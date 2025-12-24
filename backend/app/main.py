@@ -6,6 +6,7 @@ from app.api.ws_chat import router as ws_chat_router
 from app.api.ws_agent import router as ws_agent_router
 from app.api.chats import router as chats_router
 from app.api.auth import router as auth_router
+from app.api.knowledge import router as knowledge_router
 from app import models  # Import models to register them with SQLAlchemy
 
 
@@ -30,3 +31,4 @@ app.include_router(auth_router)
 app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
 app.include_router(chats_router)
+app.include_router(knowledge_router)

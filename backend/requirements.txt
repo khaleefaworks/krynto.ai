@@ -6,3 +6,7 @@ alembic
 python-dotenv
 pydantic-settings
 structlog
+pypdf
+python-multipart
+chromadb
+openai
