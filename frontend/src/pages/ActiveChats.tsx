@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
+import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Clock } from 'lucide-react'
+import { MessageSquare, Clock, LogOut } from 'lucide-react'
 
 export default function ActiveChats() {
   const navigate = useNavigate()
-  const { activeChats, setActiveChats } = useAppStore()
+  const { activeChats, setActiveChats, setAgent, setToken } = useAppStore()
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleLogout = () => {
+    setAgent(null)
+    setToken(null)
+    navigate('/login')
+  }
 
   useEffect(() => {
     fetchActiveChats()
@@ -16,12 +24,13 @@ export default function ActiveChats() {
 
   const fetchActiveChats = async () => {
     try {
-      // TODO: Replace with actual API endpoint
-      const response = await fetch('http://localhost:8000/chats/active')
-      const data = await response.json()
+      setLoading(true)
+      setError(null)
+      const data = await fetchChatsApi()
       setActiveChats(data)
-    } catch (error) {
-      console.error('Failed to fetch active chats:', error)
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch active chats')
+      console.error('Failed to fetch active chats:', err)
     } finally {
       setLoading(false)
     }
@@ -35,6 +44,17 @@ export default function ActiveChats() {
     return (
       <div className="flex items-center justify-center h-64">
         <p className="text-gray-500">Loading chats...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <p className="text-red-600 mb-4">{error}</p>
+        <Button onClick={fetchActiveChats} variant="outline">
+          Retry
+        </Button>
       </div>
     )
   }
@@ -56,42 +76,54 @@ export default function ActiveChats() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Active Chats</h2>
-        <Button onClick={fetchActiveChats} variant="outline" size="sm">
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={fetchActiveChats} variant="outline" size="sm">
+            Refresh
+          </Button>
+          <Button onClick={handleLogout} variant="outline" size="sm">
+            <LogOut className="h-4 w-4 mr-2" />
+            Logout
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {activeChats.map((chat) => (
-          <Card key={chat.id} className="hover:shadow-md transition-shadow">
+          <Card 
+            key={chat.id} 
+            className="hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => handleJoinChat(chat.id)}
+          >
             <CardHeader>
               <CardTitle className="text-lg flex items-center justify-between">
-                <span>Chat #{chat.id}</span>
-                {chat.is_handoff && (
-                  <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                    Active
-                  </span>
-                )}
+                <span className="truncate">{chat.website_name || `Website ${chat.website_id}`}</span>
+                <span 
+                  className={`text-xs px-2 py-1 rounded ml-2 whitespace-nowrap ${
+                    chat.status === 'waiting' 
+                      ? 'bg-yellow-100 text-yellow-800' 
+                      : chat.is_handoff 
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}
+                >
+                  {chat.status}
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2 text-sm">
-                <div className="flex items-center text-gray-600">
+                {chat.last_message && (
+                  <p className="text-gray-600 truncate">
+                    "{chat.last_message}"
+                  </p>
+                )}
+                <div className="flex items-center text-gray-500">
                   <MessageSquare className="h-4 w-4 mr-2" />
                   <span>{chat.message_count} messages</span>
                 </div>
-                <div className="flex items-center text-gray-600">
+                <div className="flex items-center text-gray-500">
                   <Clock className="h-4 w-4 mr-2" />
-                  <span>Session: {chat.session_id.substring(0, 8)}...</span>
-                </div>
-                <div className="pt-2">
-                  <Button
-                    onClick={() => handleJoinChat(chat.id)}
-                    className="w-full"
-                    variant={chat.is_handoff ? 'secondary' : 'default'}
-                  >
-                    {chat.is_handoff ? 'View Chat' : 'Join Chat'}
-                  </Button>
+                  <span className="text-xs">Session: {chat.session_id.substring(0, 8)}...</span>
                 </div>
               </div>
             </CardContent>

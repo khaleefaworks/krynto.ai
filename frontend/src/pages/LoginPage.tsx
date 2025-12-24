@@ -3,9 +3,11 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
+import { login as loginApi } from '@/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState } from 'react'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -17,6 +19,7 @@ type LoginForm = z.infer<typeof loginSchema>
 export default function LoginPage() {
   const navigate = useNavigate()
   const { setAgent, setToken } = useAppStore()
+  const [error, setError] = useState<string | null>(null)
   
   const {
     register,
@@ -28,23 +31,15 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginForm) => {
     try {
-      // TODO: Replace with actual API call
-      // For now, mock authentication
-      console.log('Login attempt:', data)
+      setError(null)
+      const response = await loginApi(data)
       
-      // Mock response
-      const mockAgent = {
-        id: 1,
-        email: data.email,
-        is_active: true,
-      }
-      const mockToken = 'mock-jwt-token'
-      
-      setAgent(mockAgent)
-      setToken(mockToken)
+      setAgent(response.agent)
+      setToken(response.access_token)
       navigate('/dashboard/chats')
-    } catch (error) {
-      console.error('Login failed:', error)
+    } catch (err: any) {
+      setError(err.message || 'Login failed')
+      console.error('Login failed:', err)
     }
   }
 
@@ -59,6 +54,12 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {error && (
+              <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
+                {error}
+              </div>
+            )}
+            
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
                 Email

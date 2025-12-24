@@ -45,6 +45,7 @@ async def join_chat(
         return {
             "success": True,
             "conversation_id": conversation.id,
+            "website_id": conversation.website_id,
             "assigned_agent_id": conversation.assigned_agent_id,
             "message": "Chat successfully assigned to agent"
         }
@@ -61,22 +62,34 @@ def get_active_chats(
 ):
     """Get list of active chats available for agent pickup"""
     from app.models.message import Message
+    from app.models.website import Website
     
     agent_service = AgentService(db)
     conversations = agent_service.get_active_chats(website_id)
     
-    # Add message count to each conversation
+    # Add message count and additional info to each conversation
     result = []
     for conv in conversations:
-        msg_count = db.query(Message).filter_by(conversation_id=conv.id).count()
+        # Get message count and last message
+        messages = db.query(Message).filter_by(conversation_id=conv.id).order_by(Message.created_at.desc()).all()
+        msg_count = len(messages)
+        last_message = messages[0].content if messages else "No messages yet"
+        
+        # Get website name
+        website = db.query(Website).filter_by(id=conv.website_id).first()
+        website_name = website.name if website else f"Website {conv.website_id}"
+        
         result.append({
             "id": conv.id,
             "website_id": conv.website_id,
+            "website_name": website_name,
             "session_id": conv.session_id,
             "status": conv.status,
             "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
             "assigned_agent_id": conv.assigned_agent_id,
-            "message_count": msg_count
+            "message_count": msg_count,
+            "last_message": last_message,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None
         })
     
     return result

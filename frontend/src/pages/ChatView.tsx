@@ -1,169 +1,147 @@
-import { useEffect, useState, useRef } from 'react'
-import { useParams } from 'react-router-dom'
-import { useAppStore } from '@/store/appStore'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Send, ArrowLeft } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, useRef } from "react"
+import { useParams, useNavigate } from "react-router-dom"
+import { useAppStore } from "@/store/appStore"
+import { useMessageStore } from "@/store/messages"
+import { joinChat } from "@/services/chats"
+import { fetchChatMessages } from "@/services/messages"
+import {
+  connectAgentSocket,
+  sendAgentMessage,
+  disconnectAgentSocket,
+} from "@/services/agentSocket"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArrowLeft, Send } from "lucide-react"
 
 export default function ChatView() {
   const { conversationId } = useParams<{ conversationId: string }>()
   const navigate = useNavigate()
-  const { agent, messages, setMessages, addMessage, ws, setWebSocket, setConnected } = useAppStore()
-  
-  const [messageInput, setMessageInput] = useState('')
+  const { agent } = useAppStore()
+  const { messages, addMessage, addMessages, reset } = useMessageStore()
+  const [input, setInput] = useState("")
   const [loading, setLoading] = useState(true)
+  const joinedRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!conversationId || !agent) return
+    let ws: WebSocket | null = null
+    let isSubscribed = true
 
-    // Fetch conversation history
-    fetchMessages()
+    async function init() {
+      if (!conversationId || !agent || joinedRef.current) return
+      
+      joinedRef.current = true
+      reset()
+      setLoading(true)
 
-    // Join the chat
-    joinChat()
+      try {
+        // 1. Load existing chat history via REST
+        const history = await fetchChatMessages(conversationId)
+        if (isSubscribed) {
+          addMessages(history)
+        }
 
-    // Connect to WebSocket
-    connectWebSocket()
+        // 2. Join chat (pauses AI, assigns agent)
+        const res: any = await joinChat(conversationId)
+        console.log("✅ Joined chat:", res)
+
+        if (!isSubscribed) return
+
+        // 3. Connect agent WebSocket
+        ws = connectAgentSocket(res.website_id, agent.id)
+
+        ws.onopen = () => {
+          console.log("✅ Agent WebSocket connected")
+          setLoading(false)
+          
+          // Send join_chat message to backend
+          ws!.send(
+            JSON.stringify({
+              type: "join_chat",
+              conversation_id: parseInt(conversationId),
+            })
+          )
+        }
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          console.log("📥 Received:", data)
+
+          if (data.type === "joined") {
+            console.log("✅ Successfully joined conversation")
+            // History already loaded via REST, no need to process it again
+          } else if (data.type === "visitor_message") {
+            // Visitor message received
+            addMessage({
+              sender: "visitor",
+              content: data.message,
+              created_at: new Date().toISOString(),
+            })
+          } else if (data.type === "message") {
+            // Generic message format
+            addMessage({
+              id: data.id,
+              sender: data.sender || "visitor",
+              content: data.content || data.message,
+              created_at: data.created_at,
+            })
+          }
+        }
+
+        ws.onerror = (error) => {
+          console.error("❌ WebSocket error:", error)
+        }
+
+        ws.onclose = () => {
+          console.log("🔌 Agent WebSocket closed")
+        }
+      } catch (error) {
+        console.error("Failed to initialize chat:", error)
+        setLoading(false)
+      }
+    }
+
+    init()
 
     return () => {
-      // Cleanup WebSocket on unmount
-      const currentWs = useAppStore.getState().ws
-      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-        currentWs.close()
-      }
-      setWebSocket(null)
-      setConnected(false)
+      isSubscribed = false
+      joinedRef.current = false
+      disconnectAgentSocket()
     }
   }, [conversationId, agent?.id])
 
   useEffect(() => {
-    // Auto-scroll to bottom when new messages arrive
-    scrollToBottom()
+    // Auto-scroll to bottom when messages change
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const fetchMessages = async () => {
-    try {
-      const response = await fetch(`http://localhost:8000/chats/${conversationId}/messages`)
-      const data = await response.json()
-      setMessages(data)
-    } catch (error) {
-      console.error('Failed to fetch messages:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const send = () => {
+    if (!input.trim() || !conversationId) return
 
-  const joinChat = async () => {
-    try {
-      await fetch(`http://localhost:8000/chats/${conversationId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_id: agent!.id }),
-      })
-    } catch (error) {
-      console.error('Failed to join chat:', error)
-    }
-  }
-
-  const connectWebSocket = () => {
-    // Use website_id = 1 for now (TODO: get from conversation)
-    const websiteId = 1
-    const wsUrl = `ws://localhost:8000/ws/agent/${websiteId}/${agent!.id}`
+    sendAgentMessage(input, conversationId)
     
-    const websocket = new WebSocket(wsUrl)
-
-    websocket.onopen = () => {
-      console.log('✅ Agent WebSocket connected')
-      setConnected(true)
-      
-      // Send join message
-      websocket.send(JSON.stringify({
-        type: 'join_chat',
-        conversation_id: parseInt(conversationId!),
-      }))
-    }
-
-    websocket.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      console.log('📥 Received:', data)
-
-      if (data.type === 'joined') {
-        console.log('Joined chat successfully')
-      } else if (data.type === 'visitor_message') {
-        // Add visitor message to chat
-        const newMessage = {
-          id: Date.now(),
-          conversation_id: parseInt(conversationId!),
-          sender: 'visitor' as const,
-          content: data.message,
-          created_at: new Date().toISOString(),
-        }
-        addMessage(newMessage)
-      }
-    }
-
-    websocket.onerror = (error) => {
-      console.error('❌ WebSocket error:', error)
-    }
-
-    websocket.onclose = () => {
-      console.log('🔌 WebSocket disconnected')
-      setConnected(false)
-    }
-
-    setWebSocket(websocket)
-  }
-
-  const sendMessage = () => {
-    if (!messageInput.trim() || !conversationId) return
-
-    // Get current WebSocket from store
-    const currentWs = useAppStore.getState().ws
-    
-    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket is not connected')
-      return
-    }
-
-    const messageData = {
-      type: 'message',
-      conversation_id: parseInt(conversationId),
-      content: messageInput,
-    }
-
-    currentWs.send(JSON.stringify(messageData))
-
-    // Add to local state immediately
-    const newMessage = {
-      id: Date.now(),
-      conversation_id: parseInt(conversationId),
-      sender: 'agent' as const,
-      content: messageInput,
+    // Add to local state immediately (optimistic update)
+    addMessage({ 
+      sender: "agent", 
+      content: input,
       created_at: new Date().toISOString(),
-    }
-    addMessage(newMessage)
-
-    setMessageInput('')
-  }
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    })
+    
+    setInput("")
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      sendMessage()
+      send()
     }
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <p className="text-gray-500">Loading conversation...</p>
+        <p className="text-gray-500">Connecting to chat...</p>
       </div>
     )
   }
@@ -172,7 +150,7 @@ export default function ChatView() {
     <div>
       <Button
         variant="ghost"
-        onClick={() => navigate('/dashboard/chats')}
+        onClick={() => navigate("/dashboard/chats")}
         className="mb-4"
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
@@ -185,27 +163,35 @@ export default function ChatView() {
         </CardHeader>
         <CardContent className="p-0 flex flex-col h-full">
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.map((msg) => (
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.length === 0 && (
+              <p className="text-center text-gray-400 text-sm">
+                Waiting for messages...
+              </p>
+            )}
+            
+            {messages.map((m, i) => (
               <div
-                key={msg.id}
+                key={i}
                 className={`flex ${
-                  msg.sender === 'agent' ? 'justify-end' : 'justify-start'
+                  m.sender === "agent" ? "justify-end" : "justify-start"
                 }`}
               >
                 <div
                   className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                    msg.sender === 'agent'
-                      ? 'bg-blue-600 text-white'
-                      : msg.sender === 'ai'
-                      ? 'bg-gray-200 text-gray-900'
-                      : 'bg-gray-100 text-gray-900'
+                    m.sender === "agent"
+                      ? "bg-black text-white"
+                      : m.sender === "ai"
+                      ? "bg-gray-200 text-gray-800"
+                      : "bg-blue-100 text-blue-900"
                   }`}
                 >
-                  <div className="text-xs opacity-75 mb-1">
-                    {msg.sender === 'agent' ? 'You' : msg.sender === 'ai' ? 'AI' : 'Visitor'}
-                  </div>
-                  <div className="text-sm">{msg.content}</div>
+                  <p className="text-sm">{m.content}</p>
+                  {m.sender !== "agent" && (
+                    <span className="text-xs opacity-70 mt-1 block">
+                      {m.sender}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -216,13 +202,13 @@ export default function ChatView() {
           <div className="border-t p-4">
             <div className="flex gap-2">
               <Input
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Type your message..."
                 className="flex-1"
               />
-              <Button onClick={sendMessage} disabled={!messageInput.trim()}>
+              <Button onClick={send} disabled={!input.trim()}>
                 <Send className="h-4 w-4" />
               </Button>
             </div>
@@ -232,3 +218,5 @@ export default function ChatView() {
     </div>
   )
 }
+
+
