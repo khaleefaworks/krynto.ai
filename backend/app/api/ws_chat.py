@@ -19,7 +19,7 @@ async def chat_ws(
     db = SessionLocal()
     
     try:
-        chat_service = ChatService(db, website_id, session_id)
+        chat_service = ChatService(db, website_id, session_id, websocket)
         print(f"✅ ChatService initialized, conversation_id={chat_service.conversation.id}")
     except Exception as e:
         print(f"❌ Error initializing ChatService: {e}")
@@ -40,13 +40,17 @@ async def chat_ws(
 
             print(f"💬 Processing message: {user_message}")
             response = await chat_service.handle_visitor_message(user_message)
-            print(f"🤖 AI response: {response}")
-
-            await websocket.send_json({
-                "type": "ai",
-                "message": response
-            })
-            print("✅ Response sent")
+            
+            # Only send response if AI replied (not handed off to agent)
+            if response:
+                print(f"🤖 AI response: {response}")
+                await websocket.send_json({
+                    "type": "ai",
+                    "message": response
+                })
+                print("✅ Response sent")
+            else:
+                print("🔗 Message forwarded to agent, no AI response")
 
     except WebSocketDisconnect:
         print("🔌 WebSocket disconnected")
