@@ -30,13 +30,14 @@ export default function ChatView() {
 
     return () => {
       // Cleanup WebSocket on unmount
-      if (ws) {
-        ws.close()
-        setWebSocket(null)
-        setConnected(false)
+      const currentWs = useAppStore.getState().ws
+      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+        currentWs.close()
       }
+      setWebSocket(null)
+      setConnected(false)
     }
-  }, [conversationId])
+  }, [conversationId, agent?.id])
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -117,7 +118,15 @@ export default function ChatView() {
   }
 
   const sendMessage = () => {
-    if (!messageInput.trim() || !ws || !conversationId) return
+    if (!messageInput.trim() || !conversationId) return
+
+    // Get current WebSocket from store
+    const currentWs = useAppStore.getState().ws
+    
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) {
+      console.error('WebSocket is not connected')
+      return
+    }
 
     const messageData = {
       type: 'message',
@@ -125,7 +134,7 @@ export default function ChatView() {
       content: messageInput,
     }
 
-    ws.send(JSON.stringify(messageData))
+    currentWs.send(JSON.stringify(messageData))
 
     // Add to local state immediately
     const newMessage = {

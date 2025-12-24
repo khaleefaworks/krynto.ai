@@ -39,8 +39,8 @@ async def join_chat(
             chat_id, request.agent_id
         )
         
-        # Notify agent
-        await agent_service.notify_agent_assignment(request.agent_id, chat_id)
+        # Don't notify here - WebSocket will handle it when agent connects
+        # The agent WebSocket sends "join_chat" message after connecting
         
         return {
             "success": True,
@@ -97,10 +97,13 @@ def get_chat_messages(
         conv = db.query(Conversation).filter_by(id=chat_id).first()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        # Return empty array if conversation exists but no messages
+        return []
     
     return [
         {
             "id": msg.id,
+            "conversation_id": msg.conversation_id,
             "sender": msg.sender,
             "content": msg.content,
             "created_at": msg.created_at.isoformat() if msg.created_at else None

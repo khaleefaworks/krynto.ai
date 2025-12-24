@@ -78,11 +78,11 @@ class AgentService:
         })
     
     def get_active_chats(self, website_id: Optional[int] = None):
-        """Get list of active chats available for agent pickup"""
-        from sqlalchemy import or_
-        
+        """Get list of active chats (both waiting and assigned)"""
+        # Return all active conversations regardless of handoff status
+        # The frontend will display them differently based on is_handoff
         query = self.db.query(Conversation).filter(
-            or_(Conversation.is_handoff == False, Conversation.is_handoff.is_(None))
+            Conversation.status != "closed"  # Only exclude closed chats
         )
         
         if website_id:
