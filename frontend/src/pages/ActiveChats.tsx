@@ -4,19 +4,13 @@ import { useAppStore } from '@/store/appStore'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Clock, LogOut } from 'lucide-react'
+import { MessageSquare, Clock } from 'lucide-react'
 
 export default function ActiveChats() {
   const navigate = useNavigate()
-  const { activeChats, setActiveChats, setAgent, setToken } = useAppStore()
+  const { activeChats, setActiveChats } = useAppStore()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const handleLogout = () => {
-    setAgent(null)
-    setToken(null)
-    navigate('/login')
-  }
 
   useEffect(() => {
     fetchActiveChats()
@@ -76,15 +70,9 @@ export default function ActiveChats() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Active Chats</h2>
-        <div className="flex gap-2">
-          <Button onClick={fetchActiveChats} variant="outline" size="sm">
-            Refresh
-          </Button>
-          <Button onClick={handleLogout} variant="outline" size="sm">
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
-        </div>
+        <Button onClick={fetchActiveChats} variant="outline" size="sm">
+          Refresh
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

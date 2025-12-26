@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
+import { clearToken } from '@/services/api'
 import { LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useNavigate } from 'react-router-dom'
@@ -9,8 +10,13 @@ export default function DashboardLayout() {
   const navigate = useNavigate()
 
   const handleLogout = () => {
+    // Clear token from localStorage
+    clearToken()
+    
+    // Clear store
     setAgent(null)
     setToken(null)
+    
     navigate('/login')
   }
 

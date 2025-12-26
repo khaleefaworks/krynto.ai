@@ -5,13 +5,16 @@ type LoginPayload = {
   password: string
 }
 
+export type Agent = {
+  id: number
+  email: string
+  is_active: boolean
+}
+
 type LoginResponse = {
   access_token: string
-  agent: {
-    id: number
-    email: string
-    is_active: boolean
-  }
+  token_type: string
+  agent: Agent
 }
 
 export function login(payload: LoginPayload) {
@@ -19,4 +22,8 @@ export function login(payload: LoginPayload) {
     method: "POST",
     body: JSON.stringify(payload),
   })
+}
+
+export function getCurrentUser() {
+  return apiRequest<Agent>("/auth/me")
 }
