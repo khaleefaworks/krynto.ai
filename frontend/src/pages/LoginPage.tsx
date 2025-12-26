@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { login as loginApi } from '@/services/auth'
+import { saveToken } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,8 +35,13 @@ export default function LoginPage() {
       setError(null)
       const response = await loginApi(data)
       
+      // Save token to localStorage
+      saveToken(response.access_token)
+      
+      // Update store
       setAgent(response.agent)
       setToken(response.access_token)
+      
       navigate('/dashboard/chats')
     } catch (err: any) {
       setError(err.message || 'Login failed')

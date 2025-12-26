@@ -394,8 +394,44 @@ agent_sessions
 
 ---
 
-### 🔹 Phase 6 — Deployment
+### 🔹 Phase 6 — Production Readiness
 
+#### 6.1 Widget Configuration System
+* Dynamic widget theming (colors, position)
+* Per-website customization
+* Backend API for widget config
+* Widget fetches config on load
+
+#### 6.2 Authentication & Authorization
+* JWT-based authentication
+* Password hashing with bcrypt
+* Protected API endpoints
+* Token persistence and refresh
+
+#### 6.3 Website Management UI
+* CRUD interface for websites
+* Domain management
+* AI instructions editor
+* Website-specific settings
+
+#### 6.4 Agent Assignment System
+* Assign agents to specific websites
+* Multi-agent support per website
+* Agent availability management
+
+#### 6.5 Knowledge Management UI
+* Document upload interface
+* Website crawler management
+* Knowledge source listing
+* Reindexing capabilities
+
+#### 6.6 Operational Excellence
+* Structured logging system
+* Request rate limiting
+* Error tracking
+* Performance monitoring
+
+#### 6.7 Deployment
 * Dockerize backend
 * Dockerize agent UI
 * Nginx reverse proxy
