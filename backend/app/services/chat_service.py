@@ -1,8 +1,12 @@
 from sqlalchemy.orm import Session
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.services.ai_service import AIService
+from app.models.website import Website
+from app.services.ai_service import generate_ai_response
 from typing import Dict, Optional
+
+# Confidence threshold for triggering agent handoff
+AI_CONFIDENCE_THRESHOLD = 0.4
 
 
 class ChatService:
@@ -13,7 +17,6 @@ class ChatService:
         self.db = db
         self.website_id = website_id
         self.session_id = session_id
-        self.ai = AIService()
         self.websocket = websocket
 
         self.conversation = self._get_or_create_conversation()
@@ -75,10 +78,41 @@ class ChatService:
             # Return None - agent will respond
             return None
         
-        # AI response (only if not handed off)
-        ai_reply = await self.ai.respond(text)
+        # Get website for AI instructions
+        website = self.db.query(Website).filter_by(id=self.conversation.website_id).first()
+        
+        # Generate AI response using RAG
+        ai_result = generate_ai_response(
+            website_id=self.conversation.website_id,
+            website_instructions=website.ai_instructions if website else "",
+            user_message=text,
+        )
+        
+        # Check confidence and trigger handoff if needed
+        if ai_result["confidence"] < AI_CONFIDENCE_THRESHOLD:
+            print(f"⚠️ Low confidence ({ai_result['confidence']}) - triggering handoff")
+            
+            # Mark conversation for handoff
+            self.conversation.is_handoff = True
+            self.db.commit()
+            
+            # Save handoff message
+            handoff_message = "I'm not confident I can answer that accurately. Let me connect you with a human agent who can help better."
+            self.db.add(Message(
+                conversation_id=self.conversation.id,
+                sender="ai",
+                content=handoff_message
+            ))
+            self.db.commit()
+            
+            # Notify agent service (will be handled by agent dashboard)
+            from app.services.agent_service import AgentService
+            agent_service = AgentService(self.db)
+            
+            return handoff_message
 
-        # Save AI message
+        # Save AI message with confidence
+        ai_reply = ai_result["answer"]
         self.db.add(Message(
             conversation_id=self.conversation.id,
             sender="ai",
