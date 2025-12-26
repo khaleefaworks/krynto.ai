@@ -8,6 +8,7 @@ from app.models.knowledge_chunk import KnowledgeChunk
 from app.services.document_parser import parse_pdf, parse_text
 from app.services.chunking_service import chunk_text
 from app.services.knowledge_indexer import index_document_chunks
+from app.services.web_crawler import WebCrawler
 
 router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
 
@@ -235,3 +236,77 @@ def delete_document(
         "success": True,
         "message": f"Document '{document.title}' deleted successfully",
     }
+
+
+@router.post("/documents/crawl")
+def crawl_website(payload: dict, db: Session = Depends(get_db)):
+    """
+    Crawl a website URL and create a document from the extracted content.
+    
+    Request body:
+    {
+        "website_id": int,
+        "knowledge_source_id": int,
+        "url": str,
+        "crawl_multiple": bool (optional, default: false),
+        "max_pages": int (optional, default: 10)
+    }
+    
+    If crawl_multiple is true, it will crawl multiple pages from the site.
+    Otherwise, it will only crawl the single page.
+    """
+    url = payload["url"]
+    website_id = payload["website_id"]
+    knowledge_source_id = payload["knowledge_source_id"]
+    crawl_multiple = payload.get("crawl_multiple", False)
+    max_pages = payload.get("max_pages", 10)
+    
+    # Initialize crawler
+    crawler = WebCrawler(max_pages=max_pages)
+    
+    try:
+        # Crawl the website
+        crawl_result = crawler.crawl_and_combine(url, crawl_multiple=crawl_multiple)
+        
+        # Create document
+        document = Document(
+            website_id=website_id,
+            knowledge_source_id=knowledge_source_id,
+            title=crawl_result['title'],
+            source_uri=crawl_result['source_uri'],
+            raw_text=crawl_result['text'],
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        # Chunk the text
+        chunks = chunk_text(crawl_result['text'])
+        
+        # Create knowledge chunks
+        for chunk in chunks:
+            db.add(
+                KnowledgeChunk(
+                    website_id=website_id,
+                    document_id=document.id,
+                    chunk_index=chunk["index"],
+                    content=chunk["content"],
+                )
+            )
+        
+        db.commit()
+        
+        return {
+            "document_id": document.id,
+            "title": document.title,
+            "source_uri": document.source_uri,
+            "pages_crawled": crawl_result['pages_crawled'],
+            "chunks_created": len(chunks),
+            "text_length": len(crawl_result['text']),
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crawling failed: {str(e)}")

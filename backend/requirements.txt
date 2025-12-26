@@ -13,3 +13,5 @@ openai
 python-jose[cryptography]
 bcrypt
 email-validator
+beautifulsoup4
+requests
