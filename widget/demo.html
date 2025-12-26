@@ -77,8 +77,25 @@
       <li>✅ Auto-reconnect on disconnect</li>
       <li>✅ Message display (visitor, AI, agent)</li>
       <li>✅ Real-time bidirectional messaging</li>
+      <li>✅ Dynamic configuration fetch from backend</li>
+      <li>✅ Customizable theme, position, and colors</li>
       <li>✅ Responsive design</li>
     </ul>
+    
+    <h2>Widget Configuration:</h2>
+    <p>
+      The widget automatically fetches its configuration from the backend API:
+      <code>GET /websites/{website_id}/widget-config</code>
+    </p>
+    <p>
+      If the API is unavailable, it falls back to sensible defaults:
+      <ul>
+        <li><strong>Theme:</strong> dark</li>
+        <li><strong>Position:</strong> bottom-right</li>
+        <li><strong>Primary Color:</strong> #000000</li>
+        <li><strong>Welcome Message:</strong> "Hi! How can we help you today?"</li>
+      </ul>
+    </p>
   </div>
 
   <!-- Chat Widget Script -->

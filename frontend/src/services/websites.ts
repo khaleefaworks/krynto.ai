@@ -22,6 +22,13 @@ export interface WebsiteUpdate {
   ai_instructions?: string;
 }
 
+export interface WidgetConfig {
+  theme: string;
+  position: string;
+  welcome_message: string;
+  primary_color: string;
+}
+
 export const websitesApi = {
   list: async (): Promise<Website[]> => {
     return apiRequest('/websites');
@@ -48,6 +55,17 @@ export const websitesApi = {
   delete: async (id: number): Promise<{ success: boolean; message: string }> => {
     return apiRequest(`/websites/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  getWidgetConfig: async (id: number): Promise<WidgetConfig> => {
+    return apiRequest(`/websites/${id}/widget-config`);
+  },
+
+  updateWidgetConfig: async (id: number, config: Partial<WidgetConfig>): Promise<{ success: boolean; config: WidgetConfig }> => {
+    return apiRequest(`/websites/${id}/widget-config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
     });
   },
 };

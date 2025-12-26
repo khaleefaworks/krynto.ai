@@ -260,14 +260,22 @@
       const response = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`);
       if (response.ok) {
         const config = await response.json();
-        CONFIG.theme = config.theme || 'dark';
-        CONFIG.position = config.position || 'bottom-right';
-        CONFIG.welcomeMessage = config.welcome_message || 'Hi! How can we help you today?';
-        CONFIG.primaryColor = config.primary_color || '#000000';
-        console.log('[ChatWidget] Loaded config:', config);
+        
+        // Apply fetched configuration with fallbacks to defaults
+        CONFIG.theme = config.theme || CONFIG.theme;
+        CONFIG.position = config.position || CONFIG.position;
+        CONFIG.welcomeMessage = config.welcome_message || CONFIG.welcomeMessage;
+        CONFIG.primaryColor = config.primary_color || CONFIG.primaryColor;
+        
+        console.log('[ChatWidget] Configuration loaded from backend:', config);
+        return true;
+      } else {
+        console.warn('[ChatWidget] Failed to fetch config (HTTP ' + response.status + '), using defaults');
+        return false;
       }
     } catch (error) {
       console.warn('[ChatWidget] Failed to fetch config, using defaults:', error);
+      return false;
     }
   }
 
@@ -282,8 +290,15 @@
     
     if (!container) return;
 
-    // Apply position
-    container.style.cssText = '';
+    // Apply position class - clear any existing position
+    container.className = 'chatassist-position-' + CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
+    
+    // Apply position inline styles as fallback
+    container.style.bottom = '';
+    container.style.top = '';
+    container.style.left = '';
+    container.style.right = '';
+    
     if (CONFIG.position === 'bottom-right') {
       container.style.bottom = '20px';
       container.style.right = '20px';
@@ -298,15 +313,26 @@
       container.style.left = '20px';
     }
 
-    // Apply theme colors
-    if (bubble) bubble.style.background = CONFIG.primaryColor;
-    if (header) header.style.background = CONFIG.primaryColor;
-    if (sendBtn) sendBtn.style.background = CONFIG.primaryColor;
-    
-    // Show welcome message
-    if (CONFIG.welcomeMessage) {
-      showSystemMessage(CONFIG.welcomeMessage);
+    // Apply theme/primary color
+    if (bubble) {
+      bubble.style.background = CONFIG.primaryColor;
     }
+    if (header) {
+      header.style.background = CONFIG.primaryColor;
+    }
+    if (sendBtn) {
+      sendBtn.style.background = CONFIG.primaryColor;
+      sendBtn.style.borderColor = CONFIG.primaryColor;
+    }
+    
+    // Apply theme class for additional styling
+    if (CONFIG.theme === 'light') {
+      container.classList.add('chatassist-theme-light');
+    } else {
+      container.classList.add('chatassist-theme-dark');
+    }
+    
+    console.log('[ChatWidget] Applied configuration - Position:', CONFIG.position, 'Color:', CONFIG.primaryColor);
   }
 
   /**
@@ -333,16 +359,21 @@
     // Get or create session ID
     CONFIG.sessionId = getSessionId();
     
-    console.log('[ChatWidget] Initializing with config:', CONFIG);
+    console.log('[ChatWidget] Initializing with website ID:', CONFIG.websiteId);
+
+    // Create UI first (with default styling)
+    createWidget();
 
     // Fetch widget configuration from backend
-    await fetchWidgetConfig();
-
-    // Create UI
-    createWidget();
+    const configLoaded = await fetchWidgetConfig();
     
-    // Apply configuration styling
+    // Apply configuration styling (either fetched or defaults)
     applyConfiguration();
+    
+    // Show welcome message after UI is ready
+    if (CONFIG.welcomeMessage) {
+      setTimeout(() => showSystemMessage(CONFIG.welcomeMessage), 500);
+    }
 
     // Connect WebSocket
     connectWebSocket();
