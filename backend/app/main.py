@@ -11,9 +11,17 @@ from app.api.knowledge import router as knowledge_router
 from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
 from app import models  # Import models to register them with SQLAlchemy
+from app.core.logging import setup_logging
+from app.middleware.logging_middleware import LoggingMiddleware
 
+# Setup structured logging
+logger = setup_logging()
+logger.info("application_starting", message="AI ChatAssist application initializing")
 
 app = FastAPI(title="AI ChatAssist")
+
+# Add logging middleware (before CORS)
+app.add_middleware(LoggingMiddleware)
 
 # Configure CORS
 app.add_middleware(

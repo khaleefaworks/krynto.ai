@@ -68,7 +68,7 @@ class WebCrawler:
             }
             
         except Exception as e:
-            print(f"Error crawling {url}: {str(e)}")
+            logger.error("crawl_error", url=url, error=str(e))
             return None
     
     def crawl_website(self, start_url: str, max_pages: Optional[int] = None) -> List[dict]:
@@ -128,7 +128,7 @@ class WebCrawler:
                                 absolute_url not in self.visited_urls):
                                 urls_to_visit.append((absolute_url, depth + 1))
                     except Exception as e:
-                        print(f"Error extracting links from {current_url}: {str(e)}")
+                        logger.error("link_extraction_error", url=current_url, error=str(e))
         
         return pages_data
     

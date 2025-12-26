@@ -3,7 +3,10 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.website import Website
 from app.services.ai_service import generate_ai_response
+from app.core.logging import get_logger
 from typing import Dict, Optional
+
+logger = get_logger(__name__)
 
 # Confidence threshold for triggering agent handoff
 AI_CONFIDENCE_THRESHOLD = 0.4
@@ -59,7 +62,7 @@ class ChatService:
         
         # ⚠️ PHASE 3 HANDOFF LOGIC - AI PAUSE
         if self.conversation.is_handoff:
-            print(f"🛑 AI paused - conversation {self.conversation.id} is with agent")
+            logger.info("ai_paused_handoff_active", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
             
             # Forward message to agent
             from app.services.agent_service import AgentService
@@ -92,7 +95,7 @@ class ChatService:
             
             # Check confidence and trigger handoff if needed
             if ai_result["confidence"] < AI_CONFIDENCE_THRESHOLD:
-                print(f"⚠️ Low confidence ({ai_result['confidence']}) - triggering handoff")
+                logger.warning("low_confidence_triggering_handoff", conversation_id=self.conversation.id, confidence=ai_result["confidence"], threshold=AI_CONFIDENCE_THRESHOLD)
                 
                 # Mark conversation for handoff
                 self.conversation.is_handoff = True
@@ -126,8 +129,7 @@ class ChatService:
             
         except Exception as e:
             # AI failed (API key, network, etc.) - trigger handoff to agent
-            print(f"❌ AI error: {e}")
-            print(f"🔄 Automatically triggering handoff to human agent")
+            logger.error("ai_error_triggering_handoff", conversation_id=self.conversation.id, error=str(e), exc_info=True)
             
             # Mark conversation for handoff
             self.conversation.is_handoff = True

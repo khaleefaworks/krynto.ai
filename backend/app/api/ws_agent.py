@@ -3,10 +3,12 @@ from app.core.database import SessionLocal
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.models.message import Message
+from app.core.logging import get_logger
 import json
 import traceback
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.websocket("/ws/agent/{website_id}/{agent_id}")
@@ -16,7 +18,7 @@ async def agent_ws(
     agent_id: int,
 ):
     await websocket.accept()
-    print(f"✅ Agent WebSocket connected: agent_id={agent_id}, website_id={website_id}")
+    logger.info("agent_websocket_connected", agent_id=agent_id, website_id=website_id)
 
     db = SessionLocal()
     agent_service = AgentService(db)
@@ -24,7 +26,7 @@ async def agent_ws(
     try:
         # Register agent connection
         websocket_id = agent_service.register_agent(agent_id, website_id, websocket)
-        print(f"✅ Agent registered with websocket_id={websocket_id}")
+        logger.info("agent_registered", agent_id=agent_id, websocket_id=websocket_id, website_id=website_id)
         
         # Send confirmation
         await websocket.send_json({
@@ -37,7 +39,7 @@ async def agent_ws(
         # Listen for agent messages
         while True:
             data = await websocket.receive_text()
-            print(f"📥 Agent message received: {data}")
+            logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
             
             message_type = payload.get("type")
@@ -45,7 +47,7 @@ async def agent_ws(
             if message_type == "join_chat":
                 # Agent joining a conversation
                 conversation_id = payload.get("conversation_id")
-                print(f"🔗 Agent {agent_id} joining conversation {conversation_id}")
+                logger.info("agent_joining_conversation", agent_id=agent_id, conversation_id=conversation_id)
                 
                 # Mark conversation as handoff
                 conversation = agent_service.assign_conversation_to_agent(
@@ -86,7 +88,7 @@ async def agent_ws(
                 if not content or not conversation_id:
                     continue
                 
-                print(f"💬 Agent sending message to conversation {conversation_id}")
+                logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content))
                 
                 # Save agent message
                 message = Message(
@@ -104,14 +106,14 @@ async def agent_ws(
                         "type": "agent",
                         "message": content
                     })
-                    print("✅ Message forwarded to visitor")
+                    logger.info("message_forwarded_to_visitor", conversation_id=conversation_id)
 
     except WebSocketDisconnect:
-        print(f"🔌 Agent {agent_id} disconnected")
+        logger.info("agent_disconnected", agent_id=agent_id)
     except Exception as e:
-        print(f"❌ Error in agent WebSocket: {e}")
+        logger.error("agent_websocket_error", agent_id=agent_id, error=str(e), exc_info=True)
         traceback.print_exc()
     finally:
         agent_service.unregister_agent(websocket_id)
         db.close()
-        print(f"✅ Agent {agent_id} cleanup complete")
+        logger.info("agent_cleanup_complete", agent_id=agent_id)
