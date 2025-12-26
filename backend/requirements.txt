@@ -10,3 +10,6 @@ pypdf
 python-multipart
 chromadb
 openai
+python-jose[cryptography]
+bcrypt
+email-validator
