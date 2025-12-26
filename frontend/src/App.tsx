@@ -8,6 +8,8 @@ import ActiveChats from './pages/ActiveChats'
 import ChatView from './pages/ChatView'
 import WebsiteManagement from './pages/WebsiteManagement'
 import KnowledgeManagement from './pages/KnowledgeManagement'
+import ConversationHistory from './pages/ConversationHistory'
+import ClosedChatView from './pages/ClosedChatView'
 
 function App() {
   const { token, agent, setToken, setAgent } = useAppStore()
@@ -60,6 +62,8 @@ function App() {
             <Route path="/dashboard" element={<DashboardLayout />}>
               <Route path="chats" element={<ActiveChats />} />
               <Route path="chats/:conversationId" element={<ChatView />} />
+              <Route path="history" element={<ConversationHistory />} />
+              <Route path="history/:conversationId" element={<ClosedChatView />} />
               <Route path="websites" element={<WebsiteManagement />} />
               <Route path="knowledge" element={<KnowledgeManagement />} />
               <Route index element={<Navigate to="/dashboard/chats" replace />} />

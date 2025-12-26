@@ -123,3 +123,79 @@ def get_chat_messages(
         }
         for msg in messages
     ]
+
+
+@router.post("/{chat_id}/close")
+def close_conversation(
+    chat_id: int,
+    db: Session = Depends(get_db)
+):
+    """Close a conversation - marks it as completed"""
+    from app.models.conversation import Conversation
+    
+    conv = db.query(Conversation).filter_by(id=chat_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    if conv.status == "closed":
+        return {
+            "success": True,
+            "message": "Conversation already closed"
+        }
+    
+    conv.status = "closed"
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Conversation closed successfully"
+    }
+
+
+@router.get("/closed/history")
+def get_closed_conversations(
+    website_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get closed conversation history with filters"""
+    from app.models.conversation import Conversation
+    from app.models.message import Message
+    from app.models.website import Website
+    
+    query = db.query(Conversation).filter(Conversation.status == "closed")
+    
+    if website_id:
+        query = query.filter(Conversation.website_id == website_id)
+    
+    if agent_id:
+        query = query.filter(Conversation.assigned_agent_id == agent_id)
+    
+    conversations = query.order_by(Conversation.updated_at.desc()).limit(limit).all()
+    
+    result = []
+    for conv in conversations:
+        # Get message count and last message
+        messages = db.query(Message).filter_by(conversation_id=conv.id).order_by(Message.created_at.desc()).all()
+        msg_count = len(messages)
+        last_message = messages[0].content if messages else "No messages"
+        
+        # Get website name
+        website = db.query(Website).filter_by(id=conv.website_id).first()
+        website_name = website.name if website else f"Website {conv.website_id}"
+        
+        result.append({
+            "id": conv.id,
+            "website_id": conv.website_id,
+            "website_name": website_name,
+            "session_id": conv.session_id,
+            "status": conv.status,
+            "assigned_agent_id": conv.assigned_agent_id,
+            "message_count": msg_count,
+            "last_message": last_message,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            "closed_at": conv.updated_at.isoformat() if conv.updated_at else None
+        })
+    
+    return result

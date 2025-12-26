@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Globe, BookOpen } from 'lucide-react'
+import { LogOut, MessageSquare, Globe, BookOpen, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useNavigate } from 'react-router-dom'
 
@@ -51,6 +51,15 @@ export default function DashboardLayout() {
               >
                 <MessageSquare className="h-4 w-4 mr-2" />
                 Active Chats
+              </Button>
+            </Link>
+            <Link to="/dashboard/history">
+              <Button 
+                variant={isActive('/dashboard/history') ? 'default' : 'ghost'}
+                size="sm"
+              >
+                <History className="h-4 w-4 mr-2" />
+                History
               </Button>
             </Link>
             <Link to="/dashboard/websites">

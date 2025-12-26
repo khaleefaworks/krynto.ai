@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useAppStore } from "@/store/appStore"
 import { useMessageStore } from "@/store/messages"
-import { joinChat } from "@/services/chats"
+import { joinChat, closeConversation } from "@/services/chats"
 import { fetchChatMessages } from "@/services/messages"
 import {
   connectAgentSocket,
@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Send } from "lucide-react"
+import { ArrowLeft, Send, X } from "lucide-react"
 
 export default function ChatView() {
   const { conversationId } = useParams<{ conversationId: string }>()
@@ -21,6 +21,7 @@ export default function ChatView() {
   const { messages, addMessage, addMessages, reset } = useMessageStore()
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(true)
+  const [closing, setClosing] = useState(false)
   const joinedRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -116,6 +117,26 @@ export default function ChatView() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  const handleCloseConversation = async () => {
+    if (!conversationId) return
+    
+    if (!confirm("Are you sure you want to close this conversation? This action cannot be undone.")) {
+      return
+    }
+
+    try {
+      setClosing(true)
+      await closeConversation(parseInt(conversationId))
+      alert("Conversation closed successfully")
+      navigate("/dashboard/chats")
+    } catch (error) {
+      console.error("Failed to close conversation:", error)
+      alert("Failed to close conversation")
+    } finally {
+      setClosing(false)
+    }
+  }
+
   const send = () => {
     if (!input.trim() || !conversationId) return
 
@@ -159,7 +180,19 @@ export default function ChatView() {
 
       <Card className="h-[calc(100vh-12rem)]">
         <CardHeader className="border-b">
-          <CardTitle>Chat #{conversationId}</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle>Chat #{conversationId}</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCloseConversation}
+              disabled={closing}
+              className="text-red-600 hover:bg-red-50"
+            >
+              <X className="h-4 w-4 mr-2" />
+              {closing ? "Closing..." : "Close Conversation"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0 flex flex-col h-full">
           {/* Messages Area */}

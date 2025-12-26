@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { websitesApi, type WidgetConfig } from '../services/websites';
 import type { Website, WebsiteCreate, WebsiteUpdate } from '../services/websites';
+import { agentAssignmentsApi, type Agent, type WebsiteAgent } from '../services/agentAssignments';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -11,7 +12,13 @@ export default function WebsiteManagement() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingWebsite, setEditingWebsite] = useState<Website | null>(null);
   const [editingWidgetConfig, setEditingWidgetConfig] = useState<number | null>(null);
+  const [managingAgents, setManagingAgents] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Agent assignment state
+  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [websiteAgents, setWebsiteAgents] = useState<WebsiteAgent[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
 
   const [formData, setFormData] = useState<WebsiteCreate>({
     name: '',
@@ -106,8 +113,58 @@ export default function WebsiteManagement() {
     setShowCreateForm(false);
     setEditingWebsite(null);
     setEditingWidgetConfig(null);
+    setManagingAgents(null);
     setFormData({ name: '', domain: '', ai_instructions: '' });
     setError(null);
+  };
+
+  const startManageAgents = async (websiteId: number) => {
+    try {
+      setError(null);
+      setLoadingAgents(true);
+      const [agents, assigned] = await Promise.all([
+        agentAssignmentsApi.listAgents(),
+        agentAssignmentsApi.getWebsiteAgents(websiteId),
+      ]);
+      setAllAgents(agents);
+      setWebsiteAgents(assigned);
+      setManagingAgents(websiteId);
+      setShowCreateForm(false);
+      setEditingWebsite(null);
+      setEditingWidgetConfig(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load agents');
+    } finally {
+      setLoadingAgents(false);
+    }
+  };
+
+  const handleAssignAgent = async (agentId: number) => {
+    if (!managingAgents) return;
+
+    try {
+      setError(null);
+      await agentAssignmentsApi.assignAgentToWebsite(agentId, managingAgents);
+      // Reload agents
+      const assigned = await agentAssignmentsApi.getWebsiteAgents(managingAgents);
+      setWebsiteAgents(assigned);
+    } catch (err: any) {
+      setError(err.message || 'Failed to assign agent');
+    }
+  };
+
+  const handleUnassignAgent = async (agentId: number) => {
+    if (!managingAgents) return;
+
+    try {
+      setError(null);
+      await agentAssignmentsApi.unassignAgentFromWebsite(agentId, managingAgents);
+      // Reload agents
+      const assigned = await agentAssignmentsApi.getWebsiteAgents(managingAgents);
+      setWebsiteAgents(assigned);
+    } catch (err: any) {
+      setError(err.message || 'Failed to unassign agent');
+    }
   };
 
   const startEditWidgetConfig = async (websiteId: number) => {
@@ -157,7 +214,7 @@ export default function WebsiteManagement() {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Website Management</h1>
-        {!showCreateForm && !editingWebsite && !editingWidgetConfig && (
+        {!showCreateForm && !editingWebsite && !editingWidgetConfig && !managingAgents && (
           <Button onClick={() => setShowCreateForm(true)}>
             Add Website
           </Button>
@@ -428,6 +485,82 @@ export default function WebsiteManagement() {
         </Card>
       )}
 
+      {/* Agent Assignment Form */}
+      {managingAgents && (
+        <Card className="p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">
+            Manage Agents for {websites.find(w => w.id === managingAgents)?.name}
+          </h2>
+
+          {loadingAgents ? (
+            <p className="text-gray-600">Loading agents...</p>
+          ) : (
+            <div className="space-y-6">
+              {/* Assigned Agents */}
+              <div>
+                <h3 className="text-sm font-medium mb-3">Assigned Agents ({websiteAgents.length})</h3>
+                {websiteAgents.length === 0 ? (
+                  <p className="text-sm text-gray-500">No agents assigned yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {websiteAgents.map((agent) => (
+                      <div key={agent.id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded">
+                        <div>
+                          <span className="font-medium">{agent.email}</span>
+                          {agent.assigned_at && (
+                            <span className="text-xs text-gray-500 ml-2">
+                              Assigned: {new Date(agent.assigned_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleUnassignAgent(agent.id)}
+                          className="text-red-600 hover:bg-red-50"
+                        >
+                          Unassign
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Available Agents */}
+              <div>
+                <h3 className="text-sm font-medium mb-3">Available Agents</h3>
+                {allAgents.filter(a => !websiteAgents.find(wa => wa.id === a.id)).length === 0 ? (
+                  <p className="text-sm text-gray-500">All agents are already assigned</p>
+                ) : (
+                  <div className="space-y-2">
+                    {allAgents
+                      .filter(a => !websiteAgents.find(wa => wa.id === a.id))
+                      .map((agent) => (
+                        <div key={agent.id} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded">
+                          <span className="font-medium">{agent.email}</span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleAssignAgent(agent.id)}
+                          >
+                            Assign
+                          </Button>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t">
+                <Button type="button" variant="outline" onClick={cancelForm}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Websites List */}
       <div className="space-y-4">
         {websites.length === 0 ? (
@@ -467,6 +600,13 @@ export default function WebsiteManagement() {
                     onClick={() => startEditWidgetConfig(website.id)}
                   >
                     Widget Config
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startManageAgents(website.id)}
+                  >
+                    Manage Agents
                   </Button>
                   <Button
                     variant="outline"
