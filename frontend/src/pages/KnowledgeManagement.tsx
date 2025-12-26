@@ -30,6 +30,13 @@ export default function KnowledgeManagement() {
   const [textTitle, setTextTitle] = useState('');
   const [textContent, setTextContent] = useState('');
 
+  // Crawl state
+  const [showCrawlForm, setShowCrawlForm] = useState(false);
+  const [crawlUrl, setCrawlUrl] = useState('');
+  const [crawlMultiple, setCrawlMultiple] = useState(false);
+  const [crawlMaxPages, setCrawlMaxPages] = useState(10);
+  const [crawling, setCrawling] = useState(false);
+
   useEffect(() => {
     loadWebsites();
   }, []);
@@ -258,6 +265,74 @@ export default function KnowledgeManagement() {
     }
   };
 
+  const handleCrawlWebsite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedWebsite || !crawlUrl) return;
+
+    // Create source if not exists
+    let currentSourceId = sourceId;
+    if (!currentSourceId) {
+      try {
+        const result = await knowledgeApi.createSource({
+          website_id: selectedWebsite,
+          name: 'Crawled Content',
+          source_type: 'crawl',
+        });
+        currentSourceId = result.id;
+        setSourceId(result.id);
+      } catch (err: any) {
+        setError(err.message || 'Failed to create knowledge source');
+        return;
+      }
+    }
+
+    try {
+      setCrawling(true);
+      setError(null);
+      setSuccess(null);
+
+      const crawlResult = await knowledgeApi.crawlWebsite({
+        website_id: selectedWebsite,
+        knowledge_source_id: currentSourceId,
+        url: crawlUrl,
+        crawl_multiple: crawlMultiple,
+        max_pages: crawlMaxPages,
+      });
+
+      console.log('Crawl result:', crawlResult);
+
+      // Auto-index after crawl
+      if (crawlResult.document_id) {
+        try {
+          await knowledgeApi.indexDocument(crawlResult.document_id, selectedWebsite);
+          setSuccess(
+            `Successfully crawled "${crawlResult.title}" - ${crawlResult.pages_crawled} page(s), ${crawlResult.chunks_created} chunks created and indexed!`
+          );
+        } catch (indexError: any) {
+          // Crawl succeeded but indexing failed
+          setError(
+            `Crawl succeeded but indexing failed: ${indexError.message}. The document was created but you'll need to index it manually or check your OpenAI API key.`
+          );
+        }
+      } else {
+        setSuccess(
+          `Successfully crawled "${crawlResult.title}" - ${crawlResult.pages_crawled} page(s), ${crawlResult.chunks_created} chunks created! (Indexing skipped)`
+        );
+      }
+
+      setCrawlUrl('');
+      setShowCrawlForm(false);
+      
+      // Reload document list
+      await loadDocuments();
+    } catch (err: any) {
+      console.error('Crawl error:', err);
+      setError(err.message || 'Website crawl failed');
+    } finally {
+      setCrawling(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -303,7 +378,7 @@ export default function KnowledgeManagement() {
       )}
 
       {/* Upload Options */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         {/* File Upload */}
         <Card className="p-6">
           <h2 className="text-lg font-semibold mb-4">Upload Document</h2>
@@ -349,17 +424,17 @@ export default function KnowledgeManagement() {
                   placeholder="Document title"
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
-                  required
                   disabled={uploading}
+                  required
                 />
                 <textarea
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter text content..."
+                  rows={4}
+                  placeholder="Enter your text content here..."
                   value={textContent}
                   onChange={(e) => setTextContent(e.target.value)}
-                  rows={6}
-                  required
                   disabled={uploading}
+                  required
                 />
                 <div className="flex gap-2">
                   <Button type="submit" disabled={uploading}>
@@ -367,13 +442,86 @@ export default function KnowledgeManagement() {
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
                     onClick={() => {
                       setShowTextForm(false);
                       setTextTitle('');
                       setTextContent('');
                     }}
                     disabled={uploading}
+                    className="bg-gray-500 hover:bg-gray-600"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </form>
+          )}
+        </Card>
+
+        {/* Website Crawl */}
+        <Card className="p-6">
+          <h2 className="text-lg font-semibold mb-4">Crawl Website</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Extract knowledge from a website URL
+          </p>
+          {!showCrawlForm ? (
+            <Button onClick={() => setShowCrawlForm(true)}>
+              Crawl Website
+            </Button>
+          ) : (
+            <form onSubmit={handleCrawlWebsite}>
+              <div className="space-y-4">
+                <Input
+                  type="url"
+                  placeholder="https://example.com/docs"
+                  value={crawlUrl}
+                  onChange={(e) => setCrawlUrl(e.target.value)}
+                  disabled={crawling}
+                  required
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="crawl-multiple"
+                    checked={crawlMultiple}
+                    onChange={(e) => setCrawlMultiple(e.target.checked)}
+                    disabled={crawling}
+                    className="rounded"
+                  />
+                  <label htmlFor="crawl-multiple" className="text-sm">
+                    Crawl multiple pages
+                  </label>
+                </div>
+                {crawlMultiple && (
+                  <div>
+                    <label className="block text-sm mb-1">
+                      Max pages: {crawlMaxPages}
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="50"
+                      value={crawlMaxPages}
+                      onChange={(e) => setCrawlMaxPages(Number(e.target.value))}
+                      disabled={crawling}
+                      className="w-full"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={crawling}>
+                    {crawling ? 'Crawling...' : 'Crawl & Index'}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setShowCrawlForm(false);
+                      setCrawlUrl('');
+                      setCrawlMultiple(false);
+                      setCrawlMaxPages(10);
+                    }}
+                    disabled={crawling}
+                    className="bg-gray-500 hover:bg-gray-600"
                   >
                     Cancel
                   </Button>
@@ -388,6 +536,7 @@ export default function KnowledgeManagement() {
       <Card className="p-6 bg-blue-50 border-blue-200 mb-6">
         <h3 className="font-semibold text-blue-900 mb-2">How it works</h3>
         <ul className="text-sm text-blue-800 space-y-1">
+          <li>• Upload PDFs/TXT files, add text directly, or crawl website URLs</li>
           <li>• Documents are automatically chunked into smaller pieces</li>
           <li>• Each chunk is embedded using OpenAI embeddings</li>
           <li>• Embeddings are stored in Chroma vector database</li>

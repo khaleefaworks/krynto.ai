@@ -32,6 +32,15 @@ export interface IndexResponse {
   message: string;
 }
 
+export interface CrawlResponse {
+  document_id: number;
+  title: string;
+  source_uri: string;
+  pages_crawled: number;
+  chunks_created: number;
+  text_length: number;
+}
+
 export interface DocumentListItem {
   id: number;
   title: string;
@@ -93,6 +102,13 @@ export const knowledgeApi = {
   deleteDocument: async (documentId: number, websiteId: number): Promise<{ success: boolean; message: string }> => {
     return apiRequest(`/knowledge/documents/${documentId}?website_id=${websiteId}`, {
       method: 'DELETE',
+    });
+  },
+
+  crawlWebsite: async (data: { website_id: number; knowledge_source_id: number; url: string; crawl_multiple?: boolean; max_pages?: number }): Promise<CrawlResponse> => {
+    return apiRequest('/knowledge/documents/crawl', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 };
