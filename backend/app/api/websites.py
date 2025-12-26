@@ -153,7 +153,7 @@ def delete_website(
 @router.get("/{website_id}/widget-config")
 def get_widget_config(website_id: int, db: Session = Depends(get_db)):
     """
-    Get widget configuration for a website.
+    Get widget configuration for a website (public endpoint for widget).
     Returns default config if not set.
     """
     website = db.query(Website).filter_by(id=website_id).first()
@@ -176,7 +176,8 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
 def update_widget_config(
     website_id: int,
     config: dict,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_agent = Depends(get_current_agent)
 ):
     """
     Update widget configuration for a website.
