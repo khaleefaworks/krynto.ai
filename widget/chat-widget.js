@@ -12,7 +12,11 @@
     websiteId: null,
     sessionId: null,
     wsUrl: null,
-    apiUrl: null
+    apiUrl: null,
+    theme: 'dark',
+    position: 'bottom-right',
+    welcomeMessage: 'Hi! How can we help you today?',
+    primaryColor: '#000000'
   };
 
   // WebSocket connection
@@ -249,9 +253,66 @@
   }
 
   /**
+   * Fetch widget configuration from backend
+   */
+  async function fetchWidgetConfig() {
+    try {
+      const response = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`);
+      if (response.ok) {
+        const config = await response.json();
+        CONFIG.theme = config.theme || 'dark';
+        CONFIG.position = config.position || 'bottom-right';
+        CONFIG.welcomeMessage = config.welcome_message || 'Hi! How can we help you today?';
+        CONFIG.primaryColor = config.primary_color || '#000000';
+        console.log('[ChatWidget] Loaded config:', config);
+      }
+    } catch (error) {
+      console.warn('[ChatWidget] Failed to fetch config, using defaults:', error);
+    }
+  }
+
+  /**
+   * Apply configuration to widget styling
+   */
+  function applyConfiguration() {
+    const container = document.getElementById('chatassist-widget');
+    const bubble = document.getElementById('chatassist-bubble');
+    const header = document.getElementById('chatassist-header');
+    const sendBtn = document.getElementById('chatassist-send');
+    
+    if (!container) return;
+
+    // Apply position
+    container.style.cssText = '';
+    if (CONFIG.position === 'bottom-right') {
+      container.style.bottom = '20px';
+      container.style.right = '20px';
+    } else if (CONFIG.position === 'bottom-left') {
+      container.style.bottom = '20px';
+      container.style.left = '20px';
+    } else if (CONFIG.position === 'top-right') {
+      container.style.top = '20px';
+      container.style.right = '20px';
+    } else if (CONFIG.position === 'top-left') {
+      container.style.top = '20px';
+      container.style.left = '20px';
+    }
+
+    // Apply theme colors
+    if (bubble) bubble.style.background = CONFIG.primaryColor;
+    if (header) header.style.background = CONFIG.primaryColor;
+    if (sendBtn) sendBtn.style.background = CONFIG.primaryColor;
+    
+    // Show welcome message
+    if (CONFIG.welcomeMessage) {
+      showSystemMessage(CONFIG.welcomeMessage);
+    }
+  }
+
+  /**
    * Initialize the chat widget
    */
-  function init() {
+  async function init() {
     // Get configuration from script tag
     const scriptTag = document.currentScript || document.querySelector('script[data-website-id]');
     
@@ -274,8 +335,14 @@
     
     console.log('[ChatWidget] Initializing with config:', CONFIG);
 
+    // Fetch widget configuration from backend
+    await fetchWidgetConfig();
+
     // Create UI
     createWidget();
+    
+    // Apply configuration styling
+    applyConfiguration();
 
     // Connect WebSocket
     connectWebSocket();

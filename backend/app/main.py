@@ -8,6 +8,7 @@ from app.api.ws_agent import router as ws_agent_router
 from app.api.chats import router as chats_router
 from app.api.auth import router as auth_router
 from app.api.knowledge import router as knowledge_router
+from app.api.websites import router as websites_router
 from app import models  # Import models to register them with SQLAlchemy
 
 
@@ -21,6 +22,10 @@ app.add_middleware(
         "http://localhost:3000",  # Alternative dev port
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "http://localhost:8080",  # Widget demo server
+        "http://127.0.0.1:8080",
+        "http://localhost:8000",  # Same origin (static widget)
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -33,6 +38,7 @@ app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
 app.include_router(chats_router)
 app.include_router(knowledge_router)
+app.include_router(websites_router)
 
 # Serve widget files statically
 app.mount("/widget", StaticFiles(directory="../widget"), name="widget")
