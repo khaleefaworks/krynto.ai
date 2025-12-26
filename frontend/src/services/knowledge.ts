@@ -32,6 +32,16 @@ export interface IndexResponse {
   message: string;
 }
 
+export interface DocumentListItem {
+  id: number;
+  title: string;
+  source_uri: string | null;
+  knowledge_source_id: number;
+  chunk_count: number;
+  text_length: number;
+  created_at: string | null;
+}
+
 export const knowledgeApi = {
   createSource: async (data: { website_id: number; name: string; source_type: string; metadata?: any }): Promise<{ id: number; name: string }> => {
     return apiRequest('/knowledge/sources', {
@@ -73,6 +83,16 @@ export const knowledgeApi = {
   indexDocument: async (documentId: number, websiteId: number): Promise<IndexResponse> => {
     return apiRequest(`/knowledge/documents/${documentId}/index?website_id=${websiteId}`, {
       method: 'POST',
+    });
+  },
+
+  listDocuments: async (websiteId: number): Promise<DocumentListItem[]> => {
+    return apiRequest(`/knowledge/documents?website_id=${websiteId}`);
+  },
+
+  deleteDocument: async (documentId: number, websiteId: number): Promise<{ success: boolean; message: string }> => {
+    return apiRequest(`/knowledge/documents/${documentId}?website_id=${websiteId}`, {
+      method: 'DELETE',
     });
   },
 };

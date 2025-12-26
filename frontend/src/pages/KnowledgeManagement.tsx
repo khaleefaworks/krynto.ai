@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { websitesApi, type Website } from '../services/websites';
-import { knowledgeApi } from '../services/knowledge';
+import { knowledgeApi, type DocumentListItem } from '../services/knowledge';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -12,6 +12,10 @@ export default function KnowledgeManagement() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Document list state
+  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
   
   // Source creation state
   const [showSourceForm, setShowSourceForm] = useState(false);
@@ -30,6 +34,12 @@ export default function KnowledgeManagement() {
     loadWebsites();
   }, []);
 
+  useEffect(() => {
+    if (selectedWebsite) {
+      loadDocuments();
+    }
+  }, [selectedWebsite]);
+
   const loadWebsites = async () => {
     try {
       setLoading(true);
@@ -43,6 +53,20 @@ export default function KnowledgeManagement() {
       setError(err.message || 'Failed to load websites');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDocuments = async () => {
+    if (!selectedWebsite) return;
+
+    try {
+      setLoadingDocuments(true);
+      const docs = await knowledgeApi.listDocuments(selectedWebsite);
+      setDocuments(docs);
+    } catch (err: any) {
+      console.error('Failed to load documents:', err);
+    } finally {
+      setLoadingDocuments(false);
     }
   };
 
@@ -125,6 +149,9 @@ export default function KnowledgeManagement() {
       // Reset file input
       const fileInput = document.getElementById('file-upload') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
+      
+      // Reload document list
+      await loadDocuments();
     } catch (err: any) {
       console.error('Upload error:', err);
       setError(err.message || 'Upload failed');
@@ -190,11 +217,44 @@ export default function KnowledgeManagement() {
       setTextTitle('');
       setTextContent('');
       setShowTextForm(false);
+      
+      // Reload document list
+      await loadDocuments();
     } catch (err: any) {
       console.error('Ingest error:', err);
       setError(err.message || 'Text ingest failed');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (documentId: number, title: string) => {
+    if (!selectedWebsite) return;
+
+    if (!confirm(`Are you sure you want to delete "${title}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await knowledgeApi.deleteDocument(documentId, selectedWebsite);
+      setSuccess(`Document "${title}" deleted successfully`);
+      await loadDocuments();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete document');
+    }
+  };
+
+  const handleReindexDocument = async (documentId: number, title: string) => {
+    if (!selectedWebsite) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      await knowledgeApi.indexDocument(documentId, selectedWebsite);
+      setSuccess(`Document "${title}" reindexed successfully`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reindex document');
     }
   };
 
@@ -325,7 +385,7 @@ export default function KnowledgeManagement() {
       </div>
 
       {/* Info Section */}
-      <Card className="p-6 bg-blue-50 border-blue-200">
+      <Card className="p-6 bg-blue-50 border-blue-200 mb-6">
         <h3 className="font-semibold text-blue-900 mb-2">How it works</h3>
         <ul className="text-sm text-blue-800 space-y-1">
           <li>• Documents are automatically chunked into smaller pieces</li>
@@ -334,6 +394,61 @@ export default function KnowledgeManagement() {
           <li>• AI retrieves relevant chunks when answering questions</li>
           <li>• Knowledge is isolated per website</li>
         </ul>
+      </Card>
+
+      {/* Document List */}
+      <Card className="p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">Indexed Documents</h2>
+          {loadingDocuments && <span className="text-sm text-gray-500">Loading...</span>}
+        </div>
+
+        {documents.length === 0 ? (
+          <p className="text-gray-600 text-sm">
+            No documents yet. Upload files or add text content to get started.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {documents.map((doc) => (
+              <div
+                key={doc.id}
+                className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors"
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className="font-medium text-gray-900">{doc.title}</h3>
+                    <div className="flex gap-4 mt-2 text-sm text-gray-600">
+                      <span>📄 {doc.chunk_count} chunks</span>
+                      <span>📊 {(doc.text_length / 1000).toFixed(1)}K chars</span>
+                      {doc.created_at && (
+                        <span>📅 {new Date(doc.created_at).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 ml-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleReindexDocument(doc.id, doc.title)}
+                      disabled={uploading}
+                    >
+                      Reindex
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                      className="text-red-600 hover:bg-red-50"
+                      disabled={uploading}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

@@ -170,3 +170,68 @@ def index_document(
         "chunks_indexed": count,
         "message": f"Successfully indexed {count} chunks into vector store",
     }
+
+
+@router.get("/documents")
+def list_documents(website_id: int, db: Session = Depends(get_db)):
+    """
+    List all documents for a website.
+    """
+    documents = (
+        db.query(Document)
+        .filter(Document.website_id == website_id)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
+    
+    result = []
+    for doc in documents:
+        # Count chunks for this document
+        chunk_count = (
+            db.query(KnowledgeChunk)
+            .filter(KnowledgeChunk.document_id == doc.id)
+            .count()
+        )
+        
+        result.append({
+            "id": doc.id,
+            "title": doc.title,
+            "source_uri": doc.source_uri,
+            "knowledge_source_id": doc.knowledge_source_id,
+            "chunk_count": chunk_count,
+            "text_length": len(doc.raw_text) if doc.raw_text else 0,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        })
+    
+    return result
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(
+    document_id: int,
+    website_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a document and all its chunks.
+    """
+    document = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.website_id == website_id)
+        .first()
+    )
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete all chunks (will cascade due to relationship)
+    db.query(KnowledgeChunk).filter(KnowledgeChunk.document_id == document_id).delete()
+    
+    # Delete document
+    db.delete(document)
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"Document '{document.title}' deleted successfully",
+    }
