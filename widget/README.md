@@ -1,30 +1,58 @@
 # AI ChatAssist - Visitor Chat Widget
 
+Embeddable Vanilla JavaScript chat widget for website visitors. Zero dependencies, lightweight, and customizable.
+
 ## Overview
 
-Standalone Vanilla JavaScript chat widget for website visitors. Connects to the AI ChatAssist backend via WebSocket.
+The chat widget provides a complete chat interface that connects directly to the AI ChatAssist backend via WebSocket. It handles AI responses and seamless handoff to human agents.
+
+## Features
+
+- ✅ **Real-time WebSocket messaging** - Instant bidirectional communication
+- ✅ **Session persistence** - localStorage-based session management
+- ✅ **Auto-reconnect** - Automatic reconnection on disconnect
+- ✅ **AI and agent support** - Handles both automated and human responses
+- ✅ **Agent handoff indicator** - Visual notification when agent joins
+- ✅ **Dynamic configuration** - Fetches styling from backend per website
+- ✅ **Responsive design** - Works on desktop and mobile
+- ✅ **No dependencies** - Pure Vanilla JS + CSS (3KB gzipped)
+- ✅ **Collision-free** - All IDs and classes namespaced
 
 ## Files
 
-- `chat-widget.js` - Core widget logic (WebSocket, messaging, session management)
-- `chat-widget.css` - Widget styles (plain CSS, no frameworks)
+- `chat-widget.js` - Core widget logic (4.5KB minified)
+- `chat-widget.css` - Widget styles (2KB minified)
 - `demo.html` - Demo page for testing
 - `README.md` - This file
 
 ## Installation
 
-### Basic Usage
+### Method 1: Backend Static Files (Recommended)
 
-Add to your website's HTML:
+When backend is running, it serves widget files at `/widget/` endpoint:
 
 ```html
 <!-- Widget Styles -->
-<link rel="stylesheet" href="https://your-domain.com/widget/chat-widget.css">
+<link rel="stylesheet" href="http://your-backend.com/widget/chat-widget.css">
 
 <!-- Widget Script -->
 <script 
-  src="https://your-domain.com/widget/chat-widget.js" 
-  data-website-id="YOUR_WEBSITE_ID"
+  src="http://your-backend.com/widget/chat-widget.js" 
+  data-website-id="1"
+  data-ws-url="ws://your-backend.com"
+  data-api-url="http://your-backend.com">
+</script>
+```
+
+### Method 2: Direct File Serving
+
+Host the files on your CDN or static server:
+
+```html
+<link rel="stylesheet" href="https://cdn.example.com/chat-widget.css">
+<script 
+  src="https://cdn.example.com/chat-widget.js" 
+  data-website-id="1"
   data-ws-url="ws://your-backend.com"
   data-api-url="http://your-backend.com">
 </script>
@@ -34,43 +62,164 @@ Add to your website's HTML:
 
 ### Required Attributes
 
-- `data-website-id` - Your website ID from the AI ChatAssist system
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `data-website-id` | Your website ID from backend | `"1"` |
 
 ### Optional Attributes
 
-- `data-ws-url` - WebSocket URL (default: `ws://localhost:8000`)
-- `data-api-url` - REST API URL (default: `http://localhost:8000`)
+| Attribute | Description | Default |
+|-----------|-------------|---------|
+| `data-ws-url` | WebSocket server URL | `"ws://localhost:8000"` |
+| `data-api-url` | REST API base URL | `"http://localhost:8000"` |
 
-## Features
+### Example Configurations
 
-- ✅ Real-time WebSocket messaging
-- ✅ Session persistence (localStorage)
-- ✅ Auto-reconnect on disconnect
-- ✅ AI and human agent support
-- ✅ Responsive design
-- ✅ No dependencies
-- ✅ Pure Vanilla JS + CSS
+**Development:**
+```html
+<script 
+  src="http://localhost:8000/widget/chat-widget.js" 
+  data-website-id="1"
+  data-ws-url="ws://localhost:8000"
+  data-api-url="http://localhost:8000">
+</script>
+```
 
-## Testing Locally
+**Production:**
+```html
+<script 
+  src="https://chat.example.com/widget/chat-widget.js" 
+  data-website-id="42"
+  data-ws-url="wss://chat.example.com"
+  data-api-url="https://chat.example.com">
+</script>
+```
 
-1. Start backend server:
-   ```bash
-   cd backend
-   ./start_server.sh
-   ```
+## Dynamic Widget Configuration
 
-2. Open `demo.html` in browser:
-   ```bash
-   open demo.html
-   # or
-   python -m http.server 8080
-   # then visit http://localhost:8080/demo.html
-   ```
+The widget automatically fetches per-website configuration from the backend:
 
-3. Click chat bubble and send messages
+### Session ID Generation
+- Generates UUID v4 session ID on first visit
+- Stored in `localStorage` as `ai_chatassist_session_{websiteId}_id`
+- Reuses same session across:
+  - Page reloads
+  - Browser tabs (same domain)
+  - Multiple visits
+- New session only created when localStorage is cleared
 
-## Session Management
+### WebSocket Connection
+- Connects to `/ws/chat/{website_id}?session_id={session_id}`
+- Automatic reconnection on disconnect (exponential backoff)
+- Connection status indicator in UI
+- Maintains message queue during disconnections
 
+## Message Flow
+
+### Visitor → Backend
+
+```javascript
+{
+  "message": "How can I reset my password?"
+}
+```
+
+### Backend → Visitor
+
+**AI Response:**
+```javascript
+{
+  "type": "ai",
+  "sender": "ai",
+  "message": "To reset your password, click...",
+  "confidence": 0.95
+}
+```
+
+**Agent Joins:**
+```javascript
+{
+  "type": "agent_joined",
+  "message": "Sarah has joined the chat"
+}
+```
+
+**Agent Message:**
+```javascript
+{
+  "type": "agent",
+  "sender": "agent",
+  "message": "Hi! I'm here to help.",
+  "sender_name": "Sarah"
+}
+```
+
+## Widget Lifecycle
+
+```
+1. Script loads → Parse data attributes
+2. Fetch widget config from API
+3. Apply theme/colors/position
+4. Generate or retrieve session ID
+5. Render chat bubble (minimized)
+6. User clicks bubble
+7. Show chat window
+8. Connect WebSocket
+9. Display welcome message
+10. Ready to send/receive messages
+```
+
+## UI States
+
+### Minimized (Bubble)
+- Small circular button with chat icon
+- Positioned per configuration
+- Click to expand
+
+### Expanded (Window)
+- Full chat interface
+- Header with minimize/close
+- Scrollable message area
+- Input field with send button
+- Connection status indicator
+
+### Agent Joined
+- System message displayed
+- AI pauses automatically
+- All messages from agent
+- Yellow badge for agent messages
+
+## Styling & Theming
+
+Widget uses CSS custom properties for easy customization:
+
+```css
+/* Applied dynamically from backend config */
+#chatassist-widget {
+  --primary-color: #3b82f6;
+  --text-color: #000000;
+  --bg-color: #ffffff;
+}
+```
+
+### Theme Options
+
+**Light Theme:**
+- White background
+- Dark text
+- Bright primary color
+
+**Dark Theme:**
+- Dark gray background (#1f2937)
+- Light text (#f3f4f6)
+- Accent primary color
+
+### Position Options
+
+- `bottom-right` - Default, common for chat widgets
+- `bottom-left` - Alternative bottom position
+- `top-right` - Less common, useful for some layouts
+- `top-left` - Rare, specific use cases
 - Generates UUID session ID on first visit
 - Stores in `localStorage` as `ai_chatassist_session_id`
 - Reuses same session across page reloads
