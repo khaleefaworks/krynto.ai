@@ -1,15 +1,19 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.core.database import get_db
 from app.models.agent import Agent
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
+from app.core.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
+limiter = Limiter(key_func=get_remote_address)
 
 
 class LoginRequest(BaseModel):
@@ -38,12 +42,13 @@ class LoginResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def login(request: Request, login_request: LoginRequest, db: Session = Depends(get_db)):
     """
     Agent login endpoint with JWT authentication.
     """
     # Find agent by email
-    agent = db.query(Agent).filter(Agent.email == request.email).first()
+    agent = db.query(Agent).filter(Agent.email == login_request.email).first()
     
     if not agent:
         raise HTTPException(
@@ -52,7 +57,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         )
     
     # Verify password
-    if not verify_password(request.password, agent.password_hash):
+    if not verify_password(login_request.password, agent.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
@@ -77,10 +82,11 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/register")
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def register(request: Request, register_request: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new agent account."""
     # Check if agent already exists
-    existing_agent = db.query(Agent).filter_by(email=request.email).first()
+    existing_agent = db.query(Agent).filter_by(email=register_request.email).first()
     if existing_agent:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -89,8 +95,8 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     
     # Create new agent
     agent = Agent(
-        email=request.email,
-        password_hash=get_password_hash(request.password),
+        email=register_request.email,
+        password_hash=get_password_hash(register_request.password),
         is_active=True
     )
     
