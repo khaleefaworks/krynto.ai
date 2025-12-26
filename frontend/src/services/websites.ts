@@ -1,0 +1,53 @@
+import { apiRequest } from './api';
+
+export interface Website {
+  id: number;
+  name: string;
+  domain: string;
+  ai_instructions: string | null;
+  widget_config: Record<string, any> | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface WebsiteCreate {
+  name: string;
+  domain: string;
+  ai_instructions?: string;
+}
+
+export interface WebsiteUpdate {
+  name?: string;
+  domain?: string;
+  ai_instructions?: string;
+}
+
+export const websitesApi = {
+  list: async (): Promise<Website[]> => {
+    return apiRequest('/websites');
+  },
+
+  create: async (data: WebsiteCreate): Promise<Website> => {
+    return apiRequest('/websites', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  get: async (id: number): Promise<Website> => {
+    return apiRequest(`/websites/${id}`);
+  },
+
+  update: async (id: number, data: WebsiteUpdate): Promise<Website> => {
+    return apiRequest(`/websites/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  delete: async (id: number): Promise<{ success: boolean; message: string }> => {
+    return apiRequest(`/websites/${id}`, {
+      method: 'DELETE',
+    });
+  },
+};
