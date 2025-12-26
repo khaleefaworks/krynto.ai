@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Globe } from 'lucide-react'
+import { LogOut, MessageSquare, Globe, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useNavigate } from 'react-router-dom'
 
@@ -60,6 +60,15 @@ export default function DashboardLayout() {
               >
                 <Globe className="h-4 w-4 mr-2" />
                 Websites
+              </Button>
+            </Link>
+            <Link to="/dashboard/knowledge">
+              <Button 
+                variant={isActive('/dashboard/knowledge') ? 'default' : 'ghost'}
+                size="sm"
+              >
+                <BookOpen className="h-4 w-4 mr-2" />
+                Knowledge
               </Button>
             </Link>
           </nav>

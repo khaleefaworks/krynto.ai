@@ -7,6 +7,7 @@ import DashboardLayout from './pages/DashboardLayout'
 import ActiveChats from './pages/ActiveChats'
 import ChatView from './pages/ChatView'
 import WebsiteManagement from './pages/WebsiteManagement'
+import KnowledgeManagement from './pages/KnowledgeManagement'
 
 function App() {
   const { token, agent, setToken, setAgent } = useAppStore()
@@ -60,6 +61,7 @@ function App() {
               <Route path="chats" element={<ActiveChats />} />
               <Route path="chats/:conversationId" element={<ChatView />} />
               <Route path="websites" element={<WebsiteManagement />} />
+              <Route path="knowledge" element={<KnowledgeManagement />} />
               <Route index element={<Navigate to="/dashboard/chats" replace />} />
             </Route>
             <Route path="/" element={<Navigate to="/dashboard/chats" replace />} />
