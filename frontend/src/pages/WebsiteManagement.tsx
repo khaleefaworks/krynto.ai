@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { websitesApi, Website, WebsiteCreate, WebsiteUpdate } from '../services/websites';
+import { websitesApi } from '../services/websites';
+import type { Website, WebsiteCreate, WebsiteUpdate } from '../services/websites';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
