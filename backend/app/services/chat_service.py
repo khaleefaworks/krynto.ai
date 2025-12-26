@@ -36,7 +36,7 @@ class ChatService:
             convo = Conversation(
                 website_id=self.website_id,
                 session_id=self.session_id,
-                status="ai",
+                status="active",
                 is_handoff=False
             )
             self.db.add(convo)
@@ -81,23 +81,60 @@ class ChatService:
         # Get website for AI instructions
         website = self.db.query(Website).filter_by(id=self.conversation.website_id).first()
         
-        # Generate AI response using RAG
-        ai_result = generate_ai_response(
-            website_id=self.conversation.website_id,
-            website_instructions=website.ai_instructions if website else "",
-            user_message=text,
-        )
-        
-        # Check confidence and trigger handoff if needed
-        if ai_result["confidence"] < AI_CONFIDENCE_THRESHOLD:
-            print(f"⚠️ Low confidence ({ai_result['confidence']}) - triggering handoff")
+        # Try to generate AI response - gracefully handle failures
+        try:
+            # Generate AI response using RAG
+            ai_result = generate_ai_response(
+                website_id=self.conversation.website_id,
+                website_instructions=website.ai_instructions if website else "",
+                user_message=text,
+            )
+            
+            # Check confidence and trigger handoff if needed
+            if ai_result["confidence"] < AI_CONFIDENCE_THRESHOLD:
+                print(f"⚠️ Low confidence ({ai_result['confidence']}) - triggering handoff")
+                
+                # Mark conversation for handoff
+                self.conversation.is_handoff = True
+                self.db.commit()
+                
+                # Save handoff message
+                handoff_message = "I'm not confident I can answer that accurately. Let me connect you with a human agent who can help better."
+                self.db.add(Message(
+                    conversation_id=self.conversation.id,
+                    sender="ai",
+                    content=handoff_message
+                ))
+                self.db.commit()
+                
+                # Notify agent service (will be handled by agent dashboard)
+                from app.services.agent_service import AgentService
+                agent_service = AgentService(self.db)
+                
+                return handoff_message
+
+            # Save AI message with confidence
+            ai_reply = ai_result["answer"]
+            self.db.add(Message(
+                conversation_id=self.conversation.id,
+                sender="ai",
+                content=ai_reply
+            ))
+            self.db.commit()
+
+            return ai_reply
+            
+        except Exception as e:
+            # AI failed (API key, network, etc.) - trigger handoff to agent
+            print(f"❌ AI error: {e}")
+            print(f"🔄 Automatically triggering handoff to human agent")
             
             # Mark conversation for handoff
             self.conversation.is_handoff = True
             self.db.commit()
             
             # Save handoff message
-            handoff_message = "I'm not confident I can answer that accurately. Let me connect you with a human agent who can help better."
+            handoff_message = "I'm having trouble processing your request. Let me connect you with a human agent who can help."
             self.db.add(Message(
                 conversation_id=self.conversation.id,
                 sender="ai",
@@ -105,22 +142,7 @@ class ChatService:
             ))
             self.db.commit()
             
-            # Notify agent service (will be handled by agent dashboard)
-            from app.services.agent_service import AgentService
-            agent_service = AgentService(self.db)
-            
             return handoff_message
-
-        # Save AI message with confidence
-        ai_reply = ai_result["answer"]
-        self.db.add(Message(
-            conversation_id=self.conversation.id,
-            sender="ai",
-            content=ai_reply
-        ))
-        self.db.commit()
-
-        return ai_reply
     
     async def send_to_visitor(self, message_data: dict):
         """Send message to visitor's WebSocket"""
@@ -139,7 +161,6 @@ class ChatService:
         service = ChatService.__new__(ChatService)
         service.db = db
         service.conversation = conversation
-        service.ai = AIService()
         return service
 
     def close_session(self):

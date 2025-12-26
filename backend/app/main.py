@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.health import router as health_router
 from app.api.ws_chat import router as ws_chat_router
@@ -32,3 +33,6 @@ app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
 app.include_router(chats_router)
 app.include_router(knowledge_router)
+
+# Serve widget files statically
+app.mount("/widget", StaticFiles(directory="../widget"), name="widget")
