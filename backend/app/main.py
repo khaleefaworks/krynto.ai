@@ -9,6 +9,7 @@ from app.api.chats import router as chats_router
 from app.api.auth import router as auth_router
 from app.api.knowledge import router as knowledge_router
 from app.api.websites import router as websites_router
+from app.api.agent_assignments import router as agent_assignments_router
 from app import models  # Import models to register them with SQLAlchemy
 
 
@@ -39,6 +40,7 @@ app.include_router(ws_agent_router)
 app.include_router(chats_router)
 app.include_router(knowledge_router)
 app.include_router(websites_router)
+app.include_router(agent_assignments_router)
 
 # Serve widget files statically
 app.mount("/widget", StaticFiles(directory="../widget"), name="widget")

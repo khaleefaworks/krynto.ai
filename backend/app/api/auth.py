@@ -147,3 +147,17 @@ async def get_current_user(agent: Agent = Depends(get_current_agent)):
         "email": agent.email,
         "is_active": agent.is_active
     }
+
+
+@router.get("/agents")
+async def list_agents(db: Session = Depends(get_db)):
+    """List all agents (for admin purposes like website assignment)."""
+    agents = db.query(Agent).filter(Agent.is_active == True).all()
+    return [
+        {
+            "id": agent.id,
+            "email": agent.email,
+            "is_active": agent.is_active,
+        }
+        for agent in agents
+    ]
