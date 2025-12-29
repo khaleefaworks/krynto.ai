@@ -99,7 +99,15 @@ class ConversationService:
         
         # Get website to check AI enablement
         website = self.db.query(Website).filter_by(id=website_id).first()
-        ai_enabled = website and website.ai_instructions and len(website.ai_instructions.strip()) > 0
+        if not website:
+            logger.error(
+                "website_not_found",
+                website_id=website_id,
+                session_id=session_id
+            )
+            raise ValueError(f"Website with ID {website_id} does not exist")
+        
+        ai_enabled = website.ai_instructions and len(website.ai_instructions.strip()) > 0
         
         # Determine initial status based on website online status
         online = is_website_online(website_id)

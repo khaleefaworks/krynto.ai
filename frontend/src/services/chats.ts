@@ -27,15 +27,15 @@ export async function fetchActiveChats(): Promise<ActiveChat[]> {
 
 export async function joinChat(chatId: string) {
   const token = useAppStore.getState().token
-  const agent = useAppStore.getState().agent
+  const user = useAppStore.getState().user
 
-  if (!agent) {
+  if (!user) {
     throw new Error("Agent not authenticated")
   }
 
   return apiRequest(`/chats/${chatId}/join`, {
     method: "POST",
-    body: JSON.stringify({ agent_id: agent.id }),
+    body: JSON.stringify({ agent_id: user.id }),
     headers: {
       Authorization: `Bearer ${token}`,
     },

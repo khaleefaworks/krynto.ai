@@ -5,6 +5,7 @@ from app.core.logging import get_logger
 from app.core.config import settings
 import json
 import time
+import traceback
 from collections import defaultdict
 
 router = APIRouter()
@@ -27,13 +28,31 @@ async def chat_ws(
     db = SessionLocal()
     
     try:
+        # Validate website exists before creating chat service
+        from app.models.website import Website
+        website = db.query(Website).filter_by(id=website_id).first()
+        if not website:
+            error_msg = f"Website with ID {website_id} does not exist. Please create website first."
+            logger.error("website_not_found", website_id=website_id, session_id=session_id)
+            await websocket.send_json({
+                "type": "error",
+                "message": error_msg
+            })
+            await websocket.close(code=1008, reason=error_msg)
+            db.close()
+            return
+        
         chat_service = ChatService(db, website_id, session_id, websocket)
         logger.info("chat_service_initialized", conversation_id=chat_service.conversation.id, website_id=website_id, session_id=session_id)
     except Exception as e:
         logger.error("chat_service_init_error", website_id=website_id, session_id=session_id, error=str(e), exc_info=True)
-        traceback.print_exc()
         db.close()
-        await websocket.close(code=1011, reason=str(e))
+        error_msg = f"Failed to initialize chat: {str(e)}"
+        await websocket.send_json({
+            "type": "error",
+            "message": error_msg
+        })
+        await websocket.close(code=1011, reason=error_msg)
         return
 
     try:

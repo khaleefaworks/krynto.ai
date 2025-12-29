@@ -3,6 +3,7 @@ import { useAppStore } from './store/appStore'
 import { useEffect, useState } from 'react'
 import { getCurrentUser } from './services/auth'
 import { isAdmin } from './lib/roles'
+import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
 import DashboardLayout from './pages/DashboardLayout'
 import ActiveChats from './pages/ActiveChats'
@@ -19,6 +20,22 @@ import Analytics from './pages/Analytics'
 function App() {
   const { token, user, setToken, setUser } = useAppStore()
   const [initializing, setInitializing] = useState(true)
+  const [needsSetup, setNeedsSetup] = useState(false)
+
+  // Check if system needs initial setup
+  useEffect(() => {
+    const checkSetup = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/auth/setup/status')
+        const data = await response.json()
+        setNeedsSetup(data.needs_setup)
+      } catch (error) {
+        console.error('Failed to check setup status:', error)
+      }
+    }
+    
+    checkSetup()
+  }, [])
 
   // Restore auth from localStorage on mount
   useEffect(() => {
@@ -49,6 +66,17 @@ function App() {
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-gray-500">Loading...</p>
       </div>
+    )
+  }
+
+  // Show onboarding if system needs setup
+  if (needsSetup && !token) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="*" element={<OnboardingPage />} />
+        </Routes>
+      </BrowserRouter>
     )
   }
 

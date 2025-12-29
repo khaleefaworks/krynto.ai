@@ -19,7 +19,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str  # Changed from EmailStr to allow "Administrator" username
     password: str
 
 
@@ -55,6 +55,19 @@ class LoginResponse(BaseModel):
     user: UserResponse
 
 
+@router.get("/setup/status")
+async def check_setup_status():
+    """
+    Public endpoint to check if system needs initial setup.
+    
+    Returns:
+        needs_setup: True if system is not initialized
+    """
+    return {
+        "needs_setup": not is_system_initialized()
+    }
+
+
 @router.post("/bootstrap")
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest):
@@ -63,7 +76,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
     
     This endpoint:
     - Only works ONCE on a fresh installation
-    - Creates the first admin with FULL_ACCESS role
+    - Creates Administrator user with FULL_ACCESS role
     - Marks the system as initialized
     - Gets disabled forever after first use
     
@@ -88,10 +101,18 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
                 detail="Users already exist. System may be corrupted."
             )
         
-        # Create first admin user
+        # Create first admin user (Administrator)
+        # Use fixed email if creating Administrator account
+        admin_email = bootstrap_request.email
+        admin_name = bootstrap_request.name or "Administrator"
+        
+        # If name is Administrator, use system email
+        if admin_name == "Administrator":
+            admin_email = "administrator@chatassist.system"
+        
         admin = User(
-            name=bootstrap_request.name,
-            email=bootstrap_request.email,
+            name=admin_name,
+            email=admin_email,
             password_hash=get_password_hash(bootstrap_request.password),
             role=UserRole.FULL_ACCESS,
             is_active=True,
@@ -126,6 +147,7 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
     """
     User login endpoint with JWT authentication.
     Works for both Admins (FULL_ACCESS) and Agents (LIMITED_ACCESS).
+    Special case: 'Administrator' username maps to system admin email.
     """
     # Block login if system not initialized
     if not is_system_initialized():
@@ -134,8 +156,13 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             detail="System not initialized. Create admin first via /auth/bootstrap"
         )
     
+    # Special case: Allow "Administrator" as username
+    email = login_request.email
+    if email.lower() == "administrator":
+        email = "administrator@chatassist.system"
+    
     # Find user by email
-    user = db.query(User).filter(User.email == login_request.email).first()
+    user = db.query(User).filter(User.email == email).first()
     
     if not user:
         raise HTTPException(
