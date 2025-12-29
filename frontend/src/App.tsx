@@ -15,6 +15,7 @@ import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
 import WebsitesSettings from './pages/WebsitesSettings'
 import PersonalSettings from './pages/PersonalSettings'
+import AgentsManagement from './pages/AgentsManagement'
 import Analytics from './pages/Analytics'
 
 function App() {
@@ -100,12 +101,26 @@ function App() {
               <Route path="history/:conversationId" element={<ClosedChatView />} />
               
               {/* Settings - All users */}
-              <Route path="settings" element={<Settings />} />
-              <Route 
-                path="settings/websites" 
-                element={isAdmin(user) ? <WebsitesSettings /> : <Navigate to="/dashboard/chats" replace />} 
-              />
-              <Route path="settings/personal" element={<PersonalSettings />} />
+              <Route path="settings" element={<Settings />}>
+                <Route 
+                  path="websites" 
+                  element={isAdmin(user) ? <WebsitesSettings /> : <Navigate to="/dashboard/chats" replace />} 
+                />
+                <Route 
+                  path="agents" 
+                  element={isAdmin(user) ? <AgentsManagement /> : <Navigate to="/dashboard/chats" replace />} 
+                />
+                <Route path="personal" element={<PersonalSettings />} />
+                <Route index element={
+                  <div className="p-8">
+                    <div className="max-w-4xl">
+                      <div className="text-center text-gray-500 dark:text-gray-400 py-12">
+                        Select a settings section from the sidebar
+                      </div>
+                    </div>
+                  </div>
+                } />
+              </Route>
               
               {/* Analytics - All users (placeholder) */}
               <Route path="analytics" element={<Analytics />} />

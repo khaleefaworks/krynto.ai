@@ -38,22 +38,20 @@ export default function PersonalSettings() {
   }
 
   return (
-    <div className="flex h-screen">
-      {/* Settings Sidebar (hidden, imported from Settings.tsx) */}
-      
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-gray-50 p-8">
-        <div className="max-w-2xl">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Personal Settings</h1>
-          <p className="text-gray-600 mb-8">Manage your profile and availability</p>
+    <div className="p-8">
+      <div className="max-w-2xl">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Personal Settings</h1>
+        <p className="text-gray-600 dark:text-gray-400 mb-8">Manage your profile and availability</p>
 
-          {message && (
-            <div className={`mb-6 p-4 rounded-md ${
-              message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
-            }`}>
-              {message.text}
-            </div>
-          )}
+        {message && (
+          <div className={`mb-6 p-4 rounded-md ${
+            message.type === 'success' 
+              ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300' 
+              : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
 
           {/* Profile Information */}
           <Card className="mb-6">
@@ -119,8 +117,7 @@ export default function PersonalSettings() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </main>
+      </div>
     </div>
   )
 }

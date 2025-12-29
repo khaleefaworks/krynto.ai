@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.api.deps import require_authenticated_user
+from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 
 
@@ -59,3 +59,96 @@ def get_availability(
     Get current user's availability status.
     """
     return AvailabilityResponse(is_available=current_user.is_available)
+
+
+class StatusUpdateRequest(BaseModel):
+    """Request to update user active status (admin only)"""
+    is_active: bool
+
+
+@router.patch("/{user_id}/status")
+def update_user_status(
+    user_id: int,
+    payload: StatusUpdateRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin)  # Only admins can update user status
+):
+    """
+    Update a user's active status (enable/disable account).
+    Only accessible by admins.
+    
+    Note: This is different from availability:
+    - is_active: Account enabled/disabled (admin control)
+    - is_available: Agent ready to take chats (user control)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    user.is_active = payload.is_active
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "message": "User status updated successfully",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "is_active": user.is_active,
+        }
+    }
+
+
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin)  # Only admins can delete users
+):
+    """
+    Delete a user account.
+    Only accessible by admins.
+    
+    Rules:
+    - Cannot delete yourself (the admin making the request)
+    - Cannot delete the last admin user
+    - Soft delete by setting is_active to False
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Prevent deleting yourself
+    if user.id == current_admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account"
+        )
+    
+    # Prevent deleting the last admin
+    if user.role.value == "full_access":
+        admin_count = db.query(User).filter(
+            User.role == user.role,
+            User.is_active == True
+        ).count()
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete the last administrator account"
+            )
+    
+    # Soft delete
+    user.is_active = False
+    db.commit()
+    
+    return {
+        "message": "User deleted successfully",
+        "user_id": user_id
+    }

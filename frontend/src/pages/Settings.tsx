@@ -1,7 +1,7 @@
 import { useAppStore } from "@/store/appStore"
 import { isAdmin } from "@/lib/roles"
-import { Link, useLocation } from "react-router-dom"
-import { Globe, User as UserIcon } from "lucide-react"
+import { Link, useLocation, Outlet } from "react-router-dom"
+import { Globe, User as UserIcon, Users } from "lucide-react"
 
 export default function Settings() {
   const { user } = useAppStore()
@@ -19,11 +19,11 @@ export default function Settings() {
 
         <nav className="p-4">
           <div className="space-y-1">
-            {/* Websites Section - Admin Only */}
+            {/* General Section - Admin Only */}
             {isAdmin(user) && (
               <>
                 <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Websites
+                  General
                 </div>
                 <Link
                   to="/dashboard/settings/websites"
@@ -35,6 +35,17 @@ export default function Settings() {
                 >
                   <Globe className="h-4 w-4" />
                   Manage Websites
+                </Link>
+                <Link
+                  to="/dashboard/settings/agents"
+                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${
+                    isActive('/dashboard/settings/agents')
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <Users className="h-4 w-4" />
+                  Manage Agents
                 </Link>
                 <div className="mb-4" />
               </>
@@ -60,12 +71,8 @@ export default function Settings() {
       </aside>
 
       {/* Settings Content */}
-      <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 p-8">
-        <div className="max-w-4xl">
-          <div className="text-center text-gray-500 dark:text-gray-400 py-12">
-            Select a settings section from the sidebar
-          </div>
-        </div>
+      <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        <Outlet />
       </main>
     </div>
   )
