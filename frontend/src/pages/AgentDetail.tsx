@@ -98,12 +98,27 @@ export default function AgentDetail() {
         setSuccessMessage('Agent created successfully')
         setTimeout(() => navigate('/dashboard/settings/agents'), 1500)
       } else {
-        // Update existing agent status
-        await apiRequest(`/users/${id}/status`, {
-          method: 'PATCH',
-          body: JSON.stringify({ is_active: formData.is_active }),
-        })
-        setSuccessMessage('Agent updated successfully')
+        // Update existing user
+        // Check if role changed
+        const roleChanged = agent && agent.role !== formData.role
+        
+        if (roleChanged) {
+          // Update role first
+          await apiRequest(`/users/${id}/role`, {
+            method: 'PATCH',
+            body: JSON.stringify({ role: formData.role }),
+          })
+        }
+        
+        // Update status if changed
+        if (agent && agent.is_active !== formData.is_active) {
+          await apiRequest(`/users/${id}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: formData.is_active }),
+          })
+        }
+        
+        setSuccessMessage('User updated successfully')
         loadAgent()
       }
     } catch (err: any) {
@@ -327,43 +342,28 @@ export default function AgentDetail() {
               </div>
             )}
 
-            {/* Role Selection - Only for new users */}
-            {isNew && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Role *
-                </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value as 'full_access' | 'manager' | 'agent' })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  required
-                >
-                  <option value="agent">Agent - Chat handling only</option>
-                  <option value="manager">Manager - Full access except reset</option>
-                  <option value="full_access">Administrator - Full system access</option>
-                </select>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Determines user permissions and access level
-                </p>
-              </div>
-            )}
-
-            {/* Role Information - For existing users */}
-            {!isNew && agent && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
-                <p className="text-sm text-blue-800 dark:text-blue-300">
-                  <strong>Role:</strong>{' '}
-                  {agent.role === 'full_access' ? 'Administrator' : agent.role === 'manager' ? 'Manager' : 'Agent'}
-                  <br />
-                  <span className="text-xs">
-                    {agent.role === 'full_access' && 'Full system access including reset'}
-                    {agent.role === 'manager' && 'Full access except reset application'}
-                    {agent.role === 'agent' && 'Chat handling and personal settings only'}
-                  </span>
-                </p>
-              </div>
-            )}
+            {/* Role Selection - For both new and existing users */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Role *
+              </label>
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'full_access' | 'manager' | 'agent' })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                required
+              >
+                <option value="agent">Agent - Chat handling only</option>
+                <option value="manager">Manager - Full access except reset</option>
+                <option value="full_access">Administrator - Full system access</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {isNew 
+                  ? 'Determines user permissions and access level'
+                  : 'Change user role to update permissions'
+                }
+              </p>
+            </div>
           </CardContent>
         </Card>
 

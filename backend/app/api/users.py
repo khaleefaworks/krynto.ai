@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.api.deps import require_authenticated_user, require_admin
-from app.models.user import User
+from app.models.user import User, UserRole
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -99,6 +99,68 @@ def update_user_status(
             "name": user.name,
             "email": user.email,
             "is_active": user.is_active,
+        }
+    }
+
+
+class RoleUpdateRequest(BaseModel):
+    """Request to update user role (admin only)"""
+    role: UserRole
+
+
+@router.patch("/{user_id}/role")
+def update_user_role(
+    user_id: int,
+    payload: RoleUpdateRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin)  # Only admins can update user roles
+):
+    """
+    Update a user's role.
+    Only accessible by admins.
+    
+    Rules:
+    - Cannot change your own role
+    - Cannot remove the last administrator
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Prevent changing your own role
+    if user.id == current_admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own role"
+        )
+    
+    # Prevent removing the last administrator
+    if user.role == UserRole.FULL_ACCESS and payload.role != UserRole.FULL_ACCESS:
+        admin_count = db.query(User).filter(
+            User.role == UserRole.FULL_ACCESS,
+            User.is_active == True
+        ).count()
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change role of the last administrator"
+            )
+    
+    old_role = user.role.value
+    user.role = payload.role
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "message": f"User role updated from {old_role} to {payload.role.value}",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role.value,
         }
     }
 
