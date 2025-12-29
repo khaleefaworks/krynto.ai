@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.agent_service import AgentService
+from app.services.conversation_service import ConversationService
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -199,3 +200,28 @@ def get_closed_conversations(
         })
     
     return result
+
+
+@router.post("/{conversation_id}/close")
+async def close_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Close a conversation.
+    
+    Transitions conversation to CLOSED state.
+    No more messages can be added after closing.
+    """
+    conversation_service = ConversationService(db)
+    
+    success = conversation_service.close_conversation(conversation_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    return {
+        "success": True,
+        "conversation_id": conversation_id,
+        "message": "Conversation closed successfully"
+    }

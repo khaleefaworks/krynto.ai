@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
-from app.models.conversation import Conversation
-from app.models.message import Message
+from app.models.conversation import Conversation, ConversationStatus
+from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.ai_service import generate_ai_response
+from app.services.conversation_service import ConversationService
 from app.core.logging import get_logger
 from typing import Dict, Optional
 
@@ -22,43 +23,49 @@ class ChatService:
         self.session_id = session_id
         self.websocket = websocket
 
-        self.conversation = self._get_or_create_conversation()
+        # Use ConversationService for lifecycle management
+        conversation_service = ConversationService(db)
+        self.conversation = conversation_service.get_or_create_conversation(
+            website_id=website_id,
+            session_id=session_id
+        )
         
         # Register visitor WebSocket
         if websocket:
             ChatService.active_visitors[self.conversation.id] = websocket
 
-    def _get_or_create_conversation(self):
-        convo = (
-            self.db.query(Conversation)
-            .filter_by(session_id=self.session_id)
-            .first()
-        )
-
-        if not convo:
-            convo = Conversation(
-                website_id=self.website_id,
-                session_id=self.session_id,
-                status="active",
-                is_handoff=False
-            )
-            self.db.add(convo)
-            self.db.commit()
-            self.db.refresh(convo)
-
-        return convo
-
     async def handle_visitor_message(self, text: str) -> Optional[str]:
+        """
+        Handle visitor message based on conversation status.
+        
+        - OFFLINE: Store message, return None (no AI response)
+        - ACTIVE with handoff: Forward to agent
+        - ACTIVE without handoff: AI response
+        - CLOSED: Reject message
+        """
+        conversation_service = ConversationService(self.db)
+        
+        # Check if conversation is closed
+        if self.conversation.status == ConversationStatus.CLOSED:
+            logger.warning("message_rejected_closed", conversation_id=self.conversation.id)
+            return "This conversation has been closed."
+        
         # Save visitor message
-        self.db.add(Message(
+        message = conversation_service.add_visitor_message(
             conversation_id=self.conversation.id,
-            sender="visitor",
             content=text
-        ))
-        self.db.commit()
+        )
+        
+        if not message:
+            return "Unable to send message at this time."
         
         # Refresh conversation to get latest state
         self.db.refresh(self.conversation)
+        
+        # OFFLINE mode: just store message, no response
+        if self.conversation.status == ConversationStatus.OFFLINE:
+            logger.info("offline_message_stored", conversation_id=self.conversation.id)
+            return None  # System message already sent during conversation creation
         
         # ⚠️ PHASE 3 HANDOFF LOGIC - AI PAUSE
         if self.conversation.is_handoff:
@@ -105,6 +112,7 @@ class ChatService:
                 handoff_message = "I'm not confident I can answer that accurately. Let me connect you with a human agent who can help better."
                 self.db.add(Message(
                     conversation_id=self.conversation.id,
+                    sender_type=MessageSenderType.SYSTEM,
                     sender="ai",
                     content=handoff_message
                 ))
@@ -120,6 +128,7 @@ class ChatService:
             ai_reply = ai_result["answer"]
             self.db.add(Message(
                 conversation_id=self.conversation.id,
+                sender_type=MessageSenderType.AGENT,  # AI uses AGENT type for now
                 sender="ai",
                 content=ai_reply
             ))
@@ -139,6 +148,7 @@ class ChatService:
             handoff_message = "I'm having trouble processing your request. Let me connect you with a human agent who can help."
             self.db.add(Message(
                 conversation_id=self.conversation.id,
+                sender_type=MessageSenderType.SYSTEM,
                 sender="ai",
                 content=handoff_message
             ))
