@@ -4,7 +4,7 @@ import subprocess
 import os
 
 from app.core.database import get_db
-from app.api.deps import require_authenticated_user
+from app.api.deps import require_administrator
 from app.models.user import User
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/system", tags=["system"])
 
 @router.post("/reset")
 async def reset_application(
-    current_user: User = Depends(require_authenticated_user),
+    current_user: User = Depends(require_administrator),
     db: Session = Depends(get_db)
 ):
     """
@@ -26,13 +26,6 @@ async def reset_application(
     **ONLY accessible by users with FULL_ACCESS (Administrator) role.**
     This is a destructive operation and cannot be undone!
     """
-    # Check if user is administrator (not just admin/manager)
-    if not current_user.is_administrator():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can reset the application"
-        )
-    
     try:
         # Get the backend directory path
         backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

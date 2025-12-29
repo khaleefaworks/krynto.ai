@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input'
 import { ArrowLeft, Save, Trash2, User, Mail, Lock, CheckCircle, XCircle } from 'lucide-react'
 import { Badge } from '../components/ui/badge'
+import { useAppStore } from '@/store/appStore'
+import { isAdministrator } from '@/lib/roles'
 
 interface Agent {
   id: number
@@ -19,6 +21,7 @@ interface Agent {
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user: currentUser } = useAppStore()
   const isNew = id === 'new'
   
   const [loading, setLoading] = useState(!isNew)
@@ -352,15 +355,25 @@ export default function AgentDetail() {
                 onChange={(e) => setFormData({ ...formData, role: e.target.value as 'full_access' | 'manager' | 'agent' })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 required
+                disabled={!isNew && agent?.role === 'full_access' && !isAdministrator(currentUser)}
               >
                 <option value="agent">Agent - Chat handling only</option>
                 <option value="manager">Manager - Full access except reset</option>
-                <option value="full_access">Administrator - Full system access</option>
+                {/* Only administrators can create/modify administrator role */}
+                {isAdministrator(currentUser) && (
+                  <option value="full_access">Administrator - Full system access</option>
+                )}
+                {/* Show current administrator role if editing an admin (but disabled) */}
+                {!isAdministrator(currentUser) && agent?.role === 'full_access' && (
+                  <option value="full_access" disabled>Administrator - Full system access</option>
+                )}
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {isNew 
                   ? 'Determines user permissions and access level'
-                  : 'Change user role to update permissions'
+                  : !isAdministrator(currentUser) && agent?.role === 'full_access'
+                    ? 'Only administrators can modify administrator accounts'
+                    : 'Change user role to update permissions'
                 }
               </p>
             </div>

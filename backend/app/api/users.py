@@ -117,11 +117,12 @@ def update_user_role(
 ):
     """
     Update a user's role.
-    Only accessible by admins.
+    Only accessible by admins (Administrator or Manager).
     
     Rules:
     - Cannot change your own role
     - Cannot remove the last administrator
+    - Managers cannot create administrators (only administrators can)
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -136,6 +137,21 @@ def update_user_role(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot change your own role"
         )
+    
+    # Managers cannot create administrators or modify administrator roles
+    if current_admin.role == UserRole.MANAGER:
+        # Cannot change any user TO administrator
+        if payload.role == UserRole.FULL_ACCESS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can grant administrator role"
+            )
+        # Cannot modify existing administrators
+        if user.role == UserRole.FULL_ACCESS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can modify administrator accounts"
+            )
     
     # Prevent removing the last administrator
     if user.role == UserRole.FULL_ACCESS and payload.role != UserRole.FULL_ACCESS:
@@ -173,11 +189,12 @@ def delete_user(
 ):
     """
     Delete a user account.
-    Only accessible by admins.
+    Only accessible by admins (Administrator or Manager).
     
     Rules:
     - Cannot delete yourself (the admin making the request)
-    - Cannot delete the last admin user
+    - Cannot delete the last administrator
+    - Managers cannot delete administrators (only administrators can)
     - Soft delete by setting is_active to False
     """
     user = db.query(User).filter(User.id == user_id).first()
@@ -194,8 +211,15 @@ def delete_user(
             detail="Cannot delete your own account"
         )
     
-    # Prevent deleting the last admin
-    if user.role.value == "full_access":
+    # Managers cannot delete administrators
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.FULL_ACCESS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete administrator accounts"
+        )
+    
+    # Prevent deleting the last administrator
+    if user.role == UserRole.FULL_ACCESS:
         admin_count = db.query(User).filter(
             User.role == user.role,
             User.is_active == True

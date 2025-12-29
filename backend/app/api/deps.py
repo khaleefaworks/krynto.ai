@@ -55,13 +55,29 @@ def require_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """
-    Require admin (FULL_ACCESS) role.
+    Require admin privileges (FULL_ACCESS or MANAGER role).
     Used for protected admin endpoints.
+    Managers can access all admin features except reset application.
     """
-    if current_user.role != UserRole.FULL_ACCESS:
+    if not current_user.is_admin():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
+        )
+    return current_user
+
+
+def require_administrator(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Require administrator (FULL_ACCESS only) role.
+    Used for critical operations like reset application.
+    """
+    if not current_user.is_administrator():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required",
         )
     return current_user
 
