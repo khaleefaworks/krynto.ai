@@ -17,13 +17,12 @@ depends_on = None
 
 
 def upgrade():
-    # Add new 'manager' role to enum
+    # Step 1: Add new enum values in separate transaction
+    op.execute("COMMIT")  # Commit current transaction
     op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'manager'")
-    
-    # Add new 'agent' role to enum  
     op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'agent'")
     
-    # Rename existing 'limited_access' role to 'agent'
+    # Step 2: Update existing data (in new transaction)
     op.execute("UPDATE users SET role = 'agent' WHERE role = 'limited_access'")
 
 
