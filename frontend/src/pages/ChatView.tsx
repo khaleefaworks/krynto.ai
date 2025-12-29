@@ -161,93 +161,98 @@ export default function ChatView() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <p className="text-gray-500">Connecting to chat...</p>
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Connecting to chat...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <Button
-        variant="ghost"
-        onClick={() => navigate("/dashboard/chats")}
-        className="mb-4"
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to Chats
-      </Button>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="max-w-7xl mx-auto p-8">
+        <Button
+          variant="ghost"
+          onClick={() => navigate("/dashboard/chats")}
+          className="mb-6 dark:text-gray-300 dark:hover:bg-gray-800"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Chats
+        </Button>
 
-      <Card className="h-[calc(100vh-12rem)]">
-        <CardHeader className="border-b">
-          <div className="flex justify-between items-center">
-            <CardTitle>Chat #{conversationId}</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCloseConversation}
-              disabled={closing}
-              className="text-red-600 hover:bg-red-50"
-            >
-              <X className="h-4 w-4 mr-2" />
-              {closing ? "Closing..." : "Close Conversation"}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0 flex flex-col h-full">
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {messages.length === 0 && (
-              <p className="text-center text-gray-400 text-sm">
-                Waiting for messages...
-              </p>
-            )}
-            
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${
-                  m.sender === "agent" ? "justify-end" : "justify-start"
-                }`}
+        <Card className="h-[calc(100vh-14rem)] border-gray-200 dark:border-gray-700 dark:bg-gray-800">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-gray-900 dark:text-white">Chat #{conversationId}</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCloseConversation}
+                disabled={closing}
+                className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 dark:border-gray-600"
               >
-                <div
-                  className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                    m.sender === "agent"
-                      ? "bg-black text-white"
-                      : m.sender === "ai"
-                      ? "bg-gray-200 text-gray-800"
-                      : "bg-blue-100 text-blue-900"
-                  }`}
-                >
-                  <p className="text-sm">{m.content}</p>
-                  {m.sender !== "agent" && (
-                    <span className="text-xs opacity-70 mt-1 block">
-                      {m.sender}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="border-t p-4">
-            <div className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type your message..."
-                className="flex-1"
-              />
-              <Button onClick={send} disabled={!input.trim()}>
-                <Send className="h-4 w-4" />
+                <X className="h-4 w-4 mr-2" />
+                {closing ? "Closing..." : "Close Conversation"}
               </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent className="p-0 flex flex-col h-full">
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 dark:bg-gray-900">
+              {messages.length === 0 && (
+                <p className="text-center text-gray-400 dark:text-gray-600 text-sm">
+                  Waiting for messages...
+                </p>
+              )}
+              
+              {messages.map((m, i) => (
+                <div
+                  key={i}
+                  className={`flex ${
+                    m.sender === "agent" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  <div
+                    className={`max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
+                      m.sender === "agent"
+                        ? "bg-blue-600 text-white dark:bg-blue-500"
+                        : m.sender === "ai"
+                        ? "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
+                        : "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
+                    }`}
+                  >
+                    <p className="text-sm leading-relaxed">{m.content}</p>
+                    {m.sender !== "agent" && (
+                      <span className="text-xs opacity-70 mt-2 block font-medium">
+                        {m.sender}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input Area */}
+            <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+              <div className="flex gap-3">
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Type your message..."
+                  className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400"
+                />
+                <Button onClick={send} disabled={!input.trim()} className="dark:bg-blue-600 dark:hover:bg-blue-700">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
