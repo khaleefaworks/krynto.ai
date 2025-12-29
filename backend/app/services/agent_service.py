@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.agent_session import AgentSession
-from app.models.conversation import Conversation
+from app.models.conversation import Conversation, ConversationMode
 from app.models.message import Message
 from typing import Dict, Optional
 import uuid
@@ -77,13 +77,37 @@ class AgentService:
             "message": "New chat assigned to you"
         })
     
-    def get_active_chats(self, website_id: Optional[int] = None):
-        """Get list of active chats (both waiting and assigned)"""
-        # Return all active conversations regardless of handoff status
-        # The frontend will display them differently based on is_handoff
+    def get_active_chats(self, website_id: Optional[int] = None, agent_id: Optional[int] = None):
+        """
+        Get list of conversations visible to agents.
+        
+        Inbox Visibility Rules:
+        - WAITING_FOR_AGENT: Visible to all eligible agents (unclaimed)
+        - AGENT_HANDLING: Only visible to assigned agent
+        - AI_HANDLING: Not visible to agents
+        
+        Args:
+            website_id: Optional filter by website
+            agent_id: Optional filter by assigned agent
+            
+        Returns:
+            List of conversations
+        """
+        # Base query: exclude closed and AI-handling conversations
         query = self.db.query(Conversation).filter(
-            Conversation.status != "closed"  # Only exclude closed chats
+            Conversation.status != "closed",
+            Conversation.mode != ConversationMode.AI_HANDLING
         )
+        
+        # If agent_id provided, filter for:
+        # 1. WAITING_FOR_AGENT (available to claim)
+        # 2. AGENT_HANDLING where assigned to this agent
+        if agent_id:
+            query = query.filter(
+                (Conversation.mode == ConversationMode.WAITING_FOR_AGENT) |
+                ((Conversation.mode == ConversationMode.AGENT_HANDLING) & 
+                 (Conversation.assigned_agent_id == agent_id))
+            )
         
         if website_id:
             query = query.filter(Conversation.website_id == website_id)

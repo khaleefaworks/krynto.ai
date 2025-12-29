@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.conversation import Conversation, ConversationStatus
+from app.models.conversation import Conversation, ConversationStatus, ConversationMode
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.ai_service import generate_ai_response
@@ -67,9 +67,9 @@ class ChatService:
             logger.info("offline_message_stored", conversation_id=self.conversation.id)
             return None  # System message already sent during conversation creation
         
-        # ⚠️ PHASE 3 HANDOFF LOGIC - AI PAUSE
-        if self.conversation.is_handoff:
-            logger.info("ai_paused_handoff_active", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
+        # MODE-BASED ROUTING (replaces old handoff logic)
+        if self.conversation.mode == ConversationMode.AGENT_HANDLING:
+            logger.info("agent_handling_mode", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
             
             # Forward message to agent
             from app.services.agent_service import AgentService
@@ -86,6 +86,17 @@ class ChatService:
                 )
             
             # Return None - agent will respond
+            return None
+        
+        if self.conversation.mode == ConversationMode.WAITING_FOR_AGENT:
+            logger.info("waiting_for_agent_mode", conversation_id=self.conversation.id)
+            # Message stored, waiting for agent to claim
+            # System message already sent during conversation creation
+            return None
+        
+        # AI_HANDLING mode: Generate AI response
+        if self.conversation.mode != ConversationMode.AI_HANDLING:
+            logger.warning("unexpected_mode", conversation_id=self.conversation.id, mode=self.conversation.mode.value)
             return None
         
         # Get website for AI instructions

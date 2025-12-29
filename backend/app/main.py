@@ -9,6 +9,7 @@ from app.api.health import router as health_router
 from app.api.ws_chat import router as ws_chat_router
 from app.api.ws_agent import router as ws_agent_router
 from app.api.chats import router as chats_router
+from app.api.conversations import router as conversations_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.widget import router as widget_router
@@ -59,6 +60,7 @@ app.include_router(widget_router)
 app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
 app.include_router(chats_router)
+app.include_router(conversations_router)
 app.include_router(knowledge_router)
 app.include_router(websites_router)
 app.include_router(agent_assignments_router)
