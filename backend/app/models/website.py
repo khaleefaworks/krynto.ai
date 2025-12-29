@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, JSON
+from sqlalchemy import Column, Integer, String, Text, JSON, Boolean
 from sqlalchemy.orm import relationship
 
 from app.models.base import TimestampMixin
@@ -12,6 +12,9 @@ class Website(Base, TimestampMixin):
     name = Column(String(255), nullable=False)
     domain = Column(String(255), unique=True, nullable=False)
     ai_instructions = Column(Text, nullable=True)
+    
+    # AI enablement flag (Milestone 3 - data-only, not used in routing yet)
+    ai_enabled = Column(Boolean, default=False, nullable=False)
     
     # Widget configuration
     widget_config = Column(JSON, nullable=True, default={})

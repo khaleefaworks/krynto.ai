@@ -74,3 +74,20 @@ def require_authenticated_user(
     Used for endpoints accessible to all logged-in users.
     """
     return current_user
+
+
+def require_agent(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Require agent access (both FULL_ACCESS and LIMITED_ACCESS allowed).
+    Used for agent dashboard and chat handling endpoints.
+    
+    Note: Admins (FULL_ACCESS) can also act as agents.
+    """
+    if current_user.role not in (UserRole.FULL_ACCESS, UserRole.LIMITED_ACCESS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent access required",
+        )
+    return current_user

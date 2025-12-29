@@ -19,7 +19,7 @@ type LoginForm = z.infer<typeof loginSchema>
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { setAgent, setToken } = useAppStore()
+  const { setUser, setToken } = useAppStore()
   const [error, setError] = useState<string | null>(null)
   
   const {

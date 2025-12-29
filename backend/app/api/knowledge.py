@@ -5,6 +5,8 @@ from app.core.database import get_db
 from app.models.knowledge_source import KnowledgeSource
 from app.models.document import Document
 from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.user import User
+from app.api.deps import require_admin, require_authenticated_user
 from app.services.document_parser import parse_pdf, parse_text
 from app.services.chunking_service import chunk_text
 from app.services.knowledge_indexer import index_document_chunks
@@ -14,9 +16,14 @@ router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
 
 
 @router.post("/sources")
-def create_knowledge_source(payload: dict, db: Session = Depends(get_db)):
+def create_knowledge_source(
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
     """
     Create a new knowledge source for a website.
+    Requires admin access (FULL_ACCESS role).
     
     A knowledge source is a logical grouping for documents (e.g., "Product Manuals").
     """
@@ -40,9 +47,11 @@ def upload_document(
     knowledge_source_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
 ):
     """
     Upload a document (PDF or TXT) and automatically chunk it.
+    Requires admin access (FULL_ACCESS role).
     
     This endpoint:
     1. Parses the file to extract text
@@ -99,9 +108,14 @@ def upload_document(
 
 
 @router.post("/documents/text")
-def ingest_text(payload: dict, db: Session = Depends(get_db)):
+def ingest_text(
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
     """
     Ingest raw text directly (no file upload).
+    Requires admin access (FULL_ACCESS role).
     
     Useful for FAQs, policies, or any text content that doesn't come from a file.
     """
@@ -146,9 +160,11 @@ def index_document(
     document_id: int,
     website_id: int,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
 ):
     """
     Index a document's chunks into Chroma vector store.
+    Requires admin access (FULL_ACCESS role).
     
     This endpoint:
     1. Retrieves all chunks for the document
@@ -174,9 +190,14 @@ def index_document(
 
 
 @router.get("/documents")
-def list_documents(website_id: int, db: Session = Depends(get_db)):
+def list_documents(
+    website_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user)
+):
     """
     List all documents for a website.
+    Available to all authenticated users (view-only).
     """
     documents = (
         db.query(Document)
@@ -212,9 +233,11 @@ def delete_document(
     document_id: int,
     website_id: int,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
 ):
     """
     Delete a document and all its chunks.
+    Requires admin access (FULL_ACCESS role).
     """
     document = (
         db.query(Document)
@@ -239,9 +262,14 @@ def delete_document(
 
 
 @router.post("/documents/crawl")
-def crawl_website(payload: dict, db: Session = Depends(get_db)):
+def crawl_website(
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
     """
     Crawl a website URL and create a document from the extracted content.
+    Requires admin access (FULL_ACCESS role).
     
     Request body:
     {

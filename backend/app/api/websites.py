@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.website import Website
-from app.api.auth import get_current_agent
+from app.models.user import User
+from app.api.deps import require_admin, require_authenticated_user
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -27,6 +28,7 @@ class WebsiteResponse(BaseModel):
     name: str
     domain: str
     ai_instructions: Optional[str]
+    ai_enabled: bool
     widget_config: Optional[dict]
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -48,10 +50,11 @@ class WidgetConfigResponse(BaseModel):
 @router.get("", response_model=List[WebsiteResponse])
 def list_websites(
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    current_user: User = Depends(require_authenticated_user)
 ):
     """
-    List all websites for the authenticated agent.
+    List all websites.
+    Available to all authenticated users (admins and agents).
     """
     websites = db.query(Website).all()
     return websites
@@ -61,10 +64,11 @@ def list_websites(
 def create_website(
     website_data: WebsiteCreate,
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    admin: User = Depends(require_admin)
 ):
     """
     Create a new website.
+    Requires admin access (FULL_ACCESS role).
     """
     # Check if domain already exists
     existing = db.query(Website).filter_by(domain=website_data.domain).first()
@@ -87,10 +91,11 @@ def create_website(
 def get_website(
     website_id: int,
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    current_user: User = Depends(require_authenticated_user)
 ):
     """
     Get a specific website by ID.
+    Available to all authenticated users.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
@@ -103,10 +108,11 @@ def update_website(
     website_id: int,
     website_data: WebsiteUpdate,
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    admin: User = Depends(require_admin)
 ):
     """
     Update a website.
+    Requires admin access (FULL_ACCESS role).
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
@@ -136,10 +142,11 @@ def update_website(
 def delete_website(
     website_id: int,
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    admin: User = Depends(require_admin)
 ):
     """
     Delete a website.
+    Requires admin access (FULL_ACCESS role).
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
@@ -177,10 +184,11 @@ def update_widget_config(
     website_id: int,
     config: dict,
     db: Session = Depends(get_db),
-    current_agent = Depends(get_current_agent)
+    admin: User = Depends(require_admin)
 ):
     """
     Update widget configuration for a website.
+    Requires admin access (FULL_ACCESS role).
     """
     website = db.query(Website).filter_by(id=website_id).first()
     
@@ -196,3 +204,37 @@ def update_widget_config(
         "message": "Widget configuration updated",
         "config": website.widget_config
     }
+
+
+class AISettingsUpdate(BaseModel):
+    ai_enabled: bool
+
+
+class AISettingsResponse(BaseModel):
+    ai_enabled: bool
+
+
+@router.patch("/{website_id}/ai-settings", response_model=AISettingsResponse)
+def update_ai_settings(
+    website_id: int,
+    settings: AISettingsUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    """
+    Update AI settings for a website.
+    Requires admin access (FULL_ACCESS role).
+    
+    Milestone 3: This endpoint exists but the ai_enabled flag
+    is not yet used in chat routing logic. Data-only.
+    """
+    website = db.query(Website).filter_by(id=website_id).first()
+    
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    
+    website.ai_enabled = settings.ai_enabled
+    db.commit()
+    db.refresh(website)
+    
+    return AISettingsResponse(ai_enabled=website.ai_enabled)

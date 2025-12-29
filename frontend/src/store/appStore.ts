@@ -1,14 +1,14 @@
 import { create } from 'zustand'
-import type { Agent, Conversation, Message } from '../types/index'
+import type { User, Conversation, Message } from '../types/index'
 
 // Re-export types for convenience
-export type { Agent, Conversation, Message }
+export type { User, Conversation, Message }
 
 interface AppState {
   // Auth
-  agent: Agent | null
+  user: User | null
   token: string | null
-  setAgent: (agent: Agent | null) => void
+  setUser: (user: User | null) => void
   setToken: (token: string | null) => void
   
   // Chats
@@ -31,9 +31,9 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   // Auth
-  agent: null,
+  user: null,
   token: null,
-  setAgent: (agent) => set({ agent }),
+  setUser: (user) => set({ user }),
   setToken: (token) => set({ token }),
   
   // Chats

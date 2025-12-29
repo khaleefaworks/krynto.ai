@@ -1,6 +1,11 @@
-export interface Agent {
+export type UserRole = "full_access" | "limited_access"
+
+export interface User {
   id: number
+  name: string
   email: string
+  role: UserRole
+  is_available: boolean
   is_active: boolean
 }
 

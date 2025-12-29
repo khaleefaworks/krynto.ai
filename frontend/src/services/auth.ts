@@ -1,20 +1,15 @@
 import { apiRequest } from "./api"
+import { User } from "@/types"
 
 type LoginPayload = {
   email: string
   password: string
 }
 
-export type Agent = {
-  id: number
-  email: string
-  is_active: boolean
-}
-
 type LoginResponse = {
   access_token: string
   token_type: string
-  agent: Agent
+  user: User
 }
 
 export function login(payload: LoginPayload) {
@@ -25,5 +20,5 @@ export function login(payload: LoginPayload) {
 }
 
 export function getCurrentUser() {
-  return apiRequest<Agent>("/auth/me")
+  return apiRequest<User>("/auth/me")
 }

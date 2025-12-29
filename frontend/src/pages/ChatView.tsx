@@ -17,7 +17,7 @@ import { ArrowLeft, Send, X } from "lucide-react"
 export default function ChatView() {
   const { conversationId } = useParams<{ conversationId: string }>()
   const navigate = useNavigate()
-  const { agent } = useAppStore()
+  const { user } = useAppStore()
   const { messages, addMessage, addMessages, reset } = useMessageStore()
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(true)
@@ -30,7 +30,7 @@ export default function ChatView() {
     let isSubscribed = true
 
     async function init() {
-      if (!conversationId || !agent || joinedRef.current) return
+      if (!conversationId || !user || joinedRef.current) return
       
       joinedRef.current = true
       reset()
@@ -50,7 +50,7 @@ export default function ChatView() {
         if (!isSubscribed) return
 
         // 3. Connect agent WebSocket
-        ws = connectAgentSocket(res.website_id, agent.id)
+        ws = connectAgentSocket(res.website_id, user.id)
 
         ws.onopen = () => {
           console.log("✅ Agent WebSocket connected")
@@ -110,7 +110,7 @@ export default function ChatView() {
       joinedRef.current = false
       disconnectAgentSocket()
     }
-  }, [conversationId, agent?.id])
+  }, [conversationId, user?.id])
 
   useEffect(() => {
     // Auto-scroll to bottom when messages change
