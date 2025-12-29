@@ -9,13 +9,14 @@ import DashboardLayout from './pages/DashboardLayout'
 import ActiveChats from './pages/ActiveChats'
 import ChatView from './pages/ChatView'
 import WebsiteManagement from './pages/WebsiteManagement'
+import WebsiteDetail from './pages/WebsiteDetail'
+import WebsitesList from './pages/WebsitesList'
+import AgentsList from './pages/AgentsList'
 import KnowledgeManagement from './pages/KnowledgeManagement'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
-import WebsitesSettings from './pages/WebsitesSettings'
 import PersonalSettings from './pages/PersonalSettings'
-import AgentsManagement from './pages/AgentsManagement'
 import Analytics from './pages/Analytics'
 
 function App() {
@@ -102,14 +103,27 @@ function App() {
               
               {/* Settings - All users */}
               <Route path="settings" element={<Settings />}>
+                {/* Websites management - Admin only */}
                 <Route 
                   path="websites" 
-                  element={isAdmin(user) ? <WebsitesSettings /> : <Navigate to="/dashboard/chats" replace />} 
+                  element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />} 
                 />
                 <Route 
-                  path="agents" 
-                  element={isAdmin(user) ? <AgentsManagement /> : <Navigate to="/dashboard/chats" replace />} 
+                  path="websites/:id" 
+                  element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />} 
                 />
+                
+                {/* Agents management - Admin only */}
+                <Route 
+                  path="agents" 
+                  element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />} 
+                />
+                <Route 
+                  path="agents/:id" 
+                  element={isAdmin(user) ? <div className="p-8">Agent detail placeholder</div> : <Navigate to="/dashboard/chats" replace />} 
+                />
+                
+                {/* Personal settings - All users */}
                 <Route path="personal" element={<PersonalSettings />} />
                 <Route index element={
                   <div className="p-8">
