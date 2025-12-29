@@ -172,26 +172,26 @@ export default function ChatView() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-7xl mx-auto p-8">
+      <div className="max-w-7xl mx-auto p-4 md:p-8">
         <Button
           variant="ghost"
           onClick={() => navigate("/dashboard/chats")}
-          className="mb-6 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="mb-4 md:mb-6 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Chats
         </Button>
 
-        <Card className="h-[calc(100vh-14rem)] border-gray-200 dark:border-gray-700 dark:bg-gray-800">
-          <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-gray-900 dark:text-white">Chat #{conversationId}</CardTitle>
+        <Card className="h-[calc(100vh-10rem)] md:h-[calc(100vh-14rem)] border-gray-200 dark:border-gray-700 dark:bg-gray-800">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-700 p-4 md:p-6">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+              <CardTitle className="text-gray-900 dark:text-white text-lg md:text-xl">Chat #{conversationId}</CardTitle>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleCloseConversation}
                 disabled={closing}
-                className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 dark:border-gray-600"
+                className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 dark:border-gray-600 w-full sm:w-auto"
               >
                 <X className="h-4 w-4 mr-2" />
                 {closing ? "Closing..." : "Close Conversation"}
@@ -200,7 +200,7 @@ export default function ChatView() {
           </CardHeader>
           <CardContent className="p-0 flex flex-col h-full">
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 dark:bg-gray-900">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 md:space-y-4 bg-gray-50 dark:bg-gray-900">
               {messages.length === 0 && (
                 <p className="text-center text-gray-400 dark:text-gray-600 text-sm">
                   Waiting for messages...
@@ -215,7 +215,7 @@ export default function ChatView() {
                   }`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
+                    className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 md:px-4 md:py-3 shadow-sm ${
                       m.sender === "agent"
                         ? "bg-blue-600 text-white dark:bg-blue-500"
                         : m.sender === "ai"
@@ -223,9 +223,9 @@ export default function ChatView() {
                         : "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
                     }`}
                   >
-                    <p className="text-sm leading-relaxed">{m.content}</p>
+                    <p className="text-sm leading-relaxed break-words">{m.content}</p>
                     {m.sender !== "agent" && (
-                      <span className="text-xs opacity-70 mt-2 block font-medium">
+                      <span className="text-xs opacity-70 mt-1 md:mt-2 block font-medium">
                         {m.sender}
                       </span>
                     )}
@@ -236,16 +236,16 @@ export default function ChatView() {
             </div>
 
             {/* Input Area */}
-            <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
-              <div className="flex gap-3">
+            <div className="border-t border-gray-200 dark:border-gray-700 p-3 md:p-4 bg-white dark:bg-gray-800">
+              <div className="flex gap-2 md:gap-3">
                 <Input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Type your message..."
-                  className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400"
+                  className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 text-sm md:text-base"
                 />
-                <Button onClick={send} disabled={!input.trim()} className="dark:bg-blue-600 dark:hover:bg-blue-700">
+                <Button onClick={send} disabled={!input.trim()} className="dark:bg-blue-600 dark:hover:bg-blue-700 px-3 md:px-4">
                   <Send className="h-4 w-4" />
                 </Button>
               </div>

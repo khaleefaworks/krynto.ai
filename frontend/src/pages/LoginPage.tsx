@@ -52,11 +52,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+      <Card className="w-full max-w-md dark:bg-gray-800 dark:border-gray-700">
         <CardHeader>
-          <CardTitle className="text-2xl">Agent Login</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-2xl dark:text-white">Agent Login</CardTitle>
+          <CardDescription className="dark:text-gray-400">
             Sign in to access the agent dashboard
           </CardDescription>
         </CardHeader>

@@ -22,3 +22,10 @@ export function login(payload: LoginPayload) {
 export function getCurrentUser() {
   return apiRequest<User>("/auth/me")
 }
+
+export function updateAvailability(isAvailable: boolean) {
+  return apiRequest<{ is_available: boolean }>("/users/me/availability", {
+    method: "POST",
+    body: JSON.stringify({ is_available: isAvailable }),
+  })
+}
