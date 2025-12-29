@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import Logo from '@/components/Logo'
 
 const setupSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
@@ -93,14 +94,14 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-      <Card className="w-full max-w-md shadow-xl">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+      <Card className="w-full max-w-md shadow-xl dark:bg-gray-800 dark:border-gray-700">
         <CardHeader className="space-y-3">
-          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
-            <span className="text-white font-bold text-2xl">AC</span>
+          <div className="flex justify-center">
+            <Logo size={80} />
           </div>
-          <CardTitle className="text-3xl text-center">Welcome to AI ChatAssist</CardTitle>
-          <CardDescription className="text-center text-base">
+          <CardTitle className="text-3xl text-center dark:text-white">Welcome to AI ChatAssist</CardTitle>
+          <CardDescription className="text-center text-base dark:text-gray-400">
             Let's set up your administrator account
           </CardDescription>
         </CardHeader>

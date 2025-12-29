@@ -1,19 +1,19 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Settings, BarChart3, User, Moon, Sun } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { isAdmin } from '@/lib/roles'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { updateAvailability } from '@/services/auth'
+import Logo from '@/components/Logo'
 
 export default function DashboardLayout() {
   const { user, setUser, setToken } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode')
     return saved ? JSON.parse(saved) : false
@@ -28,14 +28,15 @@ export default function DashboardLayout() {
     }
   }, [darkMode])
 
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setIsMobileMenuOpen(false)
+  }, [location.pathname])
+
   const handleLogout = () => {
-    // Clear token from localStorage
     clearToken()
-    
-    // Clear store
     setUser(null)
     setToken(null)
-    
     navigate('/login')
   }
 
@@ -44,16 +45,13 @@ export default function DashboardLayout() {
     
     try {
       const response = await updateAvailability(checked)
-      // Update user in store with new availability
       setUser({ ...user, is_available: response.is_available })
     } catch (error) {
       console.error('Failed to update availability:', error)
-      // Revert the toggle if there was an error
       alert('Failed to update availability. Please try again.')
     }
   }
 
-  // Get initials for avatar
   const getInitials = (name?: string, email?: string) => {
     if (name) {
       return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -66,22 +64,162 @@ export default function DashboardLayout() {
 
   const isActive = (path: string) => location.pathname.startsWith(path)
 
+  const NavigationLinks = () => (
+    <>
+      <Link
+        to="/dashboard/chats"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+          isActive('/dashboard/chats') 
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+        }`}
+      >
+        <MessageSquare className="h-5 w-5" />
+        <span className="md:hidden lg:block">Chats</span>
+      </Link>
+
+      <Link
+        to="/dashboard/settings"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+          isActive('/dashboard/settings') 
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+        }`}
+      >
+        <Settings className="h-5 w-5" />
+        <span className="md:hidden lg:block">Settings</span>
+      </Link>
+
+      <Link
+        to="/dashboard/analytics"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+          isActive('/dashboard/analytics') 
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+        }`}
+      >
+        <BarChart3 className="h-5 w-5" />
+        <span className="md:hidden lg:block">Analytics</span>
+      </Link>
+    </>
+  )
+
   return (
     <div className="flex min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      <aside className="w-20 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shadow-sm fixed left-0 top-0 bottom-0 z-40 md:relative">
-        {/* Logo */}
-        <div className="h-16 md:h-20 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-md">
-            <span className="text-white font-bold text-lg">AC</span>
+      {/* Mobile Header */}
+      <header className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-50">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <Menu className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+          </button>
+          <div className="flex items-center gap-2">
+            <Logo size={32} />
+            <span className="font-semibold text-gray-900 dark:text-white">AI ChatAssist</span>
+          </div>
+        </div>
+        
+        {/* Mobile Profile */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            {darkMode ? <Sun className="h-5 w-5 text-gray-700 dark:text-gray-300" /> : <Moon className="h-5 w-5 text-gray-700 dark:text-gray-300" />}
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/50 z-50"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Sliding Sidebar */}
+      <aside className={`
+        md:hidden fixed top-0 left-0 bottom-0 w-72 bg-white dark:bg-gray-800 z-50
+        transform transition-transform duration-300 ease-in-out
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        {/* Mobile Sidebar Header */}
+        <div className="h-16 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Logo size={32} />
+            <span className="font-semibold text-gray-900 dark:text-white">AI ChatAssist</span>
+          </div>
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          </button>
+        </div>
+
+        {/* Mobile Profile Section */}
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="relative">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold shadow-md">
+                {getInitials(user?.name, user?.email)}
+              </div>
+              {user?.is_available && (
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                {user?.name || 'User'}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                {user?.email}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-gray-700 dark:text-gray-300">Available</span>
+            <Switch
+              checked={user?.is_available || false}
+              onCheckedChange={handleAvailabilityToggle}
+            />
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 flex flex-col py-4 md:py-6 gap-2 px-2">
+        {/* Mobile Navigation */}
+        <nav className="flex-1 overflow-y-auto p-4">
+          <div className="space-y-1">
+            <NavigationLinks />
+          </div>
+        </nav>
+
+        {/* Mobile Sidebar Footer */}
+        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+          >
+            <LogOut className="h-5 w-5" />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex md:w-20 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shadow-sm">
+        {/* Desktop Logo */}
+        <div className="h-20 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
+          <Logo size={40} />
+        </div>
+
+        {/* Desktop Navigation - Icon Only */}
+        <nav className="flex-1 flex flex-col py-6 gap-2 px-2">
           <Link
             to="/dashboard/chats"
-            className={`flex items-center justify-center py-2.5 md:py-3 rounded-lg transition-all ${
+            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
               isActive('/dashboard/chats') 
                 ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -93,7 +231,7 @@ export default function DashboardLayout() {
 
           <Link
             to="/dashboard/settings"
-            className={`flex items-center justify-center py-2.5 md:py-3 rounded-lg transition-all ${
+            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
               isActive('/dashboard/settings') 
                 ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -105,7 +243,7 @@ export default function DashboardLayout() {
 
           <Link
             to="/dashboard/analytics"
-            className={`flex items-center justify-center py-2.5 md:py-3 rounded-lg transition-all ${
+            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
               isActive('/dashboard/analytics') 
                 ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -116,31 +254,31 @@ export default function DashboardLayout() {
           </Link>
         </nav>
 
-        {/* Bottom actions */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-2 space-y-1.5 md:space-y-2">
+        {/* Desktop Bottom Actions */}
+        <div className="border-t border-gray-200 dark:border-gray-700 p-2 space-y-2">
           <button
             onClick={() => setDarkMode(!darkMode)}
-            className="w-full flex items-center justify-center py-2.5 md:py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+            className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
             title={darkMode ? 'Light mode' : 'Dark mode'}
           >
             {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </button>
           
-          {/* Profile Dropdown */}
+          {/* Desktop Profile Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger>
-              <div className="w-full flex items-center justify-center py-1.5 md:py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all cursor-pointer">
+              <div className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all cursor-pointer">
                 <div className="relative">
-                  <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-xs md:text-sm shadow-md">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
                     {getInitials(user?.name, user?.email)}
                   </div>
                   {user?.is_available && (
-                    <div className="absolute bottom-0 right-0 w-2.5 h-2.5 md:w-3 md:h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
+                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
                   )}
                 </div>
               </div>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 md:w-56">
+            <DropdownMenuContent className="w-56">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
                   <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
@@ -175,7 +313,7 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 ml-20 md:ml-0">
+      <main className="flex-1 pt-16 md:pt-0">
         <Outlet />
       </main>
     </div>

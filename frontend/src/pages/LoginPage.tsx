@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import Logo from '@/components/Logo'
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email or username is required'),
@@ -54,9 +55,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-md dark:bg-gray-800 dark:border-gray-700">
-        <CardHeader>
-          <CardTitle className="text-2xl dark:text-white">Agent Login</CardTitle>
-          <CardDescription className="dark:text-gray-400">
+        <CardHeader className="space-y-3">
+          <div className="flex justify-center">
+            <Logo size={64} />
+          </div>
+          <CardTitle className="text-2xl dark:text-white text-center">Agent Login</CardTitle>
+          <CardDescription className="dark:text-gray-400 text-center">
             Sign in to access the agent dashboard
           </CardDescription>
         </CardHeader>
