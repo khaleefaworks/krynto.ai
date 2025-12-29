@@ -6,6 +6,21 @@ Embeddable Vanilla JavaScript chat widget for website visitors. Zero dependencie
 
 The chat widget provides a complete chat interface that connects directly to the AI ChatAssist backend via WebSocket. It handles AI responses and seamless handoff to human agents.
 
+## ⚠️ Important: Setup Requirements
+
+**Before the widget will work, you must:**
+
+1. ✅ **Complete system initialization** - Run onboarding to create admin account
+2. ✅ **Create a website** - Add website in Dashboard → Settings → Websites
+3. ✅ **Get website ID** - Note the ID assigned to your website (e.g., 1, 2, 3...)
+4. ✅ **Embed widget code** - Use the correct website ID in the embed code
+
+**The widget will NOT load if:**
+- ❌ System is not initialized
+- ❌ Website ID doesn't exist in database
+- ❌ Backend is not running
+- ❌ Website ID is incorrect
+
 ## Features
 
 - ✅ **Real-time WebSocket messaging** - Instant bidirectional communication
@@ -14,6 +29,7 @@ The chat widget provides a complete chat interface that connects directly to the
 - ✅ **AI and agent support** - Handles both automated and human responses
 - ✅ **Agent handoff indicator** - Visual notification when agent joins
 - ✅ **Dynamic configuration** - Fetches styling from backend per website
+- ✅ **Website validation** - Verifies website exists before loading
 - ✅ **Responsive design** - Works on desktop and mobile
 - ✅ **No dependencies** - Pure Vanilla JS + CSS (3KB gzipped)
 - ✅ **Collision-free** - All IDs and classes namespaced
@@ -24,6 +40,54 @@ The chat widget provides a complete chat interface that connects directly to the
 - `chat-widget.css` - Widget styles (2KB minified)
 - `demo.html` - Demo page for testing
 - `README.md` - This file
+
+## Quick Start Guide
+
+### Step 1: Initialize System
+
+1. Start the backend server:
+   ```bash
+   cd backend
+   ./start_server.sh
+   ```
+
+2. Start the frontend:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+3. Complete onboarding at `http://localhost:5173/login`
+
+### Step 2: Create a Website
+
+1. Log in to the dashboard
+2. Navigate to **Settings → Websites**
+3. Click **Add Website**
+4. Fill in:
+   - Name: "My Website"
+   - Domain: "example.com"
+   - AI Instructions: (optional)
+5. Save and note the **Website ID** (e.g., ID: 1)
+
+### Step 3: Embed Widget
+
+Add this code to your website's HTML (usually before `</body>`):
+
+```html
+<!-- Widget Styles -->
+<link rel="stylesheet" href="http://localhost:8000/widget/chat-widget.css">
+
+<!-- Widget Script -->
+<script 
+  src="http://localhost:8000/widget/chat-widget.js" 
+  data-website-id="1"
+  data-ws-url="ws://localhost:8000"
+  data-api-url="http://localhost:8000">
+</script>
+```
+
+**Replace `data-website-id="1"` with your actual website ID!**
 
 ## Installation
 

@@ -254,10 +254,12 @@
 
   /**
    * Fetch widget configuration from backend
+   * Returns: true if config loaded, false if using defaults, null if website doesn't exist
    */
   async function fetchWidgetConfig() {
     try {
       const response = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`);
+      
       if (response.ok) {
         const config = await response.json();
         
@@ -269,13 +271,16 @@
         
         console.log('[ChatWidget] Configuration loaded from backend:', config);
         return true;
+      } else if (response.status === 404) {
+        console.error('[ChatWidget] Website not found (404). Widget cannot be initialized.');
+        return null; // Website doesn't exist
       } else {
         console.warn('[ChatWidget] Failed to fetch config (HTTP ' + response.status + '), using defaults');
-        return false;
+        return false; // Use defaults
       }
     } catch (error) {
-      console.warn('[ChatWidget] Failed to fetch config, using defaults:', error);
-      return false;
+      console.error('[ChatWidget] Failed to fetch config:', error);
+      return null; // Treat network errors as fatal
     }
   }
 
@@ -361,11 +366,22 @@
     
     console.log('[ChatWidget] Initializing with website ID:', CONFIG.websiteId);
 
-    // Create UI first (with default styling)
-    createWidget();
+    // Fetch widget configuration from backend FIRST
+    // This validates that the website exists
+    const configResult = await fetchWidgetConfig();
+    
+    // If website doesn't exist (404 or network error), don't load widget
+    if (configResult === null) {
+      console.error('[ChatWidget] Website validation failed. Widget will not be loaded.');
+      console.error('[ChatWidget] Please ensure:');
+      console.error('[ChatWidget]   1. The system is initialized (complete onboarding)');
+      console.error('[ChatWidget]   2. A website with ID ' + CONFIG.websiteId + ' exists in the dashboard');
+      console.error('[ChatWidget]   3. The website ID in the embed code is correct');
+      return;
+    }
 
-    // Fetch widget configuration from backend
-    const configLoaded = await fetchWidgetConfig();
+    // Create UI only after validation passes
+    createWidget();
     
     // Apply configuration styling (either fetched or defaults)
     applyConfiguration();

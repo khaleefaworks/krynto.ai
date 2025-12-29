@@ -50,9 +50,26 @@
 <body>
   <div class="demo-container">
     <h1>🤖 AI ChatAssist - Demo Page</h1>
+    
+    <!-- Warning Box -->
+    <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+      <h3 style="margin-top: 0; color: #92400e;">⚠️ Important: Setup Required</h3>
+      <p style="color: #92400e; margin-bottom: 10px;"><strong>Before the chat widget will work, you must:</strong></p>
+      <ol style="color: #92400e; margin: 0; padding-left: 20px;">
+        <li>Complete onboarding at <a href="http://localhost:5173/login" target="_blank" style="color: #1e40af;">localhost:5173/login</a></li>
+        <li>Create a website in <strong>Dashboard → Settings → Websites</strong></li>
+        <li>Note the website ID (shown in the URL or website list)</li>
+        <li>Update the embed code below with your actual website ID</li>
+      </ol>
+      <p style="color: #92400e; margin-top: 10px; margin-bottom: 0;">
+        <strong>Current widget is configured for website ID: 1</strong><br>
+        If no website with ID=1 exists, the widget will not appear on this page.
+      </p>
+    </div>
+    
     <p>
       This is a demo page showing the AI ChatAssist visitor chat widget in action.
-      The chat bubble should appear in the bottom-right corner of the page.
+      The chat bubble should appear in the bottom-right corner of the page <strong>only after proper setup</strong>.
     </p>
     
     <div class="config-info">
