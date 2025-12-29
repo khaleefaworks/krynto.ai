@@ -253,6 +253,26 @@
   }
 
   /**
+   * Check if system is initialized
+   * Returns: true if initialized, false if needs setup
+   */
+  async function checkSystemStatus() {
+    try {
+      const response = await fetch(`${CONFIG.apiUrl}/auth/setup/status`);
+      if (response.ok) {
+        const data = await response.json();
+        // needs_setup: true means system is NOT initialized
+        return !data.needs_setup;
+      }
+      // If endpoint fails, assume system needs setup
+      return false;
+    } catch (error) {
+      console.error('[ChatWidget] Failed to check system status:', error);
+      return false;
+    }
+  }
+
+  /**
    * Fetch widget configuration from backend
    * Returns: true if config loaded, false if using defaults, null if website doesn't exist
    */
@@ -366,7 +386,15 @@
     
     console.log('[ChatWidget] Initializing with website ID:', CONFIG.websiteId);
 
-    // Fetch widget configuration from backend FIRST
+    // STEP 1: Check if system is initialized
+    const systemInitialized = await checkSystemStatus();
+    if (!systemInitialized) {
+      console.warn('[ChatWidget] System not initialized. Widget will not be loaded.');
+      console.warn('[ChatWidget] Please complete onboarding first at the admin dashboard.');
+      return;
+    }
+
+    // STEP 2: Fetch widget configuration from backend
     // This validates that the website exists
     const configResult = await fetchWidgetConfig();
     
@@ -380,7 +408,7 @@
       return;
     }
 
-    // Create UI only after validation passes
+    // STEP 3: Create UI only after all validations pass
     createWidget();
     
     // Apply configuration styling (either fetched or defaults)
