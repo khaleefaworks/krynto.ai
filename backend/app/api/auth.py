@@ -5,10 +5,12 @@ from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.models.user import User, UserRole
+from app.models.system_settings import SystemSettings
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
+from app.core.system import is_system_initialized, mark_system_initialized
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -17,6 +19,13 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class BootstrapRequest(BaseModel):
+    """Request model for creating the first admin user"""
+    name: str
     email: EmailStr
     password: str
 
@@ -46,6 +55,71 @@ class LoginResponse(BaseModel):
     user: UserResponse
 
 
+@router.post("/bootstrap")
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest):
+    """
+    Bootstrap endpoint - creates the first admin user.
+    
+    This endpoint:
+    - Only works ONCE on a fresh installation
+    - Creates the first admin with FULL_ACCESS role
+    - Marks the system as initialized
+    - Gets disabled forever after first use
+    
+    This prevents broken installs and ensures proper admin setup.
+    """
+    db = SessionLocal()
+    
+    try:
+        # Check if system already initialized
+        settings_row = db.query(SystemSettings).first()
+        if settings_row and settings_row.is_initialized:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="System already initialized. Use /auth/login instead."
+            )
+        
+        # Ensure no users exist (extra safety check)
+        user_count = db.query(User).count()
+        if user_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Users already exist. System may be corrupted."
+            )
+        
+        # Create first admin user
+        admin = User(
+            name=bootstrap_request.name,
+            email=bootstrap_request.email,
+            password_hash=get_password_hash(bootstrap_request.password),
+            role=UserRole.FULL_ACCESS,
+            is_active=True,
+            is_available=True
+        )
+        
+        db.add(admin)
+        
+        # Mark system as initialized
+        mark_system_initialized(db)
+        
+        db.commit()
+        db.refresh(admin)
+        
+        return {
+            "message": "Admin created successfully. System initialized.",
+            "admin": {
+                "id": admin.id,
+                "name": admin.name,
+                "email": admin.email,
+                "role": admin.role.value
+            }
+        }
+        
+    finally:
+        db.close()
+
+
 @router.post("/login", response_model=LoginResponse)
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def login(request: Request, login_request: LoginRequest, db: Session = Depends(get_db)):
@@ -53,6 +127,13 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
     User login endpoint with JWT authentication.
     Works for both Admins (FULL_ACCESS) and Agents (LIMITED_ACCESS).
     """
+    # Block login if system not initialized
+    if not is_system_initialized():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System not initialized. Create admin first via /auth/bootstrap"
+        )
+    
     # Find user by email
     user = db.query(User).filter(User.email == login_request.email).first()
     

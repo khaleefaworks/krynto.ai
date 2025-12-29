@@ -30,7 +30,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
 
     role = Column(
-        SQLEnum(UserRole, name="user_role"),
+        SQLEnum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=UserRole.LIMITED_ACCESS,
     )
