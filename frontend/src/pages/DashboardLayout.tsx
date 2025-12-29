@@ -1,13 +1,14 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X } from 'lucide-react'
+import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
+import { isAdministrator } from '@/lib/roles'
 
 export default function DashboardLayout() {
   const { user, setUser, setToken } = useAppStore()
@@ -101,6 +102,21 @@ export default function DashboardLayout() {
         <BarChart3 className="h-5 w-5" />
         <span className="md:hidden lg:block">Analytics</span>
       </Link>
+
+      {/* Reset Application - Administrator Only */}
+      {isAdministrator(user) && (
+        <Link
+          to="/dashboard/reset"
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+            isActive('/dashboard/reset') 
+              ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' 
+              : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+          }`}
+        >
+          <RotateCcw className="h-5 w-5" />
+          <span className="md:hidden lg:block">Reset App</span>
+        </Link>
+      )}
     </>
   )
 

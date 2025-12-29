@@ -45,7 +45,7 @@ export default function Settings() {
                   }`}
                 >
                   <Users className="h-4 w-4" />
-                  Manage Agents
+                  Manage Users
                 </Link>
                 <div className="mb-4" />
               </>

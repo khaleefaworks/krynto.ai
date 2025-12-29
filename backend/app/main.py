@@ -16,6 +16,7 @@ from app.api.widget import router as widget_router
 from app.api.knowledge import router as knowledge_router
 from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
+from app.api.system import router as system_router
 from app import models  # Import models to register them with SQLAlchemy
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -56,6 +57,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(system_router)
 app.include_router(widget_router)
 app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)

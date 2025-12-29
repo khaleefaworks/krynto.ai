@@ -29,10 +29,10 @@ export default function AgentsList() {
       setLoading(true)
       setError(null)
       const data = await apiRequest<Agent[]>('/auth/users')
-      // Filter out administrators
-      setAgents(data.filter(user => user.role !== 'full_access'))
+      // Show all users (don't filter by role)
+      setAgents(data)
     } catch (err: any) {
-      setError(err.message || 'Failed to load agents')
+      setError(err.message || 'Failed to load users')
     } finally {
       setLoading(false)
     }
@@ -66,27 +66,27 @@ export default function AgentsList() {
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agents</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Users</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Manage agent accounts who handle customer chats
+            Manage user accounts and roles
           </p>
         </div>
         <Button onClick={() => navigate('/dashboard/settings/agents/new')} className="gap-2">
           <Plus className="w-4 h-4" />
-          Add Agent
+          Add User
         </Button>
       </div>
 
       {agents.length === 0 ? (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center">
           <User className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No agents yet</h3>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No users yet</h3>
           <p className="text-gray-600 dark:text-gray-400 mb-6">
-            Create your first agent to start handling customer chats
+            Create your first user account
           </p>
           <Button onClick={() => navigate('/dashboard/settings/agents/new')} className="gap-2">
             <Plus className="w-4 h-4" />
-            Add Agent
+            Add User
           </Button>
         </div>
       ) : (
@@ -95,10 +95,13 @@ export default function AgentsList() {
             <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Agent
+                  User
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Email
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Role
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Status
@@ -133,6 +136,11 @@ export default function AgentsList() {
                       <Mail className="w-4 h-4" />
                       {agent.email}
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <Badge variant={agent.role === 'full_access' ? 'default' : 'secondary'}>
+                      {agent.role === 'full_access' ? 'Administrator' : agent.role === 'manager' ? 'Manager' : 'Agent'}
+                    </Badge>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <Badge variant={agent.is_active ? 'default' : 'destructive'} className="gap-1">

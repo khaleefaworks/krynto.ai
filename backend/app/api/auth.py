@@ -34,7 +34,7 @@ class RegisterRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: UserRole = UserRole.LIMITED_ACCESS
+    role: UserRole = UserRole.AGENT
 
 
 class UserResponse(BaseModel):

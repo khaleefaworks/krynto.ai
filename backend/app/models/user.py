@@ -7,19 +7,21 @@ from app.core.database import Base
 
 class UserRole(str, enum.Enum):
     """User role enumeration for access control"""
-    FULL_ACCESS = "full_access"       # Admin - can manage everything
-    LIMITED_ACCESS = "limited_access"  # Agent - can only handle chats
+    FULL_ACCESS = "full_access"       # Administrator - full system access including reset
+    MANAGER = "manager"                # Manager - all access except reset application
+    AGENT = "agent"                    # Agent - only chat handling and personal settings
 
 
 class User(Base):
     """
-    Unified user model for both Admins and Agents.
+    Unified user model for Admins, Managers, and Agents.
     
-    Replaces the old Agent-only model with a role-based system:
-    - FULL_ACCESS: Admins can manage websites, agents, settings, AI config
-    - LIMITED_ACCESS: Agents can only handle chats and personal settings
+    Role-based access system:
+    - FULL_ACCESS (Administrator): Full system access including reset application
+    - MANAGER: All admin features except reset application
+    - AGENT: Only chat handling and personal settings
     
-    Admins can also act as agents (handle chats).
+    Any user can be assigned to websites to handle chats.
     """
     __tablename__ = "users"
 
@@ -32,7 +34,7 @@ class User(Base):
     role = Column(
         SQLEnum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
-        default=UserRole.LIMITED_ACCESS,
+        default=UserRole.AGENT,
     )
 
     # Presence & availability
@@ -44,5 +46,9 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def is_admin(self) -> bool:
-        """Check if user has admin privileges"""
+        """Check if user has admin privileges (full access or manager)"""
+        return self.role in [UserRole.FULL_ACCESS, UserRole.MANAGER]
+    
+    def is_administrator(self) -> bool:
+        """Check if user is administrator with full access including reset"""
         return self.role == UserRole.FULL_ACCESS

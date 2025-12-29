@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState } from 'react'
 import { getCurrentUser } from './services/auth'
-import { isAdmin } from './lib/roles'
+import { isAdmin, isAdministrator } from './lib/roles'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
 import DashboardLayout from './pages/DashboardLayout'
@@ -12,12 +12,14 @@ import WebsiteManagement from './pages/WebsiteManagement'
 import WebsiteDetail from './pages/WebsiteDetail'
 import WebsitesList from './pages/WebsitesList'
 import AgentsList from './pages/AgentsList'
+import AgentDetail from './pages/AgentDetail'
 import KnowledgeManagement from './pages/KnowledgeManagement'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
 import PersonalSettings from './pages/PersonalSettings'
 import Analytics from './pages/Analytics'
+import ResetApplication from './pages/ResetApplication'
 
 function App() {
   const { token, user, setToken, setUser } = useAppStore()
@@ -120,7 +122,7 @@ function App() {
                 />
                 <Route 
                   path="agents/:id" 
-                  element={isAdmin(user) ? <div className="p-8">Agent detail placeholder</div> : <Navigate to="/dashboard/chats" replace />} 
+                  element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />} 
                 />
                 
                 {/* Personal settings - All users */}
@@ -138,6 +140,12 @@ function App() {
               
               {/* Analytics - All users (placeholder) */}
               <Route path="analytics" element={<Analytics />} />
+              
+              {/* Reset Application - Administrator only */}
+              <Route 
+                path="reset" 
+                element={isAdministrator(user) ? <ResetApplication /> : <Navigate to="/dashboard/chats" replace />} 
+              />
               
               {/* Legacy routes - kept for backwards compatibility */}
               <Route path="websites" element={<WebsiteManagement />} />
