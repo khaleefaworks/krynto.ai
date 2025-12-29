@@ -11,6 +11,7 @@ from app.api.ws_agent import router as ws_agent_router
 from app.api.chats import router as chats_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
+from app.api.widget import router as widget_router
 from app.api.knowledge import router as knowledge_router
 from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
@@ -54,6 +55,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(widget_router)
 app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
 app.include_router(chats_router)

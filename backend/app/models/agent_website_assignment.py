@@ -15,7 +15,7 @@ class AgentWebsiteAssignment(Base, TimestampMixin):
     __tablename__ = "agent_website_assignments"
 
     id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
 
     # Ensure an agent can only be assigned to a website once
