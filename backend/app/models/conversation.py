@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum, DateTime
 
 from app.models.base import TimestampMixin
 from app.core.database import Base
@@ -37,3 +37,7 @@ class Conversation(Base, TimestampMixin):
     )
     is_handoff = Column(Boolean, default=False)
     assigned_agent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Inactivity tracking for auto-release
+    last_agent_message_at = Column(DateTime, nullable=True)
+    last_visitor_message_at = Column(DateTime, nullable=True)

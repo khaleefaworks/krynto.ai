@@ -5,15 +5,18 @@ Responsibilities:
 - Create conversations based on website online status
 - Manage conversation state transitions (ACTIVE ↔ OFFLINE ↔ CLOSED)
 - Manage conversation mode (AI ↔ AGENT)
+- Handle agent inactivity timeout and AI resumption
 - Create system messages
 - Enforce conversation state rules
 """
 
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.conversation import Conversation, ConversationStatus, ConversationMode
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
+from app.core.config import settings
 from app.core.logging import get_logger
 from typing import Optional
 
@@ -27,6 +30,37 @@ class ConversationService:
     
     def __init__(self, db: Session):
         self.db = db
+    
+    def is_agent_inactive(self, conversation: Conversation) -> bool:
+        """
+        Check if agent has been inactive for too long.
+        
+        Inactivity = time since last agent message > threshold
+        
+        Args:
+            conversation: Conversation to check
+            
+        Returns:
+            True if agent inactive, False otherwise
+        """
+        if not conversation.last_agent_message_at:
+            # No agent message yet = inactive
+            return True
+        
+        inactive_duration = datetime.utcnow() - conversation.last_agent_message_at
+        inactive_seconds = inactive_duration.total_seconds()
+        
+        is_inactive = inactive_seconds > settings.AGENT_INACTIVITY_TIMEOUT_SECONDS
+        
+        if is_inactive:
+            logger.info(
+                "agent_inactive_detected",
+                conversation_id=conversation.id,
+                inactive_seconds=int(inactive_seconds),
+                threshold_seconds=settings.AGENT_INACTIVITY_TIMEOUT_SECONDS
+            )
+        
+        return is_inactive
     
     def get_or_create_conversation(
         self,
@@ -370,6 +404,10 @@ class ConversationService:
         """
         Add visitor message to conversation.
         
+        AUTO-RELEASE LOGIC:
+        If conversation is in AGENT_HANDLING mode and agent is inactive,
+        automatically release to AI_HANDLING (or WAITING_FOR_AGENT if AI disabled).
+        
         Args:
             conversation_id: Conversation ID
             content: Message content
@@ -377,10 +415,56 @@ class ConversationService:
         Returns:
             Created Message or None if conversation closed
         """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        
+        if not conversation:
+            logger.error("visitor_message_failed_conversation_not_found", conversation_id=conversation_id)
+            return None
+        
         if not self.can_add_message(conversation_id):
             logger.warning("message_rejected_conversation_closed", conversation_id=conversation_id)
             return None
         
+        # AUTO-RELEASE: Check if agent is inactive
+        if (
+            conversation.mode == ConversationMode.AGENT_HANDLING
+            and self.is_agent_inactive(conversation)
+        ):
+            logger.info(
+                "auto_releasing_inactive_agent",
+                conversation_id=conversation_id,
+                assigned_agent_id=conversation.assigned_agent_id
+            )
+            
+            # Get website to check AI enablement
+            website = self.db.query(Website).filter_by(id=conversation.website_id).first()
+            ai_enabled = website and website.ai_instructions and len(website.ai_instructions.strip()) > 0
+            
+            # Clear agent assignment
+            old_agent_id = conversation.assigned_agent_id
+            conversation.assigned_agent_id = None
+            
+            # Resume AI or wait for new agent
+            if ai_enabled:
+                conversation.mode = ConversationMode.AI_HANDLING
+                system_msg = "You're now chatting with our assistant."
+            else:
+                conversation.mode = ConversationMode.WAITING_FOR_AGENT
+                system_msg = "An agent will be with you shortly."
+            
+            self.db.commit()
+            
+            # Add system message
+            self.add_system_message(conversation_id, system_msg)
+            
+            logger.info(
+                "agent_auto_released",
+                conversation_id=conversation_id,
+                old_agent_id=old_agent_id,
+                new_mode=conversation.mode.value
+            )
+        
+        # Create visitor message
         message = Message(
             conversation_id=conversation_id,
             sender_type=MessageSenderType.VISITOR,
@@ -389,6 +473,10 @@ class ConversationService:
         )
         
         self.db.add(message)
+        
+        # Update last visitor message timestamp
+        conversation.last_visitor_message_at = datetime.utcnow()
+        
         self.db.commit()
         self.db.refresh(message)
         
@@ -444,6 +532,10 @@ class ConversationService:
         )
         
         self.db.add(message)
+        
+        # Update last agent message timestamp
+        conversation.last_agent_message_at = datetime.utcnow()
+        
         self.db.commit()
         self.db.refresh(message)
         
