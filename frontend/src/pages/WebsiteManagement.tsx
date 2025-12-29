@@ -204,8 +204,8 @@ export default function WebsiteManagement() {
   if (loading) {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-6">Website Management</h1>
-        <p className="text-gray-600">Loading websites...</p>
+        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Website Management</h1>
+        <p className="text-gray-600 dark:text-gray-400">Loading websites...</p>
       </div>
     );
   }
@@ -213,7 +213,7 @@ export default function WebsiteManagement() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Website Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Website Management</h1>
         {!showCreateForm && !editingWebsite && !editingWidgetConfig && !managingAgents && (
           <Button onClick={() => setShowCreateForm(true)}>
             Add Website
@@ -222,7 +222,7 @@ export default function WebsiteManagement() {
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md text-red-800">
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-red-800 dark:text-red-300">
           {error}
         </div>
       )}
@@ -230,13 +230,13 @@ export default function WebsiteManagement() {
       {/* Create/Edit Form */}
       {(showCreateForm || editingWebsite) && (
         <Card className="p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
             {editingWebsite ? 'Edit Website' : 'Create Website'}
           </h2>
           <form onSubmit={editingWebsite ? handleUpdate : handleCreate}>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                   Website Name *
                 </label>
                 <Input
@@ -249,7 +249,7 @@ export default function WebsiteManagement() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                   Domain *
                 </label>
                 <Input
@@ -259,17 +259,17 @@ export default function WebsiteManagement() {
                   placeholder="example.com"
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Enter the domain without protocol (e.g., example.com)
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                   AI Instructions
                 </label>
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                   value={formData.ai_instructions}
                   onChange={(e) =>
                     setFormData({ ...formData, ai_instructions: e.target.value })
@@ -296,8 +296,8 @@ export default function WebsiteManagement() {
       {editingWidgetConfig && (
         <Card className="p-6 mb-6">
           <div className="mb-4">
-            <h2 className="text-xl font-semibold">Widget Configuration</h2>
-            <p className="text-sm text-gray-600 mt-1">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Widget Configuration</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               Editing: <span className="font-semibold">{websites.find(w => w.id === editingWidgetConfig)?.name}</span> 
               {' '}({websites.find(w => w.id === editingWidgetConfig)?.domain})
             </p>
@@ -308,7 +308,7 @@ export default function WebsiteManagement() {
               <form onSubmit={handleWidgetConfigUpdate}>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                       Welcome Message
                     </label>
                     <Input
@@ -320,11 +320,11 @@ export default function WebsiteManagement() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                       Theme
                     </label>
                     <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                       value={widgetConfigData.theme}
                       onChange={(e) => setWidgetConfigData({ ...widgetConfigData, theme: e.target.value })}
                     >
@@ -334,11 +334,11 @@ export default function WebsiteManagement() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                       Position
                     </label>
                     <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                       value={widgetConfigData.position}
                       onChange={(e) => setWidgetConfigData({ ...widgetConfigData, position: e.target.value })}
                     >
@@ -350,7 +350,7 @@ export default function WebsiteManagement() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
                       Primary Color
                     </label>
                     <div className="flex gap-2">
@@ -368,7 +368,7 @@ export default function WebsiteManagement() {
                         className="flex-1"
                       />
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       Color for bubble, header, and buttons
                     </p>
                   </div>
@@ -387,9 +387,9 @@ export default function WebsiteManagement() {
 
             {/* Live Preview */}
             <div>
-              <h3 className="text-sm font-medium mb-2">Live Preview</h3>
-              <div className="relative border-2 border-gray-200 rounded-lg bg-gray-50 h-[500px] overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+              <h3 className="text-sm font-medium mb-2 text-gray-900 dark:text-white">Live Preview</h3>
+              <div className="relative border-2 border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 h-[500px] overflow-hidden">
+                <div className="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
                   Widget Preview Area
                 </div>
                 

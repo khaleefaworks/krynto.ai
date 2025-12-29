@@ -39,7 +39,7 @@ export default function ClosedChatView() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <p className="text-gray-500">Loading conversation...</p>
+        <p className="text-gray-500 dark:text-gray-400">Loading conversation...</p>
       </div>
     )
   }
@@ -56,19 +56,19 @@ export default function ClosedChatView() {
       </Button>
 
       <Card className="h-[calc(100vh-12rem)]">
-        <CardHeader className="border-b bg-gray-50">
+        <CardHeader className="border-b bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
           <div className="flex justify-between items-center">
             <CardTitle>Closed Conversation #{conversationId}</CardTitle>
-            <span className="text-sm text-gray-500 bg-gray-200 px-3 py-1 rounded-full">
+            <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full">
               Read Only
             </span>
           </div>
         </CardHeader>
         <CardContent className="p-0 flex flex-col h-full">
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
             {messages.length === 0 && (
-              <p className="text-center text-gray-400 text-sm">
+              <p className="text-center text-gray-400 dark:text-gray-600 text-sm">
                 No messages in this conversation
               </p>
             )}
@@ -83,10 +83,10 @@ export default function ClosedChatView() {
                 <div
                   className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
                     m.sender === "agent"
-                      ? "bg-black text-white"
+                      ? "bg-black dark:bg-gray-800 text-white"
                       : m.sender === "ai"
-                      ? "bg-gray-200 text-gray-800"
-                      : "bg-blue-100 text-blue-900"
+                      ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+                      : "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300"
                   }`}
                 >
                   <p className="text-sm">{m.content}</p>
@@ -108,7 +108,7 @@ export default function ClosedChatView() {
           </div>
 
           {/* Footer Info */}
-          <div className="border-t p-4 bg-gray-100 text-center text-sm text-gray-600">
+          <div className="border-t dark:border-gray-700 p-4 bg-gray-100 dark:bg-gray-800 text-center text-sm text-gray-600 dark:text-gray-400">
             This conversation is closed and cannot be replied to
           </div>
         </CardContent>

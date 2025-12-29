@@ -1,10 +1,10 @@
 export default function Analytics() {
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50">
+    <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 rounded-full mb-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-full mb-4">
           <svg
-            className="w-8 h-8 text-gray-400"
+            className="w-8 h-8 text-gray-400 dark:text-gray-500"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -17,9 +17,9 @@ export default function Analytics() {
             />
           </svg>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">Analytics</h2>
-        <p className="text-gray-500">Coming Soon</p>
-        <p className="text-sm text-gray-400 mt-2">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Analytics</h2>
+        <p className="text-gray-500 dark:text-gray-400">Coming Soon</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
           Analytics and reporting features will be available in a future update
         </p>
       </div>

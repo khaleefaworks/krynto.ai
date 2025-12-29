@@ -37,7 +37,7 @@ export default function ConversationHistory() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">Loading conversation history...</p>
+        <p className="text-gray-500 dark:text-gray-400">Loading conversation history...</p>
       </div>
     )
   }
@@ -45,7 +45,7 @@ export default function ConversationHistory() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-red-600 mb-4">{error}</p>
+        <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
         <Button onClick={fetchHistory} variant="outline">
           Retry
         </Button>
@@ -56,9 +56,9 @@ export default function ConversationHistory() {
   if (closedChats.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <MessageSquare className="h-16 w-16 text-gray-300 mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">No Closed Conversations</h3>
-        <p className="text-gray-500">Closed conversations will appear here</p>
+        <MessageSquare className="h-16 w-16 text-gray-300 dark:text-gray-700 mb-4" />
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Closed Conversations</h3>
+        <p className="text-gray-500 dark:text-gray-400">Closed conversations will appear here</p>
         <Button onClick={fetchHistory} variant="outline" className="mt-4">
           Refresh
         </Button>
@@ -69,7 +69,7 @@ export default function ConversationHistory() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Conversation History</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Conversation History</h2>
         <Button onClick={fetchHistory} variant="outline" size="sm">
           Refresh
         </Button>
@@ -79,12 +79,12 @@ export default function ConversationHistory() {
         {closedChats.map((chat) => (
           <Card 
             key={chat.id}
-            className="hover:shadow-lg transition-shadow cursor-pointer border-gray-200"
+            className="hover:shadow-lg transition-shadow cursor-pointer border-gray-200 dark:border-gray-700 dark:bg-gray-800"
           >
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span className="text-sm font-medium">Chat #{chat.id}</span>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                   <Clock className="h-3 w-3" />
                   <span>{chat.message_count} msgs</span>
                 </div>
@@ -93,18 +93,18 @@ export default function ConversationHistory() {
             <CardContent>
               <div className="space-y-2">
                 <div className="text-sm">
-                  <span className="font-medium text-gray-700">Website:</span>
-                  <span className="ml-2 text-gray-600">{chat.website_name || `Website ${chat.website_id}`}</span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300">Website:</span>
+                  <span className="ml-2 text-gray-600 dark:text-gray-400">{chat.website_name || `Website ${chat.website_id}`}</span>
                 </div>
                 
                 <div className="text-sm">
-                  <span className="font-medium text-gray-700">Last Message:</span>
-                  <p className="text-gray-600 truncate mt-1">
+                  <span className="font-medium text-gray-700 dark:text-gray-300">Last Message:</span>
+                  <p className="text-gray-600 dark:text-gray-400 truncate mt-1">
                     {chat.last_message || 'No messages'}
                   </p>
                 </div>
 
-                <div className="text-xs text-gray-500 pt-2 border-t">
+                <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t dark:border-gray-700">
                   <div>Closed: {chat.closed_at ? new Date(chat.closed_at).toLocaleString() : 'N/A'}</div>
                   <div>Started: {chat.created_at ? new Date(chat.created_at).toLocaleString() : 'N/A'}</div>
                 </div>

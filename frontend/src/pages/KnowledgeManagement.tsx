@@ -336,21 +336,21 @@ export default function KnowledgeManagement() {
   if (loading) {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-6">Knowledge Management</h1>
-        <p className="text-gray-600">Loading...</p>
+        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Knowledge Management</h1>
+        <p className="text-gray-600 dark:text-gray-400">Loading...</p>
       </div>
     );
   }
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Knowledge Management</h1>
+      <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Knowledge Management</h1>
 
       {/* Website Selector */}
       <Card className="p-6 mb-6">
-        <label className="block text-sm font-medium mb-2">Select Website</label>
+        <label className="block text-sm font-medium mb-2 text-gray-900 dark:text-white">Select Website</label>
         <select
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
           value={selectedWebsite || ''}
           onChange={(e) => {
             setSelectedWebsite(Number(e.target.value));
@@ -367,12 +367,12 @@ export default function KnowledgeManagement() {
 
       {/* Status Messages */}
       {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md text-red-800">
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-red-800 dark:text-red-300">
           {error}
         </div>
       )}
       {success && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-md text-green-800">
+        <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md text-green-800 dark:text-green-300">
           {success}
         </div>
       )}
@@ -381,8 +381,8 @@ export default function KnowledgeManagement() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         {/* File Upload */}
         <Card className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Upload Document</h2>
-          <p className="text-sm text-gray-600 mb-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Upload Document</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Upload PDF or TXT files to add to the knowledge base
           </p>
           <form onSubmit={handleFileUpload}>
@@ -395,7 +395,7 @@ export default function KnowledgeManagement() {
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                   disabled={uploading}
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Supported formats: PDF, TXT
                 </p>
               </div>
@@ -408,8 +408,8 @@ export default function KnowledgeManagement() {
 
         {/* Text Input */}
         <Card className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Add Text Content</h2>
-          <p className="text-sm text-gray-600 mb-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Add Text Content</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Add FAQ, policies, or any text content directly
           </p>
           {!showTextForm ? (
@@ -428,7 +428,7 @@ export default function KnowledgeManagement() {
                   required
                 />
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                   rows={4}
                   placeholder="Enter your text content here..."
                   value={textContent}
@@ -460,8 +460,8 @@ export default function KnowledgeManagement() {
 
         {/* Website Crawl */}
         <Card className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Crawl Website</h2>
-          <p className="text-sm text-gray-600 mb-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Crawl Website</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Extract knowledge from a website URL
           </p>
           {!showCrawlForm ? (
@@ -488,13 +488,13 @@ export default function KnowledgeManagement() {
                     disabled={crawling}
                     className="rounded"
                   />
-                  <label htmlFor="crawl-multiple" className="text-sm">
+                  <label htmlFor="crawl-multiple" className="text-sm text-gray-900 dark:text-white">
                     Crawl multiple pages
                   </label>
                 </div>
                 {crawlMultiple && (
                   <div>
-                    <label className="block text-sm mb-1">
+                    <label className="block text-sm mb-1 text-gray-900 dark:text-white">
                       Max pages: {crawlMaxPages}
                     </label>
                     <input

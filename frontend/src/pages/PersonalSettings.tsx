@@ -63,16 +63,16 @@ export default function PersonalSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700">Name</label>
-                <p className="mt-1 text-gray-900">{user?.name}</p>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
+                <p className="mt-1 text-gray-900 dark:text-white">{user?.name}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700">Email</label>
-                <p className="mt-1 text-gray-900">{user?.email}</p>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
+                <p className="mt-1 text-gray-900 dark:text-white">{user?.email}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700">Role</label>
-                <p className="mt-1 text-gray-900 capitalize">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
+                <p className="mt-1 text-gray-900 dark:text-white capitalize">
                   {user?.role === 'full_access' ? 'Administrator' : 'Agent'}
                 </p>
               </div>
@@ -92,11 +92,11 @@ export default function PersonalSettings() {
                 <div className="space-y-1">
                   <p className="font-medium">
                     Current Status: {' '}
-                    <span className={user?.is_available ? 'text-green-600' : 'text-gray-500'}>
+                    <span className={user?.is_available ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}>
                       {user?.is_available ? 'Available' : 'Unavailable'}
                     </span>
                   </p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
                     {user?.is_available 
                       ? 'You can receive new chat assignments'
                       : 'You will not receive new chat assignments'}
@@ -111,8 +111,8 @@ export default function PersonalSettings() {
                 </Button>
               </div>
 
-              <div className="mt-4 p-3 bg-blue-50 rounded-md">
-                <p className="text-sm text-blue-800">
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
+                <p className="text-sm text-blue-800 dark:text-blue-300">
                   <strong>Note:</strong> To receive chats, you must be both <strong>available</strong> (this toggle) 
                   and <strong>connected</strong> (logged in with active WebSocket).
                 </p>
