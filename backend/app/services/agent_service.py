@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from app.models.agent_session import AgentSession
 from app.models.conversation import Conversation, ConversationMode
 from app.models.message import Message
+from app.services.connection_manager import mark_connected, mark_disconnected
 from typing import Dict, Optional
 import uuid
 
@@ -35,6 +36,9 @@ class AgentService:
         )
         self.db.add(session)
         self.db.commit()
+
+        # Track connection for availability checks
+        mark_connected(agent_id)
         
         return websocket_id
     
@@ -48,6 +52,10 @@ class AgentService:
         if session:
             session.is_online = False
             self.db.commit()
+
+        # Update connection tracking
+        if session and session.agent_id:
+            mark_disconnected(session.agent_id)
     
     def assign_conversation_to_agent(self, conversation_id: int, agent_id: int):
         """Handoff conversation to agent"""
