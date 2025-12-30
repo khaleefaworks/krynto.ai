@@ -1,23 +1,14 @@
 import { useState } from "react"
-import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
 import { 
-  User, 
   Mail, 
   Phone, 
   Monitor, 
   Chrome, 
-  MessageSquare, 
-  Eye, 
-  ChevronDown, 
-  ChevronUp,
   Plus,
-  X,
-  Clock,
-  Tag as TagIcon
+  X
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 
@@ -34,7 +25,6 @@ interface VisitorDetailsPanelProps {
     last_seen_at?: string
     created_at?: string
   }
-  tags?: Array<{ id: number; tag_name: string }>
   notes?: Array<{ 
     id: number
     content: string
@@ -42,19 +32,14 @@ interface VisitorDetailsPanelProps {
     creator_name: string
   }>
   onUpdateMetadata?: (data: { visitor_name?: string; visitor_email?: string; visitor_phone?: string }) => void
-  onAddTag?: (tag: string) => void
-  onRemoveTag?: (tagId: number) => void
   onAddNote?: (content: string) => void
   onDeleteNote?: (noteId: number) => void
 }
 
 export default function VisitorDetailsPanel({
   conversation,
-  tags = [],
   notes = [],
   onUpdateMetadata,
-  onAddTag,
-  onRemoveTag,
   onAddNote,
   onDeleteNote,
 }: VisitorDetailsPanelProps) {
@@ -62,20 +47,9 @@ export default function VisitorDetailsPanel({
   const [editingPhone, setEditingPhone] = useState(false)
   const [email, setEmail] = useState(conversation.visitor_email || "")
   const [phone, setPhone] = useState(conversation.visitor_phone || "")
-  
-  const [expandedSections, setExpandedSections] = useState({
-    conversations: true,
-    browsing: false,
-    tags: true,
-  })
 
-  const [newTag, setNewTag] = useState("")
   const [newNote, setNewNote] = useState("")
   const [addingNote, setAddingNote] = useState(false)
-
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
-  }
 
   const saveEmail = () => {
     if (onUpdateMetadata) {
@@ -89,13 +63,6 @@ export default function VisitorDetailsPanel({
       onUpdateMetadata({ visitor_phone: phone })
     }
     setEditingPhone(false)
-  }
-
-  const handleAddTag = () => {
-    if (newTag.trim() && onAddTag) {
-      onAddTag(newTag.trim())
-      setNewTag("")
-    }
   }
 
   const handleAddNote = () => {
@@ -301,130 +268,6 @@ export default function VisitorDetailsPanel({
         )}
       </div>
 
-      {/* Conversations History */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => toggleSection('conversations')}
-          className="w-full p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50"
-        >
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">
-              Conversations
-            </span>
-            <Badge variant="secondary" className="text-xs">1</Badge>
-          </div>
-          {expandedSections.conversations ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
-          )}
-        </button>
-        {expandedSections.conversations && (
-          <div className="px-4 pb-4">
-            <div className="flex items-center gap-2 py-2">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-900 dark:text-white font-medium">
-                  {conversation.created_at 
-                    ? formatDistanceToNow(new Date(conversation.created_at), { addSuffix: true })
-                    : 'Now'}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Ongoing</div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Browsing History */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => toggleSection('browsing')}
-          className="w-full p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50"
-        >
-          <div className="flex items-center gap-2">
-            <Eye className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">
-              Browsing history
-            </span>
-          </div>
-          {expandedSections.browsing ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
-          )}
-        </button>
-        {expandedSections.browsing && (
-          <div className="px-4 pb-4">
-            <p className="text-sm text-gray-400 dark:text-gray-600 italic">
-              No browsing history available
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Contact Tags */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => toggleSection('tags')}
-          className="w-full p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50"
-        >
-          <div className="flex items-center gap-2">
-            <TagIcon className="h-4 w-4 text-gray-400" />
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">
-              Contact tags
-            </span>
-          </div>
-          {expandedSections.tags ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
-          )}
-        </button>
-        {expandedSections.tags && (
-          <div className="px-4 pb-4 space-y-3">
-            {/* Add Tag Input */}
-            <div className="flex gap-2">
-              <Input
-                value={newTag}
-                onChange={(e) => setNewTag(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-                placeholder="Add tag..."
-                className="h-8 text-sm"
-              />
-              <Button size="sm" onClick={handleAddTag} className="h-8">
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
-
-            {/* Tags Display */}
-            {tags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {tags.map(tag => (
-                  <Badge 
-                    key={tag.id} 
-                    variant="secondary"
-                    className="flex items-center gap-1"
-                  >
-                    {tag.tag_name}
-                    <button
-                      onClick={() => onRemoveTag?.(tag.id)}
-                      className="ml-1 hover:text-red-600"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400 dark:text-gray-600 italic">
-                No tags yet
-              </p>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

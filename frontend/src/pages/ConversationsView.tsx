@@ -11,13 +11,9 @@ import {
     disconnectAgentSocket,
 } from '@/services/agentSocket'
 import {
-    addTag,
-    getTags,
-    deleteTag,
     addNote,
     getNotes,
     deleteNote,
-    type Tag,
     type Note
 } from '@/services/conversationMetadata'
 import { Button } from '@/components/ui/button'
@@ -26,7 +22,6 @@ import { Badge } from '@/components/ui/badge'
 import {
     Send,
     Check,
-    MoreVertical,
     Tag as TagIcon,
     Smile,
     Bold,
@@ -37,12 +32,13 @@ import {
     ChevronLeft,
     ChevronRight,
     PanelRightClose,
+    PanelRightOpen,
+    Monitor,
     Sparkles,
     Inbox,
     Users,
     Bot
 } from 'lucide-react'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import { formatDistanceToNow } from 'date-fns'
@@ -72,7 +68,10 @@ export default function ConversationsView() {
 
     // Filter state
     const [activeFilter, setActiveFilter] = useState<FilterCategory>('all')
-    const [leftFilterCollapsed, setLeftFilterCollapsed] = useState(false)
+    const [leftFilterCollapsed, setLeftFilterCollapsed] = useState(() => {
+        const saved = localStorage.getItem('chat_left_filter_collapsed')
+        return saved ? saved === 'true' : false
+    })
 
     // List state
     const [loading, setLoading] = useState(true)
@@ -88,16 +87,37 @@ export default function ConversationsView() {
 
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
-    const [tags, setTags] = useState<Tag[]>([])
     const [notes, setNotes] = useState<Note[]>([])
 
     // Sidebar collapse state
-    const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
+    const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
+        const saved = localStorage.getItem('chat_right_sidebar_collapsed')
+        return saved ? saved === 'true' : false
+    })
+
+    // Persist collapse preferences
+    useEffect(() => {
+        localStorage.setItem('chat_left_filter_collapsed', String(leftFilterCollapsed))
+    }, [leftFilterCollapsed])
+
+    useEffect(() => {
+        localStorage.setItem('chat_right_sidebar_collapsed', String(rightSidebarCollapsed))
+    }, [rightSidebarCollapsed])
 
     // Load chats list
     useEffect(() => {
         fetchActiveChats()
     }, [])
+
+    // Ensure conversation details populate once chats load (handles refresh on deep links)
+    useEffect(() => {
+        if (selectedChat && activeChats.length) {
+            const chatData = activeChats.find(c => c.id === selectedChat)
+            if (chatData) {
+                setConversation(chatData as any)
+            }
+        }
+    }, [selectedChat, activeChats])
 
     // Handle conversation selection from URL
     useEffect(() => {
@@ -174,12 +194,7 @@ export default function ConversationsView() {
                 setConversation(chatData as any)
             }
 
-            const [fetchedTags, fetchedNotes] = await Promise.all([
-                getTags(chatId),
-                getNotes(chatId)
-            ])
-
-            setTags(fetchedTags)
+            const fetchedNotes = await getNotes(chatId)
             setNotes(fetchedNotes)
         } catch (error) {
             console.error("Failed to load conversation details:", error)
@@ -217,26 +232,6 @@ export default function ConversationsView() {
             console.error("Failed to resolve chat:", error)
         } finally {
             setResolving(false)
-        }
-    }
-
-    const handleAddTag = async (tagName: string) => {
-        if (!selectedChat) return
-        try {
-            const newTag = await addTag(selectedChat, tagName)
-            setTags(prev => [...prev, newTag])
-        } catch (error) {
-            console.error("Failed to add tag:", error)
-        }
-    }
-
-    const handleRemoveTag = async (tagId: number) => {
-        if (!selectedChat) return
-        try {
-            await deleteTag(selectedChat, tagId)
-            setTags(prev => prev.filter(t => t.id !== tagId))
-        } catch (error) {
-            console.error("Failed to remove tag:", error)
         }
     }
 
@@ -320,9 +315,8 @@ export default function ConversationsView() {
     return (
         <div className="flex h-full w-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div
-                className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-64'
-                    }`}
+            <div className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
+                }`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     {!leftFilterCollapsed && (
@@ -352,8 +346,8 @@ export default function ConversationsView() {
                                     <button
                                         onClick={() => setActiveFilter('all')}
                                         className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'all'
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
@@ -382,8 +376,8 @@ export default function ConversationsView() {
                                     <button
                                         onClick={() => setActiveFilter('ai')}
                                         className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'ai'
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
@@ -412,8 +406,8 @@ export default function ConversationsView() {
                                     <button
                                         onClick={() => setActiveFilter('new')}
                                         className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'new'
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
@@ -454,8 +448,8 @@ export default function ConversationsView() {
                                     <button
                                         onClick={() => setActiveFilter('agent')}
                                         className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'agent'
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
@@ -482,8 +476,8 @@ export default function ConversationsView() {
                                     <button
                                         onClick={() => setActiveFilter('ai-resolved')}
                                         className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'ai-resolved'
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
@@ -608,17 +602,6 @@ export default function ConversationsView() {
 
                             {/* Header Actions */}
                             <div className="flex items-center gap-2 flex-shrink-0">
-                                {!leftFilterCollapsed && (
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-blue-600 dark:text-blue-400 dark:hover:bg-gray-700"
-                                    >
-                                        <TagIcon className="h-4 w-4 mr-1" />
-                                        Tag conversation
-                                    </Button>
-                                )}
-
                                 <Button
                                     variant="default"
                                     size="sm"
@@ -629,49 +612,9 @@ export default function ConversationsView() {
                                     <Check className="h-4 w-4 mr-1" />
                                     {resolving ? "Resolving..." : "Resolve"}
                                 </Button>
-
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="dark:text-gray-300">
-                                            <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onSelect={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}>
-                                            {rightSidebarCollapsed ? "Show" : "Hide"} visitor details
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem className="text-red-600" onSelect={handleResolve}>
-                                            Close conversation
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-                                    className="dark:text-gray-300"
-                                    title={rightSidebarCollapsed ? "Show visitor details" : "Hide visitor details"}
-                                >
-                                    {rightSidebarCollapsed ? (
-                                        <ChevronLeft className="h-4 w-4" />
-                                    ) : (
-                                        <PanelRightClose className="h-4 w-4" />
-                                    )}
-                                </Button>
                             </div>
                         </div>
 
-                        {/* Tags Display */}
-                        {tags.length > 0 && (
-                            <div className="flex gap-2 mt-2 flex-wrap">
-                                {tags.map(tag => (
-                                    <Badge key={tag.id} variant="secondary" className="text-xs">
-                                        {tag.tag_name}
-                                    </Badge>
-                                ))}
-                            </div>
-                        )}
                     </div>
 
                     {/* Messages Area */}
@@ -841,20 +784,52 @@ export default function ConversationsView() {
             )}
 
             {/* COLUMN 4: Visitor Details (Collapsible) */}
-            {selectedChat && !rightSidebarCollapsed && conversation && (
-                <div className="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0 transition-all duration-300 ease-in-out">
-                    <VisitorDetailsPanel
-                        conversation={conversation}
-                        tags={tags}
-                        notes={notes.map(note => ({
-                            ...note,
-                            creator_name: note.creator_name || 'Unknown'
-                        }))}
-                        onAddTag={handleAddTag}
-                        onRemoveTag={handleRemoveTag}
-                        onAddNote={handleAddNote}
-                        onDeleteNote={handleDeleteNote}
-                    />
+            {selectedChat && conversation && (
+                <div
+                    className={`bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} flex`}
+                >
+                    {rightSidebarCollapsed ? (
+                        <div className="h-full flex flex-col items-center gap-4 py-4 px-2">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setRightSidebarCollapsed(false)}
+                                className="dark:text-gray-300"
+                                title="Show visitor details"
+                            >
+                                <PanelRightOpen className="h-4 w-4" />
+                            </Button>
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 text-white flex items-center justify-center text-sm font-semibold">
+                                {(conversation?.visitor_name || conversation?.session_id || 'VI').substring(0, 2).toUpperCase()}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex h-full flex-col w-full">
+                            <div className="flex items-center justify-end gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setRightSidebarCollapsed(true)}
+                                    className="dark:text-gray-300"
+                                    title="Hide visitor details"
+                                >
+                                    <PanelRightClose className="h-4 w-4" />
+                                </Button>
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                                <VisitorDetailsPanel
+                                    conversation={conversation}
+                                    notes={notes.map(note => ({
+                                        ...note,
+                                        creator_name: note.creator_name || 'Unknown'
+                                    }))}
+                                    onAddNote={handleAddNote}
+                                    onDeleteNote={handleDeleteNote}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
