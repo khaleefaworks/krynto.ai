@@ -1,8 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.database import SessionLocal
 from app.services.agent_service import AgentService
-from app.services.chat_service import ChatService
-from app.models.message import Message
+from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.core.logging import get_logger
 import json
 import traceback
@@ -22,6 +21,7 @@ async def agent_ws(
 
     db = SessionLocal()
     agent_service = AgentService(db)
+    orchestrator = ConversationOrchestrator(db)
     
     try:
         # Register agent connection
@@ -45,68 +45,54 @@ async def agent_ws(
             message_type = payload.get("type")
             
             if message_type == "join_chat":
-                # Agent joining a conversation
                 conversation_id = payload.get("conversation_id")
                 logger.info("agent_joining_conversation", agent_id=agent_id, conversation_id=conversation_id)
-                
-                # Mark conversation as handoff
-                conversation = agent_service.assign_conversation_to_agent(
-                    conversation_id, agent_id
+
+                result = await orchestrator.handle_agent_join(
+                    conversation_id=conversation_id,
+                    agent_id=agent_id,
                 )
-                
-                # Get conversation history
+
+                if result.get("error"):
+                    await websocket.send_json({"type": "error", "message": result["error"]})
+                    continue
+
                 messages = agent_service.get_conversation_messages(conversation_id)
                 history = [
                     {
                         "sender": msg.sender,
                         "content": msg.content,
-                        "created_at": msg.created_at.isoformat() if msg.created_at else None
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
                     }
                     for msg in messages
                 ]
-                
-                # Send confirmation with history
-                await websocket.send_json({
-                    "type": "joined",
-                    "conversation_id": conversation_id,
-                    "history": history
-                })
-                
-                # Notify visitor that agent joined
-                chat_service = ChatService.get_by_conversation_id(db, conversation_id)
-                if chat_service:
-                    await chat_service.send_to_visitor({
-                        "type": "agent_joined",
-                        "message": "An agent has joined the chat"
-                    })
-            
+
+                await websocket.send_json(
+                    {
+                        "type": "joined",
+                        "conversation_id": conversation_id,
+                        "history": history,
+                    }
+                )
+
             elif message_type == "message":
-                # Agent sending message to visitor
                 conversation_id = payload.get("conversation_id")
                 content = payload.get("content")
-                
+
                 if not content or not conversation_id:
                     continue
-                
+
                 logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content))
-                
-                # Save agent message
-                message = Message(
+
+                result = await orchestrator.handle_agent_message(
                     conversation_id=conversation_id,
-                    sender="agent",
-                    content=content
+                    agent_id=agent_id,
+                    content=content,
                 )
-                db.add(message)
-                db.commit()
-                
-                # Forward to visitor
-                chat_service = ChatService.get_by_conversation_id(db, conversation_id)
-                if chat_service:
-                    await chat_service.send_to_visitor({
-                        "type": "agent",
-                        "message": content
-                    })
-                    logger.info("message_forwarded_to_visitor", conversation_id=conversation_id)
+
+                if result.get("error"):
+                    await websocket.send_json({"type": "error", "message": result["error"]})
+                    continue
 
     except WebSocketDisconnect:
         logger.info("agent_disconnected", agent_id=agent_id)

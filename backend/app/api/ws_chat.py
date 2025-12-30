@@ -1,5 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.database import SessionLocal
+from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.chat_service import ChatService
 from app.core.logging import get_logger
 from app.core.config import settings
@@ -27,8 +28,10 @@ async def chat_ws(
 
     db = SessionLocal()
     
+    orchestrator = ConversationOrchestrator(db)
+
     try:
-        # Validate website exists before creating chat service
+        # Validate website exists before processing messages
         from app.models.website import Website
         website = db.query(Website).filter_by(id=website_id).first()
         if not website:
@@ -41,9 +44,6 @@ async def chat_ws(
             await websocket.close(code=1008, reason=error_msg)
             db.close()
             return
-        
-        chat_service = ChatService(db, website_id, session_id, websocket)
-        logger.info("chat_service_initialized", conversation_id=chat_service.conversation.id, website_id=website_id, session_id=session_id)
     except Exception as e:
         logger.error("chat_service_init_error", website_id=website_id, session_id=session_id, error=str(e), exc_info=True)
         db.close()
@@ -85,23 +85,31 @@ async def chat_ws(
             session_messages.append(current_time)
 
             logger.info("processing_visitor_message", session_id=session_id, message_length=len(user_message))
-            response = await chat_service.handle_visitor_message(user_message)
-            
-            # Only send response if AI replied (not handed off to agent)
+            response = await orchestrator.handle_visitor_message(
+                website_id=website_id,
+                session_id=session_id,
+                message=user_message,
+                visitor_ws=websocket,
+            )
+
+            # Send back any immediate system response (no AI during stabilization)
             if response:
-                logger.info("ai_response_generated", session_id=session_id, response_length=len(response))
                 await websocket.send_json({
-                    "type": "ai",
+                    "type": "system",
                     "message": response
                 })
-                logger.debug("response_sent", session_id=session_id)
-            else:
-                logger.info("message_forwarded_to_agent", session_id=session_id)
 
     except WebSocketDisconnect:
         logger.info("visitor_websocket_disconnected", session_id=session_id)
-        chat_service.close_session()
-        # Clean up rate limit tracking
+        # Clean up visitor mapping and rate limit tracking
+        try:
+            from app.models.conversation import Conversation
+            conv = db.query(Conversation).filter_by(session_id=session_id, website_id=website_id).first()
+            if conv and conv.id in ChatService.active_visitors:
+                del ChatService.active_visitors[conv.id]
+        except Exception:
+            pass
+
         if session_id in message_timestamps:
             del message_timestamps[session_id]
     except Exception as e:

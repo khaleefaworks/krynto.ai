@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.agent_service import AgentService
+from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.conversation_service import ConversationService
 from pydantic import BaseModel
 from typing import List, Optional
@@ -33,27 +34,25 @@ async def join_chat(
     db: Session = Depends(get_db)
 ):
     """Agent joins a chat - triggers handoff"""
-    agent_service = AgentService(db)
-    
-    try:
-        conversation = agent_service.assign_conversation_to_agent(
-            chat_id, request.agent_id
-        )
-        
-        # Don't notify here - WebSocket will handle it when agent connects
-        # The agent WebSocket sends "join_chat" message after connecting
-        
-        return {
-            "success": True,
-            "conversation_id": conversation.id,
-            "website_id": conversation.website_id,
-            "assigned_agent_id": conversation.assigned_agent_id,
-            "message": "Chat successfully assigned to agent"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to join chat: {str(e)}")
+    orchestrator = ConversationOrchestrator(db)
+
+    result = await orchestrator.handle_agent_join(
+        conversation_id=chat_id,
+        agent_id=request.agent_id,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    conversation = db.query(orchestrator.model).filter_by(id=chat_id).first()
+
+    return {
+        "success": True,
+        "conversation_id": chat_id,
+        "website_id": conversation.website_id if conversation else None,
+        "assigned_agent_id": request.agent_id,
+        "message": "Chat successfully assigned to agent",
+    }
 
 
 @router.get("/active")
@@ -213,15 +212,15 @@ async def close_conversation(
     Transitions conversation to CLOSED state.
     No more messages can be added after closing.
     """
-    conversation_service = ConversationService(db)
-    
-    success = conversation_service.close_conversation(conversation_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    
+    orchestrator = ConversationOrchestrator(db)
+
+    result = await orchestrator.close_conversation(conversation_id=conversation_id)
+
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+
     return {
         "success": True,
         "conversation_id": conversation_id,
-        "message": "Conversation closed successfully"
+        "message": "Conversation closed successfully",
     }
