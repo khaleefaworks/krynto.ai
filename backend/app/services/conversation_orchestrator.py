@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.services.conversation_service import ConversationService
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
+from app.services.website_resolver import is_website_online, get_eligible_agents_for_website
 from app.models.conversation import Conversation, ConversationStatus, ConversationMode
 from app.core.logging import get_logger
 
@@ -51,6 +52,30 @@ class ConversationOrchestrator:
         # Track the live visitor socket for downstream forwarding
         if visitor_ws:
             ChatService.active_visitors[conversation.id] = visitor_ws
+
+        # Re-evaluate website online status on every message
+        online = is_website_online(website_id)
+
+        if not online:
+            if conversation.status != ConversationStatus.OFFLINE:
+                conversation.status = ConversationStatus.OFFLINE
+                conversation.mode = ConversationMode.WAITING_FOR_AGENT
+                self.db.commit()
+                self.conversation_service.add_system_message(
+                    conversation.id,
+                    "We're currently offline. Your message has been saved for follow-up.",
+                )
+            return "We're currently offline. We've saved your message for follow-up."
+
+        # If previously offline and now online, resume active routing
+        if conversation.status == ConversationStatus.OFFLINE:
+            conversation.status = ConversationStatus.ACTIVE
+            conversation.mode = ConversationMode.WAITING_FOR_AGENT
+            self.db.commit()
+            self.conversation_service.add_system_message(
+                conversation.id,
+                "We're online now. Connecting you with an available agent.",
+            )
 
         # Reject closed conversations
         if conversation.status == ConversationStatus.CLOSED:
@@ -100,6 +125,12 @@ class ConversationOrchestrator:
 
         if conversation.status == ConversationStatus.CLOSED:
             return {"error": "Conversation is closed"}
+
+        # Enforce eligibility for this website
+        eligible = get_eligible_agents_for_website(conversation.website_id, db=self.db)
+        eligible_ids = {agent.id for agent in eligible}
+        if agent_id not in eligible_ids:
+            return {"error": "Agent not eligible or not available for this website"}
 
         # Enforce single owner
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
