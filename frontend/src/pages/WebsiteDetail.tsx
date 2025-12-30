@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
+import { agentAssignmentsApi, type Agent as AssignmentAgent, type WebsiteAgent } from '@/services/agentAssignments'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft, Save, Trash2, Globe } from 'lucide-react'
+import { useAppStore } from '@/store/appStore'
+import { isAdmin } from '@/lib/roles'
+import { ArrowLeft, Save, Trash2, Globe, UserPlus, Users } from 'lucide-react'
 
 interface Website {
   id: number
@@ -21,15 +24,23 @@ interface Website {
   created_at: string
 }
 
+type AgentWithName = AssignmentAgent & { name?: string }
+type WebsiteAgentWithName = WebsiteAgent & { name?: string }
+
 export default function WebsiteDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user } = useAppStore()
   const isNew = id === 'new'
+  const websiteId = id && id !== 'new' ? parseInt(id) : null
+  const canManageAssignments = isAdmin(user)
   
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [assignmentError, setAssignmentError] = useState<string | null>(null)
+  const [assignmentMessage, setAssignmentMessage] = useState<string | null>(null)
 
   // Form data
   const [formData, setFormData] = useState({
@@ -45,11 +56,23 @@ export default function WebsiteDetail() {
     }
   })
 
+  const [availableAgents, setAvailableAgents] = useState<AgentWithName[]>([])
+  const [websiteAgents, setWebsiteAgents] = useState<WebsiteAgentWithName[]>([])
+  const [assignmentsLoading, setAssignmentsLoading] = useState(!isNew)
+  const [assigning, setAssigning] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+
   useEffect(() => {
     if (!isNew && id) {
       loadWebsite()
     }
   }, [id, isNew])
+
+  useEffect(() => {
+    if (!isNew && websiteId && canManageAssignments) {
+      loadAssignments()
+    }
+  }, [isNew, websiteId, canManageAssignments])
 
   const loadWebsite = async () => {
     try {
@@ -72,6 +95,57 @@ export default function WebsiteDetail() {
       setError(err.message || 'Failed to load website')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadAssignments = async () => {
+    if (!websiteId) return
+    try {
+      setAssignmentsLoading(true)
+      setAssignmentError(null)
+      const [agentsData, websiteAgentsData] = await Promise.all([
+        agentAssignmentsApi.listAgents(),
+        agentAssignmentsApi.getWebsiteAgents(websiteId)
+      ])
+      setAvailableAgents(agentsData)
+      setWebsiteAgents(websiteAgentsData)
+    } catch (err: any) {
+      setAssignmentError(err.message || 'Failed to load agents')
+    } finally {
+      setAssignmentsLoading(false)
+    }
+  }
+
+  const handleAssignAgent = async () => {
+    if (!websiteId || !selectedAgentId) return
+    try {
+      setAssigning(true)
+      setAssignmentError(null)
+      setAssignmentMessage(null)
+      await agentAssignmentsApi.assignAgentToWebsite(Number(selectedAgentId), websiteId)
+      setAssignmentMessage('Agent assigned to website')
+      setSelectedAgentId('')
+      loadAssignments()
+    } catch (err: any) {
+      setAssignmentError(err.message || 'Failed to assign agent')
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  const handleUnassignAgent = async (agentId: number) => {
+    if (!websiteId) return
+    try {
+      setAssigning(true)
+      setAssignmentError(null)
+      setAssignmentMessage(null)
+      await agentAssignmentsApi.unassignAgentFromWebsite(agentId, websiteId)
+      setAssignmentMessage('Agent unassigned from website')
+      loadAssignments()
+    } catch (err: any) {
+      setAssignmentError(err.message || 'Failed to unassign agent')
+    } finally {
+      setAssigning(false)
     }
   }
 
@@ -120,6 +194,9 @@ export default function WebsiteDetail() {
       setSaving(false)
     }
   }
+
+  const assignedAgentIds = new Set(websiteAgents.map(agent => agent.id))
+  const assignableAgents = availableAgents.filter(agent => !assignedAgentIds.has(agent.id))
 
   if (loading) {
     return (
@@ -332,6 +409,106 @@ export default function WebsiteDetail() {
             </div>
           </CardContent>
         </Card>
+
+        {!isNew && canManageAssignments && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Agent Assignments
+              </CardTitle>
+              <CardDescription>Assign agents who can respond to chats on this website</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {assignmentError && (
+                <div className="p-3 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200">
+                  {assignmentError}
+                </div>
+              )}
+
+              {assignmentMessage && (
+                <div className="p-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200">
+                  {assignmentMessage}
+                </div>
+              )}
+
+              {assignmentsLoading ? (
+                <div className="text-gray-600 dark:text-gray-400">Loading agents...</div>
+              ) : (
+                <>
+                  <div className="flex flex-col md:flex-row gap-3 md:items-end">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Select Agent
+                      </label>
+                      <select
+                        value={selectedAgentId}
+                        onChange={(e) => setSelectedAgentId(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        disabled={assigning || assignableAgents.length === 0}
+                      >
+                        <option value="">
+                          {assignableAgents.length === 0 ? 'All agents are assigned' : 'Choose an agent'}
+                        </option>
+                        {assignableAgents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>
+                            {agent.name || agent.email} {agent.is_active ? '' : '(inactive)'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleAssignAgent}
+                      disabled={!selectedAgentId || assigning}
+                      className="gap-2"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Assign Agent
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {websiteAgents.length === 0 ? (
+                      <div className="p-4 border border-dashed border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-600 dark:text-gray-400">
+                        No agents assigned yet
+                      </div>
+                    ) : (
+                      websiteAgents.map((agent) => (
+                        <div key={agent.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-md">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                              {agent.name || agent.email}
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">{agent.email}</div>
+                            <div className="flex items-center gap-2 mt-2 text-xs">
+                              <span className={`px-2 py-1 rounded-full ${agent.is_active ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}>
+                                {agent.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                              {agent.assigned_at && (
+                                <span className="text-gray-500 dark:text-gray-400">Assigned {new Date(agent.assigned_at).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => handleUnassignAgent(agent.id)}
+                            disabled={assigning}
+                            className="gap-2 text-red-600 hover:text-red-700 dark:text-red-300"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Unassign
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex items-center gap-4">
           <Button type="submit" disabled={saving} className="gap-2">

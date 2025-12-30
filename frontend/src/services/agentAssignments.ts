@@ -2,7 +2,10 @@ import { apiRequest } from './api';
 
 export interface Agent {
   id: number;
+  name?: string;
   email: string;
+  role?: string;
+  is_available?: boolean;
   is_active: boolean;
 }
 
@@ -22,7 +25,8 @@ export interface WebsiteAgent {
 
 export const agentAssignmentsApi = {
   listAgents: async (): Promise<Agent[]> => {
-    return apiRequest('/auth/agents');
+    // Backend only exposes /auth/users; filter client-side if we ever need role-based subsets
+    return apiRequest('/auth/users');
   },
 
   assignAgentToWebsite: async (agentId: number, websiteId: number): Promise<{ success: boolean; message: string; assignment_id: number }> => {

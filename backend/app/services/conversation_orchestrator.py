@@ -19,6 +19,8 @@ from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.services.website_resolver import is_website_online, get_eligible_agents_for_website
 from app.models.conversation import Conversation, ConversationStatus, ConversationMode
+from app.models.agent_website_assignment import AgentWebsiteAssignment
+from app.models.user import User
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -126,10 +128,19 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.CLOSED:
             return {"error": "Conversation is closed"}
 
-        # Enforce eligibility for this website
-        eligible = get_eligible_agents_for_website(conversation.website_id, db=self.db)
-        eligible_ids = {agent.id for agent in eligible}
-        if agent_id not in eligible_ids:
+        # Enforce eligibility for this website (assignment + active + available)
+        assignment = (
+            self.db.query(AgentWebsiteAssignment)
+            .filter(
+                AgentWebsiteAssignment.agent_id == agent_id,
+                AgentWebsiteAssignment.website_id == conversation.website_id,
+            )
+            .first()
+        )
+
+        user = self.db.query(User).filter(User.id == agent_id).first()
+
+        if not assignment or not user or not user.is_active or not user.is_available:
             return {"error": "Agent not eligible or not available for this website"}
 
         # Enforce single owner

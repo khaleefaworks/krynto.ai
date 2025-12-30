@@ -2,12 +2,12 @@ import { useEffect, useState, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useAppStore } from "@/store/appStore"
 import { useMessageStore } from "@/store/messages"
-import { joinChat, closeConversation } from "@/services/chats"
-import { fetchChatMessages } from "@/services/messages"
+import { closeConversation } from "@/services/chats"
 import {
   connectAgentSocket,
   sendAgentMessage,
   disconnectAgentSocket,
+  getSocketState,
 } from "@/services/agentSocket"
 import { 
   addTag, 
@@ -56,13 +56,15 @@ interface ConversationDetails {
 export default function ChatView() {
   const { conversationId } = useParams<{ conversationId: string }>()
   const navigate = useNavigate()
-  const { user } = useAppStore()
+  const { user, activeChats } = useAppStore()
   const { messages, addMessage, addMessages, reset } = useMessageStore()
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(true)
   const [resolving, setResolving] = useState(false)
   const joinedRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
 
   // Conversation details state
   const [conversation, setConversation] = useState<ConversationDetails | null>(null)
@@ -81,48 +83,41 @@ export default function ChatView() {
       joinedRef.current = true
       reset()
       setLoading(true)
+      setConnectionError(null)
 
       try {
-        // 1. Load existing chat history via REST
-        const history = await fetchChatMessages(conversationId)
-        if (isSubscribed) {
-          addMessages(history)
+        const chatMeta = activeChats.find((c) => c.id === parseInt(conversationId))
+        if (!chatMeta) {
+          setConnectionError("Chat not found in active list. Please return to the inbox and retry.")
+          setLoading(false)
+          return
         }
 
-        // 2. Join chat (pauses AI, assigns agent)
-        const res: any = await joinChat(conversationId)
-        console.log("✅ Joined chat:", res)
-        
         if (isSubscribed) {
-          setWebsiteId(res.website_id)
-          // Set conversation details with mock data for now
+          setWebsiteId(chatMeta.website_id)
           setConversation({
-            id: parseInt(conversationId),
-            session_id: res.session_id || "9f7812a5...",
+            id: chatMeta.id,
+            session_id: chatMeta.session_id,
             visitor_name: undefined,
             visitor_email: undefined,
             visitor_phone: undefined,
-            device_info: "Linux",
-            browser_info: "Chrome 143.0.0.0",
-            visit_count: 2,
+            device_info: "",
+            browser_info: "",
+            visit_count: undefined,
             last_seen_at: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            status: "active"
+            created_at: chatMeta.created_at || new Date().toISOString(),
+            status: chatMeta.status,
           })
-          
-          // Load tags and notes
-          loadTagsAndNotes(conversationId)
         }
 
         if (!isSubscribed) return
 
-        // 3. Connect agent WebSocket
-        ws = connectAgentSocket(res.website_id, user.id)
+        // Connect agent WebSocket first, then join via WS
+        ws = connectAgentSocket(chatMeta.website_id, user.id)
+        socketRef.current = ws
 
         ws.onopen = () => {
           console.log("✅ Agent WebSocket connected")
-          setLoading(false)
-          
           // Send join_chat message to backend
           ws!.send(
             JSON.stringify({
@@ -138,6 +133,18 @@ export default function ChatView() {
 
           if (data.type === "joined") {
             console.log("✅ Successfully joined conversation")
+            if (isSubscribed) {
+              // Replace local messages with server history
+              addMessages(
+                (data.history || []).map((m: any) => ({
+                  sender: m.sender,
+                  content: m.content,
+                  created_at: m.created_at,
+                }))
+              )
+              loadTagsAndNotes(conversationId)
+              setLoading(false)
+            }
           } else if (data.type === "visitor_message") {
             // Visitor message received
             addMessage({
@@ -157,15 +164,21 @@ export default function ChatView() {
               content: data.content || data.message,
               created_at: data.created_at,
             })
+          } else if (data.type === "error") {
+            setConnectionError(data.message || "WebSocket error")
+            setLoading(false)
           }
         }
 
         ws.onerror = (error) => {
           console.error("❌ WebSocket error:", error)
+          setConnectionError("WebSocket error. Please reconnect.")
+          setLoading(false)
         }
 
         ws.onclose = () => {
           console.log("🔌 Agent WebSocket closed")
+          setConnectionError("WebSocket disconnected")
         }
       } catch (error) {
         console.error("Failed to initialize chat:", error)
@@ -178,9 +191,10 @@ export default function ChatView() {
     return () => {
       isSubscribed = false
       joinedRef.current = false
+      socketRef.current = null
       disconnectAgentSocket()
     }
-  }, [conversationId, user?.id])
+  }, [conversationId, user?.id, activeChats])
 
   const loadTagsAndNotes = async (convId: string) => {
     try {
@@ -221,6 +235,13 @@ export default function ChatView() {
 
   const send = () => {
     if (!input.trim() || !conversationId) return
+
+    // Ensure socket is connected before sending
+    const state = getSocketState()
+    if (state !== WebSocket.OPEN) {
+      setConnectionError("WebSocket not connected. Please reconnect and try again.")
+      return
+    }
 
     sendAgentMessage(input, conversationId)
     
@@ -303,10 +324,17 @@ export default function ChatView() {
     )
   }
 
+  const connectionBanner = connectionError ? (
+    <div className="px-4 py-3 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm border-b border-red-200 dark:border-red-800">
+      {connectionError}
+    </div>
+  ) : null
+
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
+        {connectionBanner}
         {/* Header */}
         <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="flex items-center justify-between">
