@@ -6,8 +6,7 @@ import { isAdmin, isAdministrator } from './lib/roles'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
 import DashboardLayout from './pages/DashboardLayout'
-import ActiveChats from './pages/ActiveChats'
-import ChatView from './pages/ChatView'
+import ConversationsView from './pages/ConversationsView'
 import WebsiteManagement from './pages/WebsiteManagement'
 import WebsiteDetail from './pages/WebsiteDetail'
 import WebsitesList from './pages/WebsitesList'
@@ -97,9 +96,9 @@ function App() {
         {token ? (
           <>
             <Route path="/dashboard" element={<DashboardLayout />}>
-              {/* Chats - All users */}
-              <Route path="chats" element={<ActiveChats />} />
-              <Route path="chats/:conversationId" element={<ChatView />} />
+              {/* Chats - Unified 3-column view */}
+              <Route path="chats" element={<ConversationsView />} />
+              <Route path="chats/:conversationId" element={<ConversationsView />} />
               <Route path="history" element={<ConversationHistory />} />
               <Route path="history/:conversationId" element={<ClosedChatView />} />
               

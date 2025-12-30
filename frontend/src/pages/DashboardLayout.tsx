@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
 import { isAdministrator } from '@/lib/roles'
@@ -121,7 +122,7 @@ export default function DashboardLayout() {
   )
 
   return (
-    <div className="flex min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
       {/* Mobile Header */}
       <header className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-3">
@@ -225,111 +226,137 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-20 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shadow-sm">
+      <aside className="hidden md:flex md:w-16 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shadow-sm">
         {/* Desktop Logo */}
-        <div className="h-20 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
+        <div className="h-16 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
           <Logo size={40} />
         </div>
 
         {/* Desktop Navigation - Icon Only */}
-        <nav className="flex-1 flex flex-col py-6 gap-2 px-2">
-          <Link
-            to="/dashboard/chats"
-            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-              isActive('/dashboard/chats') 
-                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-            title="Chats"
-          >
-            <MessageSquare className="h-5 w-5" />
-          </Link>
+        <TooltipProvider>
+          <nav className="flex-1 flex flex-col py-6 gap-2 px-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/chats"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
+                    isActive('/dashboard/chats') 
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <MessageSquare className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Chats</p>
+              </TooltipContent>
+            </Tooltip>
 
-          <Link
-            to="/dashboard/settings"
-            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-              isActive('/dashboard/settings') 
-                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-            title="Settings"
-          >
-            <Settings className="h-5 w-5" />
-          </Link>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/settings"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
+                    isActive('/dashboard/settings') 
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <Settings className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Settings</p>
+              </TooltipContent>
+            </Tooltip>
 
-          <Link
-            to="/dashboard/analytics"
-            className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-              isActive('/dashboard/analytics') 
-                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-            title="Analytics"
-          >
-            <BarChart3 className="h-5 w-5" />
-          </Link>
-        </nav>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/analytics"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
+                    isActive('/dashboard/analytics') 
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <BarChart3 className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Analytics</p>
+              </TooltipContent>
+            </Tooltip>
+          </nav>
 
-        {/* Desktop Bottom Actions */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-2 space-y-2">
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
-            title={darkMode ? 'Light mode' : 'Dark mode'}
-          >
-            {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </button>
-          
-          {/* Desktop Profile Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger>
-              <div className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all cursor-pointer">
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
-                    {getInitials(user?.name, user?.email)}
+          {/* Desktop Bottom Actions */}
+          <div className="border-t border-gray-200 dark:border-gray-700 p-2 space-y-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                >
+                  {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>{darkMode ? 'Light mode' : 'Dark mode'}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Desktop Profile Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger>
+                <div className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all cursor-pointer">
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
+                      {getInitials(user?.name, user?.email)}
+                    </div>
+                    {user?.is_available && (
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
+                    )}
                   </div>
-                  {user?.is_available && (
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
-                  )}
                 </div>
-              </div>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                    {user?.name || 'User'}
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400 font-normal truncate">
-                    {user?.email}
-                  </span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {user?.name || 'User'}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 font-normal truncate">
+                      {user?.email}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Available</span>
+                    <Switch
+                      checked={user?.is_available || false}
+                      onCheckedChange={handleAvailabilityToggle}
+                    />
+                  </div>
                 </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Available</span>
-                  <Switch
-                    checked={user?.is_available || false}
-                    onCheckedChange={handleAvailabilityToggle}
-                  />
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={handleLogout}
-                className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Logout</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={handleLogout}
+                  className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-900/20"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Logout</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </TooltipProvider>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 pt-16 md:pt-0">
+      <main className="flex-1 pt-16 md:pt-0 overflow-hidden">
         <Outlet />
       </main>
     </div>

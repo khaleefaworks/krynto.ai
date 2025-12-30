@@ -21,6 +21,8 @@ class WebsiteUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
     ai_instructions: Optional[str] = None
+    ai_enabled: Optional[bool] = None
+    widget_config: Optional[dict] = None
 
 
 class WebsiteResponse(BaseModel):
@@ -132,6 +134,10 @@ def update_website(
         website.domain = website_data.domain
     if website_data.ai_instructions is not None:
         website.ai_instructions = website_data.ai_instructions
+    if website_data.ai_enabled is not None:
+        website.ai_enabled = website_data.ai_enabled
+    if website_data.widget_config is not None:
+        website.widget_config = website_data.widget_config
     
     db.commit()
     db.refresh(website)

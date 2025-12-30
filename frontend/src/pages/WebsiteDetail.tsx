@@ -91,7 +91,7 @@ export default function WebsiteDetail() {
         setTimeout(() => navigate('/dashboard/settings/websites'), 1500)
       } else {
         await apiRequest(`/websites/${id}`, {
-          method: 'PATCH',
+          method: 'PUT',
           body: JSON.stringify(formData),
         })
         setSuccessMessage('Website updated successfully')

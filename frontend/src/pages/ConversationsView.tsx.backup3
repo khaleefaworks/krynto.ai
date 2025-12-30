@@ -1,0 +1,626 @@
+import { useEffect, useState, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useAppStore } from '@/store/appStore'
+import { useMessageStore } from '@/store/messages'
+import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
+import { joinChat, closeConversation } from '@/services/chats'
+import { fetchChatMessages } from '@/services/messages'
+import {
+  connectAgentSocket,
+  sendAgentMessage,
+  disconnectAgentSocket,
+} from '@/services/agentSocket'
+import { 
+  addTag, 
+  getTags, 
+  deleteTag, 
+  addNote, 
+  getNotes, 
+  deleteNote,
+  updateConversationMetadata,
+  type Tag,
+  type Note
+} from '@/services/conversationMetadata'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { 
+  Send, 
+  Check, 
+  MoreVertical, 
+  Tag as TagIcon,
+  Smile,
+  Bold,
+  Italic,
+  Paperclip,
+  Clock,
+  MessageSquare,
+  Search,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  PanelLeftClose,
+  PanelRightClose
+} from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
+import { formatDistanceToNow } from 'date-fns'
+import type { Conversation } from '@/types'
+
+interface ConversationDetails {
+  id: number
+  session_id: string
+  visitor_name?: string
+  visitor_email?: string
+  visitor_phone?: string
+  device_info?: string
+  browser_info?: string
+  visit_count?: number
+  last_seen_at?: string
+  created_at?: string
+  status?: string
+}
+
+export default function ConversationsView() {
+  const { conversationId } = useParams<{ conversationId?: string }>()
+  const navigate = useNavigate()
+  const { user } = useAppStore()
+  const { activeChats, setActiveChats } = useAppStore()
+  const { messages, addMessage, addMessages, reset } = useMessageStore()
+  
+  // List state
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  
+  // Chat state
+  const [selectedChat, setSelectedChat] = useState<number | null>(null)
+  const [input, setInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const joinedRef = useRef(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Conversation details state
+  const [conversation, setConversation] = useState<ConversationDetails | null>(null)
+  const [tags, setTags] = useState<Tag[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
+  const [websiteId, setWebsiteId] = useState<number | null>(null)
+  
+  // Sidebar collapse state
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false)
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
+
+  // Load chats list
+  useEffect(() => {
+    fetchActiveChats()
+  }, [])
+
+  // Handle conversation selection from URL
+  useEffect(() => {
+    if (conversationId && conversationId !== selectedChat?.toString()) {
+      setSelectedChat(parseInt(conversationId))
+    }
+  }, [conversationId])
+
+  // Load chat when selected
+  useEffect(() => {
+    if (selectedChat && selectedChat.toString() !== conversationId) {
+      navigate(`/dashboard/chats/${selectedChat}`)
+    }
+    
+    if (selectedChat) {
+      loadChatData(selectedChat)
+      loadConversationDetails(selectedChat)
+    }
+    
+    return () => {
+      if (selectedChat) {
+        disconnectAgentSocket()
+        joinedRef.current = false
+      }
+    }
+  }, [selectedChat])
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const fetchActiveChats = async () => {
+    setLoading(true)
+    try {
+      const chats = await fetchChatsApi()
+      setActiveChats(chats)
+    } catch (error) {
+      console.error("Failed to fetch chats:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadChatData = async (chatId: number) => {
+    setChatLoading(true)
+    reset()
+    
+    try {
+      const chatMessages = await fetchChatMessages(chatId)
+      addMessages(chatMessages)
+      
+      if (!joinedRef.current) {
+        const joined = await joinChat(chatId, user?.id || 0)
+        if (joined) {
+          connectAgentSocket(
+            chatId,
+            (msg) => addMessage(msg),
+            (error) => console.error('Socket error:', error)
+          )
+          joinedRef.current = true
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load chat:", error)
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  const loadConversationDetails = async (chatId: number) => {
+    try {
+      const chatData = activeChats.find(c => c.id === chatId)
+      if (chatData) {
+        setConversation(chatData as any)
+        setWebsiteId(chatData.website_id)
+      }
+      
+      const [fetchedTags, fetchedNotes] = await Promise.all([
+        getTags(chatId),
+        getNotes(chatId)
+      ])
+      
+      setTags(fetchedTags)
+      setNotes(fetchedNotes)
+    } catch (error) {
+      console.error("Failed to load conversation details:", error)
+    }
+  }
+
+  const handleChatSelect = (chatId: number) => {
+    setSelectedChat(chatId)
+  }
+
+  const handleSendMessage = async () => {
+    if (!input.trim() || !selectedChat) return
+    
+    const messageContent = input.trim()
+    setInput('')
+    
+    try {
+      await sendAgentMessage(selectedChat, messageContent)
+    } catch (error) {
+      console.error("Failed to send message:", error)
+      setInput(messageContent)
+    }
+  }
+
+  const handleResolve = async () => {
+    if (!selectedChat) return
+    
+    setResolving(true)
+    try {
+      await closeConversation(selectedChat)
+      setActiveChats(activeChats.filter(c => c.id !== selectedChat))
+      setSelectedChat(null)
+      navigate('/dashboard/chats')
+    } catch (error) {
+      console.error("Failed to resolve chat:", error)
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const handleAddTag = async (tagName: string) => {
+    if (!selectedChat) return
+    try {
+      const newTag = await addTag(selectedChat, tagName)
+      setTags(prev => [...prev, newTag])
+    } catch (error) {
+      console.error("Failed to add tag:", error)
+    }
+  }
+
+  const handleRemoveTag = async (tagId: number) => {
+    if (!selectedChat) return
+    try {
+      await deleteTag(selectedChat, tagId)
+      setTags(prev => prev.filter(t => t.id !== tagId))
+    } catch (error) {
+      console.error("Failed to remove tag:", error)
+    }
+  }
+
+  const handleAddNote = async (content: string) => {
+    if (!selectedChat) return
+    try {
+      const newNote = await addNote(selectedChat, content)
+      setNotes(prev => [...prev, newNote])
+    } catch (error) {
+      console.error("Failed to add note:", error)
+    }
+  }
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!selectedChat) return
+    try {
+      await deleteNote(selectedChat, noteId)
+      setNotes(prev => prev.filter(n => n.id !== noteId))
+    } catch (error) {
+      console.error("Failed to delete note:", error)
+    }
+  }
+
+  const filteredChats = activeChats.filter(chat => {
+    if (!searchQuery) return true
+    return chat.session_id.toLowerCase().includes(searchQuery.toLowerCase())
+  })
+
+  return (
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      {/* LEFT SIDEBAR: Conversations List (Collapsible) */}
+      <div 
+        className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out ${
+          leftSidebarCollapsed ? 'w-16' : 'w-80'
+        }`}
+      >
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-3">
+            {!leftSidebarCollapsed && (
+              <>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Chats</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={fetchActiveChats}
+                  className="dark:text-gray-300"
+                >
+                  Refresh
+                </Button>
+              </>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+              className="dark:text-gray-300"
+              title={leftSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {leftSidebarCollapsed ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          
+          {!leftSidebarCollapsed && (
+            <>
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+              
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                {filteredChats.length} conversation{filteredChats.length !== 1 ? 's' : ''} waiting
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Conversations List */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          ) : filteredChats.length === 0 ? (
+            <div className={`text-center p-8 text-gray-400 dark:text-gray-600 ${leftSidebarCollapsed ? 'px-2' : ''}`}>
+              {!leftSidebarCollapsed && (
+                <>
+                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No active conversations</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-200 dark:divide-gray-700">
+              {filteredChats.map((chat) => (
+                <button
+                  key={chat.id}
+                  onClick={() => handleChatSelect(chat.id)}
+                  className={`w-full text-left ${leftSidebarCollapsed ? 'p-2' : 'p-4'} hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                    selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : ''
+                  }`}
+                >
+                  {leftSidebarCollapsed ? (
+                    // Collapsed: Show only avatar
+                    <div className="flex justify-center">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold text-xs relative">
+                        {chat.session_id.substring(0, 2).toUpperCase()}
+                        {chat.is_handoff && (
+                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full border-2 border-white dark:border-gray-800" />
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    // Expanded: Show full details
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0">
+                        {chat.session_id.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-gray-900 dark:text-white truncate">
+                            {chat.session_id.substring(0, 8)}...
+                          </span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {chat.message_count || 0} msgs
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                          Session: {chat.session_id.substring(0, 12)}...
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="secondary" className="text-xs">
+                            {chat.status}
+                          </Badge>
+                          {chat.is_handoff && (
+                            <Badge variant="outline" className="text-xs text-orange-600">
+                              Needs agent
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* MIDDLE: Chat Messages */}
+      {selectedChat ? (
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Chat Header */}
+          <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                    {conversation?.visitor_name || conversation?.session_id.substring(0, 8) || `Chat #${selectedChat}`}
+                  </h2>
+                  {conversation?.last_seen_at && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Last seen {formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Header Actions */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                  <TagIcon className="h-4 w-4 mr-1" />
+                  Tag
+                </Button>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleResolve}
+                  disabled={resolving}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <Check className="h-4 w-4 mr-1" />
+                  {resolving ? "Resolving..." : "Resolve"}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="dark:text-gray-300">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}>
+                      {rightSidebarCollapsed ? "Show" : "Hide"} visitor details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-600" onClick={handleResolve}>
+                      Close conversation
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+                  className="dark:text-gray-300"
+                  title={rightSidebarCollapsed ? "Show visitor details" : "Hide visitor details"}
+                >
+                  {rightSidebarCollapsed ? (
+                    <ChevronLeft className="h-4 w-4" />
+                  ) : (
+                    <PanelRightClose className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Tags Display */}
+            {tags.length > 0 && (
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {tags.map(tag => (
+                  <Badge key={tag.id} variant="secondary" className="text-xs">
+                    {tag.tag_name}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Messages Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+            {chatLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <p className="text-gray-500 dark:text-gray-400">Loading messages...</p>
+                </div>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-600">
+                <div className="text-center">
+                  <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg">No messages yet</p>
+                  <p className="text-sm mt-2">Start the conversation!</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {messages.map((msg, index) => {
+                  const isSystem = msg.message_type === 'system'
+                  const isAgent = msg.sender_type === 'agent'
+                  const showTimestamp = index === 0 || 
+                    (new Date(msg.timestamp).getTime() - new Date(messages[index - 1].timestamp).getTime() > 300000)
+
+                  return (
+                    <div key={msg.id}>
+                      {/* Timestamp Divider */}
+                      {showTimestamp && (
+                        <div className="flex items-center justify-center my-4">
+                          <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-400">
+                            {new Date(msg.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* System Message */}
+                      {isSystem ? (
+                        <div className="flex justify-center">
+                          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-2 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 max-w-md text-center">
+                            {msg.content}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                          <div className="flex items-end gap-2 max-w-[70%]">
+                            {!isAgent && (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                {conversation?.session_id?.substring(0, 2).toUpperCase() || 'VI'}
+                              </div>
+                            )}
+                            <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
+                              <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                              <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                                <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                {isAgent && (
+                                  <Check className="h-3 w-3 ml-1" />
+                                )}
+                              </div>
+                            </div>
+                            {isAgent && (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                {user?.username?.substring(0, 2).toUpperCase() || 'AG'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                <div ref={messagesEndRef} />
+              </>
+            )}
+          </div>
+
+          {/* Input Area */}
+          <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0">
+            <div className="flex gap-2 mb-2">
+              <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                <Bold className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                <Italic className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                <Smile className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSendMessage()
+                  }
+                }}
+                placeholder="Type your message..."
+                className="flex-1 dark:bg-gray-700 dark:border-gray-600"
+              />
+              <Button 
+                onClick={handleSendMessage}
+                disabled={!input.trim()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+          <div className="text-center text-gray-400 dark:text-gray-600">
+            <MessageSquare className="h-24 w-24 mx-auto mb-4 opacity-50" />
+            <h2 className="text-2xl font-semibold mb-2">Select a conversation</h2>
+            <p>Choose a chat from the list to start messaging</p>
+          </div>
+        </div>
+      )}
+
+      {/* RIGHT SIDEBAR: Visitor Details (Collapsible) */}
+      {selectedChat && !rightSidebarCollapsed && (
+        <div className="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0 transition-all duration-300 ease-in-out">
+          <VisitorDetailsPanel
+            conversation={conversation}
+            tags={tags}
+            notes={notes}
+            onAddTag={handleAddTag}
+            onRemoveTag={handleRemoveTag}
+            onAddNote={handleAddNote}
+            onDeleteNote={handleDeleteNote}
+            websiteId={websiteId}
+          />
+        </div>
+      )}
+    </div>
+  )
+}

@@ -9,10 +9,49 @@ import {
   sendAgentMessage,
   disconnectAgentSocket,
 } from "@/services/agentSocket"
+import { 
+  addTag, 
+  getTags, 
+  deleteTag, 
+  addNote, 
+  getNotes, 
+  deleteNote,
+  updateConversationMetadata,
+  type Tag,
+  type Note
+} from "@/services/conversationMetadata"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Send, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { 
+  ArrowLeft, 
+  Send, 
+  Check, 
+  MoreVertical, 
+  Tag as TagIcon,
+  Smile,
+  Bold,
+  Italic,
+  Paperclip,
+  Clock
+} from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import VisitorDetailsPanel from "@/components/VisitorDetailsPanel"
+import { formatDistanceToNow } from "date-fns"
+
+interface ConversationDetails {
+  id: number
+  session_id: string
+  visitor_name?: string
+  visitor_email?: string
+  visitor_phone?: string
+  device_info?: string
+  browser_info?: string
+  visit_count?: number
+  last_seen_at?: string
+  created_at?: string
+  status?: string
+}
 
 export default function ChatView() {
   const { conversationId } = useParams<{ conversationId: string }>()
@@ -21,9 +60,16 @@ export default function ChatView() {
   const { messages, addMessage, addMessages, reset } = useMessageStore()
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(true)
-  const [closing, setClosing] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const joinedRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Conversation details state
+  const [conversation, setConversation] = useState<ConversationDetails | null>(null)
+  const [tags, setTags] = useState<Tag[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
+  const [websiteId, setWebsiteId] = useState<number | null>(null)
+  const [showRightSidebar, setShowRightSidebar] = useState(true)
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -46,6 +92,27 @@ export default function ChatView() {
         // 2. Join chat (pauses AI, assigns agent)
         const res: any = await joinChat(conversationId)
         console.log("✅ Joined chat:", res)
+        
+        if (isSubscribed) {
+          setWebsiteId(res.website_id)
+          // Set conversation details with mock data for now
+          setConversation({
+            id: parseInt(conversationId),
+            session_id: res.session_id || "9f7812a5...",
+            visitor_name: undefined,
+            visitor_email: undefined,
+            visitor_phone: undefined,
+            device_info: "Linux",
+            browser_info: "Chrome 143.0.0.0",
+            visit_count: 2,
+            last_seen_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            status: "active"
+          })
+          
+          // Load tags and notes
+          loadTagsAndNotes(conversationId)
+        }
 
         if (!isSubscribed) return
 
@@ -71,7 +138,6 @@ export default function ChatView() {
 
           if (data.type === "joined") {
             console.log("✅ Successfully joined conversation")
-            // History already loaded via REST, no need to process it again
           } else if (data.type === "visitor_message") {
             // Visitor message received
             addMessage({
@@ -79,6 +145,10 @@ export default function ChatView() {
               content: data.message,
               created_at: new Date().toISOString(),
             })
+            // Update last seen
+            if (conversation) {
+              setConversation({ ...conversation, last_seen_at: new Date().toISOString() })
+            }
           } else if (data.type === "message") {
             // Generic message format
             addMessage({
@@ -112,28 +182,40 @@ export default function ChatView() {
     }
   }, [conversationId, user?.id])
 
+  const loadTagsAndNotes = async (convId: string) => {
+    try {
+      const [tagsData, notesData] = await Promise.all([
+        getTags(parseInt(convId)),
+        getNotes(parseInt(convId))
+      ])
+      setTags(tagsData)
+      setNotes(notesData)
+    } catch (error) {
+      console.error("Failed to load tags/notes:", error)
+    }
+  }
+
   useEffect(() => {
     // Auto-scroll to bottom when messages change
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const handleCloseConversation = async () => {
+  const handleResolve = async () => {
     if (!conversationId) return
     
-    if (!confirm("Are you sure you want to close this conversation? This action cannot be undone.")) {
+    if (!confirm("Mark this conversation as resolved?")) {
       return
     }
 
     try {
-      setClosing(true)
+      setResolving(true)
       await closeConversation(parseInt(conversationId))
-      alert("Conversation closed successfully")
       navigate("/dashboard/chats")
     } catch (error) {
-      console.error("Failed to close conversation:", error)
-      alert("Failed to close conversation")
+      console.error("Failed to resolve conversation:", error)
+      alert("Failed to resolve conversation")
     } finally {
-      setClosing(false)
+      setResolving(false)
     }
   }
 
@@ -159,6 +241,57 @@ export default function ChatView() {
     }
   }
 
+  // Handler functions for VisitorDetailsPanel
+  const handleUpdateMetadata = async (data: { visitor_name?: string; visitor_email?: string; visitor_phone?: string }) => {
+    if (!conversationId) return
+    try {
+      await updateConversationMetadata(parseInt(conversationId), data)
+      setConversation(prev => prev ? { ...prev, ...data } : null)
+    } catch (error) {
+      console.error("Failed to update metadata:", error)
+    }
+  }
+
+  const handleAddTag = async (tagName: string) => {
+    if (!conversationId) return
+    try {
+      const newTag = await addTag(parseInt(conversationId), tagName)
+      setTags(prev => [...prev, newTag])
+    } catch (error) {
+      console.error("Failed to add tag:", error)
+    }
+  }
+
+  const handleRemoveTag = async (tagId: number) => {
+    if (!conversationId) return
+    try {
+      await deleteTag(parseInt(conversationId), tagId)
+      setTags(prev => prev.filter(t => t.id !== tagId))
+    } catch (error) {
+      console.error("Failed to remove tag:", error)
+    }
+  }
+
+  const handleAddNote = async (content: string) => {
+    if (!conversationId) return
+    try {
+      const newNote = await addNote(parseInt(conversationId), content)
+      setNotes(prev => [...prev, newNote])
+    } catch (error) {
+      console.error("Failed to add note:", error)
+    }
+  }
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!conversationId) return
+    try {
+      await deleteNote(parseInt(conversationId), noteId)
+      setNotes(prev => prev.filter(n => n.id !== noteId))
+    } catch (error) {
+      console.error("Failed to delete note:", error)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
@@ -171,88 +304,201 @@ export default function ChatView() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-7xl mx-auto p-4 md:p-8">
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/dashboard/chats")}
-          className="mb-4 md:mb-6 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Chats
-        </Button>
-
-        <Card className="h-[calc(100vh-10rem)] md:h-[calc(100vh-14rem)] border-gray-200 dark:border-gray-700 dark:bg-gray-800">
-          <CardHeader className="border-b border-gray-200 dark:border-gray-700 p-4 md:p-6">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-              <CardTitle className="text-gray-900 dark:text-white text-lg md:text-xl">Chat #{conversationId}</CardTitle>
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                onClick={handleCloseConversation}
-                disabled={closing}
-                className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 dark:border-gray-600 w-full sm:w-auto"
+                onClick={() => navigate("/dashboard/chats")}
+                className="dark:text-gray-300 dark:hover:bg-gray-700"
               >
-                <X className="h-4 w-4 mr-2" />
-                {closing ? "Closing..." : "Close Conversation"}
+                <ArrowLeft className="h-4 w-4" />
               </Button>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {conversation?.visitor_name || conversation?.session_id.substring(0, 8) || `Chat #${conversationId}`}
+                </h2>
+                {conversation?.last_seen_at && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Last seen {formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}
+                  </p>
+                )}
+              </div>
             </div>
-          </CardHeader>
-          <CardContent className="p-0 flex flex-col h-full">
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 md:space-y-4 bg-gray-50 dark:bg-gray-900">
-              {messages.length === 0 && (
-                <p className="text-center text-gray-400 dark:text-gray-600 text-sm">
-                  Waiting for messages...
-                </p>
-              )}
-              
-              {messages.map((m, i) => (
+
+            {/* Header Actions */}
+            <div className="flex items-center gap-2">
+              {/* Tag Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                <TagIcon className="h-4 w-4 mr-1" />
+                Tag conversation
+              </Button>
+
+              {/* Resolve Button */}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleResolve}
+                disabled={resolving}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <Check className="h-4 w-4 mr-1" />
+                {resolving ? "Resolving..." : "Resolve"}
+              </Button>
+
+              {/* More Actions */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="dark:text-gray-300">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setShowRightSidebar(!showRightSidebar)}>
+                    {showRightSidebar ? "Hide" : "Show"} visitor details
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="text-red-600">
+                    Close conversation
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          {/* Tags Display */}
+          {tags.length > 0 && (
+            <div className="flex gap-2 mt-2">
+              {tags.map(tag => (
+                <Badge key={tag.id} variant="secondary" className="text-xs">
+                  {tag.tag_name}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+          {messages.length === 0 && (
+            <p className="text-center text-gray-400 dark:text-gray-600 text-sm mt-8">
+              Waiting for messages...
+            </p>
+          )}
+          
+          {messages.map((m, i) => {
+            const isSystem = m.sender === "system"
+            const isAgent = m.sender === "agent"
+            const isVisitor = m.sender === "visitor"
+            const isAI = m.sender === "ai"
+
+            // System messages
+            if (isSystem) {
+              return (
+                <div key={i} className="flex justify-center">
+                  <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 px-4 py-2 rounded-full text-xs font-medium">
+                    {m.content}
+                  </div>
+                </div>
+              )
+            }
+
+            return (
+              <div
+                key={i}
+                className={`flex ${isAgent ? "justify-end" : "justify-start"}`}
+              >
                 <div
-                  key={i}
-                  className={`flex ${
-                    m.sender === "agent" ? "justify-end" : "justify-start"
+                  className={`max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
+                    isAgent
+                      ? "bg-blue-600 text-white dark:bg-blue-500"
+                      : "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
                   }`}
                 >
-                  <div
-                    className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 md:px-4 md:py-3 shadow-sm ${
-                      m.sender === "agent"
-                        ? "bg-blue-600 text-white dark:bg-blue-500"
-                        : m.sender === "ai"
-                        ? "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
-                        : "bg-white text-gray-800 border border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700"
-                    }`}
-                  >
-                    <p className="text-sm leading-relaxed break-words">{m.content}</p>
-                    {m.sender !== "agent" && (
-                      <span className="text-xs opacity-70 mt-1 md:mt-2 block font-medium">
-                        {m.sender}
+                  <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{m.content}</p>
+                  <div className="flex items-center justify-between mt-2 gap-2">
+                    {!isAgent && (
+                      <span className={`text-xs font-medium ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                        {isAI ? '🤖 AI' : '👤 Visitor'}
+                      </span>
+                    )}
+                    {m.created_at && (
+                      <span className={`text-xs ${isAgent ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'} ml-auto`}>
+                        {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     )}
                   </div>
                 </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <div className="border-t border-gray-200 dark:border-gray-700 p-3 md:p-4 bg-white dark:bg-gray-800">
-              <div className="flex gap-2 md:gap-3">
-                <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 text-sm md:text-base"
-                />
-                <Button onClick={send} disabled={!input.trim()} className="dark:bg-blue-600 dark:hover:bg-blue-700 px-3 md:px-4">
-                  <Send className="h-4 w-4" />
-                </Button>
               </div>
+            )
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area with Toolbar */}
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+          {/* Formatting Toolbar */}
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 dark:hover:bg-gray-700">
+              <Bold className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 dark:hover:bg-gray-700">
+              <Italic className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 dark:hover:bg-gray-700">
+              <Smile className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 dark:hover:bg-gray-700">
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <div className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+              Press Enter to send
             </div>
-          </CardContent>
-        </Card>
+          </div>
+
+          {/* Message Input */}
+          <div className="flex gap-3 p-4">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type your message..."
+              className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400"
+            />
+            <Button 
+              onClick={send} 
+              disabled={!input.trim()} 
+              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 px-6"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Send
+            </Button>
+          </div>
+        </div>
       </div>
+
+      {/* Right Sidebar - Visitor Details */}
+      {showRightSidebar && conversation && (
+        <VisitorDetailsPanel
+          conversation={conversation}
+          tags={tags}
+          notes={notes}
+          onUpdateMetadata={handleUpdateMetadata}
+          onAddTag={handleAddTag}
+          onRemoveTag={handleRemoveTag}
+          onAddNote={handleAddNote}
+          onDeleteNote={handleDeleteNote}
+        />
+      )}
     </div>
   )
 }

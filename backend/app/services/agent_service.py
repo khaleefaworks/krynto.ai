@@ -93,9 +93,8 @@ class AgentService:
         Returns:
             List of conversations
         """
-        # Base query: exclude closed and AI-handling conversations
+        # Base query: exclude AI-handling conversations (frontend will filter by status)
         query = self.db.query(Conversation).filter(
-            Conversation.status != "closed",
             Conversation.mode != ConversationMode.AI_HANDLING
         )
         

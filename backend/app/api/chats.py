@@ -85,7 +85,7 @@ def get_active_chats(
             "website_id": conv.website_id,
             "website_name": website_name,
             "session_id": conv.session_id,
-            "status": conv.status,
+            "status": conv.status.value if hasattr(conv.status, 'value') else conv.status,
             "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
             "assigned_agent_id": conv.assigned_agent_id,
             "message_count": msg_count,

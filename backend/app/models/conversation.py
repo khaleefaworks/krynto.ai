@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum, DateTime, Text
 
 from app.models.base import TimestampMixin
 from app.core.database import Base
@@ -41,3 +41,12 @@ class Conversation(Base, TimestampMixin):
     # Inactivity tracking for auto-release
     last_agent_message_at = Column(DateTime, nullable=True)
     last_visitor_message_at = Column(DateTime, nullable=True)
+    
+    # Visitor metadata
+    visitor_name = Column(String(255), nullable=True)
+    visitor_email = Column(String(255), nullable=True)
+    visitor_phone = Column(String(50), nullable=True)
+    device_info = Column(String(255), nullable=True)  # e.g., "Linux", "Windows 11"
+    browser_info = Column(String(255), nullable=True)  # e.g., "Chrome 143.0.0.0"
+    visit_count = Column(Integer, default=1, nullable=False)  # Number of visits by this visitor
+    last_seen_at = Column(DateTime, nullable=True)  # When visitor was last active
