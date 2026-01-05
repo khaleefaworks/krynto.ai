@@ -9,6 +9,10 @@ Use this for:
 - Development reset
 
 WARNING: This is DESTRUCTIVE and cannot be undone!
+
+Usage:
+  python reset_application.py          # Fresh reset (onboarding flow)
+  python reset_application.py --seed   # Reset with test data
 """
 
 import sys
@@ -22,20 +26,23 @@ from app.models.system_settings import SystemSettings
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from seed_data import seed_database
 
-def confirm_reset():
+def confirm_reset(with_seed):
     """Ask for confirmation before resetting"""
     print("⚠️  WARNING: This will DELETE ALL DATA from the database!")
     print("   - All users")
     print("   - All websites")
     print("   - All conversations and messages")
-    print("   - System settings (will trigger onboarding)")
+    if with_seed:
+        print("   - Will seed with test data (admin + agent)")
+    else:
+        print("   - Fresh start (will trigger onboarding)")
     print()
     response = input("Are you sure you want to continue? Type 'YES' to confirm: ")
     return response == "YES"
 
-def reset_database():
+def reset_database(with_seed=False):
     """Reset the database to fresh state"""
-    if not confirm_reset():
+    if not confirm_reset(with_seed):
         print("❌ Reset cancelled.")
         return
     
@@ -81,14 +88,29 @@ def reset_database():
         
         print("\n✅ Database reset successfully!")
         
-        # Seed database with test data
-        print("\n📦 Seeding database with test data...")
-        seed_database()
-        
-        print("\n🎉 System is now ready!")
-        print("\n📍 Next Steps:")
-        print("   1. Navigate to http://localhost:5173 to login")
-        print("   2. Widget demo: http://localhost:8080/demo.html")
+        if with_seed:
+            # Seed database with test data
+            print("\n📦 Seeding database with test data...")
+            seed_database()
+            
+            # Set reset timestamp to invalidate old tokens
+            from datetime import datetime, timezone
+            settings = db.query(SystemSettings).first()
+            if settings:
+                settings.last_reset_at = datetime.now(timezone.utc)
+                db.commit()
+                print("\n🔐 All previous auth tokens invalidated")
+            
+            print("\n🎉 System is now ready!")
+            print("\n📍 Next Steps:")
+            print("   1. Navigate to http://localhost:5173 to login")
+            print("   2. Widget demo: http://localhost:8080/demo.html")
+        else:
+            print("\n🎉 Fresh database created!")
+            print("\n📍 Next Steps:")
+            print("   1. Navigate to http://localhost:5173")
+            print("   2. Complete the onboarding process")
+            print("   3. Create your admin account and first website")
         
     except Exception as e:
         print(f"\n❌ Error during reset: {e}")
@@ -98,4 +120,6 @@ def reset_database():
         db.close()
 
 if __name__ == "__main__":
-    reset_database()
+    # Check for --seed argument
+    with_seed = "--seed" in sys.argv
+    reset_database(with_seed=with_seed)

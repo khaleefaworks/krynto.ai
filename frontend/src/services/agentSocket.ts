@@ -6,6 +6,10 @@ let currentWebsiteId: number | null = null
 let currentAgentId: number | null = null
 let isIntentionalClose = false
 
+// Message handler registry - allows multiple listeners
+type MessageHandler = (data: any) => void
+const messageHandlers = new Set<MessageHandler>()
+
 export function connectAgentSocket(websiteId: number, agentId: number) {
   // Return existing socket if already connected
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -31,8 +35,9 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   currentAgentId = agentId
   isIntentionalClose = false
 
-  const wsUrl = `ws://localhost:8000/ws/agent/${websiteId}/${agentId}`
-  console.log("🔌 Connecting to WebSocket:", wsUrl)
+  // Include JWT token in query parameter for authentication
+  const wsUrl = `ws://localhost:8000/ws/agent/${websiteId}?token=${encodeURIComponent(token)}`
+  console.log("🔌 Connecting to WebSocket (authenticated):", `ws://localhost:8000/ws/agent/${websiteId}`)
   socket = new WebSocket(wsUrl)
 
   socket.onopen = () => {
@@ -42,6 +47,21 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
       clearTimeout(reconnectTimeout)
       reconnectTimeout = null
     }
+  }
+
+  // Single message handler that dispatches to all registered handlers
+  socket.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    console.log("📨 WebSocket message received:", data)
+    
+    // Dispatch to all registered handlers
+    messageHandlers.forEach(handler => {
+      try {
+        handler(data)
+      } catch (error) {
+        console.error("❌ Error in message handler:", error)
+      }
+    })
   }
 
   socket.onclose = (event) => {
@@ -64,6 +84,17 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   }
 
   return socket
+}
+
+export function addMessageHandler(handler: MessageHandler): () => void {
+  messageHandlers.add(handler)
+  console.log(`📝 Added message handler (total: ${messageHandlers.size})`)
+  
+  // Return cleanup function
+  return () => {
+    messageHandlers.delete(handler)
+    console.log(`🗑️ Removed message handler (remaining: ${messageHandlers.size})`)
+  }
 }
 
 export function sendAgentMessage(content: string, conversationId: string) {
@@ -90,6 +121,9 @@ export function disconnectAgentSocket() {
     socket.close()
     socket = null
   }
+  
+  // Clear all handlers
+  messageHandlers.clear()
   
   // Clear reconnection params
   currentWebsiteId = null

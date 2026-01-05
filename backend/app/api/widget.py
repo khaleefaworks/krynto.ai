@@ -62,7 +62,14 @@ async def get_widget_loader(key: str, db: Session = Depends(get_db)):
   _aichatassist.welcomeMessage = {repr(welcome_message)};
   _aichatassist.primaryColor = '{primary_color}';
   
-  // Load the actual widget script
+  // Load the widget CSS
+  var link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.type = 'text/css';
+  link.href = _aichatassist.apiUrl + '/widget/chat-widget.css';
+  document.head.appendChild(link);
+  
+  // Load the widget script
   var script = document.createElement('script');
   script.type = 'text/javascript';
   script.async = true;
@@ -98,18 +105,19 @@ async def get_widget_snippet(website_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Website not found")
     
     # Generate the embed snippet (like Smartsupp)
-    snippet = f"""<!-- AI ChatAssist Widget -->
+    snippet = f"""<!-- AI ChatAssist Live Chat script -->
 <script type="text/javascript">
 var _aichatassist = _aichatassist || {{}};
 _aichatassist.key = '{website.widget_key}';
 window.aichatassist||(function(d) {{
-  var s,c,o=aichatassist=function(){{ o._.push(arguments)}};o._=[];
+  var s,c,o=aichatassist=function(){{ o._.push(arguments)}}; o._=[];
   s=d.getElementsByTagName('script')[0];c=d.createElement('script');
   c.type='text/javascript';c.charset='utf-8';c.async=true;
   c.src='http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
   s.parentNode.insertBefore(c,s);
 }})(document);
-</script>"""
+</script>
+<noscript> Powered by <a href="#" target="_blank">AI ChatAssist</a></noscript>"""
     
     return JSONResponse({
         "website_id": website.id,

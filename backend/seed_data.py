@@ -15,7 +15,7 @@ def seed_database():
         existing_admin = db.query(User).filter_by(email="admin@chatassist.local").first()
         if not existing_admin:
             admin = User(
-                name="System Administrator",
+                name="Administrator",
                 email="admin@chatassist.local",
                 password_hash=get_password_hash("admin123"),
                 role=UserRole.SYSTEM_MANAGER,

@@ -3,6 +3,8 @@ from app.core.database import SessionLocal
 from app.services.agent_service import AgentService
 from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.core.logging import get_logger
+from app.core.ws_auth import authenticate_websocket, extract_token_from_query
+from app.models.user import UserRole
 import json
 import traceback
 
@@ -10,20 +12,38 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.websocket("/ws/agent/{website_id}/{agent_id}")
+@router.websocket("/ws/agent/{website_id}")
 async def agent_ws(
     websocket: WebSocket,
     website_id: int,
-    agent_id: int,
 ):
     await websocket.accept()
-    logger.info("agent_websocket_connected", agent_id=agent_id, website_id=website_id)
+    logger.info("agent_websocket_connection_attempt", website_id=website_id)
 
     db = SessionLocal()
-    agent_service = AgentService(db)
-    orchestrator = ConversationOrchestrator(db)
     
     try:
+        # Authenticate WebSocket connection - agent_id comes from JWT token
+        token = extract_token_from_query(websocket)
+        user = await authenticate_websocket(
+            websocket, 
+            db, 
+            token=token,
+            required_roles=[UserRole.AGENT, UserRole.ADMIN, UserRole.MANAGER]
+        )
+        
+        if not user:
+            # authenticate_websocket already sent error and closed connection
+            db.close()
+            return
+        
+        # Use agent_id from authenticated token, not URL
+        agent_id = user.id
+        logger.info("agent_websocket_authenticated", agent_id=agent_id, website_id=website_id, email=user.email)
+        
+        agent_service = AgentService(db)
+        orchestrator = ConversationOrchestrator(db)
+        
         # Register agent connection
         websocket_id = agent_service.register_agent(agent_id, website_id, websocket)
         logger.info("agent_registered", agent_id=agent_id, websocket_id=websocket_id, website_id=website_id)

@@ -72,9 +72,9 @@ function App() {
     let reconnectTimeout: NodeJS.Timeout | null = null
 
     const setupGlobalNotifications = () => {
-      // WebSocket for real-time notifications
-      const wsUrl = `ws://localhost:8000/ws/agent/0/${user.id}`
-      console.log('🔔 Setting up global notifications...')
+      // WebSocket for real-time notifications (authenticated via query param)
+      const wsUrl = `ws://localhost:8000/ws/agent/0?token=${encodeURIComponent(token)}`
+      console.log('🔔 Setting up global notifications (authenticated)...')
       
       const ws = new WebSocket(wsUrl)
       notificationSocketRef.current = ws

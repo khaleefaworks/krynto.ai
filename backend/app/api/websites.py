@@ -134,10 +134,6 @@ def update_website(
         if existing:
             raise HTTPException(status_code=400, detail="Domain already in use")
         website.domain = website_data.domain
-    if website_data.ai_instructions is not None:
-        website.ai_instructions = website_data.ai_instructions
-    if website_data.ai_enabled is not None:
-        website.ai_enabled = website_data.ai_enabled
     if website_data.widget_config is not None:
         website.widget_config = website_data.widget_config
     

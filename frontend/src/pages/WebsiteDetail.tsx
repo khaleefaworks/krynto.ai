@@ -7,14 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, UserPlus, Users, Code, Settings, Palette, Copy, Check } from 'lucide-react'
 
 interface Website {
   id: number
   name: string
   domain: string
-  ai_enabled: boolean
-  ai_instructions: string | null
+  widget_key?: string
   widget_config: {
     theme?: string
     position?: string
@@ -33,6 +32,8 @@ interface Website {
 type AgentWithName = AssignmentAgent & { name?: string }
 type WebsiteAgentWithName = WebsiteAgent & { name?: string }
 
+type TabType = 'installation' | 'settings' | 'widget' | 'agents'
+
 export default function WebsiteDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -41,19 +42,20 @@ export default function WebsiteDetail() {
   const websiteId = id && id !== 'new' ? parseInt(id) : null
   const canManageAssignments = isAdmin(user)
   
+  const [activeTab, setActiveTab] = useState<TabType>('installation')
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [assignmentError, setAssignmentError] = useState<string | null>(null)
   const [assignmentMessage, setAssignmentMessage] = useState<string | null>(null)
+  const [snippetCopied, setSnippetCopied] = useState(false)
+  const [widgetSnippet, setWidgetSnippet] = useState('')
 
   // Form data
   const [formData, setFormData] = useState({
     name: '',
     domain: '',
-    ai_enabled: true,
-    ai_instructions: '',
     widget_config: {
       theme: 'dark',
       position: 'bottom-right',
@@ -77,6 +79,7 @@ export default function WebsiteDetail() {
   useEffect(() => {
     if (!isNew && id) {
       loadWebsite()
+      loadSnippet()
     }
   }, [id, isNew])
 
@@ -86,6 +89,16 @@ export default function WebsiteDetail() {
     }
   }, [isNew, websiteId, canManageAssignments])
 
+  const loadSnippet = async () => {
+    if (!id) return
+    try {
+      const data = await apiRequest<{ snippet: string }>(`/widget/snippet/${id}`)
+      setWidgetSnippet(data.snippet)
+    } catch (err: any) {
+      console.error('Failed to load snippet:', err)
+    }
+  }
+
   const loadWebsite = async () => {
     try {
       setLoading(true)
@@ -94,19 +107,17 @@ export default function WebsiteDetail() {
       setFormData({
         name: data.name,
         domain: data.domain,
-        ai_enabled: data.ai_enabled,
+        widget_config: {
+          theme: data.widget_config?.theme || 'dark',
+          position: data.widget_config?.position || 'bottom-right',
+          welcome_message: data.widget_config?.welcome_message || 'Hi! How can we help you today?',
+          primary_color: data.widget_config?.primary_color || '#000000',
           header_title: data.widget_config?.header_title || 'How can we help?',
           online_status_text: data.widget_config?.online_status_text || 'We reply immediately',
           bubble_text: data.widget_config?.bubble_text || 'Chat',
           show_emoji_picker: data.widget_config?.show_emoji_picker !== undefined ? data.widget_config.show_emoji_picker : true,
           show_attachments: data.widget_config?.show_attachments || false,
           branding_text: data.widget_config?.branding_text || null,
-        ai_instructions: data.ai_instructions || '',
-        widget_config: {
-          theme: data.widget_config?.theme || 'dark',
-          position: data.widget_config?.position || 'bottom-right',
-          welcome_message: data.widget_config?.welcome_message || 'Hi! How can we help you today?',
-          primary_color: data.widget_config?.primary_color || '#000000',
         }
       })
     } catch (err: any) {
@@ -187,13 +198,20 @@ export default function WebsiteDetail() {
           body: JSON.stringify(formData),
         })
         setSuccessMessage('Website updated successfully')
-        loadWebsite()
+        await loadWebsite()
+        await loadSnippet()
       }
     } catch (err: any) {
       setError(err.message || 'Failed to save website')
     } finally {
       setSaving(false)
     }
+  }
+
+  const copySnippet = () => {
+    navigator.clipboard.writeText(widgetSnippet)
+    setSnippetCopied(true)
+    setTimeout(() => setSnippetCopied(false), 2000)
   }
 
   const handleDelete = async () => {
@@ -273,85 +291,163 @@ export default function WebsiteDetail() {
         </div>
       )}
 
+      {!isNew && (
+        <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('installation')}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'installation'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              <Code className="w-4 h-4 inline-block mr-2 mb-1" />
+              Installation
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'settings'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              <Settings className="w-4 h-4 inline-block mr-2 mb-1" />
+              Settings
+            </button>
+            <button
+              onClick={() => setActiveTab('widget')}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'widget'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              <Palette className="w-4 h-4 inline-block mr-2 mb-1" />
+              Widget Customization
+            </button>
+            {canManageAssignments && (
+              <button
+                onClick={() => setActiveTab('agents')}
+                className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'agents'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+              >
+                <Users className="w-4 h-4 inline-block mr-2 mb-1" />
+                Agent Assignments
+              </button>
+            )}
+          </nav>
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-6 max-w-4xl">
-        {/* Basic Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Globe className="w-5 h-5" />
-              Basic Information
-            </CardTitle>
-            <CardDescription>Website identification and domain</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Website Name *
-              </label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="My Website"
-                required
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                A friendly name to identify this website
-              </p>
-            </div>
+        {/* Installation Tab */}
+        {!isNew && activeTab === 'installation' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Code className="w-5 h-5" />
+                Installation
+              </CardTitle>
+              <CardDescription>Copy and paste this code into your website before the closing &lt;/body&gt; tag</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 relative">
+                <Button
+                  type="button"
+                  onClick={copySnippet}
+                  className="absolute top-2 right-2"
+                  variant="outline"
+                  size="sm"
+                >
+                  {snippetCopied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-1" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-1" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+                <pre className="text-sm overflow-x-auto text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap pr-24">
+                  {widgetSnippet || 'Loading...'}
+                </pre>
+              </div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                <p className="font-semibold">Installation Instructions:</p>
+                <ol className="list-decimal list-inside space-y-1 ml-2">
+                  <li>Copy the code above</li>
+                  <li>Paste it into your website's HTML before the closing &lt;/body&gt; tag</li>
+                  <li>The chat widget will automatically appear on your website</li>
+                  <li>Make sure at least one agent is assigned to this website</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Domain *
-              </label>
-              <Input
-                value={formData.domain}
-                onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-                placeholder="example.com"
-                required
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                The domain where the chat widget will be embedded
-              </p>
-            </div>
+        {/* Basic Settings Tab */}
+        {(isNew || activeTab === 'settings') && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="w-5 h-5" />
+                Basic Information
+              </CardTitle>
+              <CardDescription>Website identification and domain</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Website Name *
+                </label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="My Website"
+                  required
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  A friendly name to identify this website
+                </p>
+              </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="ai_enabled"
-                checked={formData.ai_enabled}
-                onChange={(e) => setFormData({ ...formData, ai_enabled: e.target.checked })}
-                className="w-4 h-4"
-              />
-              <label htmlFor="ai_enabled" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Enable AI Responses
-              </label>
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Domain *
+                </label>
+                <Input
+                  value={formData.domain}
+                  onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                  placeholder="example.com"
+                  required
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  The domain where the chat widget will be embedded
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                AI Instructions
-              </label>
-              <textarea
-                value={formData.ai_instructions}
-                onChange={(e) => setFormData({ ...formData, ai_instructions: e.target.value })}
-                placeholder="Instructions for the AI assistant..."
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Optional instructions to guide the AI's responses
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Widget Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Widget Configuration</CardTitle>
-            <CardDescription>Customize the chat widget appearance</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        {/* Widget Configuration Tab */}
+        {!isNew && activeTab === 'widget' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Palette className="w-5 h-5" />
+                Widget Customization
+              </CardTitle>
+              <CardDescription>Customize the chat widget appearance and behavior</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -538,9 +634,11 @@ export default function WebsiteDetail() {
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        )}
 
-        {!isNew && canManageAssignments && (
+        {/* Agent Assignments Tab */}
+        {!isNew && activeTab === 'agents' && canManageAssignments && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -601,7 +699,7 @@ export default function WebsiteDetail() {
                   <div className="space-y-3">
                     {websiteAgents.length === 0 ? (
                       <div className="p-4 border border-dashed border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-600 dark:text-gray-400">
-                        No agents assigned yet
+                        No agents assigned yet. Assign agents to handle chats on this website.
                       </div>
                     ) : (
                       websiteAgents.map((agent) => (

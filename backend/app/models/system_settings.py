@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Boolean
+from sqlalchemy import Column, Integer, Boolean, DateTime
 
 from app.core.database import Base
 
@@ -14,3 +14,4 @@ class SystemSettings(Base):
 
     id = Column(Integer, primary_key=True)
     is_initialized = Column(Boolean, default=False, nullable=False)
+    last_reset_at = Column(DateTime(timezone=True), nullable=True)
