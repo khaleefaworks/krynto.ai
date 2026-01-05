@@ -21,6 +21,9 @@ async def agent_ws(
     logger.info("agent_websocket_connection_attempt", website_id=website_id)
 
     db = SessionLocal()
+    agent_id = None
+    websocket_id = None
+    agent_service = None
     
     try:
         # Authenticate WebSocket connection - agent_id comes from JWT token
@@ -29,7 +32,7 @@ async def agent_ws(
             websocket, 
             db, 
             token=token,
-            required_roles=[UserRole.AGENT, UserRole.ADMIN, UserRole.MANAGER]
+            required_roles=[UserRole.AGENT, UserRole.SYSTEM_MANAGER, UserRole.MANAGER]
         )
         
         if not user:
@@ -123,11 +126,17 @@ async def agent_ws(
                 })
 
     except WebSocketDisconnect:
-        logger.info("agent_disconnected", agent_id=agent_id)
+        if agent_id:
+            logger.info("agent_disconnected", agent_id=agent_id)
     except Exception as e:
-        logger.error("agent_websocket_error", agent_id=agent_id, error=str(e), exc_info=True)
+        if agent_id:
+            logger.error("agent_websocket_error", agent_id=agent_id, error=str(e), exc_info=True)
+        else:
+            logger.error("agent_websocket_error_before_auth", website_id=website_id, error=str(e), exc_info=True)
         traceback.print_exc()
     finally:
-        agent_service.unregister_agent(websocket_id)
+        if agent_service and websocket_id:
+            agent_service.unregister_agent(websocket_id)
         db.close()
-        logger.info("agent_cleanup_complete", agent_id=agent_id)
+        if agent_id:
+            logger.info("agent_cleanup_complete", agent_id=agent_id)
