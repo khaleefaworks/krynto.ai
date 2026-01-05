@@ -4,6 +4,7 @@ from app.models.user import User, UserRole
 from app.models.website import Website
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.message_shortcut import MessageShortcut
+from app.models.system_settings import SystemSettings
 from app.core.security import get_password_hash
 
 def seed_database():
@@ -101,6 +102,23 @@ def seed_database():
         db.commit()
             
         print("\n✅ Database seeded successfully!")
+        
+        # Mark system as initialized
+        print("\n🔐 Marking system as initialized...")
+        existing_settings = db.query(SystemSettings).first()
+        if not existing_settings:
+            system_settings = SystemSettings(is_initialized=True)
+            db.add(system_settings)
+            db.commit()
+            print("✅ System marked as initialized")
+        else:
+            if not existing_settings.is_initialized:
+                existing_settings.is_initialized = True
+                db.commit()
+                print("✅ System marked as initialized")
+            else:
+                print("ℹ️  System already initialized")
+        
         print("\n📋 Login Credentials:")
         print("   Admin: admin@chatassist.local / admin123")
         print("   Agent: agent@test.com / agent123")
