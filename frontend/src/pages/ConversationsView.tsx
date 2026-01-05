@@ -169,9 +169,12 @@ export default function ConversationsView() {
 
         // Register message handler
         const removeHandler = addMessageHandler((data) => {
+            console.log('📩 WebSocket message received:', data)
+            
             // Only process messages for the current chat
             if (data.type === 'visitor_message' && data.conversation_id === selectedChat) {
                 // Visitor sent a message - add to UI
+                console.log('👤 Adding visitor message to UI:', data.message)
                 const newMessage = {
                     id: Date.now(),
                     conversation_id: selectedChat,
@@ -183,6 +186,7 @@ export default function ConversationsView() {
                 addMessage(newMessage)
             } else if (data.type === 'message_sent' && data.conversation_id === selectedChat) {
                 // Our message was confirmed - add to UI
+                console.log('✅ Agent message confirmed, adding to UI:', data.content)
                 const confirmedMessage = {
                     id: Date.now(),
                     conversation_id: selectedChat,

@@ -3,9 +3,11 @@ from app.models.agent_session import AgentSession
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
 from app.services.connection_manager import mark_connected, mark_disconnected
+from app.core.logging import get_logger
 from typing import Dict, Optional
 import uuid
 
+logger = get_logger(__name__)
 
 class AgentService:
     """Manages agent presence and message routing"""
@@ -72,10 +74,19 @@ class AgentService:
     
     async def send_to_agent(self, agent_id: int, message_data: dict):
         """Send message to specific agent's WebSocket"""
+        logger.info("send_to_agent_attempt", agent_id=agent_id, message_type=message_data.get("type"))
+        sent_count = 0
         for ws_id, agent_info in AgentService.active_agents.items():
             if agent_info["agent_id"] == agent_id:
-                await agent_info["websocket"].send_json(message_data)
-                break
+                try:
+                    await agent_info["websocket"].send_json(message_data)
+                    sent_count += 1
+                    logger.info("send_to_agent_success", agent_id=agent_id, ws_id=ws_id, website_id=agent_info.get("website_id"))
+                except Exception as e:
+                    logger.error("send_to_agent_failed", agent_id=agent_id, ws_id=ws_id, error=str(e))
+        
+        if sent_count == 0:
+            logger.warning("send_to_agent_no_connections", agent_id=agent_id, message_type=message_data.get("type"))
     
     async def notify_agent_assignment(self, agent_id: int, conversation_id: int):
         """Notify agent of new chat assignment"""

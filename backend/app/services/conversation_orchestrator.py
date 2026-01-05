@@ -25,7 +25,7 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 from app.models.conversation import Conversation, ConversationStatus
-from app.models.agent_website_assignment import AgentWebsiteAssignment
+
 from app.models.user import User
 from app.core.logging import get_logger
 
@@ -75,6 +75,10 @@ class ConversationOrchestrator:
 
         # If an agent owns the conversation, forward to that agent
         if conversation.assigned_agent_id:
+            logger.info("forwarding_visitor_message", 
+                       conversation_id=conversation.id, 
+                       assigned_agent_id=conversation.assigned_agent_id,
+                       message_length=len(message))
             await self.agent_service.send_to_agent(
                 conversation.assigned_agent_id,
                 {
@@ -136,20 +140,11 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
-        # Enforce eligibility for this website (assignment + active + available)
-        assignment = (
-            self.db.query(AgentWebsiteAssignment)
-            .filter(
-                AgentWebsiteAssignment.agent_id == agent_id,
-                AgentWebsiteAssignment.website_id == conversation.website_id,
-            )
-            .first()
-        )
-
+        # Simplified: Any active user can join any chat
         user = self.db.query(User).filter(User.id == agent_id).first()
 
-        if not assignment or not user or not user.is_active or not user.is_available:
-            return {"error": "Agent not eligible or not available for this website"}
+        if not user or not user.is_active:
+            return {"error": "User not found or inactive"}
 
         # Enforce single owner
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
@@ -205,14 +200,19 @@ class ConversationOrchestrator:
         if not saved:
             return {"error": "Unable to add message"}
 
+        logger.info("agent_message_saved", conversation_id=conversation_id, agent_id=agent_id, content_length=len(content))
+        
         chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
         if chat_service:
+            logger.info("sending_agent_message_to_visitor", conversation_id=conversation_id)
             await chat_service.send_to_visitor(
                 {
                     "type": "agent",
                     "message": content,
                 }
             )
+        else:
+            logger.warning("no_visitor_socket", conversation_id=conversation_id)
 
         return {"success": True}
 
