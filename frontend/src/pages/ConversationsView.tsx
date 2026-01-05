@@ -158,11 +158,9 @@ export default function ConversationsView() {
 
     // Scroll to bottom on new messages - use Layout effect for immediate scroll
     useLayoutEffect(() => {
-        // Wait for DOM to update, then scroll
-        requestAnimationFrame(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-        })
-    }, [messages])
+        // Scroll immediately to bottom (no smooth animation to avoid delay)
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    }, [messages, selectedChat])
 
     const fetchActiveChats = async () => {
         setLoading(true)
@@ -184,10 +182,13 @@ export default function ConversationsView() {
             const chatMessages = await fetchChatMessages(chatId.toString())
             addMessages(chatMessages)
 
-            if (!joinedRef.current && user?.id) {
+            // Only join if we haven't joined this specific chat yet
+            const chatData = activeChats.find(c => c.id === chatId)
+            const alreadyJoined = chatData?.assigned_agent_id === user?.id
+            
+            if (!joinedRef.current && user?.id && !alreadyJoined) {
                 const joined = await joinChat(chatId.toString())
                 if (joined) {
-                    const chatData = activeChats.find(c => c.id === chatId)
                     if (chatData) {
                         const socket = connectAgentSocket(chatData.website_id, user.id)
                         
@@ -218,12 +219,51 @@ export default function ConversationsView() {
                                     created_at: new Date().toISOString()
                                 }
                                 addMessage(confirmedMessage)
+                            } else if (data.type === 'new_conversation') {
+                                // New conversation arrived - refresh chat list
+                                console.log('📨 New conversation arrived, refreshing...')
+                                fetchActiveChats()
                             }
                         }
                         
                         joinedRef.current = true
                     }
                 }
+            } else if (alreadyJoined && user?.id && chatData) {
+                // Already joined, just connect socket without sending join request
+                const socket = connectAgentSocket(chatData.website_id, user.id)
+                        
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data)
+                    console.log('📨 WebSocket message received:', data)
+                    
+                    if (data.type === 'visitor_message' && data.conversation_id === chatId) {
+                        const newMessage = {
+                            id: Date.now(),
+                            conversation_id: chatId,
+                            sender_type: 'visitor' as const,
+                            sender: 'visitor',
+                            content: data.message,
+                            created_at: new Date().toISOString()
+                        }
+                        addMessage(newMessage)
+                    } else if (data.type === 'message_sent' && data.conversation_id === chatId) {
+                        const confirmedMessage = {
+                            id: Date.now(),
+                            conversation_id: chatId,
+                            sender_type: 'agent' as const,
+                            sender: user.email || 'agent',
+                            content: data.content,
+                            created_at: new Date().toISOString()
+                        }
+                        addMessage(confirmedMessage)
+                    } else if (data.type === 'new_conversation') {
+                        console.log('📨 New conversation arrived, refreshing...')
+                        fetchActiveChats()
+                    }
+                }
+                        
+                joinedRef.current = true
             }
         } catch (error) {
             console.error("Failed to load chat:", error)

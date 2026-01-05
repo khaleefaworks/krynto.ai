@@ -20,6 +20,11 @@ from app.services.chat_service import ChatService
 from app.services.website_resolver import is_website_online, get_eligible_agents_for_website
 from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
+from app.models.message import Message
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+from app.models.conversation import Conversation, ConversationStatus
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.user import User
 from app.core.logging import get_logger
