@@ -117,28 +117,26 @@
   </div>
 
   <!-- Chat Widget Script -->
-  <!-- This script tag will be replaced with actual snippet from your website settings -->
-  <!-- For now, it uses a placeholder. Run seed_data.py to get the actual widget_key -->
+  <!-- Demo widget loader - uses the test website created by seed_data.py -->
   <script>
-    // Placeholder: In production, this would be the unique snippet from /widget/snippet/{website_id}
-    // For demo purposes, we'll fetch website ID 1's loader dynamically
     (function() {
-      fetch('http://localhost:8000/websites/1')
-        .then(res => res.json())
-        .then(website => {
-          if (website.widget_key) {
-            const script = document.createElement('script');
-            script.src = `http://localhost:8000/widget/loader.js?key=${website.widget_key}`;
-            script.async = true;
-            document.body.appendChild(script);
-          } else {
-            console.error('No widget_key found for website');
-          }
-        })
-        .catch(err => {
-          console.error('Failed to load widget:', err);
-          console.log('Make sure to run: python seed_data.py');
-        });
+      // This is the widget_key from the seeded Example Website (domain: example.com)
+      // If you reset the database, run this to get the new key:
+      // cd backend && python -c "from app.core.database import SessionLocal; from app.models.website import Website; db = SessionLocal(); w = db.query(Website).first(); print(w.widget_key); db.close()"
+      
+      var DEMO_WIDGET_KEY = 'f6b2115d1e3b9158ff953b71951fddd93fffae41142c74c2409f8c5f7342dca9';
+      
+      // Load the widget
+      var script = document.createElement('script');
+      script.src = 'http://localhost:8000/widget/loader.js?key=' + DEMO_WIDGET_KEY;
+      script.async = true;
+      script.onerror = function() {
+        console.error('Failed to load widget. Make sure:');
+        console.error('1. Backend is running (./start_server.sh)');
+        console.error('2. Database is seeded (./reset_application.py or python seed_data.py)');
+        console.error('3. Widget key matches the database value');
+      };
+      document.body.appendChild(script);
     })();
   </script>
 </body>

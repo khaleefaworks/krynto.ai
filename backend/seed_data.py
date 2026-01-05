@@ -52,7 +52,8 @@ def seed_database():
         if not existing_website:
             website = Website(
                 name="Example Website",
-                domain="example.com"
+                domain="example.com",
+                widget_key="f6b2115d1e3b9158ff953b71951fddd93fffae41142c74c2409f8c5f7342dca9"  # Fixed test key for demo.html
             )
             db.add(website)
             db.commit()
