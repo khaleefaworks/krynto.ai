@@ -34,7 +34,7 @@ export default function Settings() {
                   }`}
                 >
                   <Globe className="h-4 w-4" />
-                  Manage Websites
+                  Websites
                 </Link>
                 <Link
                   to="/dashboard/settings/agents"
@@ -45,7 +45,7 @@ export default function Settings() {
                   }`}
                 >
                   <Users className="h-4 w-4" />
-                  Manage Users
+                  Users
                 </Link>
                 <div className="mb-4" />
               </>
@@ -64,7 +64,7 @@ export default function Settings() {
               }`}
             >
               <UserIcon className="h-4 w-4" />
-              Profile & Availability
+              Profile
             </Link>
           </div>
         </nav>

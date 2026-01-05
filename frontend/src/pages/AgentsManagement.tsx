@@ -103,8 +103,8 @@ export default function AgentsManagement() {
   if (loading) {
     return (
       <div className="p-8">
-        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Manage Agents</h1>
-        <p className="text-gray-600 dark:text-gray-400">Loading agents...</p>
+        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Users</h1>
+        <p className="text-gray-600 dark:text-gray-400">Loading users...</p>
       </div>
     )
   }
@@ -113,15 +113,15 @@ export default function AgentsManagement() {
     <div className="p-8">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Manage Agents</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Users</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Create and manage agent accounts who can handle customer chats
+            Manage user accounts and roles
           </p>
         </div>
         {!showCreateForm && (
           <Button onClick={() => setShowCreateForm(true)}>
             <UserPlus className="h-4 w-4 mr-2" />
-            Add Agent
+            Add User
           </Button>
         )}
       </div>
@@ -141,7 +141,7 @@ export default function AgentsManagement() {
       {/* Create Form */}
       {showCreateForm && (
         <Card className="p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Create New Agent</h2>
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Create New User</h2>
           <form onSubmit={handleCreate}>
             <div className="space-y-4">
               <div>
@@ -189,7 +189,7 @@ export default function AgentsManagement() {
 
               <div className="flex gap-2">
                 <Button type="submit">
-                  Create Agent
+                  Create User
                 </Button>
                 <Button 
                   type="button" 
@@ -207,27 +207,46 @@ export default function AgentsManagement() {
         </Card>
       )}
 
-      {/* Agents List */}
-      <div className="space-y-4">
+      {/* Users Table */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
         {agents.length === 0 ? (
-          <Card className="p-8 text-center">
+          <div className="p-8 text-center">
             <div className="text-gray-400 dark:text-gray-600 mb-2">
               <UserPlus className="h-12 w-12 mx-auto mb-3" />
             </div>
-            <p className="text-gray-600 dark:text-gray-400">No agents yet</p>
+            <p className="text-gray-600 dark:text-gray-400">No users yet</p>
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-              Create your first agent to start handling customer chats
+              Create your first user to start handling customer chats
             </p>
-          </Card>
+          </div>
         ) : (
-          agents.map((agent) => (
-            <Card key={agent.id} className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      {agent.name}
-                    </h3>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 dark:border-gray-700">
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  User
+                </th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Email
+                </th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map((agent) => (
+                <tr
+                  key={agent.id}
+                  className="border-b border-gray-200 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                >
+                  <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+                    {agent.name}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                    {agent.email}
+                  </td>
+                  <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs rounded-full ${
                       agent.is_active 
                         ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
@@ -235,41 +254,11 @@ export default function AgentsManagement() {
                     }`}>
                       {agent.is_active ? "Active" : "Inactive"}
                     </span>
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      agent.is_available 
-                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300"
-                        : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300"
-                    }`}>
-                      {agent.is_available ? "Available" : "Unavailable"}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{agent.email}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                    Created: {new Date(agent.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleToggleActive(agent)}
-                    title={agent.is_active ? "Deactivate agent" : "Activate agent"}
-                  >
-                    {agent.is_active ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(agent)}
-                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                    title="Delete agent"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

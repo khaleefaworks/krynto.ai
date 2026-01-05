@@ -184,7 +184,7 @@ export default function PersonalSettings() {
     <div className="p-8">
       <div className="max-w-2xl">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Personal Settings</h1>
-        <p className="text-gray-600 dark:text-gray-400 mb-8">Manage your profile and availability</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-8">Manage your profile information</p>
 
         {message && (
           <div className={`mb-6 p-4 rounded-md ${
@@ -269,46 +269,6 @@ export default function PersonalSettings() {
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
               <p className="mt-1 text-gray-900 dark:text-white capitalize">
                 {user?.role === 'system_manager' ? 'System Manager' : user?.role === 'manager' ? 'Manager' : 'Agent'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Availability</CardTitle>
-            <CardDescription>
-              Control whether you can receive new chat assignments
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="font-medium">
-                  Current Status: {' '}
-                  <span className={user?.is_available ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}>
-                    {user?.is_available ? 'Available' : 'Unavailable'}
-                  </span>
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {user?.is_available 
-                    ? 'You can receive new chat assignments'
-                    : 'You will not receive new chat assignments'}
-                </p>
-              </div>
-              <Button
-                onClick={handleToggleAvailability}
-                disabled={loading}
-                variant={user?.is_available ? 'outline' : 'default'}
-              >
-                {loading ? 'Updating...' : user?.is_available ? 'Set Unavailable' : 'Set Available'}
-              </Button>
-            </div>
-
-            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
-              <p className="text-sm text-blue-800 dark:text-blue-300">
-                <strong>Note:</strong> To receive chats, you must be both <strong>available</strong> (this toggle) 
-                and <strong>connected</strong> (logged in with active WebSocket).
               </p>
             </div>
           </CardContent>

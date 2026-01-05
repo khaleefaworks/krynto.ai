@@ -204,7 +204,7 @@ export default function WebsiteManagement() {
   if (loading) {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Website Management</h1>
+        <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Websites</h1>
         <p className="text-gray-600 dark:text-gray-400">Loading websites...</p>
       </div>
     );
@@ -213,7 +213,12 @@ export default function WebsiteManagement() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Website Management</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Websites</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            Manage your website integrations and chat widget configurations
+          </p>
+        </div>
         {!showCreateForm && !editingWebsite && !editingWidgetConfig && !managingAgents && (
           <Button onClick={() => setShowCreateForm(true)}>
             Add Website
@@ -561,65 +566,41 @@ export default function WebsiteManagement() {
         </Card>
       )}
 
-      {/* Websites List */}
-      <div className="space-y-4">
+      {/* Websites Table */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
         {websites.length === 0 ? (
-          <p className="text-gray-600">
+          <p className="p-6 text-gray-600 dark:text-gray-400 text-center">
             No websites yet. Click "Add Website" to create your first website.
           </p>
         ) : (
-          websites.map((website) => (
-            <Card key={website.id} className="p-6">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold">{website.name}</h3>
-                  <p className="text-gray-600 mt-1">
-                    <span className="font-medium">Domain:</span> {website.domain}
-                  </p>
-                  {website.ai_instructions && (
-                    <p className="text-gray-600 mt-2 text-sm">
-                      <span className="font-medium">AI Instructions:</span>{' '}
-                      {website.ai_instructions}
-                    </p>
-                  )}
-                  <p className="text-xs text-gray-400 mt-2">
-                    Created: {new Date(website.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex gap-2 ml-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => startEdit(website)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => startEditWidgetConfig(website.id)}
-                  >
-                    Widget Config
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => startManageAgents(website.id)}
-                  >
-                    Manage Agents
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(website.id)}
-                    className="text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 dark:border-gray-700">
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Website
+                </th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Domain
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {websites.map((website) => (
+                <tr
+                  key={website.id}
+                  onClick={() => startEdit(website)}
+                  className="border-b border-gray-200 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                >
+                  <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+                    {website.name}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                    {website.domain}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
