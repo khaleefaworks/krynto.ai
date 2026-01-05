@@ -1,23 +1,33 @@
 /**
  * AI ChatAssist - Visitor Chat Widget
  * Vanilla JavaScript WebSocket-based chat widget
- * Embeddable via <script> tag
+ * Loaded dynamically via loader.js with website-specific configuration
  */
 
 (function() {
   'use strict';
 
-  // Widget configuration
+  // Get configuration from loader (set by loader.js)
+  var globalConfig = window._aichatassist || {};
+  
+  // Widget configuration - populated from global config
   const CONFIG = {
-    websiteId: null,
+    websiteId: globalConfig.websiteId || null,
+    widgetKey: globalConfig.widgetKey || null,
     sessionId: null,
-    wsUrl: null,
-    apiUrl: null,
-    theme: 'dark',
-    position: 'bottom-right',
-    welcomeMessage: 'Hi! How can we help you today?',
-    primaryColor: '#000000'
+    wsUrl: globalConfig.wsUrl || 'ws://localhost:8000',
+    apiUrl: globalConfig.apiUrl || 'http://localhost:8000',
+    theme: globalConfig.theme || 'dark',
+    position: globalConfig.position || 'bottom-right',
+    welcomeMessage: globalConfig.welcomeMessage || 'Hi! How can we help you today?',
+    primaryColor: globalConfig.primaryColor || '#000000'
   };
+  
+  // Validate required config
+  if (!CONFIG.websiteId || !CONFIG.widgetKey) {
+    console.error('[ChatWidget] Missing required configuration: websiteId or widgetKey');
+    return;
+  }
 
   // WebSocket connection
   let ws = null;
@@ -364,27 +374,17 @@
    * Initialize the chat widget
    */
   async function init() {
-    // Get configuration from script tag
-    const scriptTag = document.currentScript || document.querySelector('script[data-website-id]');
+    console.log('[ChatWidget] Initializing with config:', CONFIG);
     
-    if (!scriptTag) {
-      console.error('[ChatWidget] Script tag not found. Cannot initialize.');
-      return;
-    }
-
-    CONFIG.websiteId = scriptTag.getAttribute('data-website-id');
-    CONFIG.wsUrl = scriptTag.getAttribute('data-ws-url') || 'ws://localhost:8000';
-    CONFIG.apiUrl = scriptTag.getAttribute('data-api-url') || 'http://localhost:8000';
-
+    // Configuration already set by loader.js, just validate
     if (!CONFIG.websiteId) {
-      console.error('[ChatWidget] data-website-id is required');
+      console.error('[ChatWidget] Missing websiteId in configuration');
       return;
     }
-
-    // Get or create session ID
-    CONFIG.sessionId = getSessionId();
     
-    console.log('[ChatWidget] Initializing with website ID:', CONFIG.websiteId);
+    // Initialize session ID
+    CONFIG.sessionId = getSessionId();
+    console.log('[ChatWidget] Session ID:', CONFIG.sessionId);
 
     // STEP 1: Check if system is initialized
     const systemInitialized = await checkSystemStatus();

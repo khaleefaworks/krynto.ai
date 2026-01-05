@@ -14,14 +14,11 @@ router = APIRouter(prefix="/websites", tags=["websites"])
 class WebsiteCreate(BaseModel):
     name: str
     domain: str
-    ai_instructions: Optional[str] = None
 
 
 class WebsiteUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
-    ai_instructions: Optional[str] = None
-    ai_enabled: Optional[bool] = None
     widget_config: Optional[dict] = None
 
 
@@ -29,8 +26,7 @@ class WebsiteResponse(BaseModel):
     id: int
     name: str
     domain: str
-    ai_instructions: Optional[str]
-    ai_enabled: bool
+    widget_key: str
     widget_config: Optional[dict]
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -70,7 +66,8 @@ def create_website(
 ):
     """
     Create a new website.
-    Requires admin access (FULL_ACCESS role).
+    Requires admin access (SYSTEM_MANAGER or MANAGER role).
+    Widget key is automatically generated.
     """
     # Check if domain already exists
     existing = db.query(Website).filter_by(domain=website_data.domain).first()
@@ -80,7 +77,6 @@ def create_website(
     website = Website(
         name=website_data.name,
         domain=website_data.domain,
-        ai_instructions=website_data.ai_instructions,
         widget_config={}  # Initialize with empty config
     )
     db.add(website)
