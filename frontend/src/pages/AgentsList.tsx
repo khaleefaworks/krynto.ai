@@ -101,16 +101,7 @@ export default function AgentsList() {
                   Email
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Role
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Availability
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Actions
                 </th>
               </tr>
             </thead>
@@ -132,15 +123,9 @@ export default function AgentsList() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                      <Mail className="w-4 h-4" />
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
                       {agent.email}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <Badge variant={agent.role === 'system_manager' ? 'default' : 'secondary'}>
-                      {agent.role === 'system_manager' ? 'System Manager' : agent.role === 'manager' ? 'Manager' : 'Agent'}
-                    </Badge>
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <Badge variant={agent.is_active ? 'default' : 'destructive'} className="gap-1">
@@ -156,27 +141,6 @@ export default function AgentsList() {
                         </>
                       )}
                     </Badge>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {agent.is_active ? (
-                      <Badge variant={agent.is_available ? 'default' : 'secondary'}>
-                        {agent.is_available ? 'Available' : 'Unavailable'}
-                      </Badge>
-                    ) : (
-                      <span className="text-sm text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleRowClick(agent.id)
-                      }}
-                    >
-                      Manage
-                    </Button>
                   </td>
                 </tr>
               ))}

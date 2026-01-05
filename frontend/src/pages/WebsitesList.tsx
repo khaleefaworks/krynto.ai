@@ -102,18 +102,6 @@ export default function WebsitesList() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Domain
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  AI Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Widget
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -142,35 +130,6 @@ export default function WebsitesList() {
                       {website.domain}
                       <ExternalLink className="w-3 h-3" />
                     </a>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <Badge variant={website.ai_enabled ? 'default' : 'secondary'}>
-                      {website.ai_enabled ? 'Enabled' : 'Disabled'}
-                    </Badge>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {website.widget_config ? (
-                      <span className="text-sm text-green-600 dark:text-green-400">Configured</span>
-                    ) : (
-                      <span className="text-sm text-gray-400">Not configured</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {new Date(website.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleRowClick(website.id)
-                      }}
-                      className="gap-1"
-                    >
-                      <Settings className="w-4 h-4" />
-                      Configure
-                    </Button>
                   </td>
                 </tr>
               ))}
