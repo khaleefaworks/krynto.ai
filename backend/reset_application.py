@@ -20,6 +20,7 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.system_settings import SystemSettings
 from app.models.agent_website_assignment import AgentWebsiteAssignment
+from seed_data import seed_database
 
 def confirm_reset():
     """Ask for confirmation before resetting"""
@@ -64,37 +65,14 @@ def reset_database():
         db.commit()
         print("\n✅ Database reset successfully!")
         
-        # Create demo website for widget testing with ID=1
-        print("\n📦 Creating demo website...")
-        demo_website = Website(
-            id=1,  # Explicitly set ID to 1 for demo consistency
-            name="Demo Website",
-            domain="demo.local",
-            widget_config={
-                "theme": "dark",
-                "position": "bottom-right",
-                "primaryColor": "#000000"
-            }
-        )
-        db.add(demo_website)
-        db.commit()
+        # Seed database with test data
+        print("\n📦 Seeding database with test data...")
+        seed_database()
         
-        # Reset the sequence for the websites table
-        from sqlalchemy import text
-        db.execute(text("SELECT setval('websites_id_seq', (SELECT MAX(id) FROM websites));"))
-        db.commit()
-        
-        db.refresh(demo_website)
-        
-        print(f"   ✅ Demo website created with ID: {demo_website.id}")
-        print(f"   - Name: {demo_website.name}")
-        print(f"   - Domain: {demo_website.domain}")
-        
-        print("\n🎉 System is now in fresh state.")
+        print("\n🎉 System is now ready!")
         print("\n📍 Next Steps:")
-        print("   1. Navigate to http://localhost:5173 to see the onboarding screen")
-        print(f"   2. Widget demo: http://localhost:8080/demo.html")
-        print(f"      → Refresh the page if already open to reconnect to website_id={demo_website.id}")
+        print("   1. Navigate to http://localhost:5173 to login")
+        print("   2. Widget demo: http://localhost:8080/demo.html")
         
     except Exception as e:
         print(f"\n❌ Error during reset: {e}")

@@ -56,14 +56,14 @@
       <h3 style="margin-top: 0; color: #92400e;">⚠️ Important: Setup Required</h3>
       <p style="color: #92400e; margin-bottom: 10px;"><strong>Before the chat widget will work, you must:</strong></p>
       <ol style="color: #92400e; margin: 0; padding-left: 20px;">
-        <li>Complete onboarding at <a href="http://localhost:5173/login" target="_blank" style="color: #1e40af;">localhost:5173/login</a></li>
-        <li>Create a website in <strong>Dashboard → Settings → Websites</strong></li>
-        <li>Note the website ID (shown in the URL or website list)</li>
-        <li>Update the embed code below with your actual website ID</li>
+        <li>Run <code>./reset_application.py</code> or <code>python seed_data.py</code> to create test data</li>
+        <li>Or complete onboarding at <a href="http://localhost:5173" target="_blank" style="color: #1e40af;">localhost:5173</a></li>
+        <li>Get your website's embed snippet from Dashboard → Settings → Websites</li>
+        <li>The widget uses a unique widget_key for security</li>
       </ol>
       <p style="color: #92400e; margin-top: 10px; margin-bottom: 0;">
-        <strong>Current widget is configured for website ID: 1</strong><br>
-        If no website with ID=1 exists, the widget will not appear on this page.
+        <strong>This demo page uses a test widget_key that works with seed_data.py</strong><br>
+        If you haven't run the seed script, the widget won't load.
       </p>
     </div>
     
@@ -74,9 +74,9 @@
     
     <div class="config-info">
       <strong>Configuration:</strong>
-      data-website-id="1"<br>
-      data-ws-url="ws://localhost:8000"<br>
-      data-api-url="http://localhost:8000"
+      Using widget loader with unique widget_key<br>
+      Backend: http://localhost:8000<br>
+      WebSocket: ws://localhost:8000
     </div>
     
     <h2>How to Test:</h2>
@@ -117,13 +117,29 @@
   </div>
 
   <!-- Chat Widget Script -->
-  <!-- Note: website_id=1 is the default demo website -->
-  <!-- After making changes to widget, do a hard refresh (Ctrl+Shift+R) to clear cache -->
-  <script 
-    src="chat-widget.js?v=3" 
-    data-website-id="1"
-    data-ws-url="ws://localhost:8000"
-    data-api-url="http://localhost:8000">
+  <!-- This script tag will be replaced with actual snippet from your website settings -->
+  <!-- For now, it uses a placeholder. Run seed_data.py to get the actual widget_key -->
+  <script>
+    // Placeholder: In production, this would be the unique snippet from /widget/snippet/{website_id}
+    // For demo purposes, we'll fetch website ID 1's loader dynamically
+    (function() {
+      fetch('http://localhost:8000/websites/1')
+        .then(res => res.json())
+        .then(website => {
+          if (website.widget_key) {
+            const script = document.createElement('script');
+            script.src = `http://localhost:8000/widget/loader.js?key=${website.widget_key}`;
+            script.async = true;
+            document.body.appendChild(script);
+          } else {
+            console.error('No widget_key found for website');
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load widget:', err);
+          console.log('Make sure to run: python seed_data.py');
+        });
+    })();
   </script>
 </body>
 </html>
