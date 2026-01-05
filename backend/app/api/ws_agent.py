@@ -101,11 +101,19 @@ async def agent_ws(
             elif message_type == "message":
                 conversation_id = payload.get("conversation_id")
                 content = payload.get("content")
+                message_id = payload.get("message_id")  # Extract message ID for acknowledgment
 
                 if not content or not conversation_id:
                     continue
 
-                logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content))
+                # Send acknowledgment immediately
+                if message_id:
+                    await websocket.send_json({
+                        "type": "ack",
+                        "message_id": message_id
+                    })
+
+                logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content), message_id=message_id)
 
                 result = await orchestrator.handle_agent_message(
                     conversation_id=conversation_id,
