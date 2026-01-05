@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.agent_session import AgentSession
-from app.models.conversation import Conversation, ConversationMode
+from app.models.conversation import Conversation, ConversationMode, ConversationStatus
 from app.models.message import Message
 from app.services.connection_manager import mark_connected, mark_disconnected
 from typing import Dict, Optional

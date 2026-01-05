@@ -20,9 +20,6 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.system_settings import SystemSettings
 from app.models.agent_website_assignment import AgentWebsiteAssignment
-from app.models.knowledge_source import KnowledgeSource
-from app.models.document import Document
-from app.models.knowledge_chunk import KnowledgeChunk
 
 def confirm_reset():
     """Ask for confirmation before resetting"""
@@ -30,7 +27,6 @@ def confirm_reset():
     print("   - All users")
     print("   - All websites")
     print("   - All conversations and messages")
-    print("   - All knowledge bases")
     print("   - System settings (will trigger onboarding)")
     print()
     response = input("Are you sure you want to continue? Type 'YES' to confirm: ")
@@ -53,15 +49,6 @@ def reset_database():
         print("  Deleting conversations...")
         db.query(Conversation).delete()
         
-        print("  Deleting knowledge chunks...")
-        db.query(KnowledgeChunk).delete()
-        
-        print("  Deleting documents...")
-        db.query(Document).delete()
-        
-        print("  Deleting knowledge sources...")
-        db.query(KnowledgeSource).delete()
-        
         print("  Deleting agent assignments...")
         db.query(AgentWebsiteAssignment).delete()
         
@@ -83,8 +70,6 @@ def reset_database():
             id=1,  # Explicitly set ID to 1 for demo consistency
             name="Demo Website",
             domain="demo.local",
-            ai_instructions="You are a helpful customer support assistant.",
-            ai_enabled=True,
             widget_config={
                 "theme": "dark",
                 "position": "bottom-right",

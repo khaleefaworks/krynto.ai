@@ -17,6 +17,7 @@ from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
 from app.api.system import router as system_router
 from app.api.conversation_metadata import router as conversation_metadata_router
+from app.api.shortcuts import router as shortcuts_router
 from app import models  # Import models to register them with SQLAlchemy
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -66,6 +67,7 @@ app.include_router(conversations_router)
 app.include_router(conversation_metadata_router)
 app.include_router(websites_router)
 app.include_router(agent_assignments_router)
+app.include_router(shortcuts_router)
 
 # Serve widget files statically
 app.mount("/widget", StaticFiles(directory="../widget"), name="widget")

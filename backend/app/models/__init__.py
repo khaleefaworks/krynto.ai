@@ -9,6 +9,7 @@ from app.models.agent_session import AgentSession
 from app.models.conversation_tag import ConversationTag
 from app.models.conversation_note import ConversationNote
 from app.models.agent_website_assignment import AgentWebsiteAssignment
+from app.models.message_shortcut import MessageShortcut
 
 __all__ = [
     "Website",
@@ -24,4 +25,5 @@ __all__ = [
     "ConversationTag",
     "ConversationNote",
     "AgentWebsiteAssignment",
+    "MessageShortcut",
 ]
