@@ -1,7 +1,6 @@
 """Models package."""
 
 from app.models.website import Website
-from app.models.agent import Agent
 from app.models.user import User, UserRole
 from app.models.system_settings import SystemSettings
 from app.models.conversation import Conversation
@@ -15,7 +14,6 @@ from app.models.conversation_note import ConversationNote
 
 __all__ = [
     "Website",
-    "Agent",
     "User",
     "UserRole",
     "SystemSettings",

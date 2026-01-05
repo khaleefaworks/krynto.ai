@@ -76,7 +76,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
     
     This endpoint:
     - Only works ONCE on a fresh installation
-    - Creates Administrator user with FULL_ACCESS role
+    - Creates Administrator user with SYSTEM_MANAGER role
     - Marks the system as initialized
     - Gets disabled forever after first use
     
@@ -114,7 +114,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
             name=admin_name,
             email=admin_email,
             password_hash=get_password_hash(bootstrap_request.password),
-            role=UserRole.FULL_ACCESS,
+            role=UserRole.SYSTEM_MANAGER,
             is_active=True,
             is_available=True
         )
@@ -146,7 +146,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
 async def login(request: Request, login_request: LoginRequest, db: Session = Depends(get_db)):
     """
     User login endpoint with JWT authentication.
-    Works for both Admins (FULL_ACCESS) and Agents (LIMITED_ACCESS).
+    Works for all user roles (SYSTEM_MANAGER, MANAGER, AGENT).
     Special case: 'Administrator' username maps to system admin email.
     """
     # Block login if system not initialized

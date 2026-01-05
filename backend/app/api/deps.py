@@ -55,7 +55,7 @@ def require_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """
-    Require admin privileges (FULL_ACCESS or MANAGER role).
+    Require admin privileges (SYSTEM_MANAGER or MANAGER role).
     Used for protected admin endpoints.
     Managers can access all admin features except reset application.
     """
@@ -71,7 +71,7 @@ def require_administrator(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """
-    Require administrator (FULL_ACCESS only) role.
+    Require administrator (SYSTEM_MANAGER only) role.
     Used for critical operations like reset application.
     """
     if not current_user.is_administrator():

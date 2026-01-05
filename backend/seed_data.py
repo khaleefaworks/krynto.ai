@@ -1,18 +1,40 @@
 """Seed database with initial test data"""
 from app.core.database import SessionLocal
-from app.models.agent import Agent
+from app.models.user import User, UserRole
 from app.models.website import Website
+from app.core.security import get_password_hash
 
 def seed_database():
     db = SessionLocal()
     
     try:
-        # Check if agent already exists
-        existing_agent = db.query(Agent).filter_by(email="agent@test.com").first()
+        # Check if system manager already exists
+        existing_admin = db.query(User).filter_by(email="admin@chatassist.local").first()
+        if not existing_admin:
+            admin = User(
+                name="System Administrator",
+                email="admin@chatassist.local",
+                password_hash=get_password_hash("admin123"),
+                role=UserRole.SYSTEM_MANAGER,
+                is_active=True,
+                is_available=True
+            )
+            db.add(admin)
+            db.commit()
+            print(f"✅ Created admin: {admin.email} (ID: {admin.id})")
+        else:
+            print(f"ℹ️  Admin already exists: {existing_admin.email} (ID: {existing_admin.id})")
+        
+        # Check if test agent exists
+        existing_agent = db.query(User).filter_by(email="agent@test.com").first()
         if not existing_agent:
-            agent = Agent(
+            agent = User(
+                name="Test Agent",
                 email="agent@test.com",
-                is_active=True
+                password_hash=get_password_hash("agent123"),
+                role=UserRole.AGENT,
+                is_active=True,
+                is_available=True
             )
             db.add(agent)
             db.commit()

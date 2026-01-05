@@ -29,7 +29,7 @@ fileConfig(config.config_file_name)
 # Add your model's MetaData object here for 'autogenerate' support
 from app.core.database import Base  # noqa: E402
 # Import all models to ensure they're registered with Base.metadata
-from app.models import website, agent, conversation, message  # noqa: E402
+from app.models import website, user, conversation, message  # noqa: E402
 
 target_metadata = Base.metadata
 

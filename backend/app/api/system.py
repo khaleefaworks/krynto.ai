@@ -23,7 +23,7 @@ async def reset_application(
     - Runs all migrations
     - Seeds initial data
     
-    **ONLY accessible by users with FULL_ACCESS (Administrator) role.**
+    **ONLY accessible by users with SYSTEM_MANAGER (Administrator) role.**
     This is a destructive operation and cannot be undone!
     """
     try:

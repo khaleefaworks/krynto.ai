@@ -7,7 +7,7 @@ from app.core.database import Base
 
 class UserRole(str, enum.Enum):
     """User role enumeration for access control"""
-    FULL_ACCESS = "full_access"       # Administrator - full system access including reset
+    SYSTEM_MANAGER = "system_manager"  # Administrator - full system access including reset
     MANAGER = "manager"                # Manager - all access except reset application
     AGENT = "agent"                    # Agent - only chat handling and personal settings
 
@@ -17,7 +17,7 @@ class User(Base):
     Unified user model for Admins, Managers, and Agents.
     
     Role-based access system:
-    - FULL_ACCESS (Administrator): Full system access including reset application
+    - SYSTEM_MANAGER (Administrator): Full system access including reset application
     - MANAGER: All admin features except reset application
     - AGENT: Only chat handling and personal settings
     
@@ -46,9 +46,9 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def is_admin(self) -> bool:
-        """Check if user has admin privileges (full access or manager)"""
-        return self.role in [UserRole.FULL_ACCESS, UserRole.MANAGER]
+        """Check if user has admin privileges (system manager or manager)"""
+        return self.role in [UserRole.SYSTEM_MANAGER, UserRole.MANAGER]
     
     def is_administrator(self) -> bool:
-        """Check if user is administrator with full access including reset"""
-        return self.role == UserRole.FULL_ACCESS
+        """Check if user is system manager with full access including reset"""
+        return self.role == UserRole.SYSTEM_MANAGER
