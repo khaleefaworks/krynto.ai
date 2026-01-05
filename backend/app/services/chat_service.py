@@ -1,16 +1,11 @@
 from sqlalchemy.orm import Session
 from app.models.conversation import Conversation, ConversationStatus, ConversationMode
 from app.models.message import Message, MessageSenderType
-from app.models.website import Website
-from app.services.ai_service import generate_ai_response
 from app.services.conversation_service import ConversationService
 from app.core.logging import get_logger
 from typing import Dict, Optional
 
 logger = get_logger(__name__)
-
-# Confidence threshold for triggering agent handoff
-AI_CONFIDENCE_THRESHOLD = 0.4
 
 
 class ChatService:
@@ -39,8 +34,8 @@ class ChatService:
         Handle visitor message based on conversation status.
         
         - OFFLINE: Store message, return None (no AI response)
-        - ACTIVE with handoff: Forward to agent
-        - ACTIVE without handoff: AI response
+        - ACTIVE with agent: Forward to agent
+        - ACTIVE without agent: Queue for agent
         - CLOSED: Reject message
         """
         conversation_service = ConversationService(self.db)
@@ -67,7 +62,7 @@ class ChatService:
             logger.info("offline_message_stored", conversation_id=self.conversation.id)
             return None  # System message already sent during conversation creation
         
-        # MODE-BASED ROUTING (replaces old handoff logic)
+        # MODE-BASED ROUTING
         if self.conversation.mode == ConversationMode.AGENT_HANDLING:
             logger.info("agent_handling_mode", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
             
@@ -91,81 +86,11 @@ class ChatService:
         if self.conversation.mode == ConversationMode.WAITING_FOR_AGENT:
             logger.info("waiting_for_agent_mode", conversation_id=self.conversation.id)
             # Message stored, waiting for agent to claim
-            # System message already sent during conversation creation
-            return None
+            return "Thanks! An agent will be with you shortly."
         
-        # AI_HANDLING mode: Generate AI response
-        if self.conversation.mode != ConversationMode.AI_HANDLING:
-            logger.warning("unexpected_mode", conversation_id=self.conversation.id, mode=self.conversation.mode.value)
-            return None
-        
-        # Get website for AI instructions
-        website = self.db.query(Website).filter_by(id=self.conversation.website_id).first()
-        
-        # Try to generate AI response - gracefully handle failures
-        try:
-            # Generate AI response using RAG
-            ai_result = generate_ai_response(
-                website_id=self.conversation.website_id,
-                website_instructions=website.ai_instructions if website else "",
-                user_message=text,
-            )
-            
-            # Check confidence and trigger handoff if needed
-            if ai_result["confidence"] < AI_CONFIDENCE_THRESHOLD:
-                logger.warning("low_confidence_triggering_handoff", conversation_id=self.conversation.id, confidence=ai_result["confidence"], threshold=AI_CONFIDENCE_THRESHOLD)
-                
-                # Mark conversation for handoff
-                self.conversation.is_handoff = True
-                self.db.commit()
-                
-                # Save handoff message
-                handoff_message = "I'm not confident I can answer that accurately. Let me connect you with a human agent who can help better."
-                self.db.add(Message(
-                    conversation_id=self.conversation.id,
-                    sender_type=MessageSenderType.SYSTEM,
-                    sender="ai",
-                    content=handoff_message
-                ))
-                self.db.commit()
-                
-                # Notify agent service (will be handled by agent dashboard)
-                from app.services.agent_service import AgentService
-                agent_service = AgentService(self.db)
-                
-                return handoff_message
-
-            # Save AI message with confidence
-            ai_reply = ai_result["answer"]
-            self.db.add(Message(
-                conversation_id=self.conversation.id,
-                sender_type=MessageSenderType.AGENT,  # AI uses AGENT type for now
-                sender="ai",
-                content=ai_reply
-            ))
-            self.db.commit()
-
-            return ai_reply
-            
-        except Exception as e:
-            # AI failed (API key, network, etc.) - trigger handoff to agent
-            logger.error("ai_error_triggering_handoff", conversation_id=self.conversation.id, error=str(e), exc_info=True)
-            
-            # Mark conversation for handoff
-            self.conversation.is_handoff = True
-            self.db.commit()
-            
-            # Save handoff message
-            handoff_message = "I'm having trouble processing your request. Let me connect you with a human agent who can help."
-            self.db.add(Message(
-                conversation_id=self.conversation.id,
-                sender_type=MessageSenderType.SYSTEM,
-                sender="ai",
-                content=handoff_message
-            ))
-            self.db.commit()
-            
-            return handoff_message
+        # Shouldn't reach here, but handle gracefully
+        logger.warning("unexpected_mode", conversation_id=self.conversation.id, mode=self.conversation.mode.value)
+        return "Your message has been received. An agent will respond soon."
     
     async def send_to_visitor(self, message_data: dict):
         """Send message to visitor's WebSocket"""

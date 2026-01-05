@@ -92,7 +92,6 @@ class AgentService:
         Inbox Visibility Rules:
         - WAITING_FOR_AGENT: Visible to all eligible agents (unclaimed)
         - AGENT_HANDLING: Only visible to assigned agent
-        - AI_HANDLING: Not visible to agents
         
         Args:
             website_id: Optional filter by website
@@ -101,9 +100,9 @@ class AgentService:
         Returns:
             List of conversations
         """
-        # Base query: exclude AI-handling conversations (frontend will filter by status)
+        # Base query: get all conversations except those that are closed
         query = self.db.query(Conversation).filter(
-            Conversation.mode != ConversationMode.AI_HANDLING
+            Conversation.status != ConversationStatus.CLOSED
         )
         
         # If agent_id provided, filter for:

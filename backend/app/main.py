@@ -13,7 +13,6 @@ from app.api.conversations import router as conversations_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.widget import router as widget_router
-from app.api.knowledge import router as knowledge_router
 from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
 from app.api.system import router as system_router
@@ -65,7 +64,6 @@ app.include_router(ws_agent_router)
 app.include_router(chats_router)
 app.include_router(conversations_router)
 app.include_router(conversation_metadata_router)
-app.include_router(knowledge_router)
 app.include_router(websites_router)
 app.include_router(agent_assignments_router)
 

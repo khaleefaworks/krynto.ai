@@ -6,9 +6,9 @@ Purpose:
 - Keep API/WS layers transport+validation only.
 - Keep helper services pure (persistence, eligibility checks, delivery).
 
-Scope (current):
-- AI paths are intentionally disabled. All flows route to agents or offline.
-- Visitor/agent WS handlers should delegate here instead of branching alone.
+Scope:
+- All visitor messages route to human agents or offline mode
+- No AI integration - pure human agent workflow
 """
 
 from typing import Optional, Any
@@ -82,15 +82,6 @@ class ConversationOrchestrator:
         # Reject closed conversations
         if conversation.status == ConversationStatus.CLOSED:
             return "This conversation has been closed."
-
-        # AI is disabled: normalize AI_HANDLING to WAITING_FOR_AGENT
-        if conversation.mode == ConversationMode.AI_HANDLING:
-            conversation.mode = ConversationMode.WAITING_FOR_AGENT
-            self.db.commit()
-            self.conversation_service.add_system_message(
-                conversation.id,
-                "Please wait while we connect you with an available agent.",
-            )
 
         # Persist visitor message
         msg = self.conversation_service.add_visitor_message(

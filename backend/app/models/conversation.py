@@ -14,7 +14,6 @@ class ConversationStatus(str, enum.Enum):
 
 class ConversationMode(str, enum.Enum):
     """Who is handling the conversation right now"""
-    AI_HANDLING = "ai_handling"              # AI is responding
     WAITING_FOR_AGENT = "waiting_for_agent"  # Needs agent to claim
     AGENT_HANDLING = "agent_handling"        # Agent has claimed
 
@@ -33,7 +32,7 @@ class Conversation(Base, TimestampMixin):
     mode = Column(
         SQLEnum(ConversationMode, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
-        default=ConversationMode.AI_HANDLING
+        default=ConversationMode.WAITING_FOR_AGENT
     )
     is_handoff = Column(Boolean, default=False)
     assigned_agent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
