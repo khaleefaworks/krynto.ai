@@ -91,7 +91,7 @@ class ConversationOrchestrator:
         return "Thanks! An agent will be with you shortly."
     
     async def _broadcast_new_chat_to_agents(self, conversation: Conversation):
-        """Notify all connected agents about new unassigned chat"""
+        """Notify all connected agents about new unassigned chat via global notification socket"""
         # Only broadcast if conversation is still open and unassigned
         if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
             return
@@ -107,23 +107,25 @@ class ConversationOrchestrator:
         ).order_by(Message.created_at.desc()).first()
         last_message = last_msg.content if last_msg else "New conversation"
         
-        # Broadcast to ALL connected agents (not filtered by website)
-        # Agents will see all conversations and can claim any
+        # Broadcast ONLY to global notification sockets (website_id = 0)
+        # This prevents duplicate notifications to agents connected to both sockets
         for ws_id, agent_info in AgentService.active_agents.items():
-            try:
-                await agent_info["websocket"].send_json({
-                    "type": "new_chat",
-                    "conversation_id": conversation.id,
-                    "website_id": conversation.website_id,
-                    "website_name": website_name,
-                    "session_id": conversation.session_id,
-                    "last_message": last_message,
-                    "status": conversation.status.value,
-                    "created_at": conversation.created_at.isoformat() if conversation.created_at else None
-                })
-                logger.info("broadcast_new_chat_success", agent_id=agent_info["agent_id"], conversation_id=conversation.id)
-            except Exception as e:
-                logger.error("broadcast_error", error=str(e), agent_ws_id=ws_id)
+            # Only send to global notification socket (website_id = 0)
+            if agent_info.get("website_id") == 0:
+                try:
+                    await agent_info["websocket"].send_json({
+                        "type": "new_chat",
+                        "conversation_id": conversation.id,
+                        "website_id": conversation.website_id,
+                        "website_name": website_name,
+                        "session_id": conversation.session_id,
+                        "last_message": last_message,
+                        "status": conversation.status.value,
+                        "created_at": conversation.created_at.isoformat() if conversation.created_at else None
+                    })
+                    logger.info("broadcast_new_chat_success", agent_id=agent_info["agent_id"], conversation_id=conversation.id, via="global_socket")
+                except Exception as e:
+                    logger.error("broadcast_error", error=str(e), agent_ws_id=ws_id)
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
         """Handle agent claiming/joining a conversation."""
