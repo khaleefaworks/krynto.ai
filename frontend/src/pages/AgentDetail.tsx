@@ -34,7 +34,7 @@ export default function AgentDetail() {
     name: '',
     email: '',
     password: '',
-    role: 'agent' as 'full_access' | 'manager' | 'agent',
+    role: 'agent' as 'system_manager' | 'manager' | 'agent',
     is_active: true,
   })
 
@@ -64,7 +64,7 @@ export default function AgentDetail() {
         name: foundAgent.name,
         email: foundAgent.email,
         password: '', // Never populate password
-        role: foundAgent.role as 'full_access' | 'manager' | 'agent',
+        role: foundAgent.role as 'system_manager' | 'manager' | 'agent',
         is_active: foundAgent.is_active,
       })
     } catch (err: any) {
@@ -352,16 +352,16 @@ export default function AgentDetail() {
               </label>
               <select
                 value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'full_access' | 'manager' | 'agent' })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'system_manager' | 'manager' | 'agent' })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 required
-                disabled={!isNew && agent?.role === 'full_access' && !isAdministrator(currentUser)}
+                disabled={!isNew && agent?.role === 'system_manager' && !isAdministrator(currentUser)}
               >
                 <option value="agent">Agent - Chat handling only</option>
                 <option value="manager">Manager - Full access except reset</option>
                 {/* Only administrators can create/modify administrator role */}
                 {isAdministrator(currentUser) && (
-                  <option value="full_access">Administrator - Full system access</option>
+                  <option value="system_manager">System Manager - Full system access</option>
                 )}
                 {/* Show current administrator role if editing an admin (but disabled) */}
                 {!isAdministrator(currentUser) && agent?.role === 'full_access' && (

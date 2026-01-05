@@ -12,7 +12,6 @@ import WebsiteDetail from './pages/WebsiteDetail'
 import WebsitesList from './pages/WebsitesList'
 import AgentsList from './pages/AgentsList'
 import AgentDetail from './pages/AgentDetail'
-import KnowledgeManagement from './pages/KnowledgeManagement'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
@@ -148,7 +147,6 @@ function App() {
               
               {/* Legacy routes - kept for backwards compatibility */}
               <Route path="websites" element={<WebsiteManagement />} />
-              <Route path="knowledge" element={<KnowledgeManagement />} />
               
               {/* Default route */}
               <Route index element={<Navigate to="/dashboard/chats" replace />} />

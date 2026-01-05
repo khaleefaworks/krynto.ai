@@ -4,7 +4,7 @@ export interface Website {
   id: number;
   name: string;
   domain: string;
-  ai_instructions: string | null;
+  widget_key: string;
   widget_config: Record<string, any> | null;
   created_at: string;
   updated_at: string | null;
@@ -13,13 +13,12 @@ export interface Website {
 export interface WebsiteCreate {
   name: string;
   domain: string;
-  ai_instructions?: string;
 }
 
 export interface WebsiteUpdate {
   name?: string;
   domain?: string;
-  ai_instructions?: string;
+  widget_config?: Record<string, any>;
 }
 
 export interface WidgetConfig {

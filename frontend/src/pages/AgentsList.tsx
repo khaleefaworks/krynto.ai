@@ -138,8 +138,8 @@ export default function AgentsList() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <Badge variant={agent.role === 'full_access' ? 'default' : 'secondary'}>
-                      {agent.role === 'full_access' ? 'Administrator' : agent.role === 'manager' ? 'Manager' : 'Agent'}
+                    <Badge variant={agent.role === 'system_manager' ? 'default' : 'secondary'}>
+                      {agent.role === 'system_manager' ? 'System Manager' : agent.role === 'manager' ? 'Manager' : 'Agent'}
                     </Badge>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

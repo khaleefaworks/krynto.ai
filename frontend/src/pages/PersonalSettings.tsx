@@ -71,7 +71,7 @@ export default function PersonalSettings() {
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
                 <p className="mt-1 text-gray-900 dark:text-white capitalize">
-                  {user?.role === 'full_access' ? 'Administrator' : 'Agent'}
+                  {user?.role === 'system_manager' ? 'System Manager' : user?.role === 'manager' ? 'Manager' : 'Agent'}
                 </p>
               </div>
             </CardContent>

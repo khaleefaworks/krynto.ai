@@ -1,4 +1,4 @@
-export type UserRole = "full_access" | "limited_access"
+export type UserRole = "system_manager" | "manager" | "agent"
 
 export interface User {
   id: number
