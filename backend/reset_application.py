@@ -63,6 +63,22 @@ def reset_database():
         db.query(SystemSettings).delete()
         
         db.commit()
+        
+        # Reset all sequences to start from 1
+        print("  Resetting ID sequences...")
+        from sqlalchemy import text
+        db.execute(text("ALTER SEQUENCE users_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE websites_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE conversations_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE messages_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE agent_sessions_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE agent_website_assignments_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE message_shortcuts_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE conversation_tags_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE conversation_notes_id_seq RESTART WITH 1"))
+        db.execute(text("ALTER SEQUENCE system_settings_id_seq RESTART WITH 1"))
+        db.commit()
+        
         print("\n✅ Database reset successfully!")
         
         # Seed database with test data
