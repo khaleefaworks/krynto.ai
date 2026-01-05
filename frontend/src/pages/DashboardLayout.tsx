@@ -12,7 +12,7 @@ import Logo from '@/components/Logo'
 import { isAdministrator } from '@/lib/roles'
 
 export default function DashboardLayout() {
-  const { user, setUser, setToken } = useAppStore()
+  const { user, setUser, setToken, unreadChatsCount } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -70,14 +70,26 @@ export default function DashboardLayout() {
     <>
       <Link
         to="/dashboard/chats"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all relative ${
           isActive('/dashboard/chats') 
             ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
         }`}
       >
-        <MessageSquare className="h-5 w-5" />
+        <div className="relative">
+          <MessageSquare className="h-5 w-5" />
+          {unreadChatsCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-4 w-4 flex items-center justify-center animate-pulse">
+              {unreadChatsCount > 9 ? '9+' : unreadChatsCount}
+            </span>
+          )}
+        </div>
         <span className="md:hidden lg:block">Chats</span>
+        {unreadChatsCount > 0 && (
+          <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5 md:hidden lg:block">
+            {unreadChatsCount}
+          </span>
+        )}
       </Link>
 
       <Link

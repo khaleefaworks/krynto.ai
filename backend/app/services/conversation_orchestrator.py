@@ -18,7 +18,8 @@ from app.services.conversation_service import ConversationService
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.services.website_resolver import is_website_online, get_eligible_agents_for_website
-from app.models.conversation import Conversation, ConversationStatus, ConversationMode
+from app.models.user import User
+from app.models.conversation import Conversation, ConversationStatus
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.user import User
 from app.core.logging import get_logger
@@ -55,32 +56,8 @@ class ConversationOrchestrator:
         if visitor_ws:
             ChatService.active_visitors[conversation.id] = visitor_ws
 
-        # Re-evaluate website online status on every message
-        online = is_website_online(website_id)
-
-        if not online:
-            if conversation.status != ConversationStatus.OFFLINE:
-                conversation.status = ConversationStatus.OFFLINE
-                conversation.mode = ConversationMode.WAITING_FOR_AGENT
-                self.db.commit()
-                self.conversation_service.add_system_message(
-                    conversation.id,
-                    "We're currently offline. Your message has been saved for follow-up.",
-                )
-            return "We're currently offline. We've saved your message for follow-up."
-
-        # If previously offline and now online, resume active routing
-        if conversation.status == ConversationStatus.OFFLINE:
-            conversation.status = ConversationStatus.ACTIVE
-            conversation.mode = ConversationMode.WAITING_FOR_AGENT
-            self.db.commit()
-            self.conversation_service.add_system_message(
-                conversation.id,
-                "We're online now. Connecting you with an available agent.",
-            )
-
-        # Reject closed conversations
-        if conversation.status == ConversationStatus.CLOSED:
+        # Check if conversation is resolved
+        if conversation.status == ConversationStatus.RESOLVED:
             return "This conversation has been closed."
 
         # Persist visitor message
@@ -103,12 +80,45 @@ class ConversationOrchestrator:
             )
             return None
 
-        # No agent assigned yet
-        if conversation.status == ConversationStatus.OFFLINE:
-            return "We're currently offline. We've saved your message for follow-up."
-
-        # Online but waiting for agent
+        # No agent assigned yet - broadcast to all available agents for this website
+        await self._broadcast_new_chat_to_agents(conversation)
+        
         return "Thanks! An agent will be with you shortly."
+    
+    async def _broadcast_new_chat_to_agents(self, conversation: Conversation):
+        """Notify all connected agents about new unassigned chat"""
+        # Only broadcast if conversation is still open and unassigned
+        if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
+            return
+        
+        # Get website info
+        from app.models.website import Website
+        website = self.db.query(Website).filter_by(id=conversation.website_id).first()
+        website_name = website.name if website else f"Website {conversation.website_id}"
+        
+        # Get last message
+        last_msg = self.db.query(Message).filter_by(
+            conversation_id=conversation.id
+        ).order_by(Message.created_at.desc()).first()
+        last_message = last_msg.content if last_msg else "New conversation"
+        
+        # Broadcast to ALL connected agents (not filtered by website)
+        # Agents will see all conversations and can claim any
+        for ws_id, agent_info in AgentService.active_agents.items():
+            try:
+                await agent_info["websocket"].send_json({
+                    "type": "new_chat",
+                    "conversation_id": conversation.id,
+                    "website_id": conversation.website_id,
+                    "website_name": website_name,
+                    "session_id": conversation.session_id,
+                    "last_message": last_message,
+                    "status": conversation.status.value,
+                    "created_at": conversation.created_at.isoformat() if conversation.created_at else None
+                })
+                logger.info("broadcast_new_chat_success", agent_id=agent_info["agent_id"], conversation_id=conversation.id)
+            except Exception as e:
+                logger.error("broadcast_error", error=str(e), agent_ws_id=ws_id)
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
         """Handle agent claiming/joining a conversation."""
@@ -116,7 +126,7 @@ class ConversationOrchestrator:
         if not conversation:
             return {"error": "Conversation not found"}
 
-        if conversation.status == ConversationStatus.CLOSED:
+        if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
         # Enforce eligibility for this website (assignment + active + available)
@@ -138,9 +148,8 @@ class ConversationOrchestrator:
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
             return {"error": "Conversation already assigned to another agent"}
 
-        # Normalize status/mode
-        conversation.status = ConversationStatus.ACTIVE
-        conversation.mode = ConversationMode.AGENT_HANDLING
+        # Assign agent to conversation
+        conversation.status = ConversationStatus.OPEN
         conversation.assigned_agent_id = agent_id
         self.db.commit()
 
@@ -149,6 +158,9 @@ class ConversationOrchestrator:
             "An agent has joined the conversation.",
         )
 
+        # Get agent details including avatar
+        agent = self.db.query(User).filter_by(id=agent_id).first()
+        
         # Notify visitor if connected
         chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
         if chat_service:
@@ -156,6 +168,8 @@ class ConversationOrchestrator:
                 {
                     "type": "agent_joined",
                     "message": "A support agent has joined the chat",
+                    "agent_avatar": agent.avatar_url if agent else None,
+                    "agent_name": agent.name if agent else "Support Agent"
                 }
             )
 
@@ -169,7 +183,7 @@ class ConversationOrchestrator:
         if not conversation:
             return {"error": "Conversation not found"}
 
-        if conversation.status == ConversationStatus.CLOSED:
+        if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
         if conversation.assigned_agent_id != agent_id:

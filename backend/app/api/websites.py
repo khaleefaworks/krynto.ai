@@ -40,6 +40,12 @@ class WidgetConfigResponse(BaseModel):
     position: str = "bottom-right"
     welcome_message: str = "Hi! How can we help you today?"
     primary_color: str = "#000000"
+    header_title: str = "How can we help?"
+    online_status_text: str = "We reply immediately"
+    bubble_text: str = "Chat"
+    show_emoji_picker: bool = True
+    show_attachments: bool = False
+    branding_text: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -178,6 +184,12 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
         "position": config.get("position", "bottom-right"),
         "welcome_message": config.get("welcome_message", "Hi! How can we help you today?"),
         "primary_color": config.get("primary_color", "#000000"),
+        "header_title": config.get("header_title", "How can we help?"),
+        "online_status_text": config.get("online_status_text", "We reply immediately"),
+        "bubble_text": config.get("bubble_text", "Chat"),
+        "show_emoji_picker": config.get("show_emoji_picker", True),
+        "show_attachments": config.get("show_attachments", False),
+        "branding_text": config.get("branding_text"),
     }
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import require_authenticated_user
 from app.models.user import User
-from app.models.conversation import Conversation, ConversationMode
+from app.models.conversation import Conversation
 from app.services.conversation_service import ConversationService
 from pydantic import BaseModel
 from typing import Optional
@@ -35,7 +35,7 @@ def claim_conversation(
     Claim a conversation atomically (FCFS).
     
     Rules:
-    - Only WAITING_FOR_AGENT conversations can be claimed
+    - Only OPEN + unassigned conversations can be claimed
     - Only one agent can claim (DB-enforced)
     - First successful UPDATE wins
     - Losers get 409 Conflict

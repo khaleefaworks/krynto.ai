@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.agent_session import AgentSession
-from app.models.conversation import Conversation, ConversationMode, ConversationStatus
+from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
 from app.services.connection_manager import mark_connected, mark_disconnected
 from typing import Dict, Optional
@@ -87,11 +87,11 @@ class AgentService:
     
     def get_active_chats(self, website_id: Optional[int] = None, agent_id: Optional[int] = None):
         """
-        Get list of conversations visible to agents.
+        Get list of OPEN conversations visible to agents.
         
         Inbox Visibility Rules:
-        - WAITING_FOR_AGENT: Visible to all eligible agents (unclaimed)
-        - AGENT_HANDLING: Only visible to assigned agent
+        - Unassigned: Visible to all eligible agents
+        - Assigned: Only visible to assigned agent
         
         Args:
             website_id: Optional filter by website
@@ -100,19 +100,18 @@ class AgentService:
         Returns:
             List of conversations
         """
-        # Base query: get all conversations except those that are closed
+        # Base query: get all OPEN conversations
         query = self.db.query(Conversation).filter(
-            Conversation.status != ConversationStatus.CLOSED
+            Conversation.status == ConversationStatus.OPEN
         )
         
         # If agent_id provided, filter for:
-        # 1. WAITING_FOR_AGENT (available to claim)
-        # 2. AGENT_HANDLING where assigned to this agent
+        # 1. Unassigned (available to claim)
+        # 2. Assigned to this agent
         if agent_id:
             query = query.filter(
-                (Conversation.mode == ConversationMode.WAITING_FOR_AGENT) |
-                ((Conversation.mode == ConversationMode.AGENT_HANDLING) & 
-                 (Conversation.assigned_agent_id == agent_id))
+                (Conversation.assigned_agent_id == None) |
+                (Conversation.assigned_agent_id == agent_id)
             )
         
         if website_id:

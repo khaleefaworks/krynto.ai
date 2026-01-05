@@ -3,7 +3,7 @@
 from app.models.website import Website
 from app.models.user import User, UserRole
 from app.models.system_settings import SystemSettings
-from app.models.conversation import Conversation, ConversationStatus, ConversationMode
+from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.agent_session import AgentSession
 from app.models.conversation_tag import ConversationTag
@@ -18,7 +18,6 @@ __all__ = [
     "SystemSettings",
     "Conversation",
     "ConversationStatus",
-    "ConversationMode",
     "Message",
     "MessageSenderType",
     "AgentSession",

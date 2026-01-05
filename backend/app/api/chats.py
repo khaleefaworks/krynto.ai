@@ -34,6 +34,8 @@ async def join_chat(
     db: Session = Depends(get_db)
 ):
     """Agent joins a chat - triggers handoff"""
+    from app.models.conversation import Conversation
+    
     orchestrator = ConversationOrchestrator(db)
 
     result = await orchestrator.handle_agent_join(
@@ -44,7 +46,7 @@ async def join_chat(
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
 
-    conversation = db.query(orchestrator.model).filter_by(id=chat_id).first()
+    conversation = db.query(Conversation).filter_by(id=chat_id).first()
 
     return {
         "success": True,
@@ -118,6 +120,7 @@ def get_chat_messages(
             "id": msg.id,
             "conversation_id": msg.conversation_id,
             "sender": msg.sender,
+            "sender_type": msg.sender_type.value if hasattr(msg.sender_type, 'value') else msg.sender_type,
             "content": msg.content,
             "created_at": msg.created_at.isoformat() if msg.created_at else None
         }
@@ -130,41 +133,41 @@ def close_conversation(
     chat_id: int,
     db: Session = Depends(get_db)
 ):
-    """Close a conversation - marks it as completed"""
-    from app.models.conversation import Conversation
+    """Close a conversation - marks it as resolved"""
+    from app.models.conversation import Conversation, ConversationStatus
     
     conv = db.query(Conversation).filter_by(id=chat_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    if conv.status == "closed":
+    if conv.status == ConversationStatus.RESOLVED:
         return {
             "success": True,
-            "message": "Conversation already closed"
+            "message": "Conversation already resolved"
         }
     
-    conv.status = "closed"
+    conv.status = ConversationStatus.RESOLVED
     db.commit()
     
     return {
         "success": True,
-        "message": "Conversation closed successfully"
+        "message": "Conversation resolved successfully"
     }
 
 
-@router.get("/closed/history")
-def get_closed_conversations(
+@router.get("/resolved/history")
+def get_resolved_conversations(
     website_id: Optional[int] = None,
     agent_id: Optional[int] = None,
     limit: int = 50,
     db: Session = Depends(get_db)
 ):
-    """Get closed conversation history with filters"""
-    from app.models.conversation import Conversation
+    """Get resolved conversation history with filters"""
+    from app.models.conversation import Conversation, ConversationStatus
     from app.models.message import Message
     from app.models.website import Website
     
-    query = db.query(Conversation).filter(Conversation.status == "closed")
+    query = db.query(Conversation).filter(Conversation.status == ConversationStatus.RESOLVED)
     
     if website_id:
         query = query.filter(Conversation.website_id == website_id)
@@ -207,10 +210,10 @@ async def close_conversation(
     db: Session = Depends(get_db)
 ):
     """
-    Close a conversation.
+    Resolve a conversation.
     
-    Transitions conversation to CLOSED state.
-    No more messages can be added after closing.
+    Transitions conversation to RESOLVED state.
+    No more messages can be added after resolving.
     """
     orchestrator = ConversationOrchestrator(db)
 
@@ -222,5 +225,5 @@ async def close_conversation(
     return {
         "success": True,
         "conversation_id": conversation_id,
-        "message": "Conversation closed successfully",
+        "message": "Conversation resolved successfully",
     }

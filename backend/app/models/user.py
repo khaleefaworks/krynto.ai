@@ -30,6 +30,7 @@ class User(Base):
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    avatar_url = Column(String(500), nullable=True)  # User profile picture URL
 
     role = Column(
         SQLEnum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x]),

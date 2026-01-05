@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
 import { isAdmin, isAdministrator } from './lib/roles'
+import { fetchActiveChats } from './services/chats'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
 import DashboardLayout from './pages/DashboardLayout'
@@ -20,9 +21,11 @@ import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 
 function App() {
-  const { token, user, setToken, setUser } = useAppStore()
+  const { token, user, setToken, setUser, setUnreadChatsCount } = useAppStore()
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
+  const notificationSocketRef = useRef<WebSocket | null>(null)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Check if system needs initial setup
   useEffect(() => {
@@ -61,6 +64,102 @@ function App() {
     
     initAuth()
   }, [])
+
+  // Global notification system - runs when user is authenticated
+  useEffect(() => {
+    if (!user?.id || !token) return
+
+    let reconnectTimeout: NodeJS.Timeout | null = null
+
+    const setupGlobalNotifications = () => {
+      // WebSocket for real-time notifications
+      const wsUrl = `ws://localhost:8000/ws/agent/0/${user.id}`
+      console.log('🔔 Setting up global notifications...')
+      
+      const ws = new WebSocket(wsUrl)
+      notificationSocketRef.current = ws
+
+      ws.onopen = () => {
+        console.log('✅ Global notifications connected')
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout)
+          reconnectTimeout = null
+        }
+      }
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data)
+        console.log('🔔 Global notification:', data)
+
+        // Handle both new_chat (unassigned) and visitor_message (updates to existing chats)
+        if (data.type === 'new_chat' || data.type === 'visitor_message') {
+          console.log('📨 Chat update notification - updating count...')
+          // Fetch updated chat list and count
+          try {
+            const chats = await fetchActiveChats()
+            const openChats = chats.filter(c => c.status === 'open')
+            setUnreadChatsCount(openChats.length)
+            console.log(`📊 Updated unread count: ${openChats.length}`)
+          } catch (error) {
+            console.error('Failed to update chat count:', error)
+          }
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('❌ Global notification error:', error)
+      }
+
+      ws.onclose = (event) => {
+        console.log('🔌 Global notifications closed')
+        notificationSocketRef.current = null
+        
+        // Auto-reconnect after 5 seconds if not intentional
+        if (event.code !== 1000 && user?.id) {
+          console.log('🔄 Will reconnect in 5 seconds...')
+          reconnectTimeout = setTimeout(() => {
+            console.log('🔄 Reconnecting global notifications...')
+            setupGlobalNotifications()
+          }, 5000)
+        }
+      }
+    }
+
+    // Initial setup
+    setupGlobalNotifications()
+
+    // Polling fallback - update count every 30 seconds
+    const updateChatCount = async () => {
+      try {
+        const chats = await fetchActiveChats()
+        const openChats = chats.filter(c => c.status === 'open')
+        setUnreadChatsCount(openChats.length)
+      } catch (error) {
+        console.error('Failed to update chat count:', error)
+      }
+    }
+
+    // Initial count
+    updateChatCount()
+
+    // Poll every 30 seconds
+    pollingIntervalRef.current = setInterval(updateChatCount, 30000)
+
+    // Cleanup
+    return () => {
+      if (notificationSocketRef.current) {
+        notificationSocketRef.current.close()
+        notificationSocketRef.current = null
+      }
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout)
+      }
+    }
+  }, [user?.id, token, setUnreadChatsCount])
 
   // Show loading while initializing
   if (initializing) {

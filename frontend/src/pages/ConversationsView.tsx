@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useLayoutEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
@@ -34,10 +34,8 @@ import {
     PanelRightClose,
     PanelRightOpen,
     Monitor,
-    Sparkles,
     Inbox,
-    Users,
-    Bot
+    Users
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -57,7 +55,7 @@ interface ConversationDetails {
     status?: string
 }
 
-type FilterCategory = 'all' | 'ai' | 'new' | 'agent' | 'ai-resolved'
+type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
 export default function ConversationsView() {
     const { conversationId } = useParams<{ conversationId?: string }>()
@@ -104,10 +102,23 @@ export default function ConversationsView() {
         localStorage.setItem('chat_right_sidebar_collapsed', String(rightSidebarCollapsed))
     }, [rightSidebarCollapsed])
 
-    // Load chats list
+    // Load chats list and refresh when global notification arrives
     useEffect(() => {
         fetchActiveChats()
     }, [])
+    
+    // Listen to global notification changes and refresh list (only on ConversationsView)
+    const { unreadChatsCount } = useAppStore()
+    const lastCountRef = useRef(unreadChatsCount)
+    
+    useEffect(() => {
+        // Only refresh if count actually increased (new chat arrived)
+        if (unreadChatsCount > lastCountRef.current) {
+            console.log('📨 New chats detected, refreshing chat list...')
+            fetchActiveChats()
+        }
+        lastCountRef.current = unreadChatsCount
+    }, [unreadChatsCount])
 
     // Ensure conversation details populate once chats load (handles refresh on deep links)
     useEffect(() => {
@@ -145,9 +156,12 @@ export default function ConversationsView() {
         }
     }, [selectedChat])
 
-    // Scroll to bottom on new messages
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll to bottom on new messages - use Layout effect for immediate scroll
+    useLayoutEffect(() => {
+        // Wait for DOM to update, then scroll
+        requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        })
     }, [messages])
 
     const fetchActiveChats = async () => {
@@ -175,7 +189,38 @@ export default function ConversationsView() {
                 if (joined) {
                     const chatData = activeChats.find(c => c.id === chatId)
                     if (chatData) {
-                        connectAgentSocket(chatData.website_id, user.id)
+                        const socket = connectAgentSocket(chatData.website_id, user.id)
+                        
+                        // Setup message listener for this chat
+                        socket.onmessage = (event) => {
+                            const data = JSON.parse(event.data)
+                            console.log('📨 WebSocket message received:', data)
+                            
+                            if (data.type === 'visitor_message' && data.conversation_id === chatId) {
+                                // Visitor sent a message - add to UI
+                                const newMessage = {
+                                    id: Date.now(),
+                                    conversation_id: chatId,
+                                    sender_type: 'visitor' as const,
+                                    sender: 'visitor',
+                                    content: data.message,
+                                    created_at: new Date().toISOString()
+                                }
+                                addMessage(newMessage)
+                            } else if (data.type === 'message_sent' && data.conversation_id === chatId) {
+                                // Our message was confirmed - add to UI
+                                const confirmedMessage = {
+                                    id: Date.now(),
+                                    conversation_id: chatId,
+                                    sender_type: 'agent' as const,
+                                    sender: user.email || 'agent',
+                                    content: data.content,
+                                    created_at: new Date().toISOString()
+                                }
+                                addMessage(confirmedMessage)
+                            }
+                        }
+                        
                         joinedRef.current = true
                     }
                 }
@@ -212,9 +257,11 @@ export default function ConversationsView() {
         setInput('')
 
         try {
-            await sendAgentMessage(selectedChat.toString(), messageContent)
+            sendAgentMessage(messageContent, selectedChat.toString())
+            // Message will appear via WebSocket callback - don't add optimistically
         } catch (error) {
             console.error("Failed to send message:", error)
+            // Restore input on error
             setInput(messageContent)
         }
     }
@@ -264,17 +311,15 @@ export default function ConversationsView() {
         // Apply category filter
         switch (activeFilter) {
             case 'all':
-                return chat.status === 'active' || chat.status === 'offline'
-            case 'ai':
-                return (chat.status === 'active' || chat.status === 'offline') && (chat as any).current_agent_id === null && !chat.is_handoff
-            case 'new':
-                return (chat.status === 'active' || chat.status === 'offline') && (chat.message_count || 0) <= 1
-            case 'agent':
-                return chat.status === 'closed' && (chat as any).current_agent_id !== null
-            case 'ai-resolved':
-                return chat.status === 'closed' && (chat as any).current_agent_id === null
+                return chat.status === 'open'
+            case 'mine':
+                return chat.status === 'open' && (chat as any).current_agent_id === user?.id
+            case 'unassigned':
+                return chat.status === 'open' && (chat as any).current_agent_id === null
+            case 'resolved':
+                return chat.status === 'resolved' && (chat as any).current_agent_id !== null
             default:
-                return chat.status === 'active' || chat.status === 'offline'
+                return chat.status === 'open'
         }
     })
 
@@ -282,14 +327,12 @@ export default function ConversationsView() {
         switch (activeFilter) {
             case 'all':
                 return 'All Chats'
-            case 'ai':
-                return 'AI Chats'
-            case 'new':
-                return 'New Chats'
-            case 'agent':
-                return 'Resolved by Agent'
-            case 'ai-resolved':
-                return 'Resolved by AI'
+            case 'mine':
+                return 'My Chats'
+            case 'unassigned':
+                return 'Unassigned'
+            case 'resolved':
+                return 'Resolved'
             default:
                 return 'All Chats'
         }
@@ -299,14 +342,12 @@ export default function ConversationsView() {
         switch (activeFilter) {
             case 'all':
                 return <MessageSquare className="h-5 w-5" />
-            case 'ai':
-                return <Sparkles className="h-5 w-5" />
-            case 'new':
-                return <Inbox className="h-5 w-5" />
-            case 'agent':
+            case 'mine':
                 return <Users className="h-5 w-5" />
-            case 'ai-resolved':
-                return <Bot className="h-5 w-5" />
+            case 'unassigned':
+                return <Inbox className="h-5 w-5" />
+            case 'resolved':
+                return <Check className="h-5 w-5" />
             default:
                 return <MessageSquare className="h-5 w-5" />
         }
@@ -353,7 +394,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <MessageSquare className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'active' || c.status === 'offline').length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -362,7 +403,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'active' || c.status === 'offline').length}
+                                                    {activeChats.filter(c => c.status === 'open').length}
                                                 </Badge>
                                             </>
                                         )}
@@ -374,38 +415,38 @@ export default function ConversationsView() {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <button
-                                        onClick={() => setActiveFilter('ai')}
-                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'ai'
+                                        onClick={() => setActiveFilter('mine')}
+                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'mine'
                                             ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                                             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Sparkles className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => (c.status === 'active' || c.status === 'offline') && (c as any).current_agent_id === null && !c.is_handoff).length}</span>
+                                                <Users className="h-5 w-5 flex-shrink-0" />
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === user?.id).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Sparkles className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">AI</span>
+                                                    <Users className="h-5 w-5 flex-shrink-0" />
+                                                    <span className="flex-1 text-left">Mine</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => (c.status === 'active' || c.status === 'offline') && (c as any).current_agent_id === null && !c.is_handoff).length}
+                                                    {activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === user?.id).length}
                                                 </Badge>
                                             </>
                                         )}
                                     </button>
                                 </TooltipTrigger>
-                                {leftFilterCollapsed && <TooltipContent side="right">AI</TooltipContent>}
+                                {leftFilterCollapsed && <TooltipContent side="right">My Chats</TooltipContent>}
                             </Tooltip>
 
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <button
-                                        onClick={() => setActiveFilter('new')}
-                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'new'
+                                        onClick={() => setActiveFilter('unassigned')}
+                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'unassigned'
                                             ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                                             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
@@ -413,22 +454,22 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Inbox className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => (c.status === 'active' || c.status === 'offline') && (c.message_count || 0) <= 1).length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === null).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
                                                     <Inbox className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">New</span>
+                                                    <span className="flex-1 text-left">Unassigned</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => (c.status === 'active' || c.status === 'offline') && (c.message_count || 0) <= 1).length}
+                                                    {activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === null).length}
                                                 </Badge>
                                             </>
                                         )}
                                     </button>
                                 </TooltipTrigger>
-                                {leftFilterCollapsed && <TooltipContent side="right">New</TooltipContent>}
+                                {leftFilterCollapsed && <TooltipContent side="right">Unassigned</TooltipContent>}
                             </Tooltip>
                         </TooltipProvider>
                     </div>
@@ -446,57 +487,31 @@ export default function ConversationsView() {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <button
-                                        onClick={() => setActiveFilter('agent')}
-                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'agent'
+                                        onClick={() => setActiveFilter('resolved')}
+                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'resolved'
                                             ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                                             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Users className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">0</span>
+                                                <Check className="h-5 w-5 flex-shrink-0" />
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'resolved').length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Users className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Agent</span>
+                                                    <Check className="h-5 w-5 flex-shrink-0" />
+                                                    <span className="flex-1 text-left">Resolved</span>
                                                 </div>
-                                                <Badge variant="secondary" className="ml-auto">0</Badge>
+                                                <Badge variant="secondary" className="ml-auto">
+                                                    {activeChats.filter(c => c.status === 'resolved').length}
+                                                </Badge>
                                             </>
                                         )}
                                     </button>
                                 </TooltipTrigger>
-                                {leftFilterCollapsed && <TooltipContent side="right">Resolved by Agent</TooltipContent>}
-                            </Tooltip>
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <button
-                                        onClick={() => setActiveFilter('ai-resolved')}
-                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'ai-resolved'
-                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                            }`}
-                                    >
-                                        {leftFilterCollapsed ? (
-                                            <>
-                                                <Bot className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">0</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="flex items-center gap-3">
-                                                    <Bot className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">AI</span>
-                                                </div>
-                                                <Badge variant="secondary" className="ml-auto">0</Badge>
-                                            </>
-                                        )}
-                                    </button>
-                                </TooltipTrigger>
-                                {leftFilterCollapsed && <TooltipContent side="right">Resolved by AI</TooltipContent>}
+                                {leftFilterCollapsed && <TooltipContent side="right">Resolved</TooltipContent>}
                             </Tooltip>
                         </TooltipProvider>
                     </div>

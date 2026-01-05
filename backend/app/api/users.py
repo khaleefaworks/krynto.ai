@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional
+import os
+import uuid
+import shutil
+from pathlib import Path
 
 from app.core.database import get_db
 from app.api.deps import require_authenticated_user, require_admin
@@ -18,6 +23,16 @@ class AvailabilityRequest(BaseModel):
 class AvailabilityResponse(BaseModel):
     """Response with current availability status"""
     is_available: bool
+
+
+class AvatarUpdateRequest(BaseModel):
+    """Request to update user avatar URL"""
+    avatar_url: Optional[str] = None
+
+
+class AvatarResponse(BaseModel):
+    """Response with updated avatar URL"""
+    avatar_url: Optional[str] = None
 
 
 @router.post("/me/availability", response_model=AvailabilityResponse)
@@ -59,6 +74,86 @@ def get_availability(
     Get current user's availability status.
     """
     return AvailabilityResponse(is_available=current_user.is_available)
+
+
+@router.post("/me/avatar/upload", response_model=AvatarResponse)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload avatar image file.
+    Saves file to disk and stores path in database.
+    """
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    # Validate file size (5MB max)
+    file.file.seek(0, 2)  # Seek to end
+    file_size = file.file.tell()
+    file.file.seek(0)  # Reset to start
+    
+    if file_size > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    
+    # Create uploads directory if it doesn't exist
+    upload_dir = Path("uploads/avatars")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename
+    file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+    unique_filename = f"{current_user.id}_{uuid.uuid4().hex[:8]}.{file_extension}"
+    file_path = upload_dir / unique_filename
+    
+    # Delete old avatar file if exists
+    if current_user.avatar_url and current_user.avatar_url.startswith('/uploads/'):
+        old_file = Path(current_user.avatar_url.lstrip('/'))
+        if old_file.exists():
+            old_file.unlink()
+    
+    # Save file
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # Update database with relative URL
+    current_user.avatar_url = f"/uploads/avatars/{unique_filename}"
+    db.commit()
+    db.refresh(current_user)
+    
+    return AvatarResponse(avatar_url=current_user.avatar_url)
+
+
+@router.delete("/me/avatar", response_model=AvatarResponse)
+def delete_avatar(
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Remove avatar image.
+    """
+    # Delete file if exists
+    if current_user.avatar_url and current_user.avatar_url.startswith('/uploads/'):
+        file_path = Path(current_user.avatar_url.lstrip('/'))
+        if file_path.exists():
+            file_path.unlink()
+    
+    current_user.avatar_url = None
+    db.commit()
+    db.refresh(current_user)
+    
+    return AvatarResponse(avatar_url=None)
+
+
+@router.get("/me/avatar", response_model=AvatarResponse)
+def get_avatar(
+    current_user: User = Depends(require_authenticated_user)
+):
+    """
+    Get current user's avatar URL.
+    """
+    return AvatarResponse(avatar_url=current_user.avatar_url)
 
 
 class StatusUpdateRequest(BaseModel):

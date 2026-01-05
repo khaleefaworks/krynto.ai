@@ -14,6 +14,8 @@ interface AppState {
   // Chats
   activeChats: Conversation[]
   setActiveChats: (chats: Conversation[]) => void
+  unreadChatsCount: number
+  setUnreadChatsCount: (count: number) => void
   
   // Current Chat
   currentChat: Conversation | null
@@ -39,6 +41,8 @@ export const useAppStore = create<AppState>((set) => ({
   // Chats
   activeChats: [],
   setActiveChats: (chats) => set({ activeChats: chats }),
+  unreadChatsCount: 0,
+  setUnreadChatsCount: (count) => set({ unreadChatsCount: count }),
   
   // Current Chat
   currentChat: null,

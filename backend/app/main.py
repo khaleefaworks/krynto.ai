@@ -37,7 +37,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Add logging middleware (before CORS)
 app.add_middleware(LoggingMiddleware)
 
-# Configure CORS
+# Configure CORS - Allow all origins in development for easier debugging
+# In production, restrict to specific domains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -49,10 +50,12 @@ app.add_middleware(
         "http://127.0.0.1:8080",
         "http://localhost:8000",  # Same origin (static widget)
         "http://127.0.0.1:8000",
+        "*",  # Allow all origins in development (remove in production!)
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Expose all headers to frontend
 )
 
 app.include_router(health_router)
@@ -71,3 +74,6 @@ app.include_router(shortcuts_router)
 
 # Serve widget files statically
 app.mount("/widget", StaticFiles(directory="../widget"), name="widget")
+
+# Serve uploaded files (avatars, etc.)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

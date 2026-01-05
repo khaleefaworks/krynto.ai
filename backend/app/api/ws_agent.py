@@ -93,6 +93,14 @@ async def agent_ws(
                 if result.get("error"):
                     await websocket.send_json({"type": "error", "message": result["error"]})
                     continue
+                
+                # Send confirmation back to agent
+                await websocket.send_json({
+                    "type": "message_sent",
+                    "conversation_id": conversation_id,
+                    "content": content,
+                    "success": True
+                })
 
     except WebSocketDisconnect:
         logger.info("agent_disconnected", agent_id=agent_id)

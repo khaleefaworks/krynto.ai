@@ -6,16 +6,9 @@ from app.core.database import Base
 
 
 class ConversationStatus(str, enum.Enum):
-    """Conversation lifecycle states"""
-    ACTIVE = "active"      # Live agent chat in progress
-    OFFLINE = "offline"    # Visitor left message while offline
-    CLOSED = "closed"      # Conversation finished
-
-
-class ConversationMode(str, enum.Enum):
-    """Who is handling the conversation right now"""
-    WAITING_FOR_AGENT = "waiting_for_agent"  # Needs agent to claim
-    AGENT_HANDLING = "agent_handling"        # Agent has claimed
+    """Simplified conversation lifecycle states"""
+    OPEN = "open"          # Active conversation, may or may not have agent assigned
+    RESOLVED = "resolved"  # Conversation finished/closed
 
 
 class Conversation(Base, TimestampMixin):
@@ -27,12 +20,7 @@ class Conversation(Base, TimestampMixin):
     status = Column(
         SQLEnum(ConversationStatus, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
-        default=ConversationStatus.ACTIVE
-    )
-    mode = Column(
-        SQLEnum(ConversationMode, values_callable=lambda x: [e.value for e in x]),
-        nullable=False,
-        default=ConversationMode.WAITING_FOR_AGENT
+        default=ConversationStatus.OPEN
     )
     is_handoff = Column(Boolean, default=False)
     assigned_agent_id = Column(Integer, ForeignKey("users.id"), nullable=True)

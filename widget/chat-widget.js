@@ -20,7 +20,14 @@
     theme: globalConfig.theme || 'dark',
     position: globalConfig.position || 'bottom-right',
     welcomeMessage: globalConfig.welcomeMessage || 'Hi! How can we help you today?',
-    primaryColor: globalConfig.primaryColor || '#000000'
+    primaryColor: globalConfig.primaryColor || '#000000',
+    headerTitle: globalConfig.headerTitle || 'Support Chat',
+    onlineStatusText: globalConfig.onlineStatusText || 'Online',
+    bubbleText: globalConfig.bubbleText || 'Chat with us',
+    agentAvatar: globalConfig.agentAvatar || null,
+    showEmojiPicker: globalConfig.showEmojiPicker || false,
+    showAttachments: globalConfig.showAttachments || false,
+    brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist'
   };
   
   // Validate required config
@@ -141,14 +148,58 @@
     } else if (data.type === 'agent') {
       // Agent message
       appendMessage('agent', data.message);
+      
+      // Update agent avatar if provided
+      if (data.agent_avatar) {
+        updateAgentAvatar(data.agent_avatar);
+      }
     } else if (data.type === 'agent_joined') {
       // Agent joined notification
       showSystemMessage('A support agent has joined the chat');
+      
+      // Update agent avatar if provided
+      if (data.agent_avatar) {
+        updateAgentAvatar(data.agent_avatar);
+      }
     } else if (data.message) {
       // Generic message format
       const sender = data.sender || 'ai';
       appendMessage(sender, data.message);
     }
+  }
+
+  /**
+   * Update agent avatar in header
+   */
+  function updateAgentAvatar(avatarUrl) {
+    const fullUrl = avatarUrl.startsWith('http') ? avatarUrl : `${CONFIG.apiUrl}${avatarUrl}`;
+    const avatarContainer = document.querySelector('.chatassist-header-content');
+    if (!avatarContainer) return;
+    
+    const existingAvatar = avatarContainer.querySelector('.chatassist-header-avatar, .chatassist-header-avatar-placeholder');
+    if (existingAvatar) {
+      existingAvatar.remove();
+    }
+    
+    const avatarImg = document.createElement('img');
+    avatarImg.src = fullUrl;
+    avatarImg.alt = 'Agent';
+    avatarImg.className = 'chatassist-header-avatar';
+    avatarContainer.insertBefore(avatarImg, avatarContainer.firstChild);
+    
+    CONFIG.agentAvatar = fullUrl;
+  }
+
+  /**
+   * Format timestamp
+   */
+  function formatTimestamp(date) {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+    const displayMinutes = minutes < 10 ? '0' + minutes : minutes;
+    return `${displayHours}:${displayMinutes} ${ampm}`;
   }
 
   /**
@@ -165,7 +216,12 @@
     bubble.className = 'chatassist-message-bubble';
     bubble.textContent = content;
     
+    const timestamp = document.createElement('div');
+    timestamp.className = 'chatassist-message-timestamp';
+    timestamp.textContent = formatTimestamp(new Date());
+    
     messageDiv.appendChild(bubble);
+    messageDiv.appendChild(timestamp);
     messagesContainer.appendChild(messageDiv);
     
     // Scroll to bottom
@@ -214,21 +270,44 @@
     // Create main container
     const container = document.createElement('div');
     container.id = 'chatassist-widget';
+    
+    const avatarHTML = CONFIG.agentAvatar ? 
+      `<img src="${CONFIG.agentAvatar}" alt="Agent" class="chatassist-header-avatar" />` :
+      `<div class="chatassist-header-avatar-placeholder">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </div>`;
+    
     container.innerHTML = `
       <div id="chatassist-bubble">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
+        <div id="chatassist-bubble-text">${CONFIG.bubbleText}</div>
       </div>
       <div id="chatassist-window" style="display: none;">
         <div id="chatassist-header">
-          <span>Support Chat</span>
+          <div class="chatassist-header-content">
+            ${avatarHTML}
+            <div class="chatassist-header-info">
+              <span class="chatassist-header-title">${CONFIG.headerTitle}</span>
+              <div class="chatassist-online-status">
+                <span class="chatassist-online-dot"></span>
+                <span class="chatassist-online-text">${CONFIG.onlineStatusText}</span>
+              </div>
+            </div>
+          </div>
           <button id="chatassist-close">&times;</button>
         </div>
         <div id="chatassist-messages"></div>
-        <div id="chatassist-input-container">
-          <input type="text" id="chatassist-input" placeholder="Type your message..." />
-          <button id="chatassist-send">Send</button>
+        <div id="chatassist-footer">
+          <div id="chatassist-input-container">
+            <input type="text" id="chatassist-input" placeholder="Type your message..." />
+            <button id="chatassist-send">Send</button>
+          </div>
+          <div id="chatassist-branding">${CONFIG.brandingText}</div>
         </div>
       </div>
     `;
@@ -298,6 +377,13 @@
         CONFIG.position = config.position || CONFIG.position;
         CONFIG.welcomeMessage = config.welcome_message || CONFIG.welcomeMessage;
         CONFIG.primaryColor = config.primary_color || CONFIG.primaryColor;
+        CONFIG.headerTitle = config.header_title || CONFIG.headerTitle;
+        CONFIG.onlineStatusText = config.online_status_text || CONFIG.onlineStatusText;
+        CONFIG.bubbleText = config.bubble_text || CONFIG.bubbleText;
+        CONFIG.showEmojiPicker = config.show_emoji_picker || CONFIG.showEmojiPicker;
+        CONFIG.showAttachments = config.show_attachments || CONFIG.showAttachments;
+        CONFIG.brandingText = config.branding_text || CONFIG.brandingText;
+        // Note: agentAvatar would come from agent's profile dynamically
         
         console.log('[ChatWidget] Configuration loaded from backend:', config);
         return true;

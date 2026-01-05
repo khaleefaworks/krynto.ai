@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.conversation import Conversation, ConversationStatus, ConversationMode
+from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.services.conversation_service import ConversationService
 from app.core.logging import get_logger
@@ -33,16 +33,15 @@ class ChatService:
         """
         Handle visitor message based on conversation status.
         
-        - OFFLINE: Store message, return None (no AI response)
-        - ACTIVE with agent: Forward to agent
-        - ACTIVE without agent: Queue for agent
-        - CLOSED: Reject message
+        - OPEN with agent: Forward to agent
+        - OPEN without agent: Queue for agent
+        - RESOLVED: Reject message
         """
         conversation_service = ConversationService(self.db)
         
-        # Check if conversation is closed
-        if self.conversation.status == ConversationStatus.CLOSED:
-            logger.warning("message_rejected_closed", conversation_id=self.conversation.id)
+        # Check if conversation is resolved
+        if self.conversation.status == ConversationStatus.RESOLVED:
+            logger.warning("message_rejected_resolved", conversation_id=self.conversation.id)
             return "This conversation has been closed."
         
         # Save visitor message
@@ -57,40 +56,29 @@ class ChatService:
         # Refresh conversation to get latest state
         self.db.refresh(self.conversation)
         
-        # OFFLINE mode: just store message, no response
-        if self.conversation.status == ConversationStatus.OFFLINE:
-            logger.info("offline_message_stored", conversation_id=self.conversation.id)
-            return None  # System message already sent during conversation creation
-        
-        # MODE-BASED ROUTING
-        if self.conversation.mode == ConversationMode.AGENT_HANDLING:
-            logger.info("agent_handling_mode", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
+        # If agent assigned, forward message
+        if self.conversation.assigned_agent_id:
+            logger.info("forwarding_to_agent", conversation_id=self.conversation.id, assigned_agent_id=self.conversation.assigned_agent_id)
             
             # Forward message to agent
             from app.services.agent_service import AgentService
             agent_service = AgentService(self.db)
             
-            if self.conversation.assigned_agent_id:
-                await agent_service.send_to_agent(
-                    self.conversation.assigned_agent_id,
-                    {
-                        "type": "visitor_message",
-                        "conversation_id": self.conversation.id,
-                        "message": text
-                    }
-                )
+            await agent_service.send_to_agent(
+                self.conversation.assigned_agent_id,
+                {
+                    "type": "visitor_message",
+                    "conversation_id": self.conversation.id,
+                    "message": text
+                }
+            )
             
             # Return None - agent will respond
             return None
         
-        if self.conversation.mode == ConversationMode.WAITING_FOR_AGENT:
-            logger.info("waiting_for_agent_mode", conversation_id=self.conversation.id)
-            # Message stored, waiting for agent to claim
-            return "Thanks! An agent will be with you shortly."
-        
-        # Shouldn't reach here, but handle gracefully
-        logger.warning("unexpected_mode", conversation_id=self.conversation.id, mode=self.conversation.mode.value)
-        return "Your message has been received. An agent will respond soon."
+        # No agent assigned yet
+        logger.info("waiting_for_agent", conversation_id=self.conversation.id)
+        return "Thanks! An agent will be with you shortly."
     
     async def send_to_visitor(self, message_data: dict):
         """Send message to visitor's WebSocket"""

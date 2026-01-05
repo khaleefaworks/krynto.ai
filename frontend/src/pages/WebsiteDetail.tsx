@@ -20,6 +20,12 @@ interface Website {
     position?: string
     welcome_message?: string
     primary_color?: string
+    header_title?: string
+    online_status_text?: string
+    bubble_text?: string
+    show_emoji_picker?: boolean
+    show_attachments?: boolean
+    branding_text?: string | null
   } | null
   created_at: string
 }
@@ -53,6 +59,12 @@ export default function WebsiteDetail() {
       position: 'bottom-right',
       welcome_message: 'Hi! How can we help you today?',
       primary_color: '#000000',
+      header_title: 'How can we help?',
+      online_status_text: 'We reply immediately',
+      bubble_text: 'Chat',
+      show_emoji_picker: true,
+      show_attachments: false,
+      branding_text: null,
     }
   })
 
@@ -83,6 +95,12 @@ export default function WebsiteDetail() {
         name: data.name,
         domain: data.domain,
         ai_enabled: data.ai_enabled,
+          header_title: data.widget_config?.header_title || 'How can we help?',
+          online_status_text: data.widget_config?.online_status_text || 'We reply immediately',
+          bubble_text: data.widget_config?.bubble_text || 'Chat',
+          show_emoji_picker: data.widget_config?.show_emoji_picker !== undefined ? data.widget_config.show_emoji_picker : true,
+          show_attachments: data.widget_config?.show_attachments || false,
+          branding_text: data.widget_config?.branding_text || null,
         ai_instructions: data.ai_instructions || '',
         widget_config: {
           theme: data.widget_config?.theme || 'dark',
@@ -334,38 +352,76 @@ export default function WebsiteDetail() {
             <CardDescription>Customize the chat widget appearance</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Theme
-              </label>
-              <select
-                value={formData.widget_config.theme}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, theme: e.target.value }
-                })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              >
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Theme
+                </label>
+                <select
+                  value={formData.widget_config.theme}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, theme: e.target.value }
+                  })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                >
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Position
+                </label>
+                <select
+                  value={formData.widget_config.position}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, position: e.target.value }
+                  })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                >
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                  <option value="top-right">Top Right</option>
+                  <option value="top-left">Top Left</option>
+                </select>
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Position
+                Header Title
               </label>
-              <select
-                value={formData.widget_config.position}
+              <Input
+                value={formData.widget_config.header_title}
                 onChange={(e) => setFormData({
                   ...formData,
-                  widget_config: { ...formData.widget_config, position: e.target.value }
+                  widget_config: { ...formData.widget_config, header_title: e.target.value }
                 })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              >
-                <option value="bottom-right">Bottom Right</option>
-                <option value="bottom-left">Bottom Left</option>
-              </select>
+                placeholder="How can we help?"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Text shown in the widget header
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Online Status Text
+              </label>
+              <Input
+                value={formData.widget_config.online_status_text}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  widget_config: { ...formData.widget_config, online_status_text: e.target.value }
+                })}
+                placeholder="We reply immediately"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Status message shown below header
+              </p>
             </div>
 
             <div>
@@ -380,6 +436,26 @@ export default function WebsiteDetail() {
                 })}
                 placeholder="Hi! How can we help you today?"
               />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                First message shown to visitors
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Bubble Text
+              </label>
+              <Input
+                value={formData.widget_config.bubble_text}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  widget_config: { ...formData.widget_config, bubble_text: e.target.value }
+                })}
+                placeholder="Chat"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Text shown on the minimized chat bubble
+              </p>
             </div>
 
             <div>
@@ -405,6 +481,60 @@ export default function WebsiteDetail() {
                   placeholder="#000000"
                   className="flex-1"
                 />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Main color for header, buttons, and bubble
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Branding Text (Optional)
+              </label>
+              <Input
+                value={formData.widget_config.branding_text || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
+                })}
+                placeholder="Powered by Your Company"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Optional branding text shown at bottom of widget
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="show_emoji_picker"
+                  checked={formData.widget_config.show_emoji_picker}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, show_emoji_picker: e.target.checked }
+                  })}
+                  className="w-4 h-4"
+                />
+                <label htmlFor="show_emoji_picker" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Enable Emoji Picker
+                </label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="show_attachments"
+                  checked={formData.widget_config.show_attachments}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, show_attachments: e.target.checked }
+                  })}
+                  className="w-4 h-4"
+                />
+                <label htmlFor="show_attachments" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Enable File Attachments (Coming Soon)
+                </label>
               </div>
             </div>
           </CardContent>
