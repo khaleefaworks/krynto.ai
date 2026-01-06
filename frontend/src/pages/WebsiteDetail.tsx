@@ -4,6 +4,7 @@ import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
 import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check } from 'lucide-react'
@@ -17,6 +18,11 @@ interface Website {
     theme?: string
     position?: string
     welcome_message?: string
+    automations?: {
+      welcome_enabled?: boolean
+      welcome_message?: string
+      welcome_cooldown_hours?: number
+    }
     primary_color?: string
     header_title?: string
     online_status_text?: string
@@ -54,6 +60,11 @@ export default function WebsiteDetail() {
       theme: 'dark',
       position: 'bottom-right',
       welcome_message: 'Hi! How can we help you today?',
+      automations: {
+        welcome_enabled: true,
+        welcome_message: 'Hi! How can we help you today?',
+        welcome_cooldown_hours: 24,
+      },
       primary_color: '#000000',
       header_title: 'How can we help?',
       online_status_text: 'We reply immediately',
@@ -87,13 +98,20 @@ export default function WebsiteDetail() {
       setLoading(true)
       setError(null)
       const data = await apiRequest<Website>(`/websites/${id}`)
+      const automations = data.widget_config?.automations || {}
+      const defaultWelcome = data.widget_config?.welcome_message || 'Hi! How can we help you today?'
       setFormData({
         name: data.name,
         domain: data.domain,
         widget_config: {
           theme: data.widget_config?.theme || 'dark',
           position: data.widget_config?.position || 'bottom-right',
-          welcome_message: data.widget_config?.welcome_message || 'Hi! How can we help you today?',
+          welcome_message: defaultWelcome,
+          automations: {
+            welcome_enabled: automations.welcome_enabled !== undefined ? !!automations.welcome_enabled : true,
+            welcome_message: (automations.welcome_message || defaultWelcome) as string,
+            welcome_cooldown_hours: typeof automations.welcome_cooldown_hours === 'number' ? automations.welcome_cooldown_hours : 24,
+          },
           primary_color: data.widget_config?.primary_color || '#000000',
           header_title: data.widget_config?.header_title || 'How can we help?',
           online_status_text: data.widget_config?.online_status_text || 'We reply immediately',
@@ -514,20 +532,74 @@ export default function WebsiteDetail() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Welcome Message
-              </label>
-              <Input
-                value={formData.widget_config.welcome_message}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, welcome_message: e.target.value }
-                })}
-                placeholder="Hi! How can we help you today?"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                First message shown to visitors
-              </p>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Welcome Automation
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Sends a bot welcome message for new visitors, or when they return after the cooldown.
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.widget_config.automations?.welcome_enabled ?? true}
+                  onCheckedChange={(checked) => setFormData({
+                    ...formData,
+                    widget_config: {
+                      ...formData.widget_config,
+                      automations: {
+                        ...(formData.widget_config.automations || {}),
+                        welcome_enabled: checked,
+                        welcome_message: (formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string,
+                        welcome_cooldown_hours: (formData.widget_config.automations?.welcome_cooldown_hours ?? 24) as number,
+                      }
+                    }
+                  })}
+                />
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Welcome Message
+                  </label>
+                  <Input
+                    value={(formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: {
+                        ...formData.widget_config,
+                        welcome_message: e.target.value,
+                        automations: {
+                          ...(formData.widget_config.automations || {}),
+                          welcome_message: e.target.value,
+                        }
+                      }
+                    })}
+                    placeholder="Hi! How can we help you today?"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Cooldown (hours)
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={String(formData.widget_config.automations?.welcome_cooldown_hours ?? 24)}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: {
+                        ...formData.widget_config,
+                        automations: {
+                          ...(formData.widget_config.automations || {}),
+                          welcome_cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
+                        }
+                      }
+                    })}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>

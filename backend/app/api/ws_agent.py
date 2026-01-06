@@ -68,7 +68,12 @@ async def agent_ws(
             message_type = payload.get("type")
             
             if message_type == "join_chat":
-                conversation_id = payload.get("conversation_id")
+                conversation_id_raw = payload.get("conversation_id")
+                try:
+                    conversation_id = int(conversation_id_raw)
+                except Exception:
+                    await websocket.send_json({"type": "error", "message": "Invalid conversation_id"})
+                    continue
                 logger.info("agent_joining_conversation", agent_id=agent_id, conversation_id=conversation_id)
 
                 result = await orchestrator.handle_agent_join(
@@ -84,6 +89,8 @@ async def agent_ws(
                 history = [
                     {
                         "sender": msg.sender,
+                        "sender_type": msg.sender_type.value if hasattr(msg.sender_type, "value") else msg.sender_type,
+                        "event_type": getattr(msg, "event_type", None),
                         "content": msg.content,
                         "created_at": msg.created_at.isoformat() if msg.created_at else None,
                     }
@@ -99,7 +106,11 @@ async def agent_ws(
                 )
 
             elif message_type == "message":
-                conversation_id = payload.get("conversation_id")
+                conversation_id_raw = payload.get("conversation_id")
+                try:
+                    conversation_id = int(conversation_id_raw)
+                except Exception:
+                    continue
                 content = payload.get("content")
                 message_id = payload.get("message_id")  # Extract message ID for acknowledgment
 

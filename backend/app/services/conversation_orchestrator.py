@@ -47,7 +47,16 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             if conversation.assigned_agent_id:
                 return
 
-            # Only send if visitor is connected; message is ephemeral for now.
+            # Only send if visitor is connected.
+            # Persist as a bot message so both widget + agent dashboard show it.
+            from app.services.conversation_service import ConversationService
+
+            ConversationService(db).add_bot_message(
+                conversation_id,
+                "Thanks! An agent will be with you shortly.",
+                event_type="bot",
+            )
+
             await ChatService.send_to_visitor(
                 conversation_id,
                 {
@@ -147,6 +156,12 @@ class ConversationOrchestrator:
         # Send a single bot prompt (no repeats).
         if not is_website_online(website_id):
             if prior_message_count == 0:
+                # Persist the offline prompt as a bot message so it appears in thread history.
+                self.conversation_service.add_bot_message(
+                    conversation.id,
+                    "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                    event_type="bot",
+                )
                 await ChatService.send_to_visitor(
                     conversation.id,
                     {
@@ -234,9 +249,11 @@ class ConversationOrchestrator:
         conversation.assigned_agent_id = agent_id
         self.db.commit()
 
+        agent_name = user.name or "Support Agent"
         self.conversation_service.add_system_message(
             conversation_id,
-            "An agent has joined the conversation.",
+            f"{agent_name} joined the chat.",
+            event_type="agent_join",
         )
 
         # Get agent details including avatar
@@ -247,9 +264,9 @@ class ConversationOrchestrator:
             conversation_id,
             {
                 "type": "agent_joined",
-                "message": "A support agent has joined the chat",
+                "message": f"{agent_name} joined the chat.",
                 "agent_avatar": agent.avatar_url if agent else None,
-                "agent_name": agent.name if agent else "Support Agent"
+                "agent_name": agent.name if agent else agent_name,
             }
         )
 
@@ -278,6 +295,7 @@ class ConversationOrchestrator:
         self.conversation_service.add_system_message(
             conversation_id,
             f"{agent_name} joined the chat.",
+            event_type="agent_join",
         )
 
         # Notify visitor if connected

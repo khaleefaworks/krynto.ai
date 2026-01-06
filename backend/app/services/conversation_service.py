@@ -93,7 +93,14 @@ class ConversationService:
         
         return conversation
     
-    def add_system_message(self, conversation_id: int, content: str) -> Message:
+    def add_system_message(
+        self,
+        conversation_id: int,
+        content: str,
+        *,
+        event_type: str | None = None,
+        sender: str = "system",
+    ) -> Message:
         """
         Add a system-generated message to a conversation.
         
@@ -107,8 +114,9 @@ class ConversationService:
         message = Message(
             conversation_id=conversation_id,
             sender_type=MessageSenderType.SYSTEM,
-            sender="system",
-            content=content
+            sender=sender,
+            event_type=event_type,
+            content=content,
         )
         
         self.db.add(message)
@@ -122,6 +130,14 @@ class ConversationService:
         )
         
         return message
+
+    def add_bot_message(self, conversation_id: int, content: str, *, event_type: str = "bot") -> Message:
+        return self.add_system_message(
+            conversation_id,
+            content,
+            event_type=event_type,
+            sender="bot",
+        )
     
 
     
@@ -214,7 +230,8 @@ class ConversationService:
         # Add system message
         self.add_system_message(
             conversation_id,
-            f"{agent_name} has joined the conversation."
+            f"{agent_name} joined the chat.",
+            event_type="agent_join",
         )
         
         logger.info(

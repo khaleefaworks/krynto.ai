@@ -7,7 +7,9 @@ import { ArrowLeft } from "lucide-react"
 
 interface Message {
   id?: number
-  sender: string
+  sender?: string
+  sender_type?: "visitor" | "agent" | "system"
+  event_type?: string | null
   content: string
   created_at?: string
 }
@@ -74,36 +76,51 @@ export default function ClosedChatView() {
             )}
             
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${
-                  m.sender === "agent" ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div
-                  className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
-                    m.sender === "agent"
-                      ? "bg-black dark:bg-gray-800 text-white"
-                      : m.sender === "ai"
-                      ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
-                      : "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300"
-                  }`}
-                >
-                  <p className="text-sm">{m.content}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    {m.sender !== "agent" && (
-                      <span className="text-xs opacity-70 capitalize">
-                        {m.sender}
-                      </span>
-                    )}
-                    {m.created_at && (
-                      <span className="text-xs opacity-60 ml-2">
-                        {new Date(m.created_at).toLocaleTimeString()}
-                      </span>
-                    )}
+              (() => {
+                const senderType = (m as any).sender_type || m.sender
+                const eventType = (m as any).event_type || null
+                const isJoin = senderType === "system" && eventType === "agent_join"
+                const isBot = senderType === "system" && !isJoin
+                const isAgent = senderType === "agent"
+
+                if (isJoin) {
+                  return (
+                    <div key={i} className="flex justify-center">
+                      <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
+                        {m.content}
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div key={i} className={`flex ${isAgent ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
+                        isAgent
+                          ? "bg-black dark:bg-gray-800 text-white"
+                          : isBot
+                          ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+                          : "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300"
+                      }`}
+                    >
+                      <p className="text-sm">{m.content}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        {!isAgent && (
+                          <span className="text-xs opacity-70 capitalize">
+                            {isBot ? "bot" : "visitor"}
+                          </span>
+                        )}
+                        {m.created_at && (
+                          <span className="text-xs opacity-60 ml-2">
+                            {new Date(m.created_at).toLocaleTimeString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                )
+              })()
             ))}
           </div>
 

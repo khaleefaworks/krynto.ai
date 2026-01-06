@@ -174,9 +174,11 @@ export default function ConversationsView() {
         // Register message handler
         const removeHandler = addMessageHandler((data) => {
             console.log('📩 WebSocket message received:', data)
+
+            const dataConversationId = Number((data as any)?.conversation_id)
             
             // Only process messages for the current chat
-            if (data.type === 'visitor_message' && data.conversation_id === selectedChat) {
+            if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
                 // Visitor sent a message - add to UI
                 console.log('👤 Adding visitor message to UI:', data.message)
                 const newMessage = {
@@ -188,7 +190,7 @@ export default function ConversationsView() {
                     created_at: new Date().toISOString()
                 }
                 addMessage(newMessage)
-            } else if (data.type === 'message_sent' && data.conversation_id === selectedChat) {
+            } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 // Our message was confirmed - add to UI
                 console.log('✅ Agent message confirmed, adding to UI:', data.content)
                 const confirmedMessage = {
@@ -280,6 +282,18 @@ export default function ConversationsView() {
                 try {
                     await joinChat(selectedChat.toString())
                     joinedRef.current = true
+
+                    // Backend persists an agent-join system message, but the agent UI
+                    // doesn't refetch messages on join. Add it locally for immediate UX.
+                    addMessage({
+                        id: `temp-join-${Date.now()}`,
+                        conversation_id: selectedChat,
+                        sender_type: 'system' as const,
+                        sender: 'system' as const,
+                        event_type: 'agent_join',
+                        content: `${(user as any)?.name || 'Support Agent'} joined the chat.`,
+                        created_at: new Date().toISOString(),
+                    } as any)
                 } catch (e: any) {
                     // If another agent already owns it, ask for explicit confirmation.
                     const msg = String(e?.message || '')
@@ -316,6 +330,17 @@ export default function ConversationsView() {
         try {
             await takeoverConversation(selectedChat)
             joinedRef.current = true
+
+            addMessage({
+                id: `temp-join-${Date.now()}`,
+                conversation_id: selectedChat,
+                sender_type: 'system' as const,
+                sender: 'system' as const,
+                event_type: 'agent_join',
+                content: `${(user as any)?.name || 'Support Agent'} joined the chat.`,
+                created_at: new Date().toISOString(),
+            } as any)
+
             sendAgentMessage(content, selectedChat.toString())
         } catch (error) {
             console.error('Failed to takeover and send:', error)
@@ -730,8 +755,12 @@ export default function ConversationsView() {
                         ) : (
                             <>
                                 {messages.map((msg, index) => {
-                                    const isSystem = (msg as any).message_type === 'system'
-                                    const isAgent = (msg as any).sender_type === 'agent'
+                                    const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
+                                    const eventType = (msg as any).event_type || null
+                                    const isSystem = senderType === 'system'
+                                    const isJoin = isSystem && eventType === 'agent_join'
+                                    const isBot = isSystem && !isJoin
+                                    const isAgent = senderType === 'agent'
                                     const msgTimestamp = (msg as any).timestamp || msg.created_at
                                     const showTimestamp = index === 0 ||
                                         (new Date(msgTimestamp).getTime() - new Date((messages[index - 1] as any).timestamp || messages[index - 1].created_at).getTime() > 300000)
@@ -752,11 +781,25 @@ export default function ConversationsView() {
                                                 </div>
                                             )}
 
-                                            {/* System Message */}
-                                            {isSystem ? (
+                                            {/* Agent Joined */}
+                                            {isJoin ? (
                                                 <div className="flex justify-center">
-                                                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-2 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 max-w-md text-center">
+                                                    <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
                                                         {msg.content}
+                                                    </div>
+                                                </div>
+                                            ) : isBot ? (
+                                                <div className="flex justify-start">
+                                                    <div className="flex items-end gap-2 max-w-[70%]">
+                                                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 text-xs font-bold flex-shrink-0">
+                                                            AI
+                                                        </div>
+                                                        <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
+                                                            <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                                <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             ) : (

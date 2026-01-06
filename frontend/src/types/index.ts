@@ -23,7 +23,12 @@ export interface Conversation {
 export interface Message {
   id?: number
   conversation_id?: number
-  sender: "visitor" | "ai" | "agent"
+  // Backwards-compatible sender label used in older UI paths.
+  sender?: "visitor" | "ai" | "agent" | string
+  // Canonical sender type from backend.
+  sender_type?: "visitor" | "agent" | "system"
+  // Subtype for system messages (e.g. automation_welcome, agent_join)
+  event_type?: string | null
   content: string
   created_at?: string
 }

@@ -48,6 +48,7 @@
   let presencePingInterval = null;
   let presenceOnline = true;
   let activeAgentAvatarUrl = null;
+  let pendingOfflineMessage = null;
 
   function getFullAssetUrl(url) {
     if (!url || typeof url !== 'string') return null;
@@ -200,18 +201,37 @@
 
       data.messages.forEach((m) => {
         const senderType = m.sender_type || m.sender || 'system';
+        const eventType = m.event_type || null;
+
         if (senderType === 'visitor') {
-          appendMessage('visitor', m.content);
-        } else if (senderType === 'agent') {
-          appendMessage('agent', m.content);
-        } else if (senderType === 'ai') {
-          appendMessage('ai', m.content);
-        } else if (senderType === 'system') {
-          showSystemMessage(m.content);
-        } else {
-          // Fallback
-          showSystemMessage(m.content);
+          appendMessage('visitor', m.content, m.created_at);
+          return;
         }
+        if (senderType === 'agent') {
+          appendMessage('agent', m.content, m.created_at);
+          return;
+        }
+
+        // SYSTEM messages are sub-typed via event_type
+        if (senderType === 'system') {
+          if (eventType === 'agent_join') {
+            showJoinMessage(m.content, m.created_at);
+            return;
+          }
+          if (eventType && String(eventType).startsWith('automation')) {
+            appendMessage('ai', m.content, m.created_at);
+            return;
+          }
+          if (eventType === 'bot') {
+            appendMessage('ai', m.content, m.created_at);
+            return;
+          }
+          showSystemMessage(m.content);
+          return;
+        }
+
+        // Backwards-compatible fallback
+        appendMessage('ai', m.content, m.created_at);
       });
 
       return;
@@ -230,7 +250,8 @@
       }
     } else if (data.type === 'agent_joined') {
       // Agent joined notification
-      showSystemMessage('A support agent has joined the chat');
+      const name = data.agent_name || 'A support agent';
+      showJoinMessage(`${name} joined the chat.`, null);
       
       // Update agent avatar if provided
       if (data.agent_avatar) {
@@ -267,7 +288,7 @@
   /**
    * Append message to chat window
    */
-  function appendMessage(sender, content) {
+  function appendMessage(sender, content, createdAtIso) {
     const messagesContainer = document.getElementById('chatassist-messages');
     if (!messagesContainer) return;
 
@@ -280,7 +301,8 @@
     
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
-    timestamp.textContent = formatTimestamp(new Date());
+    const ts = createdAtIso ? new Date(createdAtIso) : new Date();
+    timestamp.textContent = formatTimestamp(ts);
     
     messageDiv.appendChild(bubble);
     messageDiv.appendChild(timestamp);
@@ -301,6 +323,21 @@
     messageDiv.className = 'chatassist-message chatassist-message-system';
     messageDiv.textContent = content;
     
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+
+  function showJoinMessage(content, createdAtIso) {
+    const messagesContainer = document.getElementById('chatassist-messages');
+    if (!messagesContainer) return;
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'chatassist-message chatassist-message-join';
+
+    const ts = createdAtIso ? new Date(createdAtIso) : new Date();
+    const time = formatTimestamp(ts);
+    messageDiv.textContent = `${content} ${time}`;
+
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
@@ -343,35 +380,95 @@
     const message = input.value.trim();
     if (!message) return;
 
-    // Display user message immediately
-    appendMessage('visitor', message);
+    // Online: normal flow
+    if (presenceOnline) {
+      appendMessage('visitor', message);
+      input.value = '';
+      sendMessage(message);
+      return;
+    }
 
-    // Clear input
-    input.value = '';
-
-    // If offline, require contact email and include contact fields.
+    // Offline: if we already have email, send immediately; otherwise show overlay.
     const contactNameInput = document.getElementById('chatassist-contact-name');
     const contactEmailInput = document.getElementById('chatassist-contact-email');
-    let meta = undefined;
 
-    if (!presenceOnline) {
-      const visitor_name = contactNameInput ? String(contactNameInput.value || '').trim() : '';
-      const visitor_email = contactEmailInput ? String(contactEmailInput.value || '').trim() : '';
-      if (!visitor_email) {
-        showToast('Please enter your email so we can contact you.');
-        return;
-      }
-      meta = { visitor_name, visitor_email };
+    const visitor_name = contactNameInput ? String(contactNameInput.value || '').trim() : '';
+    const visitor_email = contactEmailInput ? String(contactEmailInput.value || '').trim() : '';
+
+    if (visitor_email) {
+      appendMessage('visitor', message);
+      input.value = '';
       try {
         if (visitor_name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitor_name);
         if (visitor_email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitor_email);
       } catch (e) {
         // ignore
       }
+      sendMessage(message, { visitor_name, visitor_email });
+      return;
     }
 
-    // Send to backend
-    sendMessage(message, meta);
+    // Capture message and prompt for contact info
+    pendingOfflineMessage = message;
+    input.value = '';
+    showContactOverlay();
+    return;
+  }
+
+  function showContactOverlay() {
+    const overlay = document.getElementById('chatassist-contact-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    overlay.classList.add('chatassist-contact-overlay-visible');
+
+    const emailInput = document.getElementById('chatassist-contact-email');
+    if (emailInput) {
+      try {
+        emailInput.focus();
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function hideContactOverlay(restorePendingToInput) {
+    const overlay = document.getElementById('chatassist-contact-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('chatassist-contact-overlay-visible');
+    overlay.style.display = 'none';
+
+    if (restorePendingToInput && pendingOfflineMessage) {
+      const input = document.getElementById('chatassist-input');
+      if (input) input.value = pendingOfflineMessage;
+    }
+  }
+
+  function submitContactAndSendPending() {
+    const emailInput = document.getElementById('chatassist-contact-email');
+    const nameInput = document.getElementById('chatassist-contact-name');
+    const visitor_name = nameInput ? String(nameInput.value || '').trim() : '';
+    const visitor_email = emailInput ? String(emailInput.value || '').trim() : '';
+
+    if (!visitor_email) {
+      showToast('Please enter your email so we can contact you.');
+      return;
+    }
+
+    const message = pendingOfflineMessage;
+    pendingOfflineMessage = null;
+    hideContactOverlay(false);
+
+    try {
+      if (visitor_name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitor_name);
+      if (visitor_email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitor_email);
+    } catch (e) {
+      // ignore
+    }
+
+    if (message) {
+      appendMessage('visitor', message);
+      sendMessage(message, { visitor_name, visitor_email });
+    }
   }
 
   /**
@@ -398,6 +495,23 @@
         <div id="chatassist-bubble-text">${CONFIG.bubbleText}</div>
       </div>
       <div id="chatassist-window" style="display: none;">
+        <div id="chatassist-contact-overlay" class="chatassist-contact-overlay">
+          <div class="chatassist-contact-overlay-backdrop"></div>
+          <div class="chatassist-contact-overlay-panel">
+            <div class="chatassist-contact-overlay-header">
+              <div class="chatassist-contact-overlay-title">Please introduce yourself</div>
+              <button id="chatassist-contact-overlay-close" class="chatassist-contact-overlay-close" type="button">&times;</button>
+            </div>
+            <div class="chatassist-contact-overlay-subtitle">We'll use your contact info only if all agents are offline and can't reply immediately.</div>
+            <div id="chatassist-contact-form" class="chatassist-contact-form">
+              <input type="text" id="chatassist-contact-name" name="name" placeholder="Your name" autocomplete="name" />
+              <input type="email" id="chatassist-contact-email" name="email" placeholder="Your email" autocomplete="email" />
+            </div>
+            <div class="chatassist-contact-overlay-actions">
+              <button id="chatassist-contact-overlay-submit" type="button" class="chatassist-contact-overlay-submit">Send message</button>
+            </div>
+          </div>
+        </div>
         <div id="chatassist-header">
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
@@ -415,10 +529,6 @@
         </div>
         <div id="chatassist-messages"></div>
         <div id="chatassist-footer">
-          <div id="chatassist-contact-form" style="display:none;">
-            <input type="text" id="chatassist-contact-name" placeholder="Your name (optional)" />
-            <input type="email" id="chatassist-contact-email" placeholder="Your email" />
-          </div>
           <div id="chatassist-input-container">
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
@@ -437,6 +547,9 @@
     const closeBtn = document.getElementById('chatassist-close');
     const input = document.getElementById('chatassist-input');
     const sendBtn = document.getElementById('chatassist-send');
+    const overlay = document.getElementById('chatassist-contact-overlay');
+    const overlayCloseBtn = document.getElementById('chatassist-contact-overlay-close');
+    const overlaySubmitBtn = document.getElementById('chatassist-contact-overlay-submit');
     const contactNameInput = document.getElementById('chatassist-contact-name');
     const contactEmailInput = document.getElementById('chatassist-contact-email');
 
@@ -459,7 +572,33 @@
     closeBtn.addEventListener('click', function() {
       window.style.display = 'none';
       bubble.style.display = 'flex';
+      // If overlay open, close it and restore pending message
+      hideContactOverlay(true);
     });
+
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+
+    if (overlayCloseBtn) {
+      overlayCloseBtn.addEventListener('click', function() {
+        hideContactOverlay(true);
+      });
+    }
+
+    if (overlaySubmitBtn) {
+      overlaySubmitBtn.addEventListener('click', function() {
+        submitContactAndSendPending();
+      });
+    }
+
+    if (contactEmailInput) {
+      contactEmailInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          submitContactAndSendPending();
+        }
+      });
+    }
 
     sendBtn.addEventListener('click', handleUserMessage);
 
@@ -474,9 +613,11 @@
   }
 
   function updateContactFormVisibility() {
-    const formEl = document.getElementById('chatassist-contact-form');
-    if (!formEl) return;
-    formEl.style.display = presenceOnline ? 'none' : 'flex';
+    // Contact form is now an overlay shown only when the visitor attempts to send while offline.
+    // If we come online while the overlay is open, close it.
+    if (presenceOnline) {
+      hideContactOverlay(false);
+    }
   }
 
   function connectPresenceWebSocket() {
@@ -732,11 +873,6 @@
     // Apply configuration styling (either fetched or defaults)
     applyConfiguration();
     
-    // Show welcome message after UI is ready
-    if (CONFIG.welcomeMessage) {
-      setTimeout(() => showSystemMessage(CONFIG.welcomeMessage), 500);
-    }
-
     // Connect WebSocket
     connectWebSocket();
 

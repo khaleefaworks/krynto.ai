@@ -23,4 +23,6 @@ class Message(Base, TimestampMixin):
         default=MessageSenderType.VISITOR
     )
     sender = Column(String(50))  # Kept for backward compatibility (email/name)
+    # Additional subtype for SYSTEM messages (e.g. automation_welcome, agent_join)
+    event_type = Column(String(50), nullable=True)
     content = Column(Text, nullable=False)

@@ -8,6 +8,7 @@ import json
 import time
 import traceback
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -83,6 +84,7 @@ async def chat_ws(
                                 "sender_type": msg.sender_type.value
                                 if hasattr(msg.sender_type, "value")
                                 else msg.sender_type,
+                                "event_type": getattr(msg, "event_type", None),
                                 "content": msg.content,
                                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                             }
@@ -101,6 +103,89 @@ async def chat_ws(
         else:
             # Let the widget render an empty thread; conversation will be created on first message.
             await websocket.send_json({"type": "history", "conversation_id": None, "messages": []})
+
+        # Welcome automation: send on first visit or if returning after cooldown.
+        # This replaces the widget's always-on placeholder greeting.
+        try:
+            from app.services.conversation_service import ConversationService
+            from app.models.message import Message
+
+            widget_cfg = website.widget_config or {}
+            automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
+
+            welcome_enabled = automations_cfg.get("welcome_enabled")
+            if welcome_enabled is None:
+                welcome_enabled = True
+
+            welcome_message = automations_cfg.get("welcome_message")
+            if not welcome_message:
+                # Backwards-compat: fall back to legacy widget_config.welcome_message
+                welcome_message = widget_cfg.get("welcome_message")
+
+            cooldown_hours = automations_cfg.get("welcome_cooldown_hours")
+            try:
+                cooldown_hours = int(cooldown_hours) if cooldown_hours is not None else 24
+            except Exception:
+                cooldown_hours = 24
+            cooldown = timedelta(hours=max(1, cooldown_hours))
+
+            now = datetime.utcnow()
+
+            prev_seen_at = None
+
+            should_send = bool(welcome_enabled and isinstance(welcome_message, str) and welcome_message.strip())
+
+            # Update last_seen_at for existing conversations on every connect.
+            if conversation:
+                prev_seen_at = conversation.last_seen_at
+                conversation.last_seen_at = now
+                if prev_seen_at and (now - prev_seen_at) > cooldown:
+                    conversation.visit_count = int(conversation.visit_count or 0) + 1
+                db.commit()
+
+            if should_send and conversation:
+                last_welcome = (
+                    db.query(Message)
+                    .filter_by(conversation_id=conversation.id)
+                    .filter(Message.event_type == "automation_welcome")
+                    .order_by(Message.created_at.desc())
+                    .first()
+                )
+
+                if last_welcome and last_welcome.created_at:
+                    should_send = (now - last_welcome.created_at) > cooldown
+                else:
+                    # If we've never tracked last_seen_at before, use other activity timestamps.
+                    last_activity = (
+                        prev_seen_at
+                        or conversation.last_visitor_message_at
+                        or conversation.last_agent_message_at
+                        or conversation.updated_at
+                        or conversation.created_at
+                    )
+                    if last_activity:
+                        should_send = (now - last_activity) > cooldown
+
+            if should_send:
+                service = ConversationService(db)
+                if not conversation:
+                    conversation = service.get_or_create_conversation(website_id=website_id, session_id=session_id)
+                    ChatService.register_visitor(conversation.id, websocket)
+
+                # Ensure last_seen_at is set for newly created conversations.
+                if not conversation.last_seen_at:
+                    conversation.last_seen_at = now
+                    conversation.visit_count = int(conversation.visit_count or 0) or 1
+                    db.commit()
+
+                service.add_bot_message(
+                    conversation.id,
+                    str(welcome_message).strip(),
+                    event_type="automation_welcome",
+                )
+                await websocket.send_json({"type": "ai", "message": str(welcome_message).strip()})
+        except Exception as e:
+            logger.warning("welcome_automation_failed", website_id=website_id, session_id=session_id, error=str(e))
     except Exception as e:
         logger.error("chat_service_init_error", website_id=website_id, session_id=session_id, error=str(e), exc_info=True)
         db.close()

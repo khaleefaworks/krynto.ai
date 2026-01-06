@@ -120,6 +120,7 @@ def get_chat_messages(
             "conversation_id": msg.conversation_id,
             "sender": msg.sender,
             "sender_type": msg.sender_type.value if hasattr(msg.sender_type, 'value') else msg.sender_type,
+            "event_type": getattr(msg, "event_type", None),
             "content": msg.content,
             "created_at": msg.created_at.isoformat() if msg.created_at else None
         }

@@ -23,6 +23,8 @@ from app import models  # Import models to register them with SQLAlchemy
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
+from app.core.database import engine
+from sqlalchemy import inspect, text
 
 # Setup structured logging
 logger = setup_logging()
@@ -58,6 +60,27 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],  # Expose all headers to frontend
 )
+
+
+@app.on_event("startup")
+def _ensure_schema_compatibility() -> None:
+    """Best-effort schema adjustments for environments not managed by Alembic.
+
+    Some deployments reset the database via SQLAlchemy `create_all` (or custom
+    reset scripts). In that case, new columns won't exist automatically.
+    """
+    try:
+        inspector = inspect(engine)
+        if not inspector.has_table("messages"):
+            return
+        columns = {c["name"] for c in inspector.get_columns("messages")}
+        if "event_type" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN event_type VARCHAR(50)"))
+            logger.info("schema_update_applied", table="messages", column="event_type")
+    except Exception as e:
+        # Never block startup on best-effort schema fixes.
+        logger.warning("schema_update_failed", error=str(e))
 
 app.include_router(health_router)
 app.include_router(auth_router)

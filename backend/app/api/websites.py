@@ -178,10 +178,23 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
     
     # Get widget config or use defaults
     config = website.widget_config or {}
+    automations = config.get("automations") if isinstance(config.get("automations"), dict) else {}
+
+    welcome_enabled = automations.get("welcome_enabled")
+    if welcome_enabled is None:
+        welcome_enabled = True
+
+    welcome_message = automations.get("welcome_message") or config.get("welcome_message", "Hi! How can we help you today?")
+    welcome_cooldown_hours = automations.get("welcome_cooldown_hours")
+    try:
+        welcome_cooldown_hours = int(welcome_cooldown_hours) if welcome_cooldown_hours is not None else 24
+    except Exception:
+        welcome_cooldown_hours = 24
     
     return {
         "theme": config.get("theme", "dark"),
         "position": config.get("position", "bottom-right"),
+        # Legacy field (widget no longer auto-renders this text by default)
         "welcome_message": config.get("welcome_message", "Hi! How can we help you today?"),
         "primary_color": config.get("primary_color", "#000000"),
         "header_title": config.get("header_title", "How can we help?"),
@@ -191,6 +204,11 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
         "show_attachments": config.get("show_attachments", False),
         "branding_text": config.get("branding_text"),
         "header_icon_url": config.get("header_icon_url"),
+        "automations": {
+            "welcome_enabled": bool(welcome_enabled),
+            "welcome_message": str(welcome_message) if welcome_message is not None else "",
+            "welcome_cooldown_hours": welcome_cooldown_hours,
+        },
     }
 
 
