@@ -5,6 +5,7 @@ from app.models.message import Message
 from app.core.logging import get_logger
 from typing import Dict, Optional
 import uuid
+import time
 
 logger = get_logger(__name__)
 
@@ -13,13 +14,33 @@ class AgentService:
     
     # In-memory store of active agent WebSocket connections
     active_agents: Dict[str, object] = {}
+
+    # Heartbeat timestamps by agent_id (unix seconds). Used for presence with TTL/grace.
+    last_heartbeat: Dict[int, float] = {}
+
+    # Presence TTL: agent considered online if heartbeat within this window.
+    heartbeat_ttl_seconds: int = 75
     
     def __init__(self, db: Session):
         self.db = db
+
+    @classmethod
+    def mark_heartbeat(cls, agent_id: int) -> None:
+        cls.last_heartbeat[int(agent_id)] = time.time()
+
+    @classmethod
+    def is_recently_connected(cls, agent_id: int) -> bool:
+        ts = cls.last_heartbeat.get(int(agent_id))
+        if not ts:
+            return False
+        return (time.time() - ts) <= float(cls.heartbeat_ttl_seconds)
     
     def register_agent(self, agent_id: int, website_id: int, websocket) -> str:
         """Register agent WebSocket connection"""
         websocket_id = str(uuid.uuid4())
+
+        # Mark presence immediately on connect.
+        AgentService.mark_heartbeat(agent_id)
         
         # Store WebSocket connection
         AgentService.active_agents[websocket_id] = {

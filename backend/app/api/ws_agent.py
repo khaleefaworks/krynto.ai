@@ -79,8 +79,18 @@ async def agent_ws(
             data = await websocket.receive_text()
             logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
+
+            # Any inbound message counts as activity for presence.
+            try:
+                AgentService.mark_heartbeat(agent_id)
+            except Exception:
+                pass
             
             message_type = payload.get("type")
+
+            if message_type == "heartbeat":
+                # No-op response; presence socket polls separately.
+                continue
             
             if message_type == "join_chat":
                 conversation_id_raw = payload.get("conversation_id")

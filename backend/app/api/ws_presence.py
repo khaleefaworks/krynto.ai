@@ -18,7 +18,7 @@ def _compute_presence(db: Session, website_id: int) -> dict:
     eligible agent (active + available + connected) is treated as available for
     any website.
     """
-    connected_user_ids = {info["agent_id"] for info in AgentService.active_agents.values()}
+    connected_user_ids = {u_id for u_id in AgentService.last_heartbeat.keys() if AgentService.is_recently_connected(u_id)}
 
     candidates = (
         db.query(User)

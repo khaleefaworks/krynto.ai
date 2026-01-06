@@ -9,6 +9,9 @@ let reconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 10
 const BASE_RECONNECT_DELAY = 1000 // 1 second
 
+let heartbeatInterval: NodeJS.Timeout | null = null
+const HEARTBEAT_INTERVAL_MS = 25_000
+
 // Message handler registry - allows multiple listeners
 type MessageHandler = (data: any) => void
 const messageHandlers = new Set<MessageHandler>()
@@ -74,6 +77,26 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   socket.onopen = () => {
     console.log("✅ WebSocket connected")
     reconnectAttempts = 0 // Reset on successful connection
+
+    // Start heartbeat (presence is TTL-based on backend).
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval)
+      heartbeatInterval = null
+    }
+    try {
+      socket?.send(JSON.stringify({ type: "heartbeat" }))
+    } catch (e) {
+      // ignore
+    }
+    heartbeatInterval = setInterval(() => {
+      try {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "heartbeat" }))
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, HEARTBEAT_INTERVAL_MS)
     
     // Clear any pending reconnect
     if (reconnectTimeout) {
@@ -108,6 +131,11 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   socket.onclose = (event) => {
     console.log("🔌 WebSocket closed", event.code, event.reason)
     socket = null
+
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval)
+      heartbeatInterval = null
+    }
     
     // Only auto-reconnect if not intentional and connection params exist
     if (!isIntentionalClose && event.code !== 1000 && currentWebsiteId && currentAgentId) {
@@ -258,6 +286,11 @@ export function disconnectAgentSocket() {
     isIntentionalClose = true
     socket.close()
     socket = null
+  }
+
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
   }
   
   // Clear all handlers
