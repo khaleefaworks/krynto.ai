@@ -12,6 +12,7 @@ Scope:
 """
 
 from typing import Optional, Any
+import asyncio
 from sqlalchemy.orm import Session
 
 from app.services.conversation_service import ConversationService
@@ -21,8 +22,49 @@ from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
 from app.core.logging import get_logger
+from app.services.website_resolver import is_website_online
 
 logger = get_logger(__name__)
+
+# Prevent scheduling duplicate delayed "waiting" bot messages
+_waiting_bot_message_scheduled: set[int] = set()
+
+
+async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int) -> None:
+    """After 60s, if still unassigned, send a single bot message to the visitor."""
+    try:
+        from app.core.database import SessionLocal
+        from app.models.conversation import Conversation
+
+        await asyncio.sleep(60)
+
+        db = SessionLocal()
+        try:
+            conversation = db.query(Conversation).filter_by(id=conversation_id).first()
+            if not conversation:
+                return
+
+            if conversation.assigned_agent_id:
+                return
+
+            # Only send if visitor is connected; message is ephemeral for now.
+            await ChatService.send_to_visitor(
+                conversation_id,
+                {
+                    "type": "ai",
+                    "message": "Thanks! An agent will be with you shortly.",
+                },
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(
+            "delayed_waiting_message_failed",
+            conversation_id=conversation_id,
+            website_id=website_id,
+            error=str(e),
+            exc_info=True,
+        )
 
 
 class ConversationOrchestrator:
@@ -58,6 +100,11 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.RESOLVED:
             return "This conversation has been closed."
 
+        # Determine if this is the first message before persisting
+        prior_message_count = (
+            self.db.query(Message).filter_by(conversation_id=conversation.id).count()
+        )
+
         # Persist visitor message
         msg = self.conversation_service.add_visitor_message(
             conversation_id=conversation.id,
@@ -82,10 +129,49 @@ class ConversationOrchestrator:
             )
             return None
 
-        # No agent assigned yet - broadcast to all available agents for this website
-        await self._broadcast_new_chat_to_agents(conversation)
-        
-        return "Thanks! An agent will be with you shortly."
+        # Unassigned: still notify agents in realtime so inbox updates immediately.
+        # Broadcast to website-specific agent sockets and global (website_id=0) sockets.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "visitor_message",
+                "conversation_id": conversation.id,
+                "website_id": website_id,
+                "message": message,
+            },
+            include_global=True,
+        )
+
+        # No agent assigned yet.
+        # If nobody is online, accept the message (leave-a-message flow).
+        # Send a single bot prompt (no repeats).
+        if not is_website_online(website_id):
+            if prior_message_count == 0:
+                await ChatService.send_to_visitor(
+                    conversation.id,
+                    {
+                        "type": "ai",
+                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                    },
+                )
+            return None
+
+        # Someone is online.
+        # Broadcast new chat notification only once (on first message).
+        if prior_message_count == 0:
+            await self._broadcast_new_chat_to_agents(conversation)
+
+        # Schedule a single waiting bot message after 60s if still unassigned.
+        if conversation.id not in _waiting_bot_message_scheduled:
+            _waiting_bot_message_scheduled.add(conversation.id)
+            asyncio.create_task(
+                _send_delayed_waiting_message_if_unassigned(
+                    conversation_id=conversation.id,
+                    website_id=website_id,
+                )
+            )
+
+        return None
     
     async def _broadcast_new_chat_to_agents(self, conversation: Conversation):
         """Notify all connected agents about new unassigned chat via global notification socket"""
@@ -165,6 +251,45 @@ class ConversationOrchestrator:
                 "agent_avatar": agent.avatar_url if agent else None,
                 "agent_name": agent.name if agent else "Support Agent"
             }
+        )
+
+        return {"success": True}
+
+    async def handle_agent_takeover(self, *, conversation_id: int, agent_id: int) -> dict:
+        """Force-assign a conversation to a different agent (explicit confirmation UX)."""
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        if conversation.status == ConversationStatus.RESOLVED:
+            return {"error": "Conversation is closed"}
+
+        user = self.db.query(User).filter(User.id == agent_id).first()
+        if not user or not user.is_active:
+            return {"error": "User not found or inactive"}
+
+        previous_agent_id = conversation.assigned_agent_id
+
+        conversation.status = ConversationStatus.OPEN
+        conversation.assigned_agent_id = agent_id
+        self.db.commit()
+
+        agent_name = user.name or "Support Agent"
+        self.conversation_service.add_system_message(
+            conversation_id,
+            f"{agent_name} joined the chat.",
+        )
+
+        # Notify visitor if connected
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "agent_joined",
+                "message": "A support agent has joined the chat",
+                "agent_avatar": user.avatar_url,
+                "agent_name": agent_name,
+                "previous_agent_id": previous_agent_id,
+            },
         )
 
         return {"success": True}

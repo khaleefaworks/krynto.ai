@@ -4,14 +4,12 @@ from app.core.database import get_db
 from app.services.agent_service import AgentService
 from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.conversation_service import ConversationService
+from app.api.deps import require_authenticated_user
+from app.models.user import User
 from pydantic import BaseModel
 from typing import List, Optional
 
 router = APIRouter(prefix="/chats", tags=["chats"])
-
-
-class JoinChatRequest(BaseModel):
-    agent_id: int
 
 
 class ConversationResponse(BaseModel):
@@ -30,8 +28,9 @@ class ConversationResponse(BaseModel):
 @router.post("/{chat_id}/join")
 async def join_chat(
     chat_id: int,
-    request: JoinChatRequest,
-    db: Session = Depends(get_db)
+    _request: Optional[dict] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
 ):
     """Agent joins a chat - triggers handoff"""
     from app.models.conversation import Conversation
@@ -40,7 +39,7 @@ async def join_chat(
 
     result = await orchestrator.handle_agent_join(
         conversation_id=chat_id,
-        agent_id=request.agent_id,
+        agent_id=current_user.id,
     )
 
     if result.get("error"):
@@ -52,7 +51,7 @@ async def join_chat(
         "success": True,
         "conversation_id": chat_id,
         "website_id": conversation.website_id if conversation else None,
-        "assigned_agent_id": request.agent_id,
+        "assigned_agent_id": current_user.id,
         "message": "Chat successfully assigned to agent",
     }
 
@@ -126,33 +125,6 @@ def get_chat_messages(
         }
         for msg in messages
     ]
-
-
-@router.post("/{chat_id}/close")
-def close_conversation(
-    chat_id: int,
-    db: Session = Depends(get_db)
-):
-    """Close a conversation - marks it as resolved"""
-    from app.models.conversation import Conversation, ConversationStatus
-    
-    conv = db.query(Conversation).filter_by(id=chat_id).first()
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    
-    if conv.status == ConversationStatus.RESOLVED:
-        return {
-            "success": True,
-            "message": "Conversation already resolved"
-        }
-    
-    conv.status = ConversationStatus.RESOLVED
-    db.commit()
-    
-    return {
-        "success": True,
-        "message": "Conversation resolved successfully"
-    }
 
 
 @router.get("/resolved/history")

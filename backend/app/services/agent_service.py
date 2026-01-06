@@ -79,6 +79,47 @@ class AgentService:
         
         if sent_count == 0:
             logger.warning("send_to_agent_no_connections", agent_id=agent_id, message_type=message_data.get("type"))
+
+    async def broadcast_to_active_agents(
+        self,
+        *,
+        website_id: Optional[int],
+        message_data: dict,
+        include_global: bool = True,
+    ) -> int:
+        """Broadcast a message to active agent sockets.
+
+        If website_id is provided, sends to sockets connected for that website.
+        If include_global is True, also sends to "global notification" sockets (website_id == 0).
+
+        Returns number of sockets successfully sent.
+        """
+        sent_count = 0
+
+        for ws_id, agent_info in AgentService.active_agents.items():
+            ws_website_id = agent_info.get("website_id")
+            should_send = False
+
+            if include_global and ws_website_id == 0:
+                should_send = True
+            if website_id is not None and ws_website_id == website_id:
+                should_send = True
+
+            if not should_send:
+                continue
+
+            try:
+                await agent_info["websocket"].send_json(message_data)
+                sent_count += 1
+            except Exception as e:
+                logger.error(
+                    "broadcast_to_active_agents_failed",
+                    ws_id=ws_id,
+                    website_id=ws_website_id,
+                    error=str(e),
+                )
+
+        return sent_count
     
     async def notify_agent_assignment(self, agent_id: int, conversation_id: int):
         """Notify agent of new chat assignment"""

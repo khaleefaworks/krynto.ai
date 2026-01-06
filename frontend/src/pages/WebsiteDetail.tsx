@@ -58,7 +58,7 @@ export default function WebsiteDetail() {
       bubble_text: 'Chat',
       show_emoji_picker: true,
       show_attachments: false,
-      branding_text: null,
+      branding_text: null as string | null,
     }
   })
 
@@ -97,7 +97,7 @@ export default function WebsiteDetail() {
           bubble_text: data.widget_config?.bubble_text || 'Chat',
           show_emoji_picker: data.widget_config?.show_emoji_picker !== undefined ? data.widget_config.show_emoji_picker : true,
           show_attachments: data.widget_config?.show_attachments || false,
-          branding_text: data.widget_config?.branding_text || null,
+          branding_text: data.widget_config?.branding_text ?? null,
         }
       })
     } catch (err: any) {

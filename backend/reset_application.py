@@ -16,6 +16,8 @@ Usage:
 """
 
 import sys
+from pathlib import Path
+import shutil
 from app.core.database import SessionLocal, engine
 from app.models.base import Base
 from app.models.user import User
@@ -25,6 +27,25 @@ from app.models.message import Message
 from app.models.system_settings import SystemSettings
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from seed_data import seed_database
+
+
+def delete_uploaded_files():
+    """Delete uploaded files from backend/uploads (keeps the folder itself)."""
+    uploads_dir = Path(__file__).resolve().parent / "uploads"
+    if not uploads_dir.exists() or not uploads_dir.is_dir():
+        return
+
+    for child in uploads_dir.iterdir():
+        # keep placeholder files if you ever add them
+        if child.name == ".gitkeep":
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"  ⚠️  Failed to delete uploaded file(s) at {child}: {e}")
 
 def confirm_reset(with_seed):
     """Ask for confirmation before resetting"""
@@ -47,6 +68,9 @@ def reset_database(with_seed=False):
         return
     
     print("\n🔄 Resetting database...")
+
+    print("  Deleting uploaded files...")
+    delete_uploaded_files()
     
     db = SessionLocal()
     try:

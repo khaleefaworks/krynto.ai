@@ -12,8 +12,7 @@ CRITICAL: This must be used by:
 
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
-from app.models.user import User
-from app.models.agent_website_assignment import AgentWebsiteAssignment
+from app.models.user import User, UserRole
 from app.services.agent_resolver import is_agent_eligible
 
 
@@ -47,13 +46,13 @@ def is_website_online(website_id: int) -> bool:
     db = SessionLocal()
     
     try:
-        # Get all users assigned to this website
+        # Product decision: agent-website assignment UI removed.
+        # Treat any eligible agent as able to serve any website.
         assigned_agents = (
             db.query(User)
-            .join(AgentWebsiteAssignment, User.id == AgentWebsiteAssignment.agent_id)
             .filter(
-                AgentWebsiteAssignment.website_id == website_id,
-                User.is_active == True  # Only consider active users
+                User.is_active == True,  # noqa: E712
+                User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
             )
             .all()
         )
@@ -123,13 +122,11 @@ def get_eligible_agents_for_website(website_id: int, db: Session = None) -> list
         close_db = True
     
     try:
-        # Get all users assigned to this website
         assigned_agents = (
             db.query(User)
-            .join(AgentWebsiteAssignment, User.id == AgentWebsiteAssignment.agent_id)
             .filter(
-                AgentWebsiteAssignment.website_id == website_id,
-                User.is_active == True
+                User.is_active == True,  # noqa: E712
+                User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
             )
             .all()
         )

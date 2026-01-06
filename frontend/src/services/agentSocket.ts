@@ -33,13 +33,22 @@ function generateMessageId(): string {
 }
 
 export function connectAgentSocket(websiteId: number, agentId: number) {
-  // Return existing socket if already connected
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    console.log("♻️ Reusing existing WebSocket connection")
-    return socket
+  // Reuse existing socket if already connected or in-flight (CONNECTING)
+  if (socket) {
+    const isSameTarget = currentWebsiteId === websiteId && currentAgentId === agentId
+
+    if (socket.readyState === WebSocket.OPEN && isSameTarget) {
+      console.log("♻️ Reusing existing WebSocket connection")
+      return socket
+    }
+
+    if (socket.readyState === WebSocket.CONNECTING && isSameTarget) {
+      console.log("⏳ WebSocket is connecting; reusing in-flight connection")
+      return socket
+    }
   }
 
-  // Close any existing socket in bad state
+  // Close any existing socket when switching targets or if stuck
   if (socket) {
     isIntentionalClose = true
     socket.close()

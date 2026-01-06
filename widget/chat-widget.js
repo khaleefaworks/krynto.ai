@@ -40,6 +40,12 @@
   let ws = null;
   let reconnectTimeout = null;
   let isConnecting = false;
+  let toastTimeout = null;
+
+  // Presence WebSocket (online/offline + agent avatars)
+  let presenceWs = null;
+  let presencePingInterval = null;
+  let presenceOnline = true;
 
   /**
    * Generate a unique session ID (UUID v4)
@@ -83,7 +89,7 @@
       ws.onopen = function() {
         console.log('[ChatWidget] WebSocket connected');
         isConnecting = false;
-        showSystemMessage('Connected to support chat');
+        hideToast();
         
         // Clear any pending reconnect
         if (reconnectTimeout) {
@@ -109,7 +115,7 @@
         ws = null;
         
         // Attempt to reconnect after 3 seconds
-        showSystemMessage('Connection lost. Reconnecting...');
+        showToast('Connection lost. Reconnecting...');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
     } catch (error) {
@@ -121,10 +127,10 @@
   /**
    * Send message to WebSocket
    */
-  function sendMessage(message) {
+  function sendMessage(message, meta) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       console.error('[ChatWidget] WebSocket not connected');
-      showSystemMessage('Not connected. Please wait...');
+      showToast('Not connected. Please wait...');
       connectWebSocket();
       return false;
     }
@@ -132,6 +138,11 @@
     const payload = {
       message: message
     };
+
+    if (meta && typeof meta === 'object') {
+      if (meta.visitor_name) payload.visitor_name = meta.visitor_name;
+      if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
+    }
 
     ws.send(JSON.stringify(payload));
     console.log('[ChatWidget] Message sent:', payload);
@@ -142,6 +153,33 @@
    * Handle incoming WebSocket messages
    */
   function handleIncomingMessage(data) {
+    if (data.type === 'history' && Array.isArray(data.messages)) {
+      // Render full history (on initial connect)
+      const messagesContainer = document.getElementById('chatassist-messages');
+      if (!messagesContainer) return;
+
+      // Clear existing UI messages (welcome/toasts are not part of history)
+      messagesContainer.innerHTML = '';
+
+      data.messages.forEach((m) => {
+        const senderType = m.sender_type || m.sender || 'system';
+        if (senderType === 'visitor') {
+          appendMessage('visitor', m.content);
+        } else if (senderType === 'agent') {
+          appendMessage('agent', m.content);
+        } else if (senderType === 'ai') {
+          appendMessage('ai', m.content);
+        } else if (senderType === 'system') {
+          showSystemMessage(m.content);
+        } else {
+          // Fallback
+          showSystemMessage(m.content);
+        }
+      });
+
+      return;
+    }
+
     if (data.type === 'ai') {
       // AI response
       appendMessage('ai', data.message);
@@ -244,6 +282,34 @@
   }
 
   /**
+   * Show a small toast notification (outside the transcript).
+   */
+  function showToast(message) {
+    const container = document.getElementById('chatassist-toast-container');
+    if (!container) return;
+
+    container.textContent = message;
+    container.style.display = 'block';
+    container.classList.add('chatassist-toast-visible');
+
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+      toastTimeout = null;
+    }
+
+    toastTimeout = setTimeout(() => {
+      hideToast();
+    }, 3000);
+  }
+
+  function hideToast() {
+    const container = document.getElementById('chatassist-toast-container');
+    if (!container) return;
+    container.classList.remove('chatassist-toast-visible');
+    container.style.display = 'none';
+  }
+
+  /**
    * Handle user message submission
    */
   function handleUserMessage() {
@@ -259,8 +325,29 @@
     // Clear input
     input.value = '';
 
+    // If offline, require contact email and include contact fields.
+    const contactNameInput = document.getElementById('chatassist-contact-name');
+    const contactEmailInput = document.getElementById('chatassist-contact-email');
+    let meta = undefined;
+
+    if (!presenceOnline) {
+      const visitor_name = contactNameInput ? String(contactNameInput.value || '').trim() : '';
+      const visitor_email = contactEmailInput ? String(contactEmailInput.value || '').trim() : '';
+      if (!visitor_email) {
+        showToast('Please enter your email so we can contact you.');
+        return;
+      }
+      meta = { visitor_name, visitor_email };
+      try {
+        if (visitor_name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitor_name);
+        if (visitor_email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitor_email);
+      } catch (e) {
+        // ignore
+      }
+    }
+
     // Send to backend
-    sendMessage(message);
+    sendMessage(message, meta);
   }
 
   /**
@@ -271,13 +358,13 @@
     const container = document.createElement('div');
     container.id = 'chatassist-widget';
     
-    // Always show default avatar placeholder initially
+    // Default avatar placeholder initially
     const avatarHTML = `<div class="chatassist-header-avatar-placeholder">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-          <circle cx="12" cy="7" r="4"></circle>
-        </svg>
-      </div>`;
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+    </div>`;
     
     container.innerHTML = `
       <div id="chatassist-bubble">
@@ -289,7 +376,9 @@
       <div id="chatassist-window" style="display: none;">
         <div id="chatassist-header">
           <div class="chatassist-header-content">
-            ${avatarHTML}
+            <div id="chatassist-header-avatars" class="chatassist-header-avatars">
+              ${avatarHTML}
+            </div>
             <div class="chatassist-header-info">
               <span class="chatassist-header-title">${CONFIG.headerTitle}</span>
               <div class="chatassist-online-status">
@@ -302,6 +391,10 @@
         </div>
         <div id="chatassist-messages"></div>
         <div id="chatassist-footer">
+          <div id="chatassist-contact-form" style="display:none;">
+            <input type="text" id="chatassist-contact-name" placeholder="Your name (optional)" />
+            <input type="email" id="chatassist-contact-email" placeholder="Your email" />
+          </div>
           <div id="chatassist-input-container">
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
@@ -309,6 +402,7 @@
           <div id="chatassist-branding">${CONFIG.brandingText}</div>
         </div>
       </div>
+      <div id="chatassist-toast-container" style="display:none;"></div>
     `;
 
     document.body.appendChild(container);
@@ -319,6 +413,18 @@
     const closeBtn = document.getElementById('chatassist-close');
     const input = document.getElementById('chatassist-input');
     const sendBtn = document.getElementById('chatassist-send');
+    const contactNameInput = document.getElementById('chatassist-contact-name');
+    const contactEmailInput = document.getElementById('chatassist-contact-email');
+
+    // Prefill contact fields from localStorage (if any)
+    try {
+      const storedName = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`);
+      const storedEmail = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
+      if (contactNameInput && storedName) contactNameInput.value = storedName;
+      if (contactEmailInput && storedEmail) contactEmailInput.value = storedEmail;
+    } catch (e) {
+      // ignore
+    }
 
     bubble.addEventListener('click', function() {
       bubble.style.display = 'none';
@@ -338,6 +444,114 @@
         handleUserMessage();
       }
     });
+  }
+
+  function updateContactFormVisibility() {
+    const formEl = document.getElementById('chatassist-contact-form');
+    if (!formEl) return;
+    formEl.style.display = presenceOnline ? 'none' : 'flex';
+  }
+
+  function connectPresenceWebSocket() {
+    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) return;
+
+    const wsEndpoint = `${CONFIG.wsUrl}/ws/presence/${CONFIG.websiteId}`;
+    try {
+      presenceWs = new WebSocket(wsEndpoint);
+
+      presenceWs.onopen = function() {
+        // Ping frequently to keep presence extremely fresh (local dev).
+        if (presencePingInterval) clearInterval(presencePingInterval);
+        presencePingInterval = setInterval(() => {
+          try {
+            if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
+              presenceWs.send('ping');
+            }
+          } catch (e) {
+            // ignore
+          }
+        }, 1000);
+
+        // Trigger immediate refresh
+        presenceWs.send('ping');
+      };
+
+      presenceWs.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.type === 'presence') {
+            applyPresence(data);
+          }
+        } catch (e) {
+          // ignore
+        }
+      };
+
+      presenceWs.onclose = function() {
+        if (presencePingInterval) {
+          clearInterval(presencePingInterval);
+          presencePingInterval = null;
+        }
+        presenceWs = null;
+      };
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function applyPresence(presence) {
+    const titleEl = document.querySelector('.chatassist-header-title');
+    const statusTextEl = document.querySelector('.chatassist-online-text');
+    const dotEl = document.querySelector('.chatassist-online-dot');
+    const avatarsEl = document.getElementById('chatassist-header-avatars');
+
+    if (!titleEl || !statusTextEl || !dotEl || !avatarsEl) return;
+
+    const online = !!presence.online;
+    presenceOnline = online;
+    updateContactFormVisibility();
+    const agents = Array.isArray(presence.agents) ? presence.agents : [];
+
+    if (!online) {
+      titleEl.textContent = 'Send us a message';
+      statusTextEl.textContent = 'Happy to answer you later';
+      dotEl.classList.add('chatassist-dot-offline');
+
+      // Reset to placeholder avatar
+      avatarsEl.innerHTML = `<div class="chatassist-header-avatar-placeholder">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </div>`;
+      return;
+    }
+
+    dotEl.classList.remove('chatassist-dot-offline');
+    titleEl.textContent = CONFIG.headerTitle;
+    statusTextEl.textContent = CONFIG.onlineStatusText;
+
+    if (!agents.length) return;
+
+    avatarsEl.innerHTML = agents
+      .slice(0, 3)
+      .map((a, idx) => {
+        const avatarUrl = a.avatar_url
+          ? (a.avatar_url.startsWith('http') ? a.avatar_url : `${CONFIG.apiUrl}${a.avatar_url}`)
+          : null;
+
+        if (!avatarUrl) {
+          return `<div class="chatassist-header-avatar-placeholder chatassist-avatar-stack" style="z-index:${10 - idx}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>`;
+        }
+
+        return `<img class="chatassist-header-avatar chatassist-avatar-stack" style="z-index:${10 - idx}" src="${avatarUrl}" alt="${(a.name || 'Agent').replace(/"/g, '')}">`;
+      })
+      .join('');
   }
 
   /**
@@ -379,8 +593,12 @@
         CONFIG.headerTitle = config.header_title || CONFIG.headerTitle;
         CONFIG.onlineStatusText = config.online_status_text || CONFIG.onlineStatusText;
         CONFIG.bubbleText = config.bubble_text || CONFIG.bubbleText;
-        CONFIG.showEmojiPicker = config.show_emoji_picker || CONFIG.showEmojiPicker;
-        CONFIG.showAttachments = config.show_attachments || CONFIG.showAttachments;
+        if (config.show_emoji_picker !== undefined) {
+          CONFIG.showEmojiPicker = !!config.show_emoji_picker;
+        }
+        if (config.show_attachments !== undefined) {
+          CONFIG.showAttachments = !!config.show_attachments;
+        }
         CONFIG.brandingText = config.branding_text || CONFIG.brandingText;
         // Note: agentAvatar would come from agent's profile dynamically
         
@@ -506,6 +724,9 @@
 
     // Connect WebSocket
     connectWebSocket();
+
+    // Connect presence WebSocket
+    connectPresenceWebSocket();
   }
 
   // Auto-initialize when DOM is ready

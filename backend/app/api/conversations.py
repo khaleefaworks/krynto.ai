@@ -13,6 +13,7 @@ from app.api.deps import require_authenticated_user
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.services.conversation_service import ConversationService
+from app.services.conversation_orchestrator import ConversationOrchestrator
 from pydantic import BaseModel
 from typing import Optional
 
@@ -83,3 +84,23 @@ def check_can_message(
         "reason": reason,
         "conversation_id": conversation_id
     }
+
+
+@router.post("/{conversation_id}/takeover")
+async def takeover_conversation(
+    conversation_id: int,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Force-assign a conversation to the current agent (explicit confirmation flow)."""
+    orchestrator = ConversationOrchestrator(db)
+
+    result = await orchestrator.handle_agent_takeover(
+        conversation_id=conversation_id,
+        agent_id=current_user.id,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {"success": True, "conversation_id": conversation_id}

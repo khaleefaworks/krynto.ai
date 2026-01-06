@@ -89,6 +89,24 @@
   flex: 1;
 }
 
+.chatassist-header-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.chatassist-avatar-stack {
+  margin-left: -10px;
+}
+
+.chatassist-header-avatars .chatassist-avatar-stack:first-child {
+  margin-left: 0;
+}
+
+.chatassist-dot-offline {
+  background: #9ca3af;
+  animation: none;
+}
+
 .chatassist-header-avatar,
 .chatassist-header-avatar-placeholder {
   width: 40px;
@@ -253,6 +271,47 @@
 /* Footer */
 #chatassist-footer {
   background: #fff;
+}
+
+/* Offline contact form (shown when all agents are offline) */
+#chatassist-contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 16px 0 16px;
+}
+
+#chatassist-contact-form input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#chatassist-contact-form input:focus {
+  border-color: #000;
+}
+
+/* Toast (small transient notification, not part of transcript) */
+#chatassist-toast-container {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 78px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  z-index: 1000000;
+}
+
+.chatassist-toast-visible {
+  display: block;
 }
 
 /* Input container */

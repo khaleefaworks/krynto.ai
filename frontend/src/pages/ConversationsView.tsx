@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
-import { joinChat, closeConversation } from '@/services/chats'
+import { joinChat, closeConversation, takeoverConversation } from '@/services/chats'
 import { fetchChatMessages } from '@/services/messages'
 import {
     connectAgentSocket,
@@ -23,7 +23,6 @@ import { Badge } from '@/components/ui/badge'
 import {
     Send,
     Check,
-    Tag as TagIcon,
     Smile,
     Bold,
     Italic,
@@ -34,7 +33,6 @@ import {
     ChevronRight,
     PanelRightClose,
     PanelRightOpen,
-    Monitor,
     Inbox,
     Users
 } from 'lucide-react'
@@ -83,6 +81,10 @@ export default function ConversationsView() {
     const [resolving, setResolving] = useState(false)
     const joinedRef = useRef(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+
+    // Takeover confirmation (Smartsupp-like)
+    const [showTakeoverConfirm, setShowTakeoverConfirm] = useState(false)
+    const [pendingSendMessage, setPendingSendMessage] = useState<string | null>(null)
 
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
@@ -161,11 +163,13 @@ export default function ConversationsView() {
     useEffect(() => {
         if (!selectedChat || !user?.id) return
 
-        const chatData = activeChats.find(c => c.id === selectedChat)
-        if (!chatData) return
+        // Avoid reconnect loops: activeChats refreshes frequently.
+        // Website ID for a conversation is stable, so prefer the already-loaded conversation.
+        const websiteId = (conversation as any)?.website_id ?? activeChats.find(c => c.id === selectedChat)?.website_id
+        if (!websiteId) return
 
         // Connect socket
-        connectAgentSocket(chatData.website_id, user.id)
+        connectAgentSocket(websiteId, user.id)
 
         // Register message handler
         const removeHandler = addMessageHandler((data) => {
@@ -179,7 +183,7 @@ export default function ConversationsView() {
                     id: Date.now(),
                     conversation_id: selectedChat,
                     sender_type: 'visitor' as const,
-                    sender: 'visitor',
+                    sender: 'visitor' as const,
                     content: data.message,
                     created_at: new Date().toISOString()
                 }
@@ -191,7 +195,7 @@ export default function ConversationsView() {
                     id: Date.now(),
                     conversation_id: selectedChat,
                     sender_type: 'agent' as const,
-                    sender: user.email || 'agent',
+                    sender: 'agent' as const,
                     content: data.content,
                     created_at: new Date().toISOString()
                 }
@@ -205,7 +209,7 @@ export default function ConversationsView() {
 
         // Cleanup: remove handler when chat changes or component unmounts
         return removeHandler
-    }, [selectedChat, user?.id, activeChats])
+    }, [selectedChat, user?.id, (conversation as any)?.website_id])
 
     // Scroll to bottom on new messages - use Layout effect for immediate scroll
     useLayoutEffect(() => {
@@ -233,20 +237,10 @@ export default function ConversationsView() {
             const chatMessages = await fetchChatMessages(chatId.toString())
             addMessages(chatMessages)
 
-            // Only join if we haven't joined this specific chat yet
+            // Do NOT auto-join on selection.
+            // Joining happens only when the agent actually starts responding (send action).
             const chatData = activeChats.find(c => c.id === chatId)
-            const alreadyJoined = chatData?.assigned_agent_id === user?.id
-            
-            if (!joinedRef.current && user?.id && !alreadyJoined) {
-                const joined = await joinChat(chatId.toString())
-                if (joined && chatData) {
-                    // Socket connection and message handling is done in useEffect
-                    joinedRef.current = true
-                }
-            } else if (alreadyJoined) {
-                // Already joined, socket connection is handled in useEffect
-                joinedRef.current = true
-            }
+            joinedRef.current = chatData?.assigned_agent_id === user?.id
         } catch (error) {
             console.error("Failed to load chat:", error)
         } finally {
@@ -279,12 +273,53 @@ export default function ConversationsView() {
         setInput('')
 
         try {
+            const chatData = activeChats.find(c => c.id === selectedChat)
+            const alreadyJoinedByMe = chatData?.assigned_agent_id === user?.id
+
+            if (!joinedRef.current && !alreadyJoinedByMe) {
+                try {
+                    await joinChat(selectedChat.toString())
+                    joinedRef.current = true
+                } catch (e: any) {
+                    // If another agent already owns it, ask for explicit confirmation.
+                    const msg = String(e?.message || '')
+                    if (msg.toLowerCase().includes('already assigned') || msg.toLowerCase().includes('already')) {
+                        setPendingSendMessage(messageContent)
+                        setShowTakeoverConfirm(true)
+                        return
+                    }
+                    throw e
+                }
+            }
+
             sendAgentMessage(messageContent, selectedChat.toString())
             // Message will appear via WebSocket callback - don't add optimistically
         } catch (error) {
             console.error("Failed to send message:", error)
             // Restore input on error
             setInput(messageContent)
+        }
+    }
+
+    const confirmTakeoverAndSend = async (confirm: boolean) => {
+        const content = pendingSendMessage
+        setShowTakeoverConfirm(false)
+        setPendingSendMessage(null)
+
+        if (!confirm) {
+            if (content) setInput(content)
+            return
+        }
+
+        if (!selectedChat || !content) return
+
+        try {
+            await takeoverConversation(selectedChat)
+            joinedRef.current = true
+            sendAgentMessage(content, selectedChat.toString())
+        } catch (error) {
+            console.error('Failed to takeover and send:', error)
+            setInput(content)
         }
     }
 
@@ -377,6 +412,27 @@ export default function ConversationsView() {
 
     return (
         <div className="flex h-full w-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
+            {showTakeoverConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl p-6">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                            Another agent has already joined the chat
+                        </h3>
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                            If you send the message, you'll join the chat. Are you sure you want to send the message?
+                        </p>
+
+                        <div className="mt-6 flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => confirmTakeoverAndSend(false)}>
+                                No
+                            </Button>
+                            <Button onClick={() => confirmTakeoverAndSend(true)}>
+                                Yes
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* COLUMN 1: Filter/Category Sidebar */}
             <div className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
                 }`}
