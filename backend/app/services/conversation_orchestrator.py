@@ -17,16 +17,9 @@ from sqlalchemy.orm import Session
 from app.services.conversation_service import ConversationService
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
-from app.services.website_resolver import is_website_online, get_eligible_agents_for_website
 from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
-from app.core.logging import get_logger
-
-logger = get_logger(__name__)
-from app.models.conversation import Conversation, ConversationStatus
-
-from app.models.user import User
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -59,7 +52,7 @@ class ConversationOrchestrator:
 
         # Track the live visitor socket for downstream forwarding
         if visitor_ws:
-            ChatService.active_visitors[conversation.id] = visitor_ws
+            ChatService.register_visitor(conversation.id, visitor_ws)
 
         # Check if conversation is resolved
         if conversation.status == ConversationStatus.RESOLVED:
@@ -164,16 +157,15 @@ class ConversationOrchestrator:
         agent = self.db.query(User).filter_by(id=agent_id).first()
         
         # Notify visitor if connected
-        chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
-        if chat_service:
-            await chat_service.send_to_visitor(
-                {
-                    "type": "agent_joined",
-                    "message": "A support agent has joined the chat",
-                    "agent_avatar": agent.avatar_url if agent else None,
-                    "agent_name": agent.name if agent else "Support Agent"
-                }
-            )
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "agent_joined",
+                "message": "A support agent has joined the chat",
+                "agent_avatar": agent.avatar_url if agent else None,
+                "agent_name": agent.name if agent else "Support Agent"
+            }
+        )
 
         return {"success": True}
 
@@ -202,17 +194,13 @@ class ConversationOrchestrator:
 
         logger.info("agent_message_saved", conversation_id=conversation_id, agent_id=agent_id, content_length=len(content))
         
-        chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
-        if chat_service:
-            logger.info("sending_agent_message_to_visitor", conversation_id=conversation_id)
-            await chat_service.send_to_visitor(
-                {
-                    "type": "agent",
-                    "message": content,
-                }
-            )
-        else:
-            logger.warning("no_visitor_socket", conversation_id=conversation_id)
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "agent",
+                "message": content,
+            }
+        )
 
         return {"success": True}
 
@@ -222,14 +210,13 @@ class ConversationOrchestrator:
         if not success:
             return {"error": "Conversation not found"}
 
-        chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
-        if chat_service:
-            await chat_service.send_to_visitor(
-                {
-                    "type": "system",
-                    "message": "This conversation has been closed.",
-                }
-            )
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "system",
+                "message": "This conversation has been closed.",
+            }
+        )
 
         return {"success": True}
 
@@ -246,7 +233,7 @@ class ConversationOrchestrator:
             return
 
         if visitor_ws:
-            ChatService.active_visitors[conversation.id] = visitor_ws
+            ChatService.register_visitor(conversation.id, visitor_ws)
 
         # If agent reconnects, ensure assignment is still valid
         if agent_id and conversation.assigned_agent_id != agent_id:

@@ -15,7 +15,6 @@ from app.core.database import SessionLocal
 from app.models.user import User
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.services.agent_resolver import is_agent_eligible
-from app.services.connection_manager import get_connected_user_ids
 
 
 def is_website_online(website_id: int) -> bool:
@@ -59,8 +58,9 @@ def is_website_online(website_id: int) -> bool:
             .all()
         )
         
-        # Get set of currently connected user IDs
-        connected_user_ids = get_connected_user_ids()
+        # Get set of currently connected user IDs from active WebSocket connections
+        from app.services.agent_service import AgentService
+        connected_user_ids = {info["agent_id"] for info in AgentService.active_agents.values()}
         
         # Check if any assigned agent is eligible
         for agent in assigned_agents:
@@ -134,8 +134,9 @@ def get_eligible_agents_for_website(website_id: int, db: Session = None) -> list
             .all()
         )
         
-        # Get set of currently connected user IDs
-        connected_user_ids = get_connected_user_ids()
+        # Get set of currently connected user IDs from active WebSocket connections
+        from app.services.agent_service import AgentService
+        connected_user_ids = {info["agent_id"] for info in AgentService.active_agents.values()}
         
         # Filter to only eligible agents
         eligible_agents = [

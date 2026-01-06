@@ -105,8 +105,8 @@ async def chat_ws(
         try:
             from app.models.conversation import Conversation
             conv = db.query(Conversation).filter_by(session_id=session_id, website_id=website_id).first()
-            if conv and conv.id in ChatService.active_visitors:
-                del ChatService.active_visitors[conv.id]
+            if conv:
+                ChatService.unregister_visitor(conv.id)
         except Exception:
             pass
 
