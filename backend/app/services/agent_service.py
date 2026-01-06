@@ -161,6 +161,13 @@ class AgentService:
         if website_id:
             query = query.filter(Conversation.website_id == website_id)
         
+        # Stable ordering prevents inbox from "shuffling" between refreshes.
+        # Use updated_at when available (TimestampMixin), fall back to created_at.
+        try:
+            query = query.order_by(Conversation.updated_at.desc())
+        except Exception:
+            query = query.order_by(Conversation.created_at.desc())
+
         return query.all()
     
     def get_conversation_messages(self, conversation_id: int):

@@ -100,10 +100,11 @@
    * Get or create session ID
    */
   function getSessionId() {
-    let sessionId = localStorage.getItem('ai_chatassist_session_id');
+    const storageKey = `ai_chatassist_session_id_${CONFIG.websiteId}`;
+    let sessionId = localStorage.getItem(storageKey);
     if (!sessionId) {
       sessionId = generateSessionId();
-      localStorage.setItem('ai_chatassist_session_id', sessionId);
+      localStorage.setItem(storageKey, sessionId);
     }
     return sessionId;
   }

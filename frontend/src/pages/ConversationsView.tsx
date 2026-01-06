@@ -80,6 +80,8 @@ export default function ConversationsView() {
     const [chatLoading, setChatLoading] = useState(false)
     const [resolving, setResolving] = useState(false)
     const joinedRef = useRef(false)
+    const loadMessagesTokenRef = useRef(0)
+    const loadDetailsTokenRef = useRef(0)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // Takeover confirmation (Smartsupp-like)
@@ -232,11 +234,17 @@ export default function ConversationsView() {
     }
 
     const loadChatData = async (chatId: number) => {
+        const token = ++loadMessagesTokenRef.current
         setChatLoading(true)
         reset()
 
         try {
             const chatMessages = await fetchChatMessages(chatId.toString())
+
+            // If the user switched chats while we were loading, ignore stale results.
+            if (loadMessagesTokenRef.current !== token) {
+                return
+            }
             addMessages(chatMessages)
 
             // Do NOT auto-join on selection.
@@ -246,11 +254,14 @@ export default function ConversationsView() {
         } catch (error) {
             console.error("Failed to load chat:", error)
         } finally {
-            setChatLoading(false)
+            if (loadMessagesTokenRef.current === token) {
+                setChatLoading(false)
+            }
         }
     }
 
     const loadConversationDetails = async (chatId: number) => {
+        const token = ++loadDetailsTokenRef.current
         try {
             const chatData = activeChats.find(c => c.id === chatId)
             if (chatData) {
@@ -258,6 +269,10 @@ export default function ConversationsView() {
             }
 
             const fetchedNotes = await getNotes(chatId)
+
+            if (loadDetailsTokenRef.current !== token) {
+                return
+            }
             setNotes(fetchedNotes)
         } catch (error) {
             console.error("Failed to load conversation details:", error)
