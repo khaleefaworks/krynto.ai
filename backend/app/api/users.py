@@ -156,6 +156,76 @@ def get_avatar(
     return AvatarResponse(avatar_url=current_user.avatar_url)
 
 
+@router.post("/{user_id}/avatar/upload", response_model=AvatarResponse)
+async def upload_user_avatar(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin)
+):
+    """Upload avatar image for any user (admin/manager only)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not file.content_type or not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+
+    upload_dir = Path("uploads/avatars")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
+    unique_filename = f"{user.id}_{uuid.uuid4().hex[:8]}.{file_extension}"
+    file_path = upload_dir / unique_filename
+
+    if user.avatar_url and user.avatar_url.startswith('/uploads/'):
+        old_file = Path(user.avatar_url.lstrip('/'))
+        if old_file.exists():
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
+
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    user.avatar_url = f"/uploads/avatars/{unique_filename}"
+    db.commit()
+    db.refresh(user)
+    return AvatarResponse(avatar_url=user.avatar_url)
+
+
+@router.delete("/{user_id}/avatar", response_model=AvatarResponse)
+def delete_user_avatar(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin)
+):
+    """Remove avatar for any user (admin/manager only)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.avatar_url and user.avatar_url.startswith('/uploads/'):
+        file_path = Path(user.avatar_url.lstrip('/'))
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
+
+    user.avatar_url = None
+    db.commit()
+    db.refresh(user)
+    return AvatarResponse(avatar_url=None)
+
+
 class StatusUpdateRequest(BaseModel):
     """Request to update user active status (admin only)"""
     is_active: bool

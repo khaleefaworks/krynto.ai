@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.website import Website
@@ -7,6 +7,9 @@ from app.api.deps import require_admin, require_authenticated_user
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import uuid
+import shutil
+from pathlib import Path
 
 router = APIRouter(prefix="/websites", tags=["websites"])
 
@@ -46,6 +49,7 @@ class WidgetConfigResponse(BaseModel):
     show_emoji_picker: bool = True
     show_attachments: bool = False
     branding_text: Optional[str] = None
+    header_icon_url: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -186,7 +190,63 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
         "show_emoji_picker": config.get("show_emoji_picker", True),
         "show_attachments": config.get("show_attachments", False),
         "branding_text": config.get("branding_text"),
+        "header_icon_url": config.get("header_icon_url"),
     }
+
+
+@router.post("/{website_id}/widget-icon/upload")
+async def upload_widget_icon(
+    website_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin)
+):
+    """Upload a website-specific widget header icon.
+
+    Stores the uploaded image under uploads/websites/<website_id>/ and saves the
+    public URL in website.widget_config['header_icon_url'].
+    """
+    website = db.query(Website).filter_by(id=website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+
+    upload_dir = Path("uploads/websites") / str(website_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'png'
+    unique_filename = f"widget_icon_{uuid.uuid4().hex[:10]}.{file_extension}"
+    file_path = upload_dir / unique_filename
+
+    # Delete old icon file if exists
+    existing_config = website.widget_config or {}
+    old_url = existing_config.get("header_icon_url")
+    if old_url and isinstance(old_url, str) and old_url.startswith('/uploads/'):
+        old_file = Path(old_url.lstrip('/'))
+        if old_file.exists():
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
+
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    public_url = f"/uploads/websites/{website_id}/{unique_filename}"
+    existing_config["header_icon_url"] = public_url
+    website.widget_config = existing_config
+    db.commit()
+    db.refresh(website)
+
+    return {"header_icon_url": public_url}
 
 
 @router.put("/{website_id}/widget-config")

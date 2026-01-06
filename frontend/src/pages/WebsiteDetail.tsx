@@ -24,6 +24,7 @@ interface Website {
     show_emoji_picker?: boolean
     show_attachments?: boolean
     branding_text?: string | null
+    header_icon_url?: string | null
   } | null
   created_at: string
 }
@@ -43,6 +44,7 @@ export default function WebsiteDetail() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [snippetCopied, setSnippetCopied] = useState(false)
   const [widgetSnippet, setWidgetSnippet] = useState('')
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
   // Form data
   const [formData, setFormData] = useState({
@@ -59,6 +61,7 @@ export default function WebsiteDetail() {
       show_emoji_picker: true,
       show_attachments: false,
       branding_text: null as string | null,
+      header_icon_url: null as string | null,
     }
   })
 
@@ -98,6 +101,7 @@ export default function WebsiteDetail() {
           show_emoji_picker: data.widget_config?.show_emoji_picker !== undefined ? data.widget_config.show_emoji_picker : true,
           show_attachments: data.widget_config?.show_attachments || false,
           branding_text: data.widget_config?.branding_text ?? null,
+          header_icon_url: data.widget_config?.header_icon_url ?? null,
         }
       })
     } catch (err: any) {
@@ -156,6 +160,46 @@ export default function WebsiteDetail() {
       navigate('/dashboard/settings/websites')
     } catch (err: any) {
       setError(err.message || 'Failed to delete website')
+      setSaving(false)
+    }
+  }
+
+  const handleUploadWidgetIcon = async (file: File) => {
+    if (!websiteId) return
+    try {
+      setSaving(true)
+      setError(null)
+      setSuccessMessage(null)
+
+      const token = localStorage.getItem('auth_token')
+      const form = new FormData()
+      form.append('file', file)
+
+      const res = await fetch(`${API_BASE}/websites/${websiteId}/widget-icon/upload`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: form,
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to upload icon')
+      }
+
+      const data = await res.json()
+      setFormData((prev) => ({
+        ...prev,
+        widget_config: {
+          ...prev.widget_config,
+          header_icon_url: data.header_icon_url ?? prev.widget_config.header_icon_url,
+        },
+      }))
+      setSuccessMessage('Widget icon uploaded successfully')
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload icon')
+    } finally {
       setSaving(false)
     }
   }
@@ -361,6 +405,42 @@ export default function WebsiteDetail() {
               <CardDescription>Customize the chat widget appearance and behavior</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Header Icon (Optional)
+              </label>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                  {formData.widget_config.header_icon_url ? (
+                    <img
+                      src={`${API_BASE}${formData.widget_config.header_icon_url}`}
+                      alt="Widget icon"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">None</span>
+                  )}
+                </div>
+
+                {isAdmin(user) && (
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) handleUploadWidgetIcon(file)
+                      e.currentTarget.value = ''
+                    }}
+                    className="text-sm text-gray-700 dark:text-gray-300"
+                    disabled={saving}
+                  />
+                )}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Shown as the single header icon until an agent joins (then agent avatar replaces it).
+              </p>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

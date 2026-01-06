@@ -7,7 +7,10 @@ export default function Settings() {
   const { user } = useAppStore()
   const location = useLocation()
 
-  const isActive = (path: string) => location.pathname === path
+  const isActive = (path: string) => {
+    if (location.pathname === path) return true
+    return location.pathname.startsWith(`${path}/`)
+  }
 
   return (
     <div className="flex h-screen">

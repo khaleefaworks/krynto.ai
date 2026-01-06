@@ -25,6 +25,7 @@
     onlineStatusText: globalConfig.onlineStatusText || 'Online',
     bubbleText: globalConfig.bubbleText || 'Chat with us',
     agentAvatar: globalConfig.agentAvatar || null,
+    headerIconUrl: globalConfig.headerIconUrl || null,
     showEmojiPicker: globalConfig.showEmojiPicker || false,
     showAttachments: globalConfig.showAttachments || false,
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist'
@@ -46,6 +47,42 @@
   let presenceWs = null;
   let presencePingInterval = null;
   let presenceOnline = true;
+  let activeAgentAvatarUrl = null;
+
+  function getFullAssetUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    return url.startsWith('http') ? url : `${CONFIG.apiUrl}${url}`;
+  }
+
+  function setHeaderIcon(urlOrNull) {
+    const iconInner = document.getElementById('chatassist-header-icon-inner');
+    if (!iconInner) return;
+
+    const url = getFullAssetUrl(urlOrNull);
+    if (!url) {
+      iconInner.innerHTML = `<div class="chatassist-header-avatar-placeholder">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </div>`;
+      return;
+    }
+
+    iconInner.innerHTML = `<img class="chatassist-header-avatar" src="${url}" alt="Icon">`;
+  }
+
+  function refreshHeaderIcon() {
+    if (activeAgentAvatarUrl) {
+      setHeaderIcon(activeAgentAvatarUrl);
+      return;
+    }
+    if (CONFIG.headerIconUrl) {
+      setHeaderIcon(CONFIG.headerIconUrl);
+      return;
+    }
+    setHeaderIcon(null);
+  }
 
   /**
    * Generate a unique session ID (UUID v4)
@@ -210,22 +247,9 @@
    * Update agent avatar in header
    */
   function updateAgentAvatar(avatarUrl) {
-    const fullUrl = avatarUrl.startsWith('http') ? avatarUrl : `${CONFIG.apiUrl}${avatarUrl}`;
-    const avatarContainer = document.querySelector('.chatassist-header-content');
-    if (!avatarContainer) return;
-    
-    const existingAvatar = avatarContainer.querySelector('.chatassist-header-avatar, .chatassist-header-avatar-placeholder');
-    if (existingAvatar) {
-      existingAvatar.remove();
-    }
-    
-    const avatarImg = document.createElement('img');
-    avatarImg.src = fullUrl;
-    avatarImg.alt = 'Agent';
-    avatarImg.className = 'chatassist-header-avatar';
-    avatarContainer.insertBefore(avatarImg, avatarContainer.firstChild);
-    
-    CONFIG.agentAvatar = fullUrl;
+    activeAgentAvatarUrl = avatarUrl;
+    CONFIG.agentAvatar = avatarUrl;
+    refreshHeaderIcon();
   }
 
   /**
@@ -358,7 +382,7 @@
     const container = document.createElement('div');
     container.id = 'chatassist-widget';
     
-    // Default avatar placeholder initially
+    // Placeholder; actual icon is set after config/presence loads
     const avatarHTML = `<div class="chatassist-header-avatar-placeholder">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -376,13 +400,13 @@
       <div id="chatassist-window" style="display: none;">
         <div id="chatassist-header">
           <div class="chatassist-header-content">
-            <div id="chatassist-header-avatars" class="chatassist-header-avatars">
-              ${avatarHTML}
+            <div id="chatassist-header-icon" class="chatassist-header-avatars">
+              <div id="chatassist-header-icon-inner">${avatarHTML}</div>
+              <span id="chatassist-presence-badge" class="chatassist-presence-badge" aria-hidden="true"></span>
             </div>
             <div class="chatassist-header-info">
               <span class="chatassist-header-title">${CONFIG.headerTitle}</span>
               <div class="chatassist-online-status">
-                <span class="chatassist-online-dot"></span>
                 <span class="chatassist-online-text">${CONFIG.onlineStatusText}</span>
               </div>
             </div>
@@ -444,6 +468,9 @@
         handleUserMessage();
       }
     });
+
+    // Initialize icon once DOM exists
+    refreshHeaderIcon();
   }
 
   function updateContactFormVisibility() {
@@ -502,56 +529,42 @@
   function applyPresence(presence) {
     const titleEl = document.querySelector('.chatassist-header-title');
     const statusTextEl = document.querySelector('.chatassist-online-text');
-    const dotEl = document.querySelector('.chatassist-online-dot');
-    const avatarsEl = document.getElementById('chatassist-header-avatars');
+    const badgeEl = document.getElementById('chatassist-presence-badge');
 
-    if (!titleEl || !statusTextEl || !dotEl || !avatarsEl) return;
+    if (!titleEl || !statusTextEl) return;
 
-    const online = !!presence.online;
+    const count = (typeof presence.available_agents_count === 'number')
+      ? presence.available_agents_count
+      : (Array.isArray(presence.agents) ? presence.agents.length : 0);
+
+    const online = count > 0;
     presenceOnline = online;
     updateContactFormVisibility();
-    const agents = Array.isArray(presence.agents) ? presence.agents : [];
+
+    // Badge: green + count, or red with no number
+    if (badgeEl) {
+      badgeEl.style.display = 'flex';
+      if (online) {
+        badgeEl.classList.remove('chatassist-presence-badge-offline');
+        badgeEl.textContent = String(count);
+      } else {
+        badgeEl.classList.add('chatassist-presence-badge-offline');
+        badgeEl.textContent = '';
+      }
+    }
 
     if (!online) {
       titleEl.textContent = 'Send us a message';
       statusTextEl.textContent = 'Happy to answer you later';
-      dotEl.classList.add('chatassist-dot-offline');
 
-      // Reset to placeholder avatar
-      avatarsEl.innerHTML = `<div class="chatassist-header-avatar-placeholder">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-          <circle cx="12" cy="7" r="4"></circle>
-        </svg>
-      </div>`;
+      refreshHeaderIcon();
       return;
     }
 
-    dotEl.classList.remove('chatassist-dot-offline');
     titleEl.textContent = CONFIG.headerTitle;
     statusTextEl.textContent = CONFIG.onlineStatusText;
 
-    if (!agents.length) return;
-
-    avatarsEl.innerHTML = agents
-      .slice(0, 3)
-      .map((a, idx) => {
-        const avatarUrl = a.avatar_url
-          ? (a.avatar_url.startsWith('http') ? a.avatar_url : `${CONFIG.apiUrl}${a.avatar_url}`)
-          : null;
-
-        if (!avatarUrl) {
-          return `<div class="chatassist-header-avatar-placeholder chatassist-avatar-stack" style="z-index:${10 - idx}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-          </div>`;
-        }
-
-        return `<img class="chatassist-header-avatar chatassist-avatar-stack" style="z-index:${10 - idx}" src="${avatarUrl}" alt="${(a.name || 'Agent').replace(/"/g, '')}">`;
-      })
-      .join('');
+    refreshHeaderIcon();
   }
 
   /**
@@ -593,6 +606,7 @@
         CONFIG.headerTitle = config.header_title || CONFIG.headerTitle;
         CONFIG.onlineStatusText = config.online_status_text || CONFIG.onlineStatusText;
         CONFIG.bubbleText = config.bubble_text || CONFIG.bubbleText;
+        CONFIG.headerIconUrl = config.header_icon_url || CONFIG.headerIconUrl;
         if (config.show_emoji_picker !== undefined) {
           CONFIG.showEmojiPicker = !!config.show_emoji_picker;
         }
@@ -603,6 +617,7 @@
         // Note: agentAvatar would come from agent's profile dynamically
         
         console.log('[ChatWidget] Configuration loaded from backend:', config);
+        refreshHeaderIcon();
         return true;
       } else if (response.status === 404) {
         console.error('[ChatWidget] Website not found (404). Widget cannot be initialized.');

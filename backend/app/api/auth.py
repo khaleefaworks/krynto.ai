@@ -270,6 +270,7 @@ async def list_users(
             "role": user.role.value,
             "is_available": user.is_available,
             "is_active": user.is_active,
+            "avatar_url": user.avatar_url,
         }
         for user in users
     ]

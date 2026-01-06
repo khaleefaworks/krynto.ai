@@ -92,6 +92,11 @@
 .chatassist-header-avatars {
   display: flex;
   align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
 }
 
 .chatassist-avatar-stack {
@@ -102,11 +107,6 @@
   margin-left: 0;
 }
 
-.chatassist-dot-offline {
-  background: #9ca3af;
-  animation: none;
-}
-
 .chatassist-header-avatar,
 .chatassist-header-avatar-placeholder {
   width: 40px;
@@ -114,6 +114,35 @@
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.chatassist-presence-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: #10b981;
+  color: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.chatassist-presence-badge-offline {
+  background: #ef4444;
+  animation: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
 }
 
 .chatassist-header-avatar-placeholder {
@@ -141,14 +170,6 @@
   font-size: 12px;
   font-weight: 400;
   opacity: 0.9;
-}
-
-.chatassist-online-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10b981;
-  animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {

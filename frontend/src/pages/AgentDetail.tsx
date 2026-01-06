@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { ArrowLeft, Save, Trash2, User, Mail, Lock, CheckCircle, XCircle } from 'lucide-react'
 import { Badge } from '../components/ui/badge'
 import { useAppStore } from '@/store/appStore'
-import { isAdministrator } from '@/lib/roles'
+import { isAdministrator, isAdmin } from '@/lib/roles'
 
 interface Agent {
   id: number
@@ -16,6 +16,7 @@ interface Agent {
   role: string
   is_active: boolean
   is_available: boolean
+  avatar_url?: string | null
 }
 
 export default function AgentDetail() {
@@ -23,6 +24,7 @@ export default function AgentDetail() {
   const navigate = useNavigate()
   const { user: currentUser } = useAppStore()
   const isNew = id === 'new'
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
   
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
@@ -39,6 +41,54 @@ export default function AgentDetail() {
   })
 
   const [agent, setAgent] = useState<Agent | null>(null)
+
+  const uploadAvatarForUser = async (userId: number, file: File) => {
+    try {
+      setSaving(true)
+      setError(null)
+      setSuccessMessage(null)
+
+      const token = localStorage.getItem('auth_token')
+      const form = new FormData()
+      form.append('file', file)
+
+      const res = await fetch(`${API_BASE}/users/${userId}/avatar/upload`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: form,
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to upload avatar')
+      }
+
+      const data = await res.json().catch(() => ({}))
+      setAgent((prev) => (prev ? { ...prev, avatar_url: data.avatar_url ?? prev.avatar_url } : prev))
+      setSuccessMessage('Avatar updated successfully')
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload avatar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteAvatarForUser = async (userId: number) => {
+    try {
+      setSaving(true)
+      setError(null)
+      setSuccessMessage(null)
+      const data = await apiRequest<{ avatar_url: string | null }>(`/users/${userId}/avatar`, { method: 'DELETE' })
+      setAgent((prev) => (prev ? { ...prev, avatar_url: data.avatar_url } : prev))
+      setSuccessMessage('Avatar removed successfully')
+    } catch (err: any) {
+      setError(err.message || 'Failed to remove avatar')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!isNew && id) {
@@ -185,7 +235,7 @@ export default function AgentDetail() {
           className="gap-2 mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Agents
+          Back to Users
         </Button>
 
         <div className="flex items-center justify-between">
@@ -230,6 +280,50 @@ export default function AgentDetail() {
           )}
         </div>
       </div>
+
+      {!isNew && agent && isAdmin(currentUser) && (
+        <Card className="p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Avatar</h2>
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+              {agent.avatar_url ? (
+                <img
+                  src={`${API_BASE}${agent.avatar_url}`}
+                  alt="User avatar"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-gray-500 dark:text-gray-400">No avatar</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) uploadAvatarForUser(agent.id, file)
+                  e.currentTarget.value = ''
+                }}
+                className="text-sm text-gray-700 dark:text-gray-300"
+                disabled={saving}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (!confirm('Remove this user\'s avatar?')) return
+                  deleteAvatarForUser(agent.id)
+                }}
+                disabled={saving || !agent.avatar_url}
+              >
+                Remove
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">

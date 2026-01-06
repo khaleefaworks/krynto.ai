@@ -39,10 +39,13 @@ def _compute_presence(db: Session, website_id: int) -> dict:
         if is_agent_eligible(u, u.id in connected_user_ids)
     ]
 
+    available_agents_count = len(online_agents)
+
     return {
         "type": "presence",
         "website_id": website_id,
-        "online": len(online_agents) > 0,
+        "online": available_agents_count > 0,
+        "available_agents_count": available_agents_count,
         "agents": online_agents[:3],
     }
 

@@ -4,6 +4,8 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { apiRequest } from "@/services/api"
 import { UserPlus, Trash2, Check, X } from "lucide-react"
+import { useAppStore } from "@/store/appStore"
+import { isAdmin } from "@/lib/roles"
 
 interface Agent {
   id: number
@@ -12,15 +14,18 @@ interface Agent {
   role: string
   is_available: boolean
   is_active: boolean
+  avatar_url?: string | null
   created_at: string
 }
 
 export default function AgentsManagement() {
+  const { user } = useAppStore()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
   
   const [formData, setFormData] = useState({
     name: "",
@@ -97,6 +102,47 @@ export default function AgentsManagement() {
       await loadAgents()
     } catch (err: any) {
       setError(err.message || "Failed to delete agent")
+    }
+  }
+
+  const uploadAvatarForUser = async (userId: number, file: File) => {
+    try {
+      setError(null)
+      setSuccess(null)
+
+      const token = localStorage.getItem("auth_token")
+      const form = new FormData()
+      form.append("file", file)
+
+      const res = await fetch(`${API_BASE}/users/${userId}/avatar/upload`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: form,
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || "Failed to upload avatar")
+      }
+
+      setSuccess("Avatar updated successfully")
+      await loadAgents()
+    } catch (err: any) {
+      setError(err.message || "Failed to upload avatar")
+    }
+  }
+
+  const deleteAvatarForUser = async (userId: number) => {
+    try {
+      setError(null)
+      setSuccess(null)
+      await apiRequest(`/users/${userId}/avatar`, { method: "DELETE" })
+      setSuccess("Avatar removed successfully")
+      await loadAgents()
+    } catch (err: any) {
+      setError(err.message || "Failed to remove avatar")
     }
   }
 
@@ -227,6 +273,9 @@ export default function AgentsManagement() {
                   User
                 </th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Avatar
+                </th>
+                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Email
                 </th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -242,6 +291,48 @@ export default function AgentsManagement() {
                 >
                   <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
                     {agent.name}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                        {agent.avatar_url ? (
+                          <img
+                            src={`${API_BASE}${agent.avatar_url}`}
+                            alt={`${agent.name} avatar`}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">—</span>
+                        )}
+                      </div>
+
+                      {isAdmin(user) && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) uploadAvatarForUser(agent.id, file)
+                              e.currentTarget.value = ""
+                            }}
+                            className="text-sm"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (!confirm(`Remove avatar for "${agent.name}"?`)) return
+                              deleteAvatarForUser(agent.id)
+                            }}
+                            disabled={!agent.avatar_url}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                     {agent.email}
