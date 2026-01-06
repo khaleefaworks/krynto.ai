@@ -34,16 +34,28 @@ import {
     PanelRightClose,
     PanelRightOpen,
     Inbox,
-    Users
+    Users,
+    Bot
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import { formatDistanceToNow } from 'date-fns'
 
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+
 function getMessageTimestamp(m: any): number {
     const ts = m?.timestamp || m?.created_at
     const t = ts ? new Date(ts).getTime() : NaN
     return Number.isFinite(t) ? t : 0
+}
+
+function getInitials(name: string | null | undefined, fallback: string): string {
+    const v = String(name || '').trim()
+    if (!v) return fallback
+    const parts = v.split(/\s+/).filter(Boolean)
+    const first = parts[0]?.[0] || ''
+    const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
+    return (first + second).toUpperCase() || fallback
 }
 
 interface ConversationDetails {
@@ -207,7 +219,9 @@ export default function ConversationsView() {
                     sender_type: 'agent' as const,
                     sender: 'agent' as const,
                     content: data.content,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
+                    sender_name: (user as any)?.name ?? (user as any)?.email ?? null,
+                    sender_avatar_url: (user as any)?.avatar_url ?? null,
                 }
                 addMessage(confirmedMessage)
             } else if (data.type === 'new_conversation') {
@@ -814,16 +828,17 @@ export default function ConversationsView() {
                                                     </div>
                                                 </div>
                                             ) : isBot ? (
-                                                <div className="flex justify-start">
+                                                // Bot/automation/system messages render on the agent side with a robot avatar.
+                                                <div className="flex justify-end">
                                                     <div className="flex items-end gap-2 max-w-[70%]">
-                                                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 text-xs font-bold flex-shrink-0">
-                                                            AI
-                                                        </div>
                                                         <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
                                                             <p className="break-words whitespace-pre-wrap">{msg.content}</p>
                                                             <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                 <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                             </div>
+                                                        </div>
+                                                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
+                                                            <Bot className="h-4 w-4" />
                                                         </div>
                                                     </div>
                                                 </div>
@@ -845,9 +860,25 @@ export default function ConversationsView() {
                                                             </div>
                                                         </div>
                                                         {isAgent && (
-                                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                                {(user as any)?.name?.substring(0, 2).toUpperCase() || 'AG'}
-                                                            </div>
+                                                            (() => {
+                                                                const avatarUrl = (msg as any).sender_avatar_url
+                                                                const name = (msg as any).sender_name
+                                                                if (avatarUrl) {
+                                                                    const fullUrl = String(avatarUrl).startsWith('http') ? avatarUrl : `${API_BASE}${avatarUrl}`
+                                                                    return (
+                                                                        <img
+                                                                            src={fullUrl}
+                                                                            alt={name || 'Agent'}
+                                                                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                                                        />
+                                                                    )
+                                                                }
+                                                                return (
+                                                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                                                        {getInitials(name, 'AG')}
+                                                                    </div>
+                                                                )
+                                                            })()
                                                         )}
                                                     </div>
                                                 </div>

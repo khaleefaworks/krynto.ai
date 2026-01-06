@@ -13,6 +13,25 @@ from datetime import datetime, timedelta
 router = APIRouter()
 logger = get_logger(__name__)
 
+
+def _resolve_sender_user(db, sender: str | None):
+    if not sender:
+        return None
+    try:
+        user_id = int(str(sender))
+        from app.models.user import User
+
+        return db.query(User).filter(User.id == user_id).first()
+    except Exception:
+        pass
+
+    try:
+        from app.models.user import User
+
+        return db.query(User).filter(User.email == str(sender)).first()
+    except Exception:
+        return None
+
 # Rate limiting for WebSocket messages
 # Track message timestamps per session
 message_timestamps = defaultdict(list)
@@ -73,23 +92,49 @@ async def chat_ws(
                     .all()
                 )
 
+                history_messages = []
+                for msg in messages:
+                    sender_type = (
+                        msg.sender_type.value
+                        if hasattr(msg.sender_type, "value")
+                        else msg.sender_type
+                    )
+                    event_type = getattr(msg, "event_type", None)
+
+                    sender_name = None
+                    sender_avatar_url = None
+
+                    if sender_type == "agent":
+                        u = _resolve_sender_user(db, msg.sender)
+                        if u:
+                            sender_name = u.name or u.email
+                            sender_avatar_url = u.avatar_url
+                    elif sender_type == "system":
+                        if msg.sender == "bot" or event_type == "bot" or (
+                            event_type and str(event_type).startswith("automation")
+                        ):
+                            sender_name = "AI"
+
+                    history_messages.append(
+                        {
+                            "id": msg.id,
+                            "sender": msg.sender,
+                            "sender_type": sender_type,
+                            "event_type": event_type,
+                            "sender_name": sender_name,
+                            "sender_avatar_url": sender_avatar_url,
+                            "content": msg.content,
+                            "created_at": msg.created_at.isoformat()
+                            if msg.created_at
+                            else None,
+                        }
+                    )
+
                 await websocket.send_json(
                     {
                         "type": "history",
                         "conversation_id": conversation.id,
-                        "messages": [
-                            {
-                                "id": msg.id,
-                                "sender": msg.sender,
-                                "sender_type": msg.sender_type.value
-                                if hasattr(msg.sender_type, "value")
-                                else msg.sender_type,
-                                "event_type": getattr(msg, "event_type", None),
-                                "content": msg.content,
-                                "created_at": msg.created_at.isoformat() if msg.created_at else None,
-                            }
-                            for msg in messages
-                        ],
+                        "messages": history_messages,
                     }
                 )
             except Exception as e:

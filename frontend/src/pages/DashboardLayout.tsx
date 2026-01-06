@@ -11,6 +11,14 @@ import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
 import { isAdministrator } from '@/lib/roles'
 
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+
+function getFullAvatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  const v = String(url)
+  return v.startsWith('http') ? v : `${API_BASE}${v}`
+}
+
 export default function DashboardLayout() {
   const { user, setUser, setToken, unreadChatsCount } = useAppStore()
   const navigate = useNavigate()
@@ -193,9 +201,17 @@ export default function DashboardLayout() {
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3 mb-3">
             <div className="relative">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold shadow-md">
-                {getInitials(user?.name, user?.email)}
-              </div>
+              {getFullAvatarUrl((user as any)?.avatar_url) ? (
+                <img
+                  src={getFullAvatarUrl((user as any)?.avatar_url) as string}
+                  alt={user?.name || user?.email || 'User'}
+                  className="w-12 h-12 rounded-full object-cover shadow-md"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold shadow-md">
+                  {getInitials(user?.name, user?.email)}
+                </div>
+              )}
               {user?.is_available && (
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
               )}
@@ -323,9 +339,17 @@ export default function DashboardLayout() {
               <DropdownMenuTrigger>
                 <div className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all cursor-pointer">
                   <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
-                      {getInitials(user?.name, user?.email)}
-                    </div>
+                    {getFullAvatarUrl((user as any)?.avatar_url) ? (
+                      <img
+                        src={getFullAvatarUrl((user as any)?.avatar_url) as string}
+                        alt={user?.name || user?.email || 'User'}
+                        className="w-10 h-10 rounded-full object-cover shadow-md"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
+                        {getInitials(user?.name, user?.email)}
+                      </div>
+                    )}
                     {user?.is_available && (
                       <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
                     )}

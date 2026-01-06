@@ -48,6 +48,7 @@
   let presencePingInterval = null;
   let presenceOnline = true;
   let activeAgentAvatarUrl = null;
+  let activeAgentName = null;
   let pendingOfflineMessage = null;
 
   function getFullAssetUrl(url) {
@@ -209,7 +210,13 @@
           return;
         }
         if (senderType === 'agent') {
-          appendMessage('agent', m.content, m.created_at);
+          // Track the most recent agent identity for the header (supports takeover).
+          if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
+          if (m.sender_name) updateAgentName(m.sender_name);
+          appendMessage('agent', m.content, m.created_at, {
+            avatarUrl: m.sender_avatar_url,
+            name: m.sender_name,
+          });
           return;
         }
 
@@ -240,10 +247,14 @@
 
     if (data.type === 'ai') {
       // AI response
-      appendMessage('ai', data.message);
+      appendMessage('ai', data.message, data.created_at);
     } else if (data.type === 'agent') {
       // Agent message
-      appendMessage('agent', data.message);
+      if (data.agent_name) updateAgentName(data.agent_name);
+      appendMessage('agent', data.message, data.created_at, {
+        avatarUrl: data.agent_avatar,
+        name: data.agent_name,
+      });
       
       // Update agent avatar if provided
       if (data.agent_avatar) {
@@ -253,6 +264,8 @@
       // Agent joined notification
       const name = data.agent_name || 'A support agent';
       showJoinMessage(`${name} joined the chat.`, null);
+
+      if (data.agent_name) updateAgentName(data.agent_name);
       
       // Update agent avatar if provided
       if (data.agent_avatar) {
@@ -260,8 +273,9 @@
       }
     } else if (data.message) {
       // Generic message format
-      const sender = data.sender || 'ai';
-      appendMessage(sender, data.message);
+      const rawSender = data.sender || 'ai';
+      const sender = rawSender === 'user' ? 'visitor' : rawSender;
+      appendMessage(sender, data.message, data.created_at);
     }
   }
 
@@ -272,6 +286,46 @@
     activeAgentAvatarUrl = avatarUrl;
     CONFIG.agentAvatar = avatarUrl;
     refreshHeaderIcon();
+  }
+
+  function updateAgentName(name) {
+    if (!name) return;
+    activeAgentName = String(name);
+  }
+
+  function createRobotAvatarNode() {
+    const avatar = document.createElement('div');
+    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-bot';
+    avatar.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 8V4H8" />
+        <rect width="16" height="12" x="4" y="8" rx="2" />
+        <path d="M9 16h.01" />
+        <path d="M15 16h.01" />
+      </svg>
+    `;
+    return avatar;
+  }
+
+  function createAgentAvatarNode(avatarUrl, name) {
+    const avatar = document.createElement('div');
+    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-agent';
+
+    const url = getFullAssetUrl(avatarUrl || activeAgentAvatarUrl);
+    const displayName = String(name || activeAgentName || 'Agent');
+
+    if (url) {
+      const img = document.createElement('img');
+      img.className = 'chatassist-message-avatar-img';
+      img.src = url;
+      img.alt = displayName;
+      avatar.appendChild(img);
+      return avatar;
+    }
+
+    const initials = (displayName.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('') || 'AG').toUpperCase();
+    avatar.textContent = initials;
+    return avatar;
   }
 
   /**
@@ -289,24 +343,45 @@
   /**
    * Append message to chat window
    */
-  function appendMessage(sender, content, createdAtIso) {
+  function appendMessage(sender, content, createdAtIso, meta) {
     const messagesContainer = document.getElementById('chatassist-messages');
     if (!messagesContainer) return;
 
+    const metaSafe = meta && typeof meta === 'object' ? meta : {};
+
     const messageDiv = document.createElement('div');
     messageDiv.className = `chatassist-message chatassist-message-${sender}`;
-    
+
+    const row = document.createElement('div');
+    row.className = 'chatassist-message-row';
+    row.classList.add(sender === 'visitor' ? 'chatassist-message-row-right' : 'chatassist-message-row-left');
+
+    const contentWrap = document.createElement('div');
+    contentWrap.className = 'chatassist-message-content';
+
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
     bubble.textContent = content;
-    
+
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
     const ts = createdAtIso ? new Date(createdAtIso) : new Date();
     timestamp.textContent = formatTimestamp(ts);
-    
-    messageDiv.appendChild(bubble);
-    messageDiv.appendChild(timestamp);
+
+    contentWrap.appendChild(bubble);
+    contentWrap.appendChild(timestamp);
+
+    if (sender === 'agent') {
+      row.appendChild(createAgentAvatarNode(metaSafe.avatarUrl, metaSafe.name));
+      row.appendChild(contentWrap);
+    } else if (sender === 'ai') {
+      row.appendChild(createRobotAvatarNode());
+      row.appendChild(contentWrap);
+    } else {
+      row.appendChild(contentWrap);
+    }
+
+    messageDiv.appendChild(row);
     messagesContainer.appendChild(messageDiv);
     
     // Scroll to bottom
@@ -698,6 +773,10 @@
     if (!online) {
       titleEl.textContent = 'Send us a message';
       statusTextEl.textContent = 'Happy to answer you later';
+
+      // Everyone offline: revert header icon to website/default.
+      activeAgentAvatarUrl = null;
+      activeAgentName = null;
 
       refreshHeaderIcon();
       return;

@@ -336,12 +336,17 @@ class ConversationOrchestrator:
             return {"error": "Unable to add message"}
 
         logger.info("agent_message_saved", conversation_id=conversation_id, agent_id=agent_id, content_length=len(content))
+
+        agent = self.db.query(User).filter(User.id == agent_id).first()
+        agent_name = (agent.name if agent and agent.name else "Support Agent")
         
         await ChatService.send_to_visitor(
             conversation_id,
             {
                 "type": "agent",
                 "message": content,
+                "agent_name": agent_name,
+                "agent_avatar": agent.avatar_url if agent else None,
             }
         )
 

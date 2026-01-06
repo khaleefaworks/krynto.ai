@@ -12,6 +12,24 @@ from typing import List, Optional
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
+def _resolve_sender_user(db: Session, sender: Optional[str]) -> Optional[User]:
+    if not sender:
+        return None
+
+    # Newer messages may store agent_id as a string in sender.
+    try:
+        user_id = int(str(sender))
+        return db.query(User).filter(User.id == user_id).first()
+    except Exception:
+        pass
+
+    # Backwards-compat: older messages might store agent email.
+    try:
+        return db.query(User).filter(User.email == str(sender)).first()
+    except Exception:
+        return None
+
+
 class ConversationResponse(BaseModel):
     id: int
     website_id: int
@@ -114,18 +132,39 @@ def get_chat_messages(
         # Return empty array if conversation exists but no messages
         return []
     
-    return [
-        {
-            "id": msg.id,
-            "conversation_id": msg.conversation_id,
-            "sender": msg.sender,
-            "sender_type": msg.sender_type.value if hasattr(msg.sender_type, 'value') else msg.sender_type,
-            "event_type": getattr(msg, "event_type", None),
-            "content": msg.content,
-            "created_at": msg.created_at.isoformat() if msg.created_at else None
-        }
-        for msg in messages
-    ]
+    result = []
+    for msg in messages:
+        sender_type = msg.sender_type.value if hasattr(msg.sender_type, 'value') else msg.sender_type
+        event_type = getattr(msg, "event_type", None)
+
+        sender_name = None
+        sender_avatar_url = None
+
+        if sender_type == "agent":
+            u = _resolve_sender_user(db, msg.sender)
+            if u:
+                sender_name = u.name or u.email
+                sender_avatar_url = u.avatar_url
+        elif sender_type == "system":
+            # Bot/automation messages should render with a robot avatar client-side.
+            if msg.sender == "bot" or (event_type and str(event_type).startswith("automation")) or event_type == "bot":
+                sender_name = "AI"
+
+        result.append(
+            {
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
+                "sender": msg.sender,
+                "sender_type": sender_type,
+                "event_type": event_type,
+                "sender_name": sender_name,
+                "sender_avatar_url": sender_avatar_url,
+                "content": msg.content,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+            }
+        )
+
+    return result
 
 
 @router.get("/resolved/history")

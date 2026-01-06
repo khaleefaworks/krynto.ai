@@ -29,6 +29,8 @@ export interface Message {
   sender_type?: "visitor" | "agent" | "system"
   // Subtype for system messages (e.g. automation_welcome, agent_join)
   event_type?: string | null
+  sender_name?: string | null
+  sender_avatar_url?: string | null
   content: string
   created_at?: string
 }
