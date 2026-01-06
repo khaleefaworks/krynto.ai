@@ -9,7 +9,6 @@ interface Website {
   id: number
   name: string
   domain: string
-  ai_enabled: boolean
   widget_config: {
     primary_color?: string
     position?: string

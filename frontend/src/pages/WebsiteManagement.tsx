@@ -23,7 +23,6 @@ export default function WebsiteManagement() {
   const [formData, setFormData] = useState<WebsiteCreate>({
     name: '',
     domain: '',
-    ai_instructions: '',
   });
 
   const [widgetConfigData, setWidgetConfigData] = useState<WidgetConfig>({
@@ -56,7 +55,7 @@ export default function WebsiteManagement() {
       setError(null);
       await websitesApi.create(formData);
       setShowCreateForm(false);
-      setFormData({ name: '', domain: '', ai_instructions: '' });
+      setFormData({ name: '', domain: '' });
       await loadWebsites();
     } catch (err: any) {
       setError(err.message || 'Failed to create website');
@@ -72,13 +71,10 @@ export default function WebsiteManagement() {
       const updateData: WebsiteUpdate = {};
       if (formData.name !== editingWebsite.name) updateData.name = formData.name;
       if (formData.domain !== editingWebsite.domain) updateData.domain = formData.domain;
-      if (formData.ai_instructions !== (editingWebsite.ai_instructions || '')) {
-        updateData.ai_instructions = formData.ai_instructions;
-      }
 
       await websitesApi.update(editingWebsite.id, updateData);
       setEditingWebsite(null);
-      setFormData({ name: '', domain: '', ai_instructions: '' });
+      setFormData({ name: '', domain: '' });
       await loadWebsites();
     } catch (err: any) {
       setError(err.message || 'Failed to update website');
@@ -104,7 +100,6 @@ export default function WebsiteManagement() {
     setFormData({
       name: website.name,
       domain: website.domain,
-      ai_instructions: website.ai_instructions || '',
     });
     setShowCreateForm(false);
   };
@@ -114,7 +109,7 @@ export default function WebsiteManagement() {
     setEditingWebsite(null);
     setEditingWidgetConfig(null);
     setManagingAgents(null);
-    setFormData({ name: '', domain: '', ai_instructions: '' });
+    setFormData({ name: '', domain: '' });
     setError(null);
   };
 
@@ -267,21 +262,6 @@ export default function WebsiteManagement() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Enter the domain without protocol (e.g., example.com)
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1 text-gray-900 dark:text-white">
-                  AI Instructions
-                </label>
-                <textarea
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-                  value={formData.ai_instructions}
-                  onChange={(e) =>
-                    setFormData({ ...formData, ai_instructions: e.target.value })
-                  }
-                  placeholder="Instructions for AI to handle customer queries..."
-                  rows={4}
-                />
               </div>
 
               <div className="flex gap-2">
