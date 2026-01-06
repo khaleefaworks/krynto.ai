@@ -40,6 +40,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import { formatDistanceToNow } from 'date-fns'
 
+function getMessageTimestamp(m: any): number {
+    const ts = m?.timestamp || m?.created_at
+    const t = ts ? new Date(ts).getTime() : NaN
+    return Number.isFinite(t) ? t : 0
+}
+
 interface ConversationDetails {
     id: number
     session_id: string
@@ -410,11 +416,11 @@ export default function ConversationsView() {
             case 'all':
                 return chat.status === 'open'
             case 'mine':
-                return chat.status === 'open' && (chat as any).current_agent_id === user?.id
+                return chat.status === 'open' && (chat as any).assigned_agent_id === user?.id
             case 'unassigned':
-                return chat.status === 'open' && (chat as any).current_agent_id === null
+                return chat.status === 'open' && (chat as any).assigned_agent_id == null
             case 'resolved':
-                return chat.status === 'resolved' && (chat as any).current_agent_id !== null
+                return chat.status === 'resolved'
             default:
                 return chat.status === 'open'
         }
@@ -542,7 +548,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Users className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === user?.id).length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -551,7 +557,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left">Mine</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === user?.id).length}
+                                                    {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}
                                                 </Badge>
                                             </>
                                         )}
@@ -572,7 +578,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Inbox className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === null).length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -581,7 +587,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left">Unassigned</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'open' && (c as any).current_agent_id === null).length}
+                                                    {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}
                                                 </Badge>
                                             </>
                                         )}
@@ -686,7 +692,7 @@ export default function ConversationsView() {
                                     <div className="flex items-start gap-3">
                                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0 relative">
                                             {chat.session_id.substring(0, 2).toUpperCase()}
-                                            {(chat as any).current_agent_id && (
+                                            {(chat as any).assigned_agent_id && (
                                                 <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-gray-800" />
                                             )}
                                         </div>
@@ -696,11 +702,13 @@ export default function ConversationsView() {
                                                     {chat.session_id.substring(0, 8)}...
                                                 </span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                    16h
+                                                    {(chat as any).created_at
+                                                        ? formatDistanceToNow(new Date((chat as any).created_at), { addSuffix: true })
+                                                        : ''}
                                                 </span>
                                             </div>
                                             <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                                                Hi
+                                                {(chat as any).last_message || 'No messages yet'}
                                             </p>
                                         </div>
                                     </div>
@@ -769,7 +777,9 @@ export default function ConversationsView() {
                             </div>
                         ) : (
                             <>
-                                {messages.map((msg, index) => {
+                                {[...messages]
+                                    .sort((a: any, b: any) => getMessageTimestamp(a) - getMessageTimestamp(b))
+                                    .map((msg, index, sortedMessages) => {
                                     const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
                                     const eventType = (msg as any).event_type || null
                                     const isSystem = senderType === 'system'
@@ -778,7 +788,7 @@ export default function ConversationsView() {
                                     const isAgent = senderType === 'agent'
                                     const msgTimestamp = (msg as any).timestamp || msg.created_at
                                     const showTimestamp = index === 0 ||
-                                        (new Date(msgTimestamp).getTime() - new Date((messages[index - 1] as any).timestamp || messages[index - 1].created_at).getTime() > 300000)
+                                        (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
 
                                     return (
                                         <div key={msg.id}>
