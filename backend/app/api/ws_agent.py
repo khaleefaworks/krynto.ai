@@ -9,24 +9,10 @@ from app.models.user import User
 import json
 import traceback
 
+from app.api.message_presenter import message_presentation
+
 router = APIRouter()
 logger = get_logger(__name__)
-
-
-def _resolve_sender_user(db, sender: str | None):
-    if not sender:
-        return None
-    try:
-        user_id = int(str(sender))
-        return db.query(User).filter(User.id == user_id).first()
-    except Exception:
-        pass
-    try:
-        return db.query(User).filter(User.email == str(sender)).first()
-    except Exception:
-        return None
-
-
 @router.websocket("/ws/agent/{website_id}")
 async def agent_ws(
     websocket: WebSocket,
@@ -113,22 +99,7 @@ async def agent_ws(
                 messages = agent_service.get_conversation_messages(conversation_id)
                 history = []
                 for msg in messages:
-                    sender_type = msg.sender_type.value if hasattr(msg.sender_type, "value") else msg.sender_type
-                    event_type = getattr(msg, "event_type", None)
-
-                    sender_name = None
-                    sender_avatar_url = None
-
-                    if sender_type == "agent":
-                        u = _resolve_sender_user(db, msg.sender)
-                        if u:
-                            sender_name = u.name or u.email
-                            sender_avatar_url = u.avatar_url
-                    elif sender_type == "system":
-                        if msg.sender == "bot" or event_type == "bot" or (
-                            event_type and str(event_type).startswith("automation")
-                        ):
-                            sender_name = "AI"
+                    sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
 
                     history.append(
                         {

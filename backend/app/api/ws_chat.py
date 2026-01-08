@@ -10,6 +10,8 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from app.api.message_presenter import message_presentation
+
 router = APIRouter()
 logger = get_logger(__name__)
 
@@ -21,24 +23,6 @@ def _ws_close_reason(reason: str | None) -> str:
     reason_str = str(reason).replace("\n", " ").replace("\r", " ")
     return reason_str[:120]
 
-
-def _resolve_sender_user(db, sender: str | None):
-    if not sender:
-        return None
-    try:
-        user_id = int(str(sender))
-        from app.models.user import User
-
-        return db.query(User).filter(User.id == user_id).first()
-    except Exception:
-        pass
-
-    try:
-        from app.models.user import User
-
-        return db.query(User).filter(User.email == str(sender)).first()
-    except Exception:
-        return None
 
 # Rate limiting for WebSocket messages
 # Track message timestamps per session
@@ -102,26 +86,7 @@ async def chat_ws(
 
                 history_messages = []
                 for msg in messages:
-                    sender_type = (
-                        msg.sender_type.value
-                        if hasattr(msg.sender_type, "value")
-                        else msg.sender_type
-                    )
-                    event_type = getattr(msg, "event_type", None)
-
-                    sender_name = None
-                    sender_avatar_url = None
-
-                    if sender_type == "agent":
-                        u = _resolve_sender_user(db, msg.sender)
-                        if u:
-                            sender_name = u.name or u.email
-                            sender_avatar_url = u.avatar_url
-                    elif sender_type == "system":
-                        if msg.sender == "bot" or event_type == "bot" or (
-                            event_type and str(event_type).startswith("automation")
-                        ):
-                            sender_name = "AI"
+                    sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
 
                     history_messages.append(
                         {

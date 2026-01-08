@@ -27,6 +27,25 @@ Additional gaps found during repo scan (actionable):
 - No Dockerfile / docker-compose / CI workflows detected; Python dependencies are not pinned.
 - Frontend dependency versions differ from PRD assumptions (e.g., React version drift). Treat docs as descriptive, not authoritative.
 
+## Status (as of 2026-01-08)
+
+Phase 0 (Hardening):
+- Done:
+  - Env-driven CORS/origins (no wildcard + credentials).
+  - JWT issuance includes `iat` (supports reset invalidation logic).
+  - Runtime DDL/schema guards removed; deploy expects migrations.
+  - Hardcoded `localhost` removed from widget/frontend bases (env-driven + backend public base).
+  - Upload validation hardened (type/size/content checks; block risky types).
+  - Alembic history stabilized enough for `alembic upgrade head` on mixed/dirty DBs (idempotent migrations + merge head).
+  - CI added (backend tests + frontend lint/build) and backend dependency constraints/lock strategy.
+- Deferred (explicit constraint):
+  - Dockerfile / docker-compose local-prod parity (user requested no Docker files).
+- Still pending:
+  - Document a single “production run command” for the backend (gunicorn/uvicorn guidance + env checklist).
+
+Phase 1 (Architecture cleanup):
+- Next up (starting now): centralize sender resolution + message enrichment into a shared helper used by REST + WS paths.
+
 ## Guiding Principles
 
 - One source of truth for schema: Alembic migrations only; no runtime DDL changes.

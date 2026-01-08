@@ -9,25 +9,9 @@ from app.models.user import User
 from pydantic import BaseModel
 from typing import List, Optional
 
+from app.api.message_presenter import message_presentation
+
 router = APIRouter(prefix="/chats", tags=["chats"])
-
-
-def _resolve_sender_user(db: Session, sender: Optional[str]) -> Optional[User]:
-    if not sender:
-        return None
-
-    # Newer messages may store agent_id as a string in sender.
-    try:
-        user_id = int(str(sender))
-        return db.query(User).filter(User.id == user_id).first()
-    except Exception:
-        pass
-
-    # Backwards-compat: older messages might store agent email.
-    try:
-        return db.query(User).filter(User.email == str(sender)).first()
-    except Exception:
-        return None
 
 
 class ConversationResponse(BaseModel):
@@ -134,21 +118,7 @@ def get_chat_messages(
     
     result = []
     for msg in messages:
-        sender_type = msg.sender_type.value if hasattr(msg.sender_type, 'value') else msg.sender_type
-        event_type = getattr(msg, "event_type", None)
-
-        sender_name = None
-        sender_avatar_url = None
-
-        if sender_type == "agent":
-            u = _resolve_sender_user(db, msg.sender)
-            if u:
-                sender_name = u.name or u.email
-                sender_avatar_url = u.avatar_url
-        elif sender_type == "system":
-            # Bot/automation messages should render with a robot avatar client-side.
-            if msg.sender == "bot" or (event_type and str(event_type).startswith("automation")) or event_type == "bot":
-                sender_name = "AI"
+        sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
 
         result.append(
             {

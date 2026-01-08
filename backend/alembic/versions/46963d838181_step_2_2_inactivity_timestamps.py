@@ -17,18 +17,32 @@ depends_on = None
 
 
 def upgrade():
-    # Add timestamp fields for inactivity tracking
-    op.add_column(
-        'conversations',
-        sa.Column('last_agent_message_at', sa.DateTime(), nullable=True)
-    )
-    op.add_column(
-        'conversations',
-        sa.Column('last_visitor_message_at', sa.DateTime(), nullable=True)
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("conversations")}
+
+    # Add timestamp fields for inactivity tracking (idempotent)
+    if "last_agent_message_at" not in existing_columns:
+        op.add_column(
+            "conversations",
+            sa.Column("last_agent_message_at", sa.DateTime(), nullable=True),
+        )
+
+    if "last_visitor_message_at" not in existing_columns:
+        op.add_column(
+            "conversations",
+            sa.Column("last_visitor_message_at", sa.DateTime(), nullable=True),
+        )
 
 
 def downgrade():
-    # Remove timestamp fields
-    op.drop_column('conversations', 'last_visitor_message_at')
-    op.drop_column('conversations', 'last_agent_message_at')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("conversations")}
+
+    # Remove timestamp fields (idempotent)
+    if "last_visitor_message_at" in existing_columns:
+        op.drop_column("conversations", "last_visitor_message_at")
+
+    if "last_agent_message_at" in existing_columns:
+        op.drop_column("conversations", "last_agent_message_at")

@@ -18,8 +18,21 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("messages", sa.Column("event_type", sa.String(length=50), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("messages")}
+
+    if "event_type" not in existing_columns:
+        op.add_column(
+            "messages",
+            sa.Column("event_type", sa.String(length=50), nullable=True),
+        )
 
 
 def downgrade():
-    op.drop_column("messages", "event_type")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("messages")}
+
+    if "event_type" in existing_columns:
+        op.drop_column("messages", "event_type")

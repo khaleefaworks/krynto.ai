@@ -102,35 +102,56 @@ def upgrade():
         except ProgrammingError:
             pass
     
-    # 6. Add sender_type column to messages table
-    op.add_column(
-        'messages',
-        sa.Column('sender_type', sa.Enum('visitor', 'agent', 'system', name='message_sender_type'), 
-                  nullable=True, server_default='visitor')
-    )
-    
-    # Backfill sender_type based on existing sender field patterns
-    # This is a best-effort migration
-    op.execute("""
-        UPDATE messages 
-        SET sender_type = CASE
-            WHEN sender LIKE '%@%' THEN 'agent'::message_sender_type
-            WHEN sender = 'system' THEN 'system'::message_sender_type
-            ELSE 'visitor'::message_sender_type
-        END
-        WHERE sender_type IS NULL
-    """)
-    
-    # Make sender_type NOT NULL
-    op.execute("""
-        ALTER TABLE messages 
-        ALTER COLUMN sender_type SET NOT NULL
-    """)
+    # 6. Add sender_type column to messages table (idempotent)
+    # Some DBs may already have this column from earlier manual/schema changes.
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    message_cols = {c.get('name') for c in inspector.get_columns('messages', schema=schema)}
+
+    if 'sender_type' not in message_cols:
+        op.add_column(
+            'messages',
+            sa.Column(
+                'sender_type',
+                sa.Enum('visitor', 'agent', 'system', name='message_sender_type'),
+                nullable=True,
+                server_default='visitor',
+            ),
+        )
+
+    # Backfill sender_type based on existing sender field patterns (best-effort).
+    try:
+        op.execute("""
+            UPDATE messages
+            SET sender_type = CASE
+                WHEN sender LIKE '%@%' THEN 'agent'::message_sender_type
+                WHEN sender = 'system' THEN 'system'::message_sender_type
+                ELSE 'visitor'::message_sender_type
+            END
+            WHERE sender_type IS NULL
+        """)
+    except ProgrammingError:
+        pass
+
+    # Make sender_type NOT NULL (best-effort).
+    try:
+        op.execute("""
+            ALTER TABLE messages
+            ALTER COLUMN sender_type SET NOT NULL
+        """)
+    except ProgrammingError:
+        pass
 
 
 def downgrade():
     # Revert messages.sender_type
-    op.drop_column('messages', 'sender_type')
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    message_cols = {c.get('name') for c in inspector.get_columns('messages', schema=schema)}
+    if 'sender_type' in message_cols:
+        op.drop_column('messages', 'sender_type')
     
     # Revert conversations FK
     op.drop_constraint('conversations_assigned_agent_id_fkey', 'conversations', type_='foreignkey')
