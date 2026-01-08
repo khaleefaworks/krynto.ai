@@ -147,6 +147,17 @@ alembic upgrade head
 
 Backend runs at `http://localhost:8000`
 
+### Production run (no Docker)
+
+- Set `ENV=production`, `SECRET_KEY`, `PUBLIC_BASE_URL`, and `CORS_ALLOWED_ORIGINS` in `backend/.env`
+- Run `alembic upgrade head` during deploy
+- Start with gunicorn (example):
+
+```bash
+cd backend
+gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 app.main:app
+```
+
 ### 2. Frontend Setup
 
 ```bash

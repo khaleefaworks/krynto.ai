@@ -101,6 +101,41 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Server will be available at `http://localhost:8000`
 
+## Production Run (No Docker)
+
+Minimal checklist:
+
+1) Set environment variables (example):
+
+```env
+ENV=production
+DATABASE_URL=postgresql+psycopg2://chatassist:chatassist@localhost:5432/chatassist
+SECRET_KEY=... # required; generate with: openssl rand -hex 32
+PUBLIC_BASE_URL=https://api.yourdomain.com
+
+# Comma-separated
+CORS_ALLOWED_ORIGINS=https://app.yourdomain.com
+```
+
+2) Apply migrations on deploy:
+
+```bash
+alembic upgrade head
+```
+
+3) Run the server (recommended):
+
+```bash
+gunicorn -k uvicorn.workers.UvicornWorker \
+  -w 2 \
+  -b 0.0.0.0:8000 \
+  app.main:app
+```
+
+Notes:
+- Put this behind a reverse proxy (nginx/caddy) for TLS.
+- Increase `-w` based on CPU cores and workload.
+
 ## API Endpoints
 
 ### Authentication
@@ -129,8 +164,8 @@ Server will be available at `http://localhost:8000`
 - `POST /knowledge/reindex` - Reindex knowledge base
 
 ### WebSocket
-- `/ws/chat/{website_id}` - Visitor chat WebSocket
-- `/ws/agent/{agent_id}` - Agent dashboard WebSocket
+- `/ws/chat/{website_id}/{session_id}` - Visitor chat WebSocket
+- `/ws/agent/{website_id}` - Agent dashboard WebSocket (website_id=0 for global notifications)
 
 ### Health
 - `GET /health` - Health check endpoint
