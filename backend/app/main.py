@@ -31,7 +31,11 @@ logger = setup_logging()
 logger.info("application_starting", message="AI ChatAssist application initializing")
 
 # Setup rate limiter
-limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIMIT_DEFAULT])
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[settings.RATE_LIMIT_DEFAULT],
+    enabled=bool(settings.RATE_LIMIT_ENABLED),
+)
 
 app = FastAPI(title="AI ChatAssist")
 app.state.limiter = limiter
@@ -45,9 +49,9 @@ app.add_middleware(LoggingMiddleware)
 cors_origins = settings.cors_allow_origins()
 if settings.ENV == "production":
     if not cors_origins:
-        raise RuntimeError("CORS_ALLOWED_ORIGINS must be set in production")
+        raise RuntimeError("CORS_ALLOWED_ORIGINS (or legacy CORS_ORIGINS) must be set in production")
     if any(o.strip() == "*" for o in cors_origins):
-        raise RuntimeError("CORS_ALLOWED_ORIGINS cannot include '*' in production")
+        raise RuntimeError("CORS allowed origins cannot include '*' in production")
     if not (settings.SECRET_KEY or "").strip():
         raise RuntimeError("SECRET_KEY must be set in production")
 
@@ -78,8 +82,11 @@ app.include_router(shortcuts_router)
 # Serve widget files statically
 project_root = Path(__file__).resolve().parents[2]
 widget_dir = project_root / "widget"
+if not widget_dir.is_dir():
+    raise RuntimeError(f"Widget directory '{widget_dir}' does not exist")
 app.mount("/widget", StaticFiles(directory=str(widget_dir)), name="widget")
 
 # Serve uploaded files (avatars, etc.)
 uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")

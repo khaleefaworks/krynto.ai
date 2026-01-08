@@ -15,7 +15,7 @@ from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, enabled=bool(settings.RATE_LIMIT_ENABLED))
 
 
 class LoginRequest(BaseModel):

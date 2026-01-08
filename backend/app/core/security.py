@@ -10,7 +10,6 @@ logger = get_logger(__name__)
 # JWT settings
 SECRET_KEY = getattr(settings, "SECRET_KEY", "")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 
 def _get_secret_key() -> str:
@@ -42,7 +41,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     
     now = datetime.utcnow()
     to_encode.update({

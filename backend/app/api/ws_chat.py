@@ -14,6 +14,14 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _ws_close_reason(reason: str | None) -> str:
+    if not reason:
+        return ""
+    # WebSocket close reason is size-limited; truncate to stay safe.
+    reason_str = str(reason).replace("\n", " ").replace("\r", " ")
+    return reason_str[:120]
+
+
 def _resolve_sender_user(db, sender: str | None):
     if not sender:
         return None
@@ -61,7 +69,7 @@ async def chat_ws(
                 "type": "error",
                 "message": error_msg
             })
-            await websocket.close(code=1008, reason=error_msg)
+            await websocket.close(code=1008, reason=_ws_close_reason(error_msg))
             db.close()
             return
 
@@ -239,7 +247,7 @@ async def chat_ws(
             "type": "error",
             "message": error_msg
         })
-        await websocket.close(code=1011, reason=error_msg)
+        await websocket.close(code=1011, reason=_ws_close_reason(error_msg))
         return
 
     try:
@@ -326,7 +334,7 @@ async def chat_ws(
     except Exception as e:
         logger.error("websocket_handler_error", session_id=session_id, error=str(e), exc_info=True)
         try:
-            await websocket.close(code=1011, reason=str(e))
+            await websocket.close(code=1011, reason=_ws_close_reason(str(e)))
         except:
             pass
     finally:

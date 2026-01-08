@@ -15,18 +15,25 @@ class Settings(BaseSettings):
     # CORS
     # Comma-separated list of allowed origins. In development, defaults are applied if empty.
     CORS_ALLOWED_ORIGINS: str = ""
+    # Backward-compatible alias (older docs/envs)
+    CORS_ORIGINS: str = ""
     
     # Rate limiting settings
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_DEFAULT: str = "100/minute"  # Default rate limit for API endpoints
     RATE_LIMIT_AUTH: str = "5/minute"  # Stricter limit for auth endpoints
     RATE_LIMIT_CHAT_MESSAGE: int = 10  # Max messages per minute per session
+
+    # Auth / JWT
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # Agent inactivity timeout (seconds)
     AGENT_INACTIVITY_TIMEOUT_SECONDS: int = 15 * 60  # 15 minutes
 
     def cors_allow_origins(self) -> List[str]:
         raw = (self.CORS_ALLOWED_ORIGINS or "").strip()
+        if not raw:
+            raw = (self.CORS_ORIGINS or "").strip()
         if raw:
             return [o.strip() for o in raw.split(",") if o.strip()]
 
