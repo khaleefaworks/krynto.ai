@@ -1,10 +1,20 @@
 from pydantic_settings import BaseSettings
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str
     ENV: str = "development"
-    SECRET_KEY: str = "your-secret-key-change-in-production-please"
+    # SECURITY: must be explicitly set for production.
+    SECRET_KEY: str = ""
+
+    # Public base URL for generating widget loader/snippets (e.g. https://api.example.com)
+    # If not set, endpoints will fall back to request.base_url.
+    PUBLIC_BASE_URL: Optional[str] = None
+
+    # CORS
+    # Comma-separated list of allowed origins. In development, defaults are applied if empty.
+    CORS_ALLOWED_ORIGINS: str = ""
     
     # Rate limiting settings
     RATE_LIMIT_ENABLED: bool = True
@@ -14,6 +24,26 @@ class Settings(BaseSettings):
     
     # Agent inactivity timeout (seconds)
     AGENT_INACTIVITY_TIMEOUT_SECONDS: int = 15 * 60  # 15 minutes
+
+    def cors_allow_origins(self) -> List[str]:
+        raw = (self.CORS_ALLOWED_ORIGINS or "").strip()
+        if raw:
+            return [o.strip() for o in raw.split(",") if o.strip()]
+
+        # Reasonable dev defaults (no wildcard).
+        if self.ENV == "development":
+            return [
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:3000",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080",
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+            ]
+
+        return []
 
     class Config:
         env_file = ".env"

@@ -9,14 +9,38 @@
 
   // Get configuration from loader (set by loader.js)
   var globalConfig = window._aichatassist || {};
+
+  // Try to locate the script element that loaded this widget, so we can derive a base URL
+  // for self-hosted deployments when explicit apiUrl/wsUrl are not provided.
+  const scriptElement = document.currentScript || document.querySelector('script[src*="chat-widget.js"]');
   
+  function deriveBaseFromScriptSrc() {
+    try {
+      const src = scriptElement && scriptElement.src ? scriptElement.src : '';
+      if (!src) return null;
+      const u = new URL(src, window.location.href);
+      return u.origin;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  const derivedApiBase = deriveBaseFromScriptSrc();
+  const derivedWsBase = derivedApiBase
+    ? (derivedApiBase.startsWith('https://')
+      ? 'wss://' + derivedApiBase.slice('https://'.length)
+      : derivedApiBase.startsWith('http://')
+        ? 'ws://' + derivedApiBase.slice('http://'.length)
+        : derivedApiBase)
+    : null;
+
   // Widget configuration - populated from global config
   const CONFIG = {
-    websiteId: globalConfig.websiteId || null,
+    websiteId: globalConfig.websiteId || (scriptElement ? scriptElement.getAttribute('data-website-id') : null) || null,
     widgetKey: globalConfig.widgetKey || null,
     sessionId: null,
-    wsUrl: globalConfig.wsUrl || 'ws://localhost:8000',
-    apiUrl: globalConfig.apiUrl || 'http://localhost:8000',
+    wsUrl: globalConfig.wsUrl || (scriptElement ? scriptElement.getAttribute('data-ws-url') : null) || derivedWsBase || '',
+    apiUrl: globalConfig.apiUrl || (scriptElement ? scriptElement.getAttribute('data-api-url') : null) || derivedApiBase || '',
     theme: globalConfig.theme || 'dark',
     position: globalConfig.position || 'bottom-right',
     welcomeMessage: globalConfig.welcomeMessage || 'Hi! How can we help you today?',

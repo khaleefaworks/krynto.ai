@@ -3,11 +3,25 @@ from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # JWT settings
-SECRET_KEY = getattr(settings, 'SECRET_KEY', "your-secret-key-change-in-production")
+SECRET_KEY = getattr(settings, "SECRET_KEY", "")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+
+def _get_secret_key() -> str:
+    key = (SECRET_KEY or "").strip()
+    if key:
+        return key
+
+    # Development fallback to keep local runs working.
+    # Production must set SECRET_KEY explicitly (validated at startup).
+    logger.warning("secret_key_missing_using_dev_fallback")
+    return "dev-insecure-secret-key-change-me"
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -30,15 +44,20 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     else:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    now = datetime.utcnow()
+    to_encode.update({
+        "exp": expire,
+        # Used for reset invalidation checks.
+        "iat": int(now.timestamp()),
+    })
+    encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
     return encoded_jwt
 
 
 def decode_access_token(token: str) -> Optional[dict]:
     """Decode and verify a JWT token."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None

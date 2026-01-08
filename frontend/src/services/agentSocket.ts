@@ -1,5 +1,14 @@
 import { useAppStore } from "../store/appStore"
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+const WS_BASE =
+  import.meta.env.VITE_WS_BASE ||
+  (API_BASE.startsWith("https://")
+    ? "wss://" + API_BASE.slice("https://".length)
+    : API_BASE.startsWith("http://")
+      ? "ws://" + API_BASE.slice("http://".length)
+      : API_BASE)
+
 let socket: WebSocket | null = null
 let reconnectTimeout: NodeJS.Timeout | null = null
 let currentWebsiteId: number | null = null
@@ -70,8 +79,8 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   isIntentionalClose = false
 
   // Include JWT token in query parameter for authentication
-  const wsUrl = `ws://localhost:8000/ws/agent/${websiteId}?token=${encodeURIComponent(token)}`
-  console.log("🔌 Connecting to WebSocket (authenticated):", `ws://localhost:8000/ws/agent/${websiteId}`)
+  const wsUrl = `${WS_BASE}/ws/agent/${websiteId}?token=${encodeURIComponent(token)}`
+  console.log("🔌 Connecting to WebSocket (authenticated):", `${WS_BASE}/ws/agent/${websiteId}`)
   socket = new WebSocket(wsUrl)
 
   socket.onopen = () => {

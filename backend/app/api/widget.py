@@ -5,12 +5,13 @@ These endpoints are called by the embedded chat widget on visitor websites.
 They must be fast, reliable, and not require authentication.
 """
 
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Query, HTTPException, Depends, Request
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/widget", tags=["widget"])
 
 
 @router.get("/loader.js")
-async def get_widget_loader(key: str, db: Session = Depends(get_db)):
+async def get_widget_loader(request: Request, key: str, db: Session = Depends(get_db)):
     """
     Dynamic widget loader endpoint - serves JavaScript with embedded website configuration.
     
@@ -46,6 +47,18 @@ async def get_widget_loader(key: str, db: Session = Depends(get_db)):
     welcome_message = config.get('welcome_message', 'Hi! How can we help you today?')
     primary_color = config.get('primary_color', '#000000')
     
+    def _normalize_base(base: str) -> str:
+        b = (base or "").strip()
+        return b[:-1] if b.endswith("/") else b
+
+    api_base = _normalize_base(settings.PUBLIC_BASE_URL or str(request.base_url))
+    if api_base.startswith("https://"):
+        ws_base = "wss://" + api_base[len("https://"):]
+    elif api_base.startswith("http://"):
+        ws_base = "ws://" + api_base[len("http://"):]
+    else:
+        ws_base = api_base
+
     # Generate dynamic JavaScript
     js_content = f"""
 (function() {{
@@ -55,8 +68,8 @@ async def get_widget_loader(key: str, db: Session = Depends(get_db)):
   var _aichatassist = window._aichatassist || {{}};
   _aichatassist.websiteId = {website.id};
   _aichatassist.widgetKey = '{key}';
-  _aichatassist.apiUrl = window.location.protocol + '//localhost:8000';
-  _aichatassist.wsUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//localhost:8000';
+    _aichatassist.apiUrl = '{api_base}';
+    _aichatassist.wsUrl = '{ws_base}';
   _aichatassist.theme = '{theme}';
   _aichatassist.position = '{position}';
   _aichatassist.welcomeMessage = {repr(welcome_message)};
@@ -94,7 +107,7 @@ async def get_widget_loader(key: str, db: Session = Depends(get_db)):
 
 
 @router.get("/snippet/{website_id}")
-async def get_widget_snippet(website_id: int, db: Session = Depends(get_db)):
+async def get_widget_snippet(request: Request, website_id: int, db: Session = Depends(get_db)):
     """
     Get the embed snippet code for a website.
     This is shown to admins in the dashboard to copy-paste into their website.
@@ -104,7 +117,13 @@ async def get_widget_snippet(website_id: int, db: Session = Depends(get_db)):
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     
-    # Generate the embed snippet (like Smartsupp)
+        def _normalize_base(base: str) -> str:
+                b = (base or "").strip()
+                return b[:-1] if b.endswith("/") else b
+
+        api_base = _normalize_base(settings.PUBLIC_BASE_URL or str(request.base_url))
+
+        # Generate the embed snippet (like Smartsupp)
     snippet = f"""<!-- AI ChatAssist Live Chat script -->
 <script type="text/javascript">
 var _aichatassist = _aichatassist || {{}};
@@ -113,7 +132,7 @@ window.aichatassist||(function(d) {{
   var s,c,o=aichatassist=function(){{ o._.push(arguments)}}; o._=[];
   s=d.getElementsByTagName('script')[0];c=d.createElement('script');
   c.type='text/javascript';c.charset='utf-8';c.async=true;
-  c.src='http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
+    c.src='{api_base}/widget/loader.js?key=' + _aichatassist.key;
   s.parentNode.insertBefore(c,s);
 }})(document);
 </script>

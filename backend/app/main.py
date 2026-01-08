@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -24,7 +24,6 @@ from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
 from app.core.database import engine
-from sqlalchemy import inspect, text
 
 # Setup structured logging
 logger = setup_logging()
@@ -42,45 +41,23 @@ app.add_middleware(LoggingMiddleware)
 
 # Configure CORS - Allow all origins in development for easier debugging
 # In production, restrict to specific domains
+cors_origins = settings.cors_allow_origins()
+if settings.ENV == "production":
+    if not cors_origins:
+        raise RuntimeError("CORS_ALLOWED_ORIGINS must be set in production")
+    if any(o.strip() == "*" for o in cors_origins):
+        raise RuntimeError("CORS_ALLOWED_ORIGINS cannot include '*' in production")
+    if not (settings.SECRET_KEY or "").strip():
+        raise RuntimeError("SECRET_KEY must be set in production")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",  # Alternative dev port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "http://localhost:8080",  # Widget demo server
-        "http://127.0.0.1:8080",
-        "http://localhost:8000",  # Same origin (static widget)
-        "http://127.0.0.1:8000",
-        "*",  # Allow all origins in development (remove in production!)
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],  # Expose all headers to frontend
 )
-
-
-@app.on_event("startup")
-def _ensure_schema_compatibility() -> None:
-    """Best-effort schema adjustments for environments not managed by Alembic.
-
-    Some deployments reset the database via SQLAlchemy `create_all` (or custom
-    reset scripts). In that case, new columns won't exist automatically.
-    """
-    try:
-        inspector = inspect(engine)
-        if not inspector.has_table("messages"):
-            return
-        columns = {c["name"] for c in inspector.get_columns("messages")}
-        if "event_type" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE messages ADD COLUMN event_type VARCHAR(50)"))
-            logger.info("schema_update_applied", table="messages", column="event_type")
-    except Exception as e:
-        # Never block startup on best-effort schema fixes.
-        logger.warning("schema_update_failed", error=str(e))
 
 app.include_router(health_router)
 app.include_router(auth_router)

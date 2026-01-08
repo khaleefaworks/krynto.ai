@@ -1,3 +1,11 @@
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+const WS_BASE =
+  import.meta.env.VITE_WS_BASE ||
+  (API_BASE.startsWith("https://")
+    ? "wss://" + API_BASE.slice("https://".length)
+    : API_BASE.startsWith("http://")
+      ? "ws://" + API_BASE.slice("http://".length)
+      : API_BASE)
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
@@ -31,7 +39,7 @@ function App() {
   useEffect(() => {
     const checkSetup = async () => {
       try {
-        const response = await fetch('http://localhost:8000/auth/setup/status')
+        const response = await fetch(`${API_BASE}/auth/setup/status`)
         const data = await response.json()
         setNeedsSetup(data.needs_setup)
       } catch (error) {
@@ -73,7 +81,7 @@ function App() {
 
     const setupGlobalNotifications = () => {
       // WebSocket for real-time notifications (authenticated via query param)
-      const wsUrl = `ws://localhost:8000/ws/agent/0?token=${encodeURIComponent(token)}`
+      const wsUrl = `${WS_BASE}/ws/agent/0?token=${encodeURIComponent(token)}`
       console.log('🔔 Setting up global notifications (authenticated)...')
       
       const ws = new WebSocket(wsUrl)
