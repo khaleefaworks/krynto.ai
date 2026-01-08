@@ -24,6 +24,7 @@ from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
 from app.core.database import engine
+from pathlib import Path
 
 # Setup structured logging
 logger = setup_logging()
@@ -75,7 +76,10 @@ app.include_router(agent_assignments_router)
 app.include_router(shortcuts_router)
 
 # Serve widget files statically
-app.mount("/widget", StaticFiles(directory="../widget"), name="widget")
+project_root = Path(__file__).resolve().parents[2]
+widget_dir = project_root / "widget"
+app.mount("/widget", StaticFiles(directory=str(widget_dir)), name="widget")
 
 # Serve uploaded files (avatars, etc.)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")

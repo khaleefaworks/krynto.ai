@@ -159,15 +159,20 @@ Agent dashboard runs at `http://localhost:5173`
 
 ### 3. Widget Setup
 
-Add to your website:
+Add to your website (recommended):
 
 ```html
-<link rel="stylesheet" href="http://localhost:8000/widget/chat-widget.css">
-<script 
-  src="http://localhost:8000/widget/chat-widget.js" 
-  data-website-id="1"
-  data-ws-url="ws://localhost:8000"
-  data-api-url="http://localhost:8000">
+<!-- AI ChatAssist Live Chat script -->
+<script type="text/javascript">
+  var _aichatassist = _aichatassist || {};
+  _aichatassist.key = "YOUR_WIDGET_KEY";
+  window.aichatassist||(function(d) {
+    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
+    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+    c.type='text/javascript';c.charset='utf-8';c.async=true;
+    c.src='http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
+    s.parentNode.insertBefore(c,s);
+  })(document);
 </script>
 ```
 

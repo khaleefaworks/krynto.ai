@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 
 from app.core.database import get_db
+from app.core.uploads import validate_image_upload
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
 
@@ -86,24 +87,13 @@ async def upload_avatar(
     Upload avatar image file.
     Saves file to disk and stores path in database.
     """
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
-    
-    # Validate file size (5MB max)
-    file.file.seek(0, 2)  # Seek to end
-    file_size = file.file.tell()
-    file.file.seek(0)  # Reset to start
-    
-    if file_size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    file_extension = validate_image_upload(file)
     
     # Create uploads directory if it doesn't exist
     upload_dir = Path("uploads/avatars")
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate unique filename
-    file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
     unique_filename = f"{current_user.id}_{uuid.uuid4().hex[:8]}.{file_extension}"
     file_path = upload_dir / unique_filename
     
@@ -168,19 +158,11 @@ async def upload_user_avatar(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not file.content_type or not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    file.file.seek(0, 2)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    if file_size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    file_extension = validate_image_upload(file)
 
     upload_dir = Path("uploads/avatars")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
     unique_filename = f"{user.id}_{uuid.uuid4().hex[:8]}.{file_extension}"
     file_path = upload_dir / unique_filename
 

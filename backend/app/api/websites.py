@@ -10,6 +10,7 @@ from datetime import datetime
 import uuid
 import shutil
 from pathlib import Path
+from app.core.uploads import validate_image_upload
 
 router = APIRouter(prefix="/websites", tags=["websites"])
 
@@ -228,19 +229,11 @@ async def upload_widget_icon(
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    file.file.seek(0, 2)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    if file_size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    file_extension = validate_image_upload(file)
 
     upload_dir = Path("uploads/websites") / str(website_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'png'
     unique_filename = f"widget_icon_{uuid.uuid4().hex[:10]}.{file_extension}"
     file_path = upload_dir / unique_filename
 
