@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+import sqlalchemy as sa
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.agent_service import AgentService
@@ -64,37 +65,85 @@ def get_active_chats(
     db: Session = Depends(get_db)
 ):
     """Get list of active chats available for agent pickup"""
+    from app.models.conversation import Conversation, ConversationStatus
     from app.models.message import Message
     from app.models.website import Website
-    
-    agent_service = AgentService(db)
-    conversations = agent_service.get_active_chats(website_id)
-    
-    # Add message count and additional info to each conversation
+
+    # Match AgentService.get_active_chats() base visibility rules (without agent_id filter).
+
+    # Message counts per conversation
+    msg_count_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            sa.func.count(Message.id).label("message_count"),
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # Last message per conversation (window function)
+    msg_ranked = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.content.label("content"),
+            sa.func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=(Message.created_at.desc(), Message.id.desc()),
+            )
+            .label("rn"),
+        )
+        .subquery()
+    )
+    last_msg_subq = (
+        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content)
+        .filter(msg_ranked.c.rn == 1)
+        .subquery()
+    )
+
+    rows_query = (
+        db.query(
+            Conversation,
+            Website.name.label("website_name"),
+            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
+            last_msg_subq.c.content.label("last_message"),
+        )
+        .outerjoin(Website, Website.id == Conversation.website_id)
+        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
+        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
+        .filter(Conversation.status == ConversationStatus.OPEN)
+    )
+
+    if website_id:
+        rows_query = rows_query.filter(Conversation.website_id == website_id)
+
+    # Stable ordering prevents inbox from shuffling between refreshes.
+    try:
+        rows_query = rows_query.order_by(Conversation.updated_at.desc())
+    except Exception:
+        rows_query = rows_query.order_by(Conversation.created_at.desc())
+
+    rows = rows_query.all()
+
     result = []
-    for conv in conversations:
-        # Get message count and last message
-        messages = db.query(Message).filter_by(conversation_id=conv.id).order_by(Message.created_at.desc()).all()
-        msg_count = len(messages)
-        last_message = messages[0].content if messages else "No messages yet"
-        
-        # Get website name
-        website = db.query(Website).filter_by(id=conv.website_id).first()
-        website_name = website.name if website else f"Website {conv.website_id}"
-        
-        result.append({
-            "id": conv.id,
-            "website_id": conv.website_id,
-            "website_name": website_name,
-            "session_id": conv.session_id,
-            "status": conv.status.value if hasattr(conv.status, 'value') else conv.status,
-            "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
-            "assigned_agent_id": conv.assigned_agent_id,
-            "message_count": msg_count,
-            "last_message": last_message,
-            "created_at": conv.created_at.isoformat() if conv.created_at else None
-        })
-    
+    for conv, website_name, message_count, last_message in rows:
+        website_name_val = website_name or f"Website {conv.website_id}"
+        last_message_val = last_message if last_message is not None else "No messages yet"
+        result.append(
+            {
+                "id": conv.id,
+                "website_id": conv.website_id,
+                "website_name": website_name_val,
+                "session_id": conv.session_id,
+                "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
+                "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
+                "assigned_agent_id": conv.assigned_agent_id,
+                "message_count": int(message_count or 0),
+                "last_message": last_message_val,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            }
+        )
+
     return result
 
 
@@ -134,41 +183,82 @@ def get_resolved_conversations(
     from app.models.conversation import Conversation, ConversationStatus
     from app.models.message import Message
     from app.models.website import Website
-    
-    query = db.query(Conversation).filter(Conversation.status == ConversationStatus.RESOLVED)
-    
+
+    # Message counts per conversation
+    msg_count_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            sa.func.count(Message.id).label("message_count"),
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # Last message per conversation (window function)
+    msg_ranked = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.content.label("content"),
+            sa.func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=(Message.created_at.desc(), Message.id.desc()),
+            )
+            .label("rn"),
+        )
+        .subquery()
+    )
+    last_msg_subq = (
+        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content)
+        .filter(msg_ranked.c.rn == 1)
+        .subquery()
+    )
+
+    rows_query = (
+        db.query(
+            Conversation,
+            Website.name.label("website_name"),
+            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
+            last_msg_subq.c.content.label("last_message"),
+        )
+        .outerjoin(Website, Website.id == Conversation.website_id)
+        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
+        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
+        .filter(Conversation.status == ConversationStatus.RESOLVED)
+    )
+
     if website_id:
-        query = query.filter(Conversation.website_id == website_id)
-    
+        rows_query = rows_query.filter(Conversation.website_id == website_id)
+
     if agent_id:
-        query = query.filter(Conversation.assigned_agent_id == agent_id)
-    
-    conversations = query.order_by(Conversation.updated_at.desc()).limit(limit).all()
-    
+        rows_query = rows_query.filter(Conversation.assigned_agent_id == agent_id)
+
+    try:
+        rows_query = rows_query.order_by(Conversation.updated_at.desc())
+    except Exception:
+        rows_query = rows_query.order_by(Conversation.created_at.desc())
+
+    rows = rows_query.limit(limit).all()
+
     result = []
-    for conv in conversations:
-        # Get message count and last message
-        messages = db.query(Message).filter_by(conversation_id=conv.id).order_by(Message.created_at.desc()).all()
-        msg_count = len(messages)
-        last_message = messages[0].content if messages else "No messages"
-        
-        # Get website name
-        website = db.query(Website).filter_by(id=conv.website_id).first()
-        website_name = website.name if website else f"Website {conv.website_id}"
-        
-        result.append({
-            "id": conv.id,
-            "website_id": conv.website_id,
-            "website_name": website_name,
-            "session_id": conv.session_id,
-            "status": conv.status,
-            "assigned_agent_id": conv.assigned_agent_id,
-            "message_count": msg_count,
-            "last_message": last_message,
-            "created_at": conv.created_at.isoformat() if conv.created_at else None,
-            "closed_at": conv.updated_at.isoformat() if conv.updated_at else None
-        })
-    
+    for conv, website_name, message_count, last_message in rows:
+        website_name_val = website_name or f"Website {conv.website_id}"
+        last_message_val = last_message if last_message is not None else "No messages"
+        result.append(
+            {
+                "id": conv.id,
+                "website_id": conv.website_id,
+                "website_name": website_name_val,
+                "session_id": conv.session_id,
+                "status": conv.status,
+                "assigned_agent_id": conv.assigned_agent_id,
+                "message_count": int(message_count or 0),
+                "last_message": last_message_val,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "closed_at": conv.updated_at.isoformat() if conv.updated_at else None,
+            }
+        )
+
     return result
 
 
