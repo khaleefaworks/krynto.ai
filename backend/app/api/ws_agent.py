@@ -9,7 +9,7 @@ from app.models.user import User
 import json
 import traceback
 
-from app.api.message_presenter import message_presentation
+from app.api.message_presenter import serialize_message
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -99,19 +99,7 @@ async def agent_ws(
                 messages = agent_service.get_conversation_messages(conversation_id)
                 history = []
                 for msg in messages:
-                    sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
-
-                    history.append(
-                        {
-                            "sender": msg.sender,
-                            "sender_type": sender_type,
-                            "event_type": event_type,
-                            "sender_name": sender_name,
-                            "sender_avatar_url": sender_avatar_url,
-                            "content": msg.content,
-                            "created_at": msg.created_at.isoformat() if msg.created_at else None,
-                        }
-                    )
+                    history.append(serialize_message(db, msg))
 
                 await websocket.send_json(
                     {

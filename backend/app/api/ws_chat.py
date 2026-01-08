@@ -10,7 +10,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from app.api.message_presenter import message_presentation
+from app.api.message_presenter import serialize_message
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -86,22 +86,7 @@ async def chat_ws(
 
                 history_messages = []
                 for msg in messages:
-                    sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
-
-                    history_messages.append(
-                        {
-                            "id": msg.id,
-                            "sender": msg.sender,
-                            "sender_type": sender_type,
-                            "event_type": event_type,
-                            "sender_name": sender_name,
-                            "sender_avatar_url": sender_avatar_url,
-                            "content": msg.content,
-                            "created_at": msg.created_at.isoformat()
-                            if msg.created_at
-                            else None,
-                        }
-                    )
+                    history_messages.append(serialize_message(db, msg))
 
                 await websocket.send_json(
                     {

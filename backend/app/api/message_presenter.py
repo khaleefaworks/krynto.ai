@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Dict
 
 
 def resolve_sender_user(db, sender: str | None):
@@ -56,3 +56,31 @@ def message_presentation(
             sender_name = "AI"
 
     return sender_type, event_type, sender_name, sender_avatar_url
+
+
+def serialize_message(db, msg: Any) -> Dict[str, Any]:
+    """Canonical message DTO shared by REST + WS.
+
+    Intentionally includes backward-compatible keys (e.g. `sender`) while also
+    providing canonical fields (`sender_type`, `event_type`).
+    """
+
+    sender_type, event_type, sender_name, sender_avatar_url = message_presentation(db, msg)
+
+    created_at = getattr(msg, "created_at", None)
+    try:
+        created_at_iso = created_at.isoformat() if created_at else None
+    except Exception:
+        created_at_iso = None
+
+    return {
+        "id": getattr(msg, "id", None),
+        "conversation_id": getattr(msg, "conversation_id", None),
+        "sender": getattr(msg, "sender", None),
+        "sender_type": sender_type,
+        "event_type": event_type,
+        "sender_name": sender_name,
+        "sender_avatar_url": sender_avatar_url,
+        "content": getattr(msg, "content", None),
+        "created_at": created_at_iso,
+    }
