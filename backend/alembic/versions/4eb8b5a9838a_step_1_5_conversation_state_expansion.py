@@ -7,6 +7,8 @@ Create Date: 2025-12-29 13:44:57.998959
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
+from sqlalchemy.exc import ProgrammingError
 
 
 # revision identifiers, used by Alembic.
@@ -35,7 +37,21 @@ def upgrade():
         END $$;
     """)
     
-    # 3. Update conversations.status to use enum type (currently VARCHAR)
+    # 3. Normalize existing values BEFORE converting to enum.
+    # Some DBs may already have the later "open/resolved" strings.
+    # Use status::text to be safe whether the column is VARCHAR or already enum.
+    op.execute("""
+        UPDATE conversations
+        SET status = CASE
+            WHEN status IS NULL THEN 'active'
+            WHEN status::text IN ('open') THEN 'active'
+            WHEN status::text IN ('resolved') THEN 'closed'
+            WHEN status::text NOT IN ('active', 'offline', 'closed') THEN 'active'
+            ELSE status::text
+        END
+    """)
+
+    # 4. Update conversations.status to use enum type (currently VARCHAR)
     # Alter column type to enum
     op.execute("""
         ALTER TABLE conversations 
@@ -50,7 +66,7 @@ def upgrade():
         ALTER COLUMN status SET DEFAULT 'active'::conversation_status
     """)
     
-    # 4. Update conversations.assigned_agent_id FK from agents -> users
+    # 5. Update conversations.assigned_agent_id FK from agents -> users (when available)
     # Drop old FK constraint
     op.execute("""
         DO $$ BEGIN
@@ -59,18 +75,34 @@ def upgrade():
             WHEN undefined_object THEN null;
         END $$;
     """)
+
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    tables = set(inspector.get_table_names(schema=schema))
+
+    referent = None
+    if 'users' in tables:
+        referent = 'users'
+    elif 'agents' in tables:
+        referent = 'agents'
+
+    if referent:
+        try:
+            op.create_foreign_key(
+                'conversations_assigned_agent_id_fkey',
+                'conversations',
+                referent,
+                ['assigned_agent_id'],
+                ['id'],
+                ondelete='SET NULL',
+                source_schema=schema,
+                referent_schema=schema,
+            )
+        except ProgrammingError:
+            pass
     
-    # Create new FK constraint to users table
-    op.create_foreign_key(
-        'conversations_assigned_agent_id_fkey',
-        'conversations',
-        'users',
-        ['assigned_agent_id'],
-        ['id'],
-        ondelete='SET NULL'
-    )
-    
-    # 5. Add sender_type column to messages table
+    # 6. Add sender_type column to messages table
     op.add_column(
         'messages',
         sa.Column('sender_type', sa.Enum('visitor', 'agent', 'system', name='message_sender_type'), 

@@ -8,6 +8,7 @@ Create Date: 2025-12-24 13:44:12.104122
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
+from sqlalchemy.exc import ProgrammingError
 
 
 # revision identifiers, used by Alembic.
@@ -44,12 +45,15 @@ def upgrade():
 
     # The project moved from an `agents` table to a unified `users` table.
     # Prefer creating the FK to `users.id` when present; fall back to `agents.id`.
+    schema = inspector.default_schema_name
+    tables = set(inspector.get_table_names(schema=schema))
+
     referred_table = None
     fk_name = None
-    if inspector.has_table('users'):
+    if 'users' in tables:
         referred_table = 'users'
         fk_name = 'fk_conversations_assigned_agent_id_users'
-    elif inspector.has_table('agents'):
+    elif 'agents' in tables:
         referred_table = 'agents'
         fk_name = 'fk_conversations_assigned_agent_id_agents'
 
@@ -62,13 +66,19 @@ def upgrade():
         )
 
         if not fk_already_present:
-            op.create_foreign_key(
-                fk_name,
-                'conversations',
-                referred_table,
-                ['assigned_agent_id'],
-                ['id'],
-            )
+            try:
+                op.create_foreign_key(
+                    fk_name,
+                    'conversations',
+                    referred_table,
+                    ['assigned_agent_id'],
+                    ['id'],
+                    source_schema=schema,
+                    referent_schema=schema,
+                )
+            except ProgrammingError:
+                # If the DB schema is out-of-sync (e.g., table missing), skip the FK.
+                pass
     # ### end Alembic commands ###
 
 
