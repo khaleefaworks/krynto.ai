@@ -41,20 +41,34 @@ def upgrade():
         op.add_column('conversations', sa.Column('assigned_agent_id', sa.Integer(), nullable=True))
 
     existing_fks = inspector.get_foreign_keys('conversations')
-    fk_already_present = any(
-        (fk.get('referred_table') == 'agents')
-        and (fk.get('constrained_columns') == ['assigned_agent_id'])
-        and (fk.get('referred_columns') == ['id'])
-        for fk in existing_fks
-    )
-    if not fk_already_present:
-        op.create_foreign_key(
-            'fk_conversations_assigned_agent_id_agents',
-            'conversations',
-            'agents',
-            ['assigned_agent_id'],
-            ['id'],
+
+    # The project moved from an `agents` table to a unified `users` table.
+    # Prefer creating the FK to `users.id` when present; fall back to `agents.id`.
+    referred_table = None
+    fk_name = None
+    if inspector.has_table('users'):
+        referred_table = 'users'
+        fk_name = 'fk_conversations_assigned_agent_id_users'
+    elif inspector.has_table('agents'):
+        referred_table = 'agents'
+        fk_name = 'fk_conversations_assigned_agent_id_agents'
+
+    if referred_table:
+        fk_already_present = any(
+            (fk.get('referred_table') == referred_table)
+            and (fk.get('constrained_columns') == ['assigned_agent_id'])
+            and (fk.get('referred_columns') == ['id'])
+            for fk in existing_fks
         )
+
+        if not fk_already_present:
+            op.create_foreign_key(
+                fk_name,
+                'conversations',
+                referred_table,
+                ['assigned_agent_id'],
+                ['id'],
+            )
     # ### end Alembic commands ###
 
 
@@ -66,11 +80,16 @@ def downgrade():
     # Drop the FK if present (name may differ across DBs).
     for fk in inspector.get_foreign_keys('conversations'):
         if (
-            fk.get('referred_table') == 'agents'
-            and fk.get('constrained_columns') == ['assigned_agent_id']
+            fk.get('constrained_columns') == ['assigned_agent_id']
             and fk.get('referred_columns') == ['id']
+            and fk.get('referred_table') in ('agents', 'users')
         ):
-            fk_name = fk.get('name') or 'fk_conversations_assigned_agent_id_agents'
+            fallback = (
+                'fk_conversations_assigned_agent_id_users'
+                if fk.get('referred_table') == 'users'
+                else 'fk_conversations_assigned_agent_id_agents'
+            )
+            fk_name = fk.get('name') or fallback
             op.drop_constraint(fk_name, 'conversations', type_='foreignkey')
             break
 
