@@ -18,7 +18,8 @@
             var s, c, o = aichatassist = function () { o._.push(arguments) }; o._ = [];
             s = d.getElementsByTagName('script')[0]; c = d.createElement('script');
             c.type = 'text/javascript'; c.charset = 'utf-8'; c.async = true;
-            c.src = 'http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
+            var API_BASE = window.DEMO_API_BASE || 'http://localhost:8000';
+            c.src = API_BASE + '/widget/loader.js?key=' + _aichatassist.key;
             s.parentNode.insertBefore(c, s);
         })(document);
     </script>

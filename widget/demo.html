@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI ChatAssist - Widget Demo</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="http://localhost:8000/widget/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/widget/favicon-32x32.png">
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -75,8 +75,8 @@
     <div class="config-info">
       <strong>Configuration:</strong>
       Using widget loader with unique widget_key<br>
-      Backend: http://localhost:8000<br>
-      WebSocket: ws://localhost:8000
+      Backend: <span id="demo-api-base">(set in code)</span><br>
+      WebSocket: <span id="demo-ws-base">(derived from backend)</span>
     </div>
     
     <h2>How to Test:</h2>
@@ -128,7 +128,12 @@
       
       // Load the widget
       var script = document.createElement('script');
-      script.src = 'http://localhost:8000/widget/loader.js?key=' + DEMO_WIDGET_KEY;
+      // NOTE: Set API_BASE to your deployed backend URL (no trailing slash)
+      const API_BASE = window.DEMO_API_BASE || 'http://localhost:8000';
+      document.getElementById('demo-api-base').textContent = API_BASE;
+      document.getElementById('demo-ws-base').textContent = API_BASE.replace(/^http(s?):\/\//, (_, s) => (s ? 'wss://' : 'ws://'));
+
+      script.src = API_BASE + '/widget/loader.js?key=' + DEMO_WIDGET_KEY;
       script.async = true;
       script.onerror = function() {
         console.error('Failed to load widget. Make sure:');

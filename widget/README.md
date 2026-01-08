@@ -76,14 +76,14 @@ Add this code to your website's HTML (usually before `</body>`):
 
 ```html
 <!-- Widget Styles -->
-<link rel="stylesheet" href="http://localhost:8000/widget/chat-widget.css">
+<link rel="stylesheet" href="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.css">
 
 <!-- Widget Script -->
 <script 
-  src="http://localhost:8000/widget/chat-widget.js" 
+  src="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.js" 
   data-website-id="1"
-  data-ws-url="ws://localhost:8000"
-  data-api-url="http://localhost:8000">
+  data-ws-url="<YOUR_WS_BASE_URL>"
+  data-api-url="<YOUR_BACKEND_BASE_URL>">
 </script>
 ```
 
@@ -134,18 +134,18 @@ Host the files on your CDN or static server:
 
 | Attribute | Description | Default |
 |-----------|-------------|---------|
-| `data-ws-url` | WebSocket server URL | `"ws://localhost:8000"` |
-| `data-api-url` | REST API base URL | `"http://localhost:8000"` |
+| `data-ws-url` | WebSocket server URL | `"ws://your-backend.example.com"` |
+| `data-api-url` | REST API base URL | `"https://your-backend.example.com"` |
 
 ### Example Configurations
 
 **Development:**
 ```html
 <script 
-  src="http://localhost:8000/widget/chat-widget.js" 
+  src="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.js" 
   data-website-id="1"
-  data-ws-url="ws://localhost:8000"
-  data-api-url="http://localhost:8000">
+  data-ws-url="<YOUR_WS_BASE_URL>"
+  data-api-url="<YOUR_BACKEND_BASE_URL>">
 </script>
 ```
 

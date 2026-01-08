@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -27,9 +28,9 @@ export default function PersonalSettings() {
   // Load existing avatar when user data is available
   useEffect(() => {
     if (user?.avatar_url) {
-      const fullAvatarUrl = user.avatar_url.startsWith('http') 
-        ? user.avatar_url 
-        : `http://localhost:8000${user.avatar_url}`
+          const fullAvatarUrl = user.avatar_url.startsWith('http') 
+            ? user.avatar_url 
+            : `${API_BASE}${user.avatar_url}`
       setAvatarPreview(fullAvatarUrl)
     }
   }, [user])
@@ -108,9 +109,8 @@ export default function PersonalSettings() {
       const formData = new FormData()
       formData.append('file', selectedFile)
 
-      // Upload file
       const token = localStorage.getItem('auth_token')
-      const response = await fetch('http://localhost:8000/users/me/avatar/upload', {
+      const response = await fetch(`${API_BASE}/users/me/avatar/upload`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -122,9 +122,8 @@ export default function PersonalSettings() {
         const error = await response.json()
         throw new Error(error.detail || 'Failed to upload avatar')
       }
-
       const data = await response.json()
-      const avatarUrl = data.avatar_url ? `http://localhost:8000${data.avatar_url}` : null
+          const avatarUrl = data.avatar_url ? `${API_BASE}${data.avatar_url}` : null
       
       setUser({ ...user, avatar_url: avatarUrl })
       setAvatarPreview(avatarUrl)

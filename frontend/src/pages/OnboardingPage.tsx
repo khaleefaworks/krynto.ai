@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { saveToken } from '@/services/api'
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -41,7 +42,7 @@ export default function OnboardingPage() {
       setError(null)
       
       // Create Administrator user
-      const response = await fetch('http://localhost:8000/auth/bootstrap', {
+      const response = await fetch(`${API_BASE}/auth/bootstrap`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -63,7 +64,7 @@ export default function OnboardingPage() {
       console.log('Setup complete:', result)
       
       // Now login with the created credentials (using 'Administrator' as username)
-      const loginResponse = await fetch('http://localhost:8000/auth/login', {
+      const loginResponse = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
