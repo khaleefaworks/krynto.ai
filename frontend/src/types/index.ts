@@ -13,11 +13,16 @@ export interface User {
 export interface Conversation {
   id: number
   website_id: number
+  website_name?: string
   session_id: string
   status: string
   is_handoff: boolean
   assigned_agent_id: number | null
+  current_agent_id?: number | null
   message_count: number
+  last_message?: string
+  created_at?: string
+  closed_at?: string
 }
 
 export interface Message {

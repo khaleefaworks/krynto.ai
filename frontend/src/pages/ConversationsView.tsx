@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useLayoutEffect } from 'react'
+import { useEffect, useState, useRef, useLayoutEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
@@ -14,9 +14,11 @@ import {
 import {
     addNote,
     getNotes,
+    getBrowsingHistory,
     deleteNote,
     type Note
 } from '@/services/conversationMetadata'
+import { updateConversationMetadata } from '@/services/conversationMetadata'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -49,6 +51,30 @@ function getMessageTimestamp(m: any): number {
     return Number.isFinite(t) ? t : 0
 }
 
+function formatShortAge(dateLike: any): string {
+    const t = dateLike ? new Date(dateLike).getTime() : NaN
+    if (!Number.isFinite(t)) return ''
+
+    const deltaMs = Math.max(0, Date.now() - t)
+    const minutes = Math.floor(deltaMs / 60000)
+    if (minutes < 60) return `${minutes}m`
+
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h`
+
+    const days = Math.floor(hours / 24)
+    return `${days}d`
+}
+
+function shortSessionId(sessionId: string | null | undefined): string {
+    const raw = String(sessionId || '').trim()
+    if (!raw) return ''
+    const lastSegment = raw.split('-').filter(Boolean).pop() || raw
+    if (lastSegment.length >= 12) return lastSegment.slice(-12)
+    const compact = raw.replace(/-/g, '')
+    return compact.length >= 12 ? compact.slice(-12) : raw
+}
+
 function getInitials(name: string | null | undefined, fallback: string): string {
     const v = String(name || '').trim()
     if (!v) return fallback
@@ -56,6 +82,16 @@ function getInitials(name: string | null | undefined, fallback: string): string 
     const first = parts[0]?.[0] || ''
     const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
     return (first + second).toUpperCase() || fallback
+}
+
+function getVisitorAvatarText(visitorName: string | null | undefined, sessionId: string | null | undefined): string {
+    const name = String(visitorName || '').trim()
+    if (name) {
+        return getInitials(name, '??')
+    }
+    const displayId = shortSessionId(sessionId)
+    const ch = String(displayId || '').trim().charAt(0)
+    return (ch || '?').toUpperCase()
 }
 
 interface ConversationDetails {
@@ -75,11 +111,34 @@ interface ConversationDetails {
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
 export default function ConversationsView() {
-    const { conversationId } = useParams<{ conversationId?: string }>()
+    const { sessionId } = useParams<{ sessionId?: string }>()
     const navigate = useNavigate()
     const { user } = useAppStore()
     const { activeChats, setActiveChats } = useAppStore()
+    const {
+        chatEventsVersion,
+        lastChatEvent,
+        unreadByConversationId,
+        incrementUnreadForConversation,
+        clearUnreadForConversation,
+        pruneUnreadByConversationIds,
+        lastProcessedChatEventsVersion,
+        setLastProcessedChatEventsVersion,
+    } = useAppStore()
     const { messages, addMessage, addMessages, reset } = useMessageStore()
+
+    const activeChatsRef = useRef(activeChats)
+    useEffect(() => {
+        activeChatsRef.current = activeChats
+    }, [activeChats])
+
+    const [unreadRibbon, setUnreadRibbon] = useState<{ chatId: number; count: number } | null>(null)
+    const unreadRibbonHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const connectedWebsiteIdRef = useRef<number | null>(null)
+
+    const [resolvedChats, setResolvedChats] = useState<any[]>([])
+    const [resolvedLoading, setResolvedLoading] = useState(false)
 
     // Filter state
     const [activeFilter, setActiveFilter] = useState<FilterCategory>('all')
@@ -99,6 +158,7 @@ export default function ConversationsView() {
     const [resolving, setResolving] = useState(false)
     const joinedRef = useRef(false)
     const loadMessagesTokenRef = useRef(0)
+    const hasLoadedChatsRef = useRef(false)
     const loadDetailsTokenRef = useRef(0)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -109,6 +169,7 @@ export default function ConversationsView() {
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
     const [notes, setNotes] = useState<Note[]>([])
+    const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
 
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
@@ -125,9 +186,9 @@ export default function ConversationsView() {
         localStorage.setItem('chat_right_sidebar_collapsed', String(rightSidebarCollapsed))
     }, [rightSidebarCollapsed])
 
-    // Load chats list and refresh when global notification arrives
+    // Load chats list (show spinner only on first load)
     useEffect(() => {
-        fetchActiveChats()
+        fetchActiveChats({ showSpinner: true })
     }, [])
     
     // Listen to global notification changes and refresh list (only on ConversationsView)
@@ -138,10 +199,96 @@ export default function ConversationsView() {
         // Only refresh if count actually increased (new chat arrived)
         if (unreadChatsCount > lastCountRef.current) {
             console.log('📨 New chats detected, refreshing chat list...')
-            fetchActiveChats()
+            fetchActiveChats({ showSpinner: false })
         }
         lastCountRef.current = unreadChatsCount
     }, [unreadChatsCount])
+
+    const selectedWebsiteId = selectedChat
+        ? ((conversation as any)?.website_id ?? activeChats.find((c) => c.id === selectedChat)?.website_id ?? null)
+        : null
+
+    const clearUnreadForChat = useCallback((chatId: number) => {
+        clearUnreadForConversation(chatId)
+    }, [clearUnreadForConversation])
+
+    const showUnreadRibbonForChat = useCallback((chatId: number, count: number) => {
+        if (unreadRibbonHideTimerRef.current) {
+            clearTimeout(unreadRibbonHideTimerRef.current)
+            unreadRibbonHideTimerRef.current = null
+        }
+
+        if (count > 0) {
+            setUnreadRibbon({ chatId, count })
+            unreadRibbonHideTimerRef.current = setTimeout(() => {
+                setUnreadRibbon(null)
+                unreadRibbonHideTimerRef.current = null
+            }, 3000)
+        } else {
+            setUnreadRibbon(null)
+        }
+    }, [])
+
+    const openChat = useCallback((chatId: number) => {
+        const count = unreadByConversationId[chatId] || 0
+        showUnreadRibbonForChat(chatId, count)
+        clearUnreadForChat(chatId)
+        setSelectedChat(chatId)
+    }, [clearUnreadForChat, showUnreadRibbonForChat, unreadByConversationId])
+
+    // Refresh list/messages when global chat events arrive.
+    // This is a safety net: if the per-website WS misses an event, we still
+    // re-fetch persisted data so timestamps reflect DB truth.
+    useEffect(() => {
+        // Critical: avoid replaying stale lastChatEvent when navigating away/back.
+        if (chatEventsVersion <= lastProcessedChatEventsVersion) return
+
+        if (!lastChatEvent) return
+
+        const eventType = lastChatEvent.type
+        const eventConversationId = lastChatEvent.conversation_id
+
+        const conversationIsInList =
+            typeof eventConversationId === 'number' &&
+            activeChatsRef.current.some((c) => c.id === eventConversationId)
+
+        if (eventType === 'new_chat' || (eventType === 'visitor_message' && conversationIsInList)) {
+            fetchActiveChats({ showSpinner: false })
+        }
+
+        if (eventType === 'visitor_message' && selectedChat && eventConversationId === selectedChat) {
+            console.log('🔄 Global visitor_message: refreshing messages from server...')
+            loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+        }
+
+        // Unread badge fallback via global notifications.
+        // Avoid double-counting for the currently-connected website (those messages
+        // are typically delivered via the per-website WS already).
+        if (eventType === 'visitor_message' && typeof eventConversationId === 'number' && eventConversationId > 0) {
+            if (!selectedChat || eventConversationId !== selectedChat) {
+                const eventWebsiteId = lastChatEvent.website_id
+                const connectedWebsiteId = connectedWebsiteIdRef.current
+                const shouldSkipBecauseConnectedWebsite =
+                    typeof eventWebsiteId === 'number' &&
+                    typeof connectedWebsiteId === 'number' &&
+                    eventWebsiteId === connectedWebsiteId
+
+                if (!shouldSkipBecauseConnectedWebsite) {
+                    incrementUnreadForConversation(eventConversationId)
+                }
+            }
+        }
+        // Mark this version as processed so remounts don't re-apply it.
+        setLastProcessedChatEventsVersion(chatEventsVersion)
+    }, [
+        chatEventsVersion,
+        lastProcessedChatEventsVersion,
+        lastChatEvent,
+        selectedChat,
+        selectedWebsiteId,
+        incrementUnreadForConversation,
+        setLastProcessedChatEventsVersion,
+    ])
 
     // Ensure conversation details populate once chats load (handles refresh on deep links)
     useEffect(() => {
@@ -155,15 +302,22 @@ export default function ConversationsView() {
 
     // Handle conversation selection from URL
     useEffect(() => {
-        if (conversationId && conversationId !== selectedChat?.toString()) {
-            setSelectedChat(parseInt(conversationId))
+        if (!sessionId) return
+
+        const matched = activeChats.find((c) => c.session_id === sessionId)
+        if (matched && matched.id !== selectedChat) {
+            openChat(matched.id)
         }
-    }, [conversationId])
+    }, [sessionId, activeChats, selectedChat, openChat])
 
     // Load chat when selected
     useEffect(() => {
-        if (selectedChat && selectedChat.toString() !== conversationId) {
-            navigate(`/dashboard/chats/${selectedChat}`)
+        if (selectedChat) {
+            const chatData = activeChats.find((c) => c.id === selectedChat)
+            const selectedSessionId = chatData?.session_id
+            if (selectedSessionId && selectedSessionId !== sessionId) {
+                navigate(`/dashboard/chats/${selectedSessionId}`)
+            }
         }
 
         if (selectedChat) {
@@ -174,6 +328,7 @@ export default function ConversationsView() {
         return () => {
             if (selectedChat) {
                 disconnectAgentSocket()
+                connectedWebsiteIdRef.current = null
                 joinedRef.current = false
             }
         }
@@ -190,6 +345,7 @@ export default function ConversationsView() {
 
         // Connect socket
         connectAgentSocket(websiteId, user.id)
+        connectedWebsiteIdRef.current = Number(websiteId)
 
         // Register message handler
         const removeHandler = addMessageHandler((data) => {
@@ -197,7 +353,7 @@ export default function ConversationsView() {
 
             const dataConversationId = Number((data as any)?.conversation_id)
             
-            // Only process messages for the current chat
+            // Visitor message: either add to current chat UI, or increment unread badge.
             if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
                 // Visitor sent a message - add to UI
                 const dto = (data as any)?.message_obj
@@ -215,6 +371,22 @@ export default function ConversationsView() {
                         created_at: new Date().toISOString()
                     }
                     addMessage(newMessage)
+                }
+            } else if (data.type === 'visitor_message' && dataConversationId && dataConversationId !== selectedChat) {
+                const dto = (data as any)?.message_obj
+                const content = (dto && typeof dto === 'object' ? (dto as any)?.content : null) ?? (data as any)?.message
+
+                incrementUnreadForConversation(dataConversationId)
+
+                // Best-effort: update preview without a full refresh.
+                if (typeof content === 'string' && content.trim()) {
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], last_message: content }
+                        setActiveChats(next)
+                    }
                 }
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 // Our message was confirmed - add to UI
@@ -239,7 +411,12 @@ export default function ConversationsView() {
             } else if (data.type === 'new_conversation') {
                 // New conversation arrived - refresh chat list
                 console.log('📨 New conversation arrived, refreshing...')
-                fetchActiveChats()
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
+                // Realtime browsing update: re-fetch history (capped)
+                getBrowsingHistory(selectedChat)
+                    .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))
+                    .catch(() => {})
             }
         })
 
@@ -253,22 +430,39 @@ export default function ConversationsView() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
     }, [messages, selectedChat])
 
-    const fetchActiveChats = async () => {
-        setLoading(true)
+    const fetchActiveChats = async ({ showSpinner }: { showSpinner: boolean }) => {
+        if (showSpinner) {
+            setLoading(true)
+        }
         try {
             const chats = await fetchChatsApi()
             setActiveChats(chats)
+            hasLoadedChatsRef.current = true
+
+            pruneUnreadByConversationIds(chats.map(c => c.id))
         } catch (error) {
             console.error("Failed to fetch chats:", error)
         } finally {
-            setLoading(false)
+            if (showSpinner) {
+                setLoading(false)
+            }
         }
     }
 
-    const loadChatData = async (chatId: number) => {
+    const loadChatData = async (
+        chatId: number,
+        {
+            showSpinner = true,
+            preserveMessages = false,
+        }: { showSpinner?: boolean; preserveMessages?: boolean } = {}
+    ) => {
         const token = ++loadMessagesTokenRef.current
-        setChatLoading(true)
-        reset()
+        if (showSpinner) {
+            setChatLoading(true)
+        }
+        if (!preserveMessages) {
+            reset()
+        }
 
         try {
             const chatMessages = await fetchChatMessages(chatId.toString())
@@ -276,6 +470,11 @@ export default function ConversationsView() {
             // If the user switched chats while we were loading, ignore stale results.
             if (loadMessagesTokenRef.current !== token) {
                 return
+            }
+            if (preserveMessages) {
+                // Replace existing thread with server truth, without showing a loader.
+                // Use store's de-dupe logic then sort by timestamp.
+                reset()
             }
             addMessages(chatMessages)
 
@@ -286,7 +485,7 @@ export default function ConversationsView() {
         } catch (error) {
             console.error("Failed to load chat:", error)
         } finally {
-            if (loadMessagesTokenRef.current === token) {
+            if (showSpinner && loadMessagesTokenRef.current === token) {
                 setChatLoading(false)
             }
         }
@@ -302,17 +501,25 @@ export default function ConversationsView() {
 
             const fetchedNotes = await getNotes(chatId)
 
+            let fetchedHistory: any[] = []
+            try {
+                fetchedHistory = await getBrowsingHistory(chatId)
+            } catch {
+                fetchedHistory = []
+            }
+
             if (loadDetailsTokenRef.current !== token) {
                 return
             }
             setNotes(fetchedNotes)
+            setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
         } catch (error) {
             console.error("Failed to load conversation details:", error)
         }
     }
 
     const handleChatSelect = (chatId: number) => {
-        setSelectedChat(chatId)
+        openChat(chatId)
     }
 
     const handleSendMessage = async () => {
@@ -401,7 +608,17 @@ export default function ConversationsView() {
         setResolving(true)
         try {
             await closeConversation(selectedChat)
-            setActiveChats(activeChats.filter(c => c.id !== selectedChat))
+            await fetchActiveChats({ showSpinner: false })
+            // If user is viewing resolved, refresh that list too.
+            if (activeFilter === 'resolved') {
+                try {
+                    const { fetchClosedConversations } = await import('@/services/chats')
+                    const data = await fetchClosedConversations(undefined, undefined, 100)
+                    setResolvedChats(data as any)
+                } catch (e) {
+                    console.error('Failed to refresh resolved conversations:', e)
+                }
+            }
             setSelectedChat(null)
             navigate('/dashboard/chats')
         } catch (error) {
@@ -431,10 +648,19 @@ export default function ConversationsView() {
         }
     }
 
-    const filteredChats = activeChats.filter(chat => {
+    const chatsForList = activeFilter === 'resolved'
+        ? (Array.isArray(resolvedChats) ? resolvedChats : [])
+        : activeChats
+
+    const filteredChats = chatsForList.filter(chat => {
         // Apply search filter
-        if (searchQuery && !chat.session_id.toLowerCase().includes(searchQuery.toLowerCase())) {
-            return false
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase().trim()
+            const matchesSession = chat.session_id.toLowerCase().includes(q)
+            const matchesName = String((chat as any).visitor_name || '').toLowerCase().includes(q)
+            if (!matchesSession && !matchesName) {
+                return false
+            }
         }
 
         // Apply category filter
@@ -451,6 +677,30 @@ export default function ConversationsView() {
                 return chat.status === 'open'
         }
     })
+
+    useEffect(() => {
+        if (activeFilter !== 'resolved') return
+
+        let cancelled = false
+        const load = async () => {
+            try {
+                setResolvedLoading(true)
+                const { fetchClosedConversations } = await import('@/services/chats')
+                const data = await fetchClosedConversations(undefined, undefined, 100)
+                if (!cancelled) setResolvedChats(Array.isArray(data) ? (data as any) : [])
+            } catch (e) {
+                console.error('Failed to load resolved conversations:', e)
+                if (!cancelled) setResolvedChats([])
+            } finally {
+                if (!cancelled) setResolvedLoading(false)
+            }
+        }
+        load()
+
+        return () => {
+            cancelled = true
+        }
+    }, [activeFilter])
 
     const getFilterHeaderText = () => {
         switch (activeFilter) {
@@ -646,7 +896,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Check className="h-5 w-5 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'resolved').length}</span>
+                                                <span className="text-xs font-semibold">{resolvedChats.length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -655,7 +905,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left">Resolved</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'resolved').length}
+                                                    {resolvedChats.length}
                                                 </Badge>
                                             </>
                                         )}
@@ -697,7 +947,7 @@ export default function ConversationsView() {
 
                 {/* Conversations List */}
                 <div className="flex-1 overflow-y-auto">
-                    {loading ? (
+                    {(activeFilter === 'resolved' ? resolvedLoading : loading) ? (
                         <div className="flex items-center justify-center h-32">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                         </div>
@@ -717,25 +967,33 @@ export default function ConversationsView() {
                                 >
                                     <div className="flex items-start gap-3">
                                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0 relative">
-                                            {chat.session_id.substring(0, 2).toUpperCase()}
-                                            {(chat as any).assigned_agent_id && (
-                                                <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-gray-800" />
-                                            )}
+                                            {getVisitorAvatarText((chat as any).visitor_name, chat.session_id)}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center justify-between">
                                                 <span className="font-semibold text-gray-900 dark:text-white truncate">
-                                                    {chat.session_id.substring(0, 8)}...
+                                                    {(chat as any).visitor_name || shortSessionId(chat.session_id)}
                                                 </span>
-                                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                    {(chat as any).created_at
-                                                        ? formatDistanceToNow(new Date((chat as any).created_at), { addSuffix: true })
-                                                        : ''}
+                                                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                                                    {(chat as any).created_at ? formatShortAge((chat as any).created_at) : ''}
                                                 </span>
                                             </div>
-                                            <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                                                {(chat as any).last_message || 'No messages yet'}
-                                            </p>
+
+                                            <div className="mt-1 flex items-center justify-between gap-2">
+                                                <Badge variant="secondary" className="h-5 px-2 text-[10px] max-w-44 truncate">
+                                                    {(chat as any).website_name
+                                                        ? (chat as any).website_name
+                                                        : `Website #${(chat as any).website_id}`}
+                                                </Badge>
+                                                {Boolean(unreadByConversationId[chat.id]) && (
+                                                    <Badge
+                                                        variant="destructive"
+                                                        className="h-5 min-w-5 justify-center rounded-full px-1.5 text-xs flex-shrink-0"
+                                                    >
+                                                        {unreadByConversationId[chat.id] > 99 ? '99+' : unreadByConversationId[chat.id]}
+                                                    </Badge>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </button>
@@ -753,11 +1011,11 @@ export default function ConversationsView() {
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 min-w-0">
                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0">
-                                    {conversation?.session_id?.substring(0, 2).toUpperCase() || 'VI'}
+                                    {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-                                        {conversation?.visitor_name || conversation?.session_id.substring(0, 8) || `Chat #${selectedChat}`}
+                                        {conversation?.visitor_name || shortSessionId(conversation?.session_id)}
                                     </h2>
                                     {conversation?.last_seen_at && (
                                         <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -786,6 +1044,13 @@ export default function ConversationsView() {
 
                     {/* Messages Area */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                        {unreadRibbon && unreadRibbon.chatId === selectedChat && unreadRibbon.count > 0 && (
+                            <div className="flex justify-center">
+                                <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
+                                    {unreadRibbon.count} unread message{unreadRibbon.count === 1 ? '' : 's'}
+                                </div>
+                            </div>
+                        )}
                         {chatLoading ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="text-center">
@@ -859,7 +1124,7 @@ export default function ConversationsView() {
                                                     <div className="flex items-end gap-2 max-w-[70%]">
                                                         {!isAgent && (
                                                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                                {conversation?.session_id?.substring(0, 2).toUpperCase() || 'VI'}
+                                                                {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
                                                             </div>
                                                         )}
                                                         <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
@@ -1004,7 +1269,7 @@ export default function ConversationsView() {
                                 <PanelRightOpen className="h-4 w-4" />
                             </Button>
                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 text-white flex items-center justify-center text-sm font-semibold">
-                                {(conversation?.visitor_name || conversation?.session_id || 'VI').substring(0, 2).toUpperCase()}
+                                {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
                             </div>
                         </div>
                     ) : (
@@ -1028,6 +1293,40 @@ export default function ConversationsView() {
                                         ...note,
                                         creator_name: note.creator_name || 'Unknown'
                                     }))}
+                                    browsingHistory={browsingHistory}
+                                    onUpdateMetadata={async (data) => {
+                                        if (!conversation?.id) return
+                                        try {
+                                            const resp = (await updateConversationMetadata(conversation.id, data)) as {
+                                                visitor_name?: string | null
+                                                visitor_email?: string | null
+                                                visitor_phone?: string | null
+                                            }
+
+                                            const updates: Partial<ConversationDetails> = {
+                                                visitor_name: resp?.visitor_name ?? undefined,
+                                                visitor_email: resp?.visitor_email ?? undefined,
+                                                visitor_phone: resp?.visitor_phone ?? undefined,
+                                            }
+
+                                            setConversation((prev) => (prev ? ({ ...prev, ...updates } as any) : prev))
+
+                                            // Zustand setter expects the full array, not an updater function.
+                                            setActiveChats(
+                                                activeChats.map((c) =>
+                                                    c.id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
+                                                )
+                                            )
+
+                                            setResolvedChats((prev) =>
+                                                (Array.isArray(prev) ? prev : []).map((c) =>
+                                                    (c as any).id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
+                                                )
+                                            )
+                                        } catch (e) {
+                                            console.error('Failed to update visitor metadata:', e)
+                                        }
+                                    }}
                                     onAddNote={handleAddNote}
                                     onDeleteNote={handleDeleteNote}
                                 />

@@ -29,7 +29,7 @@ import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 
 function App() {
-  const { token, user, setToken, setUser, setUnreadChatsCount } = useAppStore()
+  const { token, user, setToken, setUser, setUnreadChatsCount, bumpChatEventsVersion } = useAppStore()
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
   const notificationSocketRef = useRef<WebSocket | null>(null)
@@ -101,6 +101,11 @@ function App() {
 
         // Handle both new_chat (unassigned) and visitor_message (updates to existing chats)
         if (data.type === 'new_chat' || data.type === 'visitor_message') {
+          bumpChatEventsVersion({
+            type: data.type,
+            conversation_id: typeof data.conversation_id === 'number' ? data.conversation_id : Number(data.conversation_id) || undefined,
+            website_id: typeof data.website_id === 'number' ? data.website_id : Number(data.website_id) || undefined,
+          })
           console.log('📨 Chat update notification - updating count...')
           // Fetch updated chat list and count
           try {
@@ -167,7 +172,7 @@ function App() {
         clearTimeout(reconnectTimeout)
       }
     }
-  }, [user?.id, token, setUnreadChatsCount])
+  }, [user?.id, token, setUnreadChatsCount, bumpChatEventsVersion])
 
   // Show loading while initializing
   if (initializing) {
@@ -204,7 +209,7 @@ function App() {
             <Route path="/dashboard" element={<DashboardLayout />}>
               {/* Chats - Unified 3-column view */}
               <Route path="chats" element={<ConversationsView />} />
-              <Route path="chats/:conversationId" element={<ConversationsView />} />
+              <Route path="chats/:sessionId" element={<ConversationsView />} />
               <Route path="history" element={<ConversationHistory />} />
               <Route path="history/:conversationId" element={<ClosedChatView />} />
               

@@ -13,13 +13,12 @@
     <!-- AI ChatAssist Live Chat script -->
     <script type="text/javascript">
         var _aichatassist = _aichatassist || {};
-        _aichatassist.key = '48c89e10ce708eee70921ba27a9bf815885fbacd45ea9d599e7117fbed181eec';
+        _aichatassist.key = '7de473f9dc69d32986b7714ac32f5cb40aea351131a2dc2f4653f2d47a652f40';
         window.aichatassist || (function (d) {
             var s, c, o = aichatassist = function () { o._.push(arguments) }; o._ = [];
             s = d.getElementsByTagName('script')[0]; c = d.createElement('script');
             c.type = 'text/javascript'; c.charset = 'utf-8'; c.async = true;
-            var API_BASE = window.DEMO_API_BASE || 'http://localhost:8000';
-            c.src = API_BASE + '/widget/loader.js?key=' + _aichatassist.key;
+            c.src = 'http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
             s.parentNode.insertBefore(c, s);
         })(document);
     </script>

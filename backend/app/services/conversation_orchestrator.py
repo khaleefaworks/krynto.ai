@@ -107,9 +107,14 @@ class ConversationOrchestrator:
         if visitor_ws:
             ChatService.register_visitor(conversation.id, visitor_ws)
 
-        # Check if conversation is resolved
+        # If the visitor returns to a previously resolved conversation (same session_id),
+        # reopen it and make it unassigned again.
         if conversation.status == ConversationStatus.RESOLVED:
-            return "This conversation has been closed."
+            conversation.status = ConversationStatus.OPEN
+            conversation.assigned_agent_id = None
+            conversation.is_handoff = False
+            self.db.commit()
+            self.db.refresh(conversation)
 
         # Determine if this is the first message before persisting
         prior_message_count = (

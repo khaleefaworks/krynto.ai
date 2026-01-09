@@ -16,6 +16,16 @@ export interface Note {
   creator_name: string | null
 }
 
+export interface PageView {
+  id: number
+  title: string | null
+  url: string
+  referrer: string | null
+  device_info: string | null
+  browser_info: string | null
+  created_at: string
+}
+
 export function addTag(conversationId: number, tagName: string) {
   return apiRequest<Tag>(`/conversations/${conversationId}/tags`, {
     method: "POST",
@@ -62,4 +72,8 @@ export function updateConversationMetadata(
     method: "PATCH",
     body: JSON.stringify(data),
   })
+}
+
+export function getBrowsingHistory(conversationId: number, limit: number = 50) {
+  return apiRequest<PageView[]>(`/conversations/${conversationId}/browsing-history?limit=${limit}`)
 }

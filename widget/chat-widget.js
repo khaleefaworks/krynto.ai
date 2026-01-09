@@ -67,6 +67,11 @@
   let isConnecting = false;
   let toastTimeout = null;
 
+  // Page view tracking (browsing history)
+  let pageViewTrackingInitialized = false;
+  let lastTrackedUrl = null;
+  let pendingPageView = null;
+
   // Presence WebSocket (online/offline + agent avatars)
   let presenceWs = null;
   let presencePingInterval = null;
@@ -154,6 +159,17 @@
         console.log('[ChatWidget] WebSocket connected');
         isConnecting = false;
         hideToast();
+
+        // Flush any queued page view captured before the socket opened
+        if (pendingPageView) {
+          try {
+            ws.send(JSON.stringify(pendingPageView));
+            console.log('[ChatWidget] Page view sent:', pendingPageView);
+            pendingPageView = null;
+          } catch (e) {
+            // keep it queued; it will retry on next connect
+          }
+        }
         
         // Clear any pending reconnect
         if (reconnectTimeout) {
@@ -186,6 +202,159 @@
       console.error('[ChatWidget] Failed to create WebSocket:', error);
       isConnecting = false;
     }
+  }
+
+  function getDeviceInfo() {
+    try {
+      const uaData = navigator.userAgentData;
+      if (uaData && typeof uaData.platform === 'string' && uaData.platform.trim()) {
+        return uaData.platform.trim();
+      }
+    } catch (e) {}
+
+    try {
+      const platform = navigator.platform;
+      if (typeof platform === 'string' && platform.trim()) {
+        return platform.trim();
+      }
+    } catch (e) {}
+
+    // Fallback: very lightweight OS guess from UA
+    try {
+      const ua = String(navigator.userAgent || '');
+      if (/Windows NT/i.test(ua)) return 'Windows';
+      if (/Android/i.test(ua)) return 'Android';
+      if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+      if (/Mac OS X/i.test(ua)) return 'macOS';
+      if (/Linux/i.test(ua)) return 'Linux';
+    } catch (e) {}
+
+    return null;
+  }
+
+  function getBrowserInfo() {
+    try {
+      const ua = String(navigator.userAgent || '');
+
+      // Edge (Chromium)
+      let m = ua.match(/Edg\/([0-9\.]+)/);
+      if (m && m[1]) return `Edge ${m[1]}`;
+
+      // Chrome (exclude Edge)
+      m = ua.match(/Chrome\/([0-9\.]+)/);
+      if (m && m[1] && !/Edg\//.test(ua)) return `Chrome ${m[1]}`;
+
+      // Firefox
+      m = ua.match(/Firefox\/([0-9\.]+)/);
+      if (m && m[1]) return `Firefox ${m[1]}`;
+
+      // Safari (exclude Chrome)
+      if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) {
+        m = ua.match(/Version\/([0-9\.]+)/);
+        if (m && m[1]) return `Safari ${m[1]}`;
+        return 'Safari';
+      }
+    } catch (e) {}
+
+    return null;
+  }
+
+  function sendPageView(referrerOverride) {
+    try {
+      const url = String(window.location && window.location.href ? window.location.href : '').trim();
+      if (!url) return;
+      if (lastTrackedUrl === url) return;
+
+      const title = (typeof document !== 'undefined' && typeof document.title === 'string' && document.title.trim())
+        ? document.title.trim()
+        : null;
+
+      const referrer = (referrerOverride != null)
+        ? String(referrerOverride).trim() || null
+        : (typeof document !== 'undefined' && typeof document.referrer === 'string' && document.referrer.trim())
+          ? document.referrer.trim()
+          : null;
+
+      const payload = {
+        type: 'page_view',
+        url,
+        title,
+        referrer,
+        device_info: getDeviceInfo(),
+        browser_info: getBrowserInfo(),
+      };
+
+      lastTrackedUrl = url;
+
+      // Persist across refreshes in the same tab.
+      try {
+        const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+        sessionStorage.setItem(key, url);
+      } catch (e) {}
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+        pendingPageView = null;
+        console.log('[ChatWidget] Page view sent:', payload);
+        return;
+      }
+
+      // Queue until WS is connected
+      pendingPageView = payload;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function setupPageViewTracking() {
+    if (pageViewTrackingInitialized) return;
+    pageViewTrackingInitialized = true;
+
+    // Restore last tracked URL so refreshes don't create duplicates.
+    try {
+      const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+      const restored = sessionStorage.getItem(key);
+      if (restored && String(restored).trim()) {
+        lastTrackedUrl = String(restored).trim();
+      }
+    } catch (e) {}
+
+    let previousUrl = null;
+    try { previousUrl = window.location.href; } catch (e) { previousUrl = null; }
+
+    function handleNavigation() {
+      let currentUrl = null;
+      try { currentUrl = window.location.href; } catch (e) { currentUrl = null; }
+      if (!currentUrl) return;
+
+      const ref = previousUrl;
+      previousUrl = currentUrl;
+      sendPageView(ref);
+    }
+
+    try {
+      const originalPushState = history.pushState;
+      history.pushState = function() {
+        const ret = originalPushState.apply(this, arguments);
+        handleNavigation();
+        return ret;
+      };
+    } catch (e) {}
+
+    try {
+      const originalReplaceState = history.replaceState;
+      history.replaceState = function() {
+        const ret = originalReplaceState.apply(this, arguments);
+        handleNavigation();
+        return ret;
+      };
+    } catch (e) {}
+
+    try { window.addEventListener('popstate', handleNavigation); } catch (e) {}
+    try { window.addEventListener('hashchange', handleNavigation); } catch (e) {}
+
+    // Initial capture (will be queued until WS connects)
+    sendPageView(null);
   }
 
   /**
@@ -976,6 +1145,9 @@
     
     // Apply configuration styling (either fetched or defaults)
     applyConfiguration();
+
+    // Browsing history tracking (page views)
+    setupPageViewTracking();
     
     // Connect WebSocket
     connectWebSocket();

@@ -83,6 +83,36 @@ class ConversationService:
         self.db.add(conversation)
         self.db.commit()
         self.db.refresh(conversation)
+
+        # Attach any pre-conversation browsing events captured before the first message.
+        # This preserves the invariant: we don't create a conversation just to track page views.
+        try:
+            from app.repos import page_views as page_views_repo
+
+            latest = page_views_repo.attach_session_page_views_to_conversation(
+                self.db,
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation.id,
+            )
+
+            # Best-effort backfill device/browser info from the latest page view.
+            if latest:
+                changed = False
+                if latest.device_info and not conversation.device_info:
+                    conversation.device_info = latest.device_info
+                    changed = True
+                if latest.browser_info and not conversation.browser_info:
+                    conversation.browser_info = latest.browser_info
+                    changed = True
+                if changed:
+                    self.db.commit()
+                    self.db.refresh(conversation)
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
         
         logger.info(
             "conversation_created",

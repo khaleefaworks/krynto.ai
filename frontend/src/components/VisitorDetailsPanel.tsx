@@ -1,16 +1,25 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { 
+  User,
   Mail, 
   Phone, 
-  Monitor, 
-  Chrome, 
+  Monitor,
   Plus,
   X
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+
+function shortSessionId(sessionId: string | null | undefined): string {
+  const raw = String(sessionId || "").trim()
+  if (!raw) return ""
+  const lastSegment = raw.split("-").filter(Boolean).pop() || raw
+  if (lastSegment.length >= 12) return lastSegment.slice(-12)
+  const compact = raw.replace(/-/g, "")
+  return compact.length >= 12 ? compact.slice(-12) : raw
+}
 
 interface VisitorDetailsPanelProps {
   conversation: {
@@ -34,6 +43,14 @@ interface VisitorDetailsPanelProps {
   onUpdateMetadata?: (data: { visitor_name?: string; visitor_email?: string; visitor_phone?: string }) => void
   onAddNote?: (content: string) => void
   onDeleteNote?: (noteId: number) => void
+
+  browsingHistory?: Array<{
+    id: number
+    title: string | null
+    url: string
+    referrer: string | null
+    created_at: string
+  }>
 }
 
 export default function VisitorDetailsPanel({
@@ -42,11 +59,31 @@ export default function VisitorDetailsPanel({
   onUpdateMetadata,
   onAddNote,
   onDeleteNote,
+  browsingHistory = [],
 }: VisitorDetailsPanelProps) {
+  const [editingName, setEditingName] = useState(false)
   const [editingEmail, setEditingEmail] = useState(false)
   const [editingPhone, setEditingPhone] = useState(false)
+  const [name, setName] = useState(conversation.visitor_name || "")
   const [email, setEmail] = useState(conversation.visitor_email || "")
   const [phone, setPhone] = useState(conversation.visitor_phone || "")
+
+  // Keep local input state in sync when switching conversations
+  useEffect(() => {
+    setName(conversation.visitor_name || "")
+    setEmail(conversation.visitor_email || "")
+    setPhone(conversation.visitor_phone || "")
+    setEditingName(false)
+    setEditingEmail(false)
+    setEditingPhone(false)
+  }, [conversation.id])
+
+  const saveName = () => {
+    if (onUpdateMetadata) {
+      onUpdateMetadata({ visitor_name: name })
+    }
+    setEditingName(false)
+  }
 
   const [newNote, setNewNote] = useState("")
   const [addingNote, setAddingNote] = useState(false)
@@ -73,14 +110,18 @@ export default function VisitorDetailsPanel({
     }
   }
 
-  const getInitials = (name?: string, sessionId?: string) => {
-    if (name) {
-      return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+  const getVisitorAvatarText = (name?: string, sessionId?: string) => {
+    const v = String(name || '').trim()
+    if (v) {
+      const parts = v.split(/\s+/).filter(Boolean)
+      const first = parts[0]?.[0] || ''
+      const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
+      return (first + second).toUpperCase() || '??'
     }
-    if (sessionId) {
-      return sessionId.substring(0, 2).toUpperCase()
-    }
-    return '??'
+
+    const displayId = shortSessionId(sessionId)
+    const ch = String(displayId || '').trim().charAt(0)
+    return (ch || '?').toUpperCase()
   }
 
   return (
@@ -89,35 +130,59 @@ export default function VisitorDetailsPanel({
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col items-center">
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg mb-3">
-            {getInitials(conversation.visitor_name, conversation.session_id)}
+            {getVisitorAvatarText(conversation.visitor_name, conversation.session_id)}
           </div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-            {conversation.visitor_name || conversation.session_id.substring(0, 8)}
+            {conversation.visitor_name || shortSessionId(conversation.session_id)}
           </h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {conversation.last_seen_at 
-              ? `Last seen ${formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}`
-              : 'Active now'}
-          </p>
+        </div>
+      </div>
 
-          {/* Stats */}
-          <div className="flex gap-6 w-full justify-center">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {conversation.visit_count || 1}
-              </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">Visits</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">1</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">Chats</div>
-            </div>
-          </div>
+      {/* Device */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Device</h4>
+        <div className="flex items-center gap-2">
+          <Monitor className="h-4 w-4 text-gray-400" />
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            {(() => {
+              const device = String(conversation.device_info || '').trim()
+              const browser = String(conversation.browser_info || '').trim()
+              if (device && browser) return `${device}, ${browser}`
+              return device || browser || 'Unknown'
+            })()}
+          </span>
         </div>
       </div>
 
       {/* Contact Information */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
+        {/* Name */}
+        <div className="flex items-start gap-2">
+          <User className="h-4 w-4 text-gray-400 mt-2" />
+          <div className="flex-1">
+            {editingName ? (
+              <div className="flex gap-1">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Visitor name"
+                  className="h-8 text-sm"
+                  onBlur={saveName}
+                  onKeyDown={(e) => e.key === 'Enter' && saveName()}
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditingName(true)}
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-left w-full"
+              >
+                {name || "Fill in visitor's name"}
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Email */}
         <div className="flex items-start gap-2">
           <Mail className="h-4 w-4 text-gray-400 mt-2" />
@@ -172,25 +237,6 @@ export default function VisitorDetailsPanel({
           </div>
         </div>
 
-        {/* Device Info */}
-        {conversation.device_info && (
-          <div className="flex items-center gap-2">
-            <Monitor className="h-4 w-4 text-gray-400" />
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              {conversation.device_info}
-            </span>
-          </div>
-        )}
-
-        {/* Browser Info */}
-        {conversation.browser_info && (
-          <div className="flex items-center gap-2">
-            <Chrome className="h-4 w-4 text-gray-400" />
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              {conversation.browser_info}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Private Notes */}
@@ -265,6 +311,60 @@ export default function VisitorDetailsPanel({
               No notes yet
             </p>
           )
+        )}
+      </div>
+
+      {/* Browsing History */}
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+            Browsing history
+          </h4>
+        </div>
+        {browsingHistory.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-gray-600 italic">No browsing history yet</p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto pr-2 space-y-3">
+            {browsingHistory.map((item) => {
+              const title = String(item.title || '').trim() || 'Document'
+              const when = item.created_at ? formatDistanceToNow(new Date(item.created_at), { addSuffix: true }) : ''
+              return (
+                <div key={item.id} className="flex gap-3">
+                  <div className="pt-1 flex flex-col items-center">
+                    <div className="h-2.5 w-2.5 rounded-full bg-gray-400 dark:bg-gray-500" />
+                    <div className="w-px flex-1 bg-gray-200 dark:bg-gray-700 mt-1" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="text-sm text-gray-900 dark:text-white truncate">{title}</div>
+                      {when && <div className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{when}</div>}
+                    </div>
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline break-all"
+                    >
+                      {item.url}
+                    </a>
+                    {item.referrer && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all">
+                        Referrer{' '}
+                        <a
+                          href={item.referrer}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {item.referrer}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 

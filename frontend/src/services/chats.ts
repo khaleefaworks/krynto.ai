@@ -75,7 +75,7 @@ export async function fetchClosedConversations(websiteId?: number, agentId?: num
 
   const query = params.toString() ? `?${params.toString()}` : ''
 
-  return apiRequest<ActiveChat[]>(`/chats/closed/history${query}`, {
+  return apiRequest<ActiveChat[]>(`/chats/resolved/history${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

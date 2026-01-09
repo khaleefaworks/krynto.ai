@@ -113,30 +113,30 @@ async def get_widget_snippet(request: Request, website_id: int, db: Session = De
     This is shown to admins in the dashboard to copy-paste into their website.
     """
     website = db.query(Website).filter(Website.id == website_id).first()
-    
+
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
-    
-        def _normalize_base(base: str) -> str:
-                b = (base or "").strip()
-                return b[:-1] if b.endswith("/") else b
 
-        api_base = _normalize_base(settings.PUBLIC_BASE_URL or str(request.base_url))
+    def _normalize_base(base: str) -> str:
+        b = (base or "").strip()
+        return b[:-1] if b.endswith("/") else b
 
-        # Generate the embed snippet (like Smartsupp)
+    api_base = _normalize_base(settings.PUBLIC_BASE_URL or str(request.base_url))
+
+    # Generate the embed snippet (like Smartsupp)
     snippet = f"""<!-- AI ChatAssist Live Chat script -->
-<script type="text/javascript">
-var _aichatassist = _aichatassist || {{}};
-_aichatassist.key = '{website.widget_key}';
-window.aichatassist||(function(d) {{
-  var s,c,o=aichatassist=function(){{ o._.push(arguments)}}; o._=[];
-  s=d.getElementsByTagName('script')[0];c=d.createElement('script');
-  c.type='text/javascript';c.charset='utf-8';c.async=true;
-    c.src='{api_base}/widget/loader.js?key=' + _aichatassist.key;
-  s.parentNode.insertBefore(c,s);
-}})(document);
-</script>
-<noscript> Powered by <a href="#" target="_blank">AI ChatAssist</a></noscript>"""
+    <script type="text/javascript">
+    var _aichatassist = _aichatassist || {{}};
+    _aichatassist.key = '{website.widget_key}';
+    window.aichatassist||(function(d) {{
+      var s,c,o=aichatassist=function(){{ o._.push(arguments)}}; o._=[];
+      s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+      c.type='text/javascript';c.charset='utf-8';c.async=true;
+      c.src='{api_base}/widget/loader.js?key=' + _aichatassist.key;
+      s.parentNode.insertBefore(c,s);
+    }})(document);
+    </script>
+    <noscript> Powered by <a href="#" target="_blank">AI ChatAssist</a></noscript>"""
     
     return JSONResponse({
         "website_id": website.id,

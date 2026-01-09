@@ -16,6 +16,21 @@ interface AppState {
   setActiveChats: (chats: Conversation[]) => void
   unreadChatsCount: number
   setUnreadChatsCount: (count: number) => void
+
+  // Unread per conversation (agent inbox)
+  unreadByConversationId: Record<number, number>
+  incrementUnreadForConversation: (conversationId: number, delta?: number) => void
+  clearUnreadForConversation: (conversationId: number) => void
+  pruneUnreadByConversationIds: (validConversationIds: number[]) => void
+
+  // Global chat notifications (event signal)
+  chatEventsVersion: number
+  lastChatEvent: { type: string; conversation_id?: number; website_id?: number } | null
+  bumpChatEventsVersion: (event: { type: string; conversation_id?: number; website_id?: number }) => void
+
+  // Prevent re-processing stale lastChatEvent on remount
+  lastProcessedChatEventsVersion: number
+  setLastProcessedChatEventsVersion: (version: number) => void
   
   // Current Chat
   currentChat: Conversation | null
@@ -43,6 +58,52 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveChats: (chats) => set({ activeChats: chats }),
   unreadChatsCount: 0,
   setUnreadChatsCount: (count) => set({ unreadChatsCount: count }),
+
+  // Unread per conversation
+  unreadByConversationId: {},
+  incrementUnreadForConversation: (conversationId, delta = 1) =>
+    set((state) => {
+      const id = Number(conversationId)
+      if (!Number.isFinite(id) || id <= 0) return state
+      const next = { ...state.unreadByConversationId }
+      next[id] = (next[id] || 0) + delta
+      return { unreadByConversationId: next }
+    }),
+  clearUnreadForConversation: (conversationId) =>
+    set((state) => {
+      const id = Number(conversationId)
+      if (!Number.isFinite(id) || id <= 0) return state
+      if (!state.unreadByConversationId[id]) return state
+      return { unreadByConversationId: { ...state.unreadByConversationId, [id]: 0 } }
+    }),
+  pruneUnreadByConversationIds: (validConversationIds) =>
+    set((state) => {
+      const valid = new Set((validConversationIds || []).map((n) => Number(n)).filter((n) => Number.isFinite(n)))
+      const prev = state.unreadByConversationId
+      let changed = false
+      const next: Record<number, number> = {}
+      for (const [key, value] of Object.entries(prev)) {
+        const id = Number(key)
+        if (valid.has(id)) {
+          next[id] = value
+        } else {
+          changed = true
+        }
+      }
+      return changed ? { unreadByConversationId: next } : state
+    }),
+
+  // Global chat notifications
+  chatEventsVersion: 0,
+  lastChatEvent: null,
+  bumpChatEventsVersion: (event) =>
+    set((state) => ({
+      chatEventsVersion: state.chatEventsVersion + 1,
+      lastChatEvent: event,
+    })),
+
+  lastProcessedChatEventsVersion: 0,
+  setLastProcessedChatEventsVersion: (version) => set({ lastProcessedChatEventsVersion: version }),
   
   // Current Chat
   currentChat: null,

@@ -134,10 +134,14 @@ Each website is **fully isolated**:
 | API       | REST + WebSocket |
 | ORM       | SQLAlchemy       |
 | DB        | PostgreSQL       |
-| Cache     | Redis            |
+| Cache / Bus | Redis (deferred; optional — only needed for multi-worker realtime routing) |
 | Queue     | RQ               |
 | Logging   | structlog        |
 | Auth      | JWT              |
+
+Note (important):
+- Until Redis Pub/Sub (or equivalent) is added, WebSocket message delivery/routing is single-worker (in-memory connection maps).
+- This is OK for shipping Dashboard/Widget features on a single instance/worker; Redis is a scale-readiness upgrade, not required for feature development.
 
 ---
 

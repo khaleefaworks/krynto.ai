@@ -13,8 +13,10 @@ from app.core.database import get_db
 from app.models.conversation_tag import ConversationTag
 from app.models.conversation_note import ConversationNote
 from app.models.conversation import Conversation
+from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.models.user import User
+from app.repos import page_views as page_views_repo
 
 router = APIRouter(prefix="/conversations", tags=["conversation-metadata"])
 
@@ -57,6 +59,19 @@ class ConversationMetadataUpdate(BaseModel):
     visitor_name: str | None = None
     visitor_email: str | None = None
     visitor_phone: str | None = None
+
+
+class PageViewResponse(BaseModel):
+    id: int
+    title: str | None = None
+    url: str
+    referrer: str | None = None
+    device_info: str | None = None
+    browser_info: str | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ==================== Tags Endpoints ====================
@@ -212,6 +227,32 @@ def update_note(
     result.creator_name = current_user.name
     
     return result
+
+
+# ==================== Browsing History Endpoints ====================
+
+
+@router.get("/{conversation_id}/browsing-history", response_model=List[PageViewResponse])
+def get_browsing_history(
+    conversation_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get recent browsing history (page views) for a conversation."""
+    # Verify conversation exists
+    conversation = db.query(Conversation).filter_by(id=conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    try:
+        limit_int = int(limit)
+    except Exception:
+        limit_int = 50
+    limit_int = max(1, min(200, limit_int))
+
+    rows = page_views_repo.list_page_views_for_conversation(db, conversation_id, limit=limit_int)
+    return rows
 
 
 @router.delete("/{conversation_id}/notes/{note_id}")

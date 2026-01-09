@@ -47,6 +47,15 @@ Phase 0 (Hardening):
 Phase 1 (Architecture cleanup):
 - Next up (starting now): centralize sender resolution + message enrichment into a shared helper used by REST + WS paths.
 
+Feature delivery priority note:
+- Dashboard + Widget feature work can proceed now under a single-worker deployment model.
+- Redis (Pub/Sub for multi-worker WebSocket routing) is intentionally deferred until after the feature backlog is complete, unless multi-worker/horizontal scaling becomes a near-term requirement.
+
+Recent feature progress:
+- Smartsupp-like right sidebar: simplified contact/notes plus real Device and Browsing History.
+- Browsing History pipeline: widget emits `page_view` events over WS → backend persists → dashboard renders a timeline.
+- Duplicate protection: widget avoids re-sending the same URL on refresh; backend de-dupes consecutive identical URLs.
+
 ## Guiding Principles
 
 - One source of truth for schema: Alembic migrations only; no runtime DDL changes.
@@ -103,6 +112,10 @@ Concrete refactors:
 ## Phase 2 — Realtime & Presence That Scales (1–2 weeks)
 
 Goal: “Smartsupp-like” reliability and multi-worker readiness.
+
+Scheduling note:
+- This phase is planned after the Dashboard/Widget feature backlog is complete.
+- If you stay single-worker/single-instance, you may defer Redis indefinitely.
 
 Presence:
 - Persist heartbeat to DB (`users.last_heartbeat_at` or a device table `agent_devices`).

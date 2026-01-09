@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.database import SessionLocal
 from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.chat_service import ChatService
+from app.services.agent_service import AgentService
 from app.core.logging import get_logger
 from app.core.config import settings
 import json
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta
 from app.api.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
 from app.repos import messages as messages_repo
+from app.repos import page_views as page_views_repo
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -44,6 +46,7 @@ async def chat_ws(
     registered_conversation_id: int | None = None
 
     orchestrator = ConversationOrchestrator(db)
+    agent_service = AgentService(db)
 
     try:
         # Validate website exists before processing messages
@@ -200,6 +203,138 @@ async def chat_ws(
             data = await websocket.receive_text()
             logger.debug("visitor_message_received", session_id=session_id, data=data)
             payload = json.loads(data)
+
+            message_type = payload.get("type")
+
+            # Page view / browsing history event.
+            # This can arrive even before the first visitor message, so it must NOT create
+            # a conversation (avoid spam inbox). We store by website_id+session_id and
+            # attach to the conversation once it exists.
+            if message_type == "page_view":
+                url = payload.get("url")
+                title = payload.get("title")
+                referrer = payload.get("referrer")
+                device_info = payload.get("device_info")
+                browser_info = payload.get("browser_info")
+
+                try:
+                    url_str = str(url or "").strip()
+                except Exception:
+                    url_str = ""
+                if not url_str:
+                    continue
+                if len(url_str) > 4096:
+                    url_str = url_str[:4096]
+
+                try:
+                    title_str = str(title).strip() if title is not None else None
+                except Exception:
+                    title_str = None
+                if title_str and len(title_str) > 255:
+                    title_str = title_str[:255]
+
+                try:
+                    referrer_str = str(referrer).strip() if referrer is not None else None
+                except Exception:
+                    referrer_str = None
+                if referrer_str and len(referrer_str) > 4096:
+                    referrer_str = referrer_str[:4096]
+
+                try:
+                    device_str = str(device_info).strip() if device_info is not None else None
+                except Exception:
+                    device_str = None
+                if device_str and len(device_str) > 255:
+                    device_str = device_str[:255]
+
+                try:
+                    browser_str = str(browser_info).strip() if browser_info is not None else None
+                except Exception:
+                    browser_str = None
+                if browser_str and len(browser_str) > 255:
+                    browser_str = browser_str[:255]
+
+                conversation_id: int | None = registered_conversation_id
+                conversation = None
+                if conversation_id is None:
+                    try:
+                        conversation = conversations_repo.get_conversation_by_session(
+                            db,
+                            website_id=website_id,
+                            session_id=session_id,
+                        )
+                        if conversation:
+                            conversation_id = conversation.id
+                    except Exception:
+                        conversation = None
+
+                row = page_views_repo.create_page_view(
+                    db,
+                    website_id=website_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    url=url_str,
+                    title=title_str,
+                    referrer=referrer_str,
+                    device_info=device_str,
+                    browser_info=browser_str,
+                )
+
+                # Best-effort: persist device/browser onto the conversation if it already exists.
+                if conversation_id is not None:
+                    if conversation is None:
+                        try:
+                            conversation = conversations_repo.get_conversation_by_id(db, conversation_id)
+                        except Exception:
+                            conversation = None
+
+                if conversation:
+                    changed = False
+                    if device_str and conversation.device_info != device_str:
+                        conversation.device_info = device_str
+                        changed = True
+                    if browser_str and conversation.browser_info != browser_str:
+                        conversation.browser_info = browser_str
+                        changed = True
+                    if changed:
+                        try:
+                            db.commit()
+                        except Exception:
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+
+                # Realtime: notify agents (useful if agent has the chat open).
+                if conversation_id is not None:
+                    try:
+                        event = {
+                            "type": "page_view",
+                            "website_id": website_id,
+                            "conversation_id": conversation_id,
+                            "page_view": {
+                                "id": row.id,
+                                "title": row.title,
+                                "url": row.url,
+                                "referrer": row.referrer,
+                                "device_info": row.device_info,
+                                "browser_info": row.browser_info,
+                                "created_at": row.created_at.isoformat() if row.created_at else None,
+                            },
+                        }
+
+                        if conversation and conversation.assigned_agent_id:
+                            await agent_service.send_to_agent(conversation.assigned_agent_id, event)
+                        else:
+                            await agent_service.broadcast_to_active_agents(
+                                website_id=website_id,
+                                message_data=event,
+                                include_global=False,
+                            )
+                    except Exception:
+                        pass
+
+                continue
 
             user_message = payload.get("message")
             if not user_message:
