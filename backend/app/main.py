@@ -25,6 +25,7 @@ from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
 from app.core.database import engine
 from pathlib import Path
+from app.infra import realtime_bus
 
 # Setup structured logging
 logger = setup_logging()
@@ -63,6 +64,24 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],  # Expose all headers to frontend
 )
+
+
+@app.on_event("startup")
+async def _startup_realtime_bus() -> None:
+    async def _handle_event(event: dict) -> None:
+        # Dispatch to local websocket registries.
+        from app.services.agent_service import AgentService
+        from app.services.chat_service import ChatService
+
+        await AgentService.deliver_bus_event(event)
+        await ChatService.deliver_bus_event(event)
+
+    await realtime_bus.start(_handle_event)
+
+
+@app.on_event("shutdown")
+async def _shutdown_realtime_bus() -> None:
+    await realtime_bus.stop()
 
 app.include_router(health_router)
 app.include_router(auth_router)

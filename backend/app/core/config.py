@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     # SECURITY: must be explicitly set for production.
     SECRET_KEY: str = ""
 
+    # Optional - Redis (Pub/Sub for multi-worker WebSocket routing)
+    REDIS_URL: str = ""
+
     # Public base URL for generating widget loader/snippets (e.g. https://api.example.com)
     # If not set, endpoints will fall back to request.base_url.
     PUBLIC_BASE_URL: Optional[str] = None

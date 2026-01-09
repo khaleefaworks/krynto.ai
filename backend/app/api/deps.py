@@ -120,12 +120,12 @@ def require_agent(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """
-    Require agent access (both FULL_ACCESS and LIMITED_ACCESS allowed).
+    Require agent access.
     Used for agent dashboard and chat handling endpoints.
     
-    Note: Admins (FULL_ACCESS) can also act as agents.
+    Note: Admin roles (SYSTEM_MANAGER/MANAGER) can also act as agents.
     """
-    if current_user.role not in (UserRole.FULL_ACCESS, UserRole.LIMITED_ACCESS):
+    if current_user.role not in (UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Agent access required",

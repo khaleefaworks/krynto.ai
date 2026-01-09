@@ -22,6 +22,9 @@ Set these in the backend environment (systemd unit / supervisor / container env)
 Recommended:
 - `PUBLIC_BASE_URL=https://api.example.com` (used for widget snippet generation)
 
+Optional (recommended if running multiple workers/instances):
+- `REDIS_URL=redis://localhost:6379/0`
+
 Notes:
 - In production, the backend will refuse to start if `SECRET_KEY` is empty or if `CORS_ALLOWED_ORIGINS` is empty.
 - Do **not** include `*` in CORS origins when `allow_credentials=true`.
@@ -84,4 +87,4 @@ Serve `frontend/dist/` via Nginx (or equivalent).
 ## Known Limitations (Current)
 
 - Presence is DB-backed via heartbeat TTL.
-- Message delivery/routing is still in-memory (`AgentService.active_agents`, `ChatService.active_visitors`), so true horizontal scaling requires Redis (Phase 2).
+- WebSocket message delivery/routing supports multi-worker when `REDIS_URL` is set (Pub/Sub event bus). Without `REDIS_URL`, routing is in-memory and single-worker.

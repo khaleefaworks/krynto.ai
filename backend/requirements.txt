@@ -16,3 +16,4 @@ email-validator
 beautifulsoup4
 requests
 slowapi
+redis

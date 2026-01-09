@@ -8,6 +8,7 @@ import time
 
 from app.repos import agent_sessions as agent_sessions_repo
 from app.repos import users as users_repo
+from app.infra import realtime_bus, BusEvent
 
 logger = get_logger(__name__)
 
@@ -117,6 +118,18 @@ class AgentService:
     
     async def send_to_agent(self, agent_id: int, message_data: dict):
         """Send message to specific agent's WebSocket"""
+        # If Redis is enabled, publish and let the subscriber deliver to whichever
+        # worker actually holds the agent's websocket.
+        if realtime_bus.enabled:
+            await realtime_bus.publish(
+                BusEvent(
+                    event_type="agent_direct",
+                    agent_id=int(agent_id),
+                    payload=message_data,
+                )
+            )
+            return
+
         logger.info("send_to_agent_attempt", agent_id=agent_id, message_type=message_data.get("type"))
         sent_count = 0
         for ws_id, agent_info in AgentService.active_agents.items():
@@ -145,6 +158,19 @@ class AgentService:
 
         Returns number of sockets successfully sent.
         """
+        # If Redis is enabled, publish once and let every worker deliver
+        # to its locally connected sockets (prevents cross-worker misses).
+        if realtime_bus.enabled:
+            await realtime_bus.publish(
+                BusEvent(
+                    event_type="agent_broadcast",
+                    website_id=website_id,
+                    include_global=bool(include_global),
+                    payload=message_data,
+                )
+            )
+            return 0
+
         sent_count = 0
 
         for ws_id, agent_info in AgentService.active_agents.items():
@@ -171,6 +197,51 @@ class AgentService:
                 )
 
         return sent_count
+
+    @classmethod
+    async def deliver_bus_event(cls, event: dict) -> None:
+        """Deliver a Redis bus event to locally connected agent sockets."""
+
+        event_type = event.get("event_type")
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            return
+
+        if event_type == "agent_direct":
+            try:
+                target_agent_id = int(event.get("agent_id"))
+            except Exception:
+                return
+
+            for agent_info in cls.active_agents.values():
+                if int(agent_info.get("agent_id")) != target_agent_id:
+                    continue
+                try:
+                    await agent_info["websocket"].send_json(payload)
+                except Exception:
+                    # Keep behavior consistent with existing direct send:
+                    # log only at the sender side.
+                    continue
+            return
+
+        if event_type == "agent_broadcast":
+            website_id = event.get("website_id")
+            include_global = bool(event.get("include_global", True))
+
+            for agent_info in cls.active_agents.values():
+                ws_website_id = agent_info.get("website_id")
+                should_send = False
+                if include_global and ws_website_id == 0:
+                    should_send = True
+                if website_id is not None and ws_website_id == website_id:
+                    should_send = True
+                if not should_send:
+                    continue
+                try:
+                    await agent_info["websocket"].send_json(payload)
+                except Exception:
+                    continue
+            return
     
     async def notify_agent_assignment(self, agent_id: int, conversation_id: int):
         """Notify agent of new chat assignment"""

@@ -1,6 +1,7 @@
 from typing import Dict
 
 from app.core.logging import get_logger
+from app.infra import realtime_bus, BusEvent
 
 logger = get_logger(__name__)
 
@@ -19,6 +20,18 @@ class ChatService:
     @staticmethod
     async def send_to_visitor(conversation_id: int, message_data: dict):
         """Send message to visitor's WebSocket if they're connected"""
+        # If Redis is enabled, publish and let the subscriber deliver to whichever
+        # worker actually holds the visitor websocket.
+        if realtime_bus.enabled:
+            await realtime_bus.publish(
+                BusEvent(
+                    event_type="visitor_direct",
+                    conversation_id=int(conversation_id),
+                    payload=message_data,
+                )
+            )
+            return
+
         if conversation_id in ChatService.active_visitors:
             websocket = ChatService.active_visitors[conversation_id]
             try:
@@ -33,6 +46,34 @@ class ChatService:
                     pass
         else:
             logger.warning("visitor_not_connected", conversation_id=conversation_id)
+
+    @classmethod
+    async def deliver_bus_event(cls, event: dict) -> None:
+        """Deliver a Redis bus event to a locally connected visitor socket."""
+
+        if event.get("event_type") != "visitor_direct":
+            return
+
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            return
+
+        try:
+            conversation_id = int(event.get("conversation_id"))
+        except Exception:
+            return
+
+        websocket = cls.active_visitors.get(conversation_id)
+        if not websocket:
+            return
+
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            try:
+                cls.unregister_visitor(conversation_id)
+            except Exception:
+                pass
     
     @staticmethod
     def register_visitor(conversation_id: int, websocket):
