@@ -75,7 +75,9 @@ AI ChatAssist is a **hybrid support system**:
 ❌ SaaS onboarding
 ❌ Multi-tenant accounts
 ❌ CRM integrations
-❌ Mobile apps
+❌ Native mobile apps (iOS/Android) for MVP
+
+Note: PWA support for the Agent Dashboard is planned for production readiness to improve agent availability on mobile/desktop. See `docs/PWA_PLAN_OF_ACTION.md`.
 
 ---
 
@@ -178,11 +180,11 @@ Each website is **fully isolated**:
 
 ### 7.4 Infrastructure
 
-| Area          | Tech           |
-| ------------- | -------------- |
-| Containers    | Docker         |
-| Orchestration | docker-compose |
-| Proxy         | Nginx          |
+| Area          | Tech |
+| ------------- | ---- |
+| Containers    | Docker (optional) / No-Docker (optional) — deployment decision pending |
+| Process Mgmt  | If no Docker: systemd / supervisor (pick one) |
+| Proxy         | Nginx (recommended) |
 
 ---
 
@@ -325,7 +327,9 @@ POST   /chats/{id}/message
 
 ```
 /ws/chat/{website_id}/{session_id}
-/ws/agent/{website_id}/{agent_id}
+/ws/agent/{website_id}?token=<JWT>
+# (Optional) global notifications use website_id = 0:
+/ws/agent/0?token=<JWT>
 ```
 
 ---
@@ -432,10 +436,18 @@ agent_sessions
 * Performance monitoring
 
 #### 6.7 Deployment
-* Dockerize backend
-* Dockerize agent UI
-* Nginx reverse proxy
-* docker-compose setup
+* Deployment decision pending:
+  * Option A (Docker): Dockerize backend + agent UI, use Nginx reverse proxy, compose for local-prod parity
+  * Option B (No Docker): systemd/supervisor for backend + static hosting for frontend build, Nginx reverse proxy
+
+#### 6.8 Agent Availability (PWA / Mobile)
+Goal: improve agent “online” reliability and responsiveness across desktop + mobile.
+
+Planned deliverables (implementation details tracked in `docs/PWA_PLAN_OF_ACTION.md`):
+* Make the Agent Dashboard installable as a PWA (manifest + service worker).
+* Presence should be heartbeat-based with a TTL/grace window (supports brief disconnects and multi-device).
+* Add Web Push notifications for new visitor messages when the dashboard is backgrounded.
+* Ensure the dashboard is usable on mobile (responsive layout + deep links to conversations).
 
 ---
 

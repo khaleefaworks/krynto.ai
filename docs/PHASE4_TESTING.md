@@ -29,7 +29,7 @@
 1. Navigate to `http://localhost:5173`
 2. Should redirect to `/login`
 3. Enter email: `agent@example.com`
-4. Enter password: `password123` (any 6+ chars for mock)
+4. Enter password: `password123`
 5. Click "Sign In"
 
 **Expected:**
@@ -74,6 +74,7 @@
 1. Agent clicks "Join Chat" on conversation
 2. POST `/chats/{id}/join` triggered
 3. WebSocket connects to `/ws/agent/{website_id}/{agent_id}`
+3. WebSocket connects to `/ws/agent/{website_id}?token=<JWT>`
 4. Chat view opens with message history
 
 **Expected:**

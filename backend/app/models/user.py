@@ -46,6 +46,9 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Heartbeat (presence)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
     def is_admin(self) -> bool:
         """Check if user has admin privileges (system manager or manager)"""
         return self.role in [UserRole.SYSTEM_MANAGER, UserRole.MANAGER]

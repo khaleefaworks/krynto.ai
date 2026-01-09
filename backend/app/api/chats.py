@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from app.api.message_presenter import serialize_message
+from app.repos import conversations as conversations_repo
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -48,7 +49,7 @@ async def join_chat(
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
 
-    conversation = db.query(Conversation).filter_by(id=chat_id).first()
+    conversation = conversations_repo.get_conversation_by_id(db, chat_id)
 
     return {
         "success": True,
@@ -65,65 +66,8 @@ def get_active_chats(
     db: Session = Depends(get_db)
 ):
     """Get list of active chats available for agent pickup"""
-    from app.models.conversation import Conversation, ConversationStatus
-    from app.models.message import Message
-    from app.models.website import Website
-
     # Match AgentService.get_active_chats() base visibility rules (without agent_id filter).
-
-    # Message counts per conversation
-    msg_count_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            sa.func.count(Message.id).label("message_count"),
-        )
-        .group_by(Message.conversation_id)
-        .subquery()
-    )
-
-    # Last message per conversation (window function)
-    msg_ranked = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            Message.content.label("content"),
-            sa.func.row_number()
-            .over(
-                partition_by=Message.conversation_id,
-                order_by=(Message.created_at.desc(), Message.id.desc()),
-            )
-            .label("rn"),
-        )
-        .subquery()
-    )
-    last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content)
-        .filter(msg_ranked.c.rn == 1)
-        .subquery()
-    )
-
-    rows_query = (
-        db.query(
-            Conversation,
-            Website.name.label("website_name"),
-            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
-            last_msg_subq.c.content.label("last_message"),
-        )
-        .outerjoin(Website, Website.id == Conversation.website_id)
-        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
-        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
-        .filter(Conversation.status == ConversationStatus.OPEN)
-    )
-
-    if website_id:
-        rows_query = rows_query.filter(Conversation.website_id == website_id)
-
-    # Stable ordering prevents inbox from shuffling between refreshes.
-    try:
-        rows_query = rows_query.order_by(Conversation.updated_at.desc())
-    except Exception:
-        rows_query = rows_query.order_by(Conversation.created_at.desc())
-
-    rows = rows_query.all()
+    rows = conversations_repo.active_conversations_with_counts_and_last_message(db, website_id=website_id)
 
     result = []
     for conv, website_name, message_count, last_message in rows:
@@ -158,8 +102,7 @@ def get_chat_messages(
     
     if not messages:
         # Check if conversation exists
-        from app.models.conversation import Conversation
-        conv = db.query(Conversation).filter_by(id=chat_id).first()
+        conv = conversations_repo.get_conversation_by_id(db, chat_id)
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
         # Return empty array if conversation exists but no messages
@@ -180,65 +123,12 @@ def get_resolved_conversations(
     db: Session = Depends(get_db)
 ):
     """Get resolved conversation history with filters"""
-    from app.models.conversation import Conversation, ConversationStatus
-    from app.models.message import Message
-    from app.models.website import Website
-
-    # Message counts per conversation
-    msg_count_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            sa.func.count(Message.id).label("message_count"),
-        )
-        .group_by(Message.conversation_id)
-        .subquery()
+    rows = conversations_repo.resolved_conversations_with_counts_and_last_message(
+        db,
+        website_id=website_id,
+        agent_id=agent_id,
+        limit=limit,
     )
-
-    # Last message per conversation (window function)
-    msg_ranked = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            Message.content.label("content"),
-            sa.func.row_number()
-            .over(
-                partition_by=Message.conversation_id,
-                order_by=(Message.created_at.desc(), Message.id.desc()),
-            )
-            .label("rn"),
-        )
-        .subquery()
-    )
-    last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content)
-        .filter(msg_ranked.c.rn == 1)
-        .subquery()
-    )
-
-    rows_query = (
-        db.query(
-            Conversation,
-            Website.name.label("website_name"),
-            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
-            last_msg_subq.c.content.label("last_message"),
-        )
-        .outerjoin(Website, Website.id == Conversation.website_id)
-        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
-        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
-        .filter(Conversation.status == ConversationStatus.RESOLVED)
-    )
-
-    if website_id:
-        rows_query = rows_query.filter(Conversation.website_id == website_id)
-
-    if agent_id:
-        rows_query = rows_query.filter(Conversation.assigned_agent_id == agent_id)
-
-    try:
-        rows_query = rows_query.order_by(Conversation.updated_at.desc())
-    except Exception:
-        rows_query = rows_query.order_by(Conversation.created_at.desc())
-
-    rows = rows_query.limit(limit).all()
 
     result = []
     for conv, website_name, message_count, last_message in rows:

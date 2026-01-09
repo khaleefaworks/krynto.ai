@@ -10,7 +10,6 @@ CRITICAL: This must be used by:
 - Offline message flow (to know when to queue messages)
 """
 
-from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole
 from app.services.agent_resolver import is_agent_eligible
@@ -59,7 +58,8 @@ def is_website_online(website_id: int) -> bool:
         
         # Get set of currently connected user IDs from active WebSocket connections
         from app.services.agent_service import AgentService
-        connected_user_ids = {info["agent_id"] for info in AgentService.active_agents.values()}
+
+        connected_user_ids = AgentService.connected_agent_ids()
         
         # Check if any assigned agent is eligible
         for agent in assigned_agents:
@@ -70,79 +70,3 @@ def is_website_online(website_id: int) -> bool:
         
     finally:
         db.close()
-
-
-def get_online_websites() -> list[int]:
-    """
-    Get list of all website IDs that are currently online.
-    
-    Returns:
-        List of website IDs with at least one eligible agent
-        
-    Note: This can be expensive. Use sparingly or cache results.
-    """
-    db = SessionLocal()
-    
-    try:
-        # Get all unique website IDs from assignments
-        from app.models.website import Website
-        websites = db.query(Website.id).all()
-        
-        online_websites = []
-        for (website_id,) in websites:
-            if is_website_online(website_id):
-                online_websites.append(website_id)
-        
-        return online_websites
-        
-    finally:
-        db.close()
-
-
-def get_eligible_agents_for_website(website_id: int, db: Session = None) -> list[User]:
-    """
-    Get all currently eligible agents for a website.
-    
-    Args:
-        website_id: ID of the website
-        db: Database session (optional, creates new if not provided)
-        
-    Returns:
-        List of User objects that are eligible to handle chats
-        
-    Usage:
-        eligible = get_eligible_agents_for_website(website_id)
-        if eligible:
-            agent = random.choice(eligible)  # Simple round-robin
-            assign_chat_to_agent(chat, agent)
-    """
-    close_db = False
-    if db is None:
-        db = SessionLocal()
-        close_db = True
-    
-    try:
-        assigned_agents = (
-            db.query(User)
-            .filter(
-                User.is_active == True,  # noqa: E712
-                User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
-            )
-            .all()
-        )
-        
-        # Get set of currently connected user IDs from active WebSocket connections
-        from app.services.agent_service import AgentService
-        connected_user_ids = {info["agent_id"] for info in AgentService.active_agents.values()}
-        
-        # Filter to only eligible agents
-        eligible_agents = [
-            agent for agent in assigned_agents
-            if is_agent_eligible(agent, agent.id in connected_user_ids)
-        ]
-        
-        return eligible_agents
-        
-    finally:
-        if close_db:
-            db.close()

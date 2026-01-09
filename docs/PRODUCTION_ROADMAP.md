@@ -1,6 +1,6 @@
 # Production Roadmap (MVP → Production)
 
-Date: 2026-01-08
+Date: 2026-01-09
 
 This document captures the agreed plan to move AI ChatAssist from an MVP to a production-ready system.
 
@@ -14,8 +14,8 @@ Strengths:
 Known MVP shortcuts / risks:
 - Realtime state relies heavily on in-memory maps (presence, active agents, active visitors). This breaks with multi-worker/multi-instance deployments and resets on server restart.
 - Production configuration is not locked down (e.g., CORS allows `*` in backend).
-- Hardcoded localhost assumptions exist in widget and frontend WS paths.
-- Alembic history has been fragile (missing revisions previously) and a runtime schema guard exists (ALTER TABLE at startup) — this is not acceptable for production.
+- Frontend and widget have development defaults (e.g., localhost base URLs), but support env/script-derived base URLs for production.
+- Alembic history has been fragile (missing revisions previously). Production should rely on migrations only; avoid any runtime DDL.
 - Duplicate logic exists across endpoints (e.g., sender resolution, message payload enrichment).
 - WebSocket topology includes both global and per-website agent sockets, increasing duplication risk.
 - Limited automated test coverage / CI gates.
@@ -23,8 +23,8 @@ Known MVP shortcuts / risks:
 Additional gaps found during repo scan (actionable):
 - JWT reset invalidation is intended but likely ineffective: token `iat` is checked in WS/HTTP auth, but token issuance does not currently include `iat`.
 - CORS currently includes `*` while `allow_credentials=true` (unsafe and browser-incompatible). Must be env-driven.
-- Widget loader/snippet and dashboard sockets have hardcoded `localhost` base URLs; widget loader currently derives protocol from the *visitor site* (via `window.location`) which is incorrect for production.
-- No Dockerfile / docker-compose / CI workflows detected; Python dependencies are not pinned.
+- Widget base URL derivation must be based on the widget script origin (or explicit data attributes), not the visitor site origin.
+- CI exists in `.github/workflows/ci.yml` (backend compile/tests + frontend lint/build) and backend dependencies are constrained via `backend/requirements.lock.txt`.
 - Frontend dependency versions differ from PRD assumptions (e.g., React version drift). Treat docs as descriptive, not authoritative.
 
 ## Status (as of 2026-01-08)
@@ -34,12 +34,12 @@ Phase 0 (Hardening):
   - Env-driven CORS/origins (no wildcard + credentials).
   - JWT issuance includes `iat` (supports reset invalidation logic).
   - Runtime DDL/schema guards removed; deploy expects migrations.
-  - Hardcoded `localhost` removed from widget/frontend bases (env-driven + backend public base).
+  - Widget/frontend support non-localhost bases (env-driven + script-derived base); dev fallbacks may still point to localhost.
   - Upload validation hardened (type/size/content checks; block risky types).
   - Alembic history stabilized enough for `alembic upgrade head` on mixed/dirty DBs (idempotent migrations + merge head).
   - CI added (backend tests + frontend lint/build) and backend dependency constraints/lock strategy.
-- Deferred (explicit constraint):
-  - Dockerfile / docker-compose local-prod parity (user requested no Docker files).
+- Deployment decision (open):
+  - Docker vs no-Docker packaging is not yet finalized.
 - Still pending:
   - Document a single “production run command” for the backend (gunicorn/uvicorn guidance + env checklist).
 
@@ -78,7 +78,8 @@ Goal: eliminate unsafe defaults and deployment foot-guns.
 
 4) Operational basics
 - Provide production server run command (uvicorn/gunicorn settings).
-- Add a docker-compose (or equivalent) for local-prod parity.
+- If Docker is chosen: add docker-compose for local-prod parity.
+- If no Docker is chosen: add systemd/supervisor + Nginx guidance for local-prod parity.
 - Add CI minimum gates: backend tests + frontend lint/build.
 - Pin backend Python dependencies (lock strategy).
 
@@ -106,10 +107,24 @@ Presence:
 - Persist heartbeat to DB (`users.last_heartbeat_at` or a device table `agent_devices`).
 - Compute presence from DB heartbeat TTL + grace period.
 
+Current implementation note:
+- Heartbeat-based presence is now designed to be DB-backed (survives restarts, supports multi-worker presence).
+- Message delivery/routing is still in-memory (`AgentService.active_agents`, `ChatService.active_visitors`) and therefore single-worker only until Redis Pub/Sub (or similar) is introduced.
+
 WebSocket scaling:
 - Introduce Redis Pub/Sub (or similar) as the event bus so any worker can deliver events.
 - Consider collapsing agent sockets to a single authenticated connection to avoid duplicate delivery.
 - Ensure visitor socket routing works across instances.
+
+## Phase 2.5 — Agent Availability (PWA / Mobile) (3–7 days)
+
+Goal: increase the chance an agent is reachable and reduce “false offline” when a browser tab closes.
+
+Scope (see `docs/PWA_PLAN_OF_ACTION.md` for implementation notes):
+- Make the Agent Dashboard installable as a PWA (complete manifest + service worker).
+- Presence should be based on heartbeat TTL + grace window (multi-device friendly).
+- Add Web Push notifications (VAPID) for new visitor messages when the app is backgrounded.
+- Ensure dashboard UX is practical on mobile (responsive layout + deep link to conversation).
 
 ## Phase 3 — Observability & Operability (3–5 days)
 

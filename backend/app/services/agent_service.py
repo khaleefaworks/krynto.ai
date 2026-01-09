@@ -1,11 +1,13 @@
 from sqlalchemy.orm import Session
-from app.models.agent_session import AgentSession
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
 from app.core.logging import get_logger
 from typing import Dict, Optional
 import uuid
 import time
+
+from app.repos import agent_sessions as agent_sessions_repo
+from app.repos import users as users_repo
 
 logger = get_logger(__name__)
 
@@ -20,6 +22,28 @@ class AgentService:
 
     # Presence TTL: agent considered online if heartbeat within this window.
     heartbeat_ttl_seconds: int = 75
+
+    @classmethod
+    def connected_agent_ids(cls) -> set[int]:
+        """Agent IDs that currently have an active websocket connection."""
+        ids: set[int] = set()
+        for info in cls.active_agents.values():
+            try:
+                agent_id = info.get("agent_id")
+                if agent_id is not None:
+                    ids.add(int(agent_id))
+            except Exception:
+                continue
+        return ids
+
+    @classmethod
+    def recently_active_agent_ids(cls) -> set[int]:
+        """Agent IDs considered online by heartbeat TTL."""
+        return {
+            int(agent_id)
+            for agent_id in cls.last_heartbeat.keys()
+            if cls.is_recently_connected(agent_id)
+        }
     
     def __init__(self, db: Session):
         self.db = db
@@ -41,6 +65,16 @@ class AgentService:
 
         # Mark presence immediately on connect.
         AgentService.mark_heartbeat(agent_id)
+
+        # Persist heartbeat for scale-safe presence.
+        try:
+            users_repo.touch_last_heartbeat_at(self.db, user_id=agent_id)
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
         
         # Store WebSocket connection
         AgentService.active_agents[websocket_id] = {
@@ -50,14 +84,13 @@ class AgentService:
         }
         
         # Create session record
-        session = AgentSession(
+        agent_sessions_repo.create_agent_session(
+            self.db,
             agent_id=agent_id,
             website_id=website_id,
             websocket_id=websocket_id,
-            is_online=True
+            is_online=True,
         )
-        self.db.add(session)
-        self.db.commit()
         
         return websocket_id
     
@@ -67,10 +100,7 @@ class AgentService:
             del AgentService.active_agents[websocket_id]
         
         # Mark session offline
-        session = self.db.query(AgentSession).filter_by(websocket_id=websocket_id).first()
-        if session:
-            session.is_online = False
-            self.db.commit()
+        agent_sessions_repo.mark_agent_session_offline(self.db, websocket_id)
     
     def assign_conversation_to_agent(self, conversation_id: int, agent_id: int):
         """Handoff conversation to agent"""

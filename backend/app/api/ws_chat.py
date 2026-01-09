@@ -6,11 +6,12 @@ from app.core.logging import get_logger
 from app.core.config import settings
 import json
 import time
-import traceback
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 from app.api.message_presenter import serialize_message
+from app.repos import conversations as conversations_repo
+from app.repos import messages as messages_repo
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -40,6 +41,8 @@ async def chat_ws(
 
     db = SessionLocal()
 
+    registered_conversation_id: int | None = None
+
     orchestrator = ConversationOrchestrator(db)
 
     try:
@@ -62,27 +65,20 @@ async def chat_ws(
         # We only create the conversation on the first visitor message.
         conversation = None
         try:
-            from app.models.conversation import Conversation
-            conversation = (
-                db.query(Conversation)
-                .filter_by(session_id=session_id, website_id=website_id)
-                .first()
+            conversation = conversations_repo.get_conversation_by_session(
+                db,
+                website_id=website_id,
+                session_id=session_id,
             )
         except Exception:
             conversation = None
 
         if conversation:
             ChatService.register_visitor(conversation.id, websocket)
+            registered_conversation_id = conversation.id
 
             try:
-                from app.models.message import Message
-
-                messages = (
-                    db.query(Message)
-                    .filter_by(conversation_id=conversation.id)
-                    .order_by(Message.created_at)
-                    .all()
-                )
+                messages = messages_repo.list_messages_for_conversation(db, conversation.id)
 
                 history_messages = []
                 for msg in messages:
@@ -147,13 +143,7 @@ async def chat_ws(
                 db.commit()
 
             if should_send and conversation:
-                last_welcome = (
-                    db.query(Message)
-                    .filter_by(conversation_id=conversation.id)
-                    .filter(Message.event_type == "automation_welcome")
-                    .order_by(Message.created_at.desc())
-                    .first()
-                )
+                last_welcome = messages_repo.get_last_welcome_message(db, conversation.id)
 
                 if last_welcome and last_welcome.created_at:
                     should_send = (now - last_welcome.created_at) > cooldown
@@ -174,6 +164,7 @@ async def chat_ws(
                 if not conversation:
                     conversation = service.get_or_create_conversation(website_id=website_id, session_id=session_id)
                     ChatService.register_visitor(conversation.id, websocket)
+                    registered_conversation_id = conversation.id
 
                 # Ensure last_seen_at is set for newly created conversations.
                 if not conversation.last_seen_at:
@@ -188,6 +179,10 @@ async def chat_ws(
                 )
                 await websocket.send_json({"type": "ai", "message": str(welcome_message).strip()})
         except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             logger.warning("welcome_automation_failed", website_id=website_id, session_id=session_id, error=str(e))
     except Exception as e:
         logger.error("chat_service_init_error", website_id=website_id, session_id=session_id, error=str(e), exc_info=True)
@@ -241,6 +236,21 @@ async def chat_ws(
                 visitor_ws=websocket,
             )
 
+            # Conversation may have been created on first message; register for cleanup.
+            if registered_conversation_id is None:
+                try:
+                    from app.models.conversation import Conversation
+
+                    conv = (
+                        db.query(Conversation)
+                        .filter_by(session_id=session_id, website_id=website_id)
+                        .first()
+                    )
+                    if conv:
+                        registered_conversation_id = conv.id
+                except Exception:
+                    pass
+
             # Store visitor contact info if provided (conversation exists now after first message)
             if visitor_name or visitor_email:
                 try:
@@ -270,17 +280,6 @@ async def chat_ws(
 
     except WebSocketDisconnect:
         logger.info("visitor_websocket_disconnected", session_id=session_id)
-        # Clean up visitor mapping and rate limit tracking
-        try:
-            from app.models.conversation import Conversation
-            conv = db.query(Conversation).filter_by(session_id=session_id, website_id=website_id).first()
-            if conv:
-                ChatService.unregister_visitor(conv.id)
-        except Exception:
-            pass
-
-        if session_id in message_timestamps:
-            del message_timestamps[session_id]
     except Exception as e:
         logger.error("websocket_handler_error", session_id=session_id, error=str(e), exc_info=True)
         try:
@@ -288,4 +287,16 @@ async def chat_ws(
         except:
             pass
     finally:
+        # Always clean up visitor mapping + rate limit tracking.
+        try:
+            if registered_conversation_id is not None:
+                ChatService.unregister_visitor(registered_conversation_id)
+        except Exception:
+            pass
+
+        try:
+            if session_id in message_timestamps:
+                del message_timestamps[session_id]
+        except Exception:
+            pass
         db.close()

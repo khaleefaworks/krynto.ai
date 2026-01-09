@@ -47,7 +47,7 @@ app.add_middleware(LoggingMiddleware)
 # Configure CORS - Allow all origins in development for easier debugging
 # In production, restrict to specific domains
 cors_origins = settings.cors_allow_origins()
-if settings.ENV == "production":
+if settings.is_production():
     if not cors_origins:
         raise RuntimeError("CORS_ALLOWED_ORIGINS (or legacy CORS_ORIGINS) must be set in production")
     if any(o.strip() == "*" for o in cors_origins):

@@ -6,6 +6,7 @@ from app.core.logging import get_logger
 from app.models.user import User, UserRole
 from app.services.agent_resolver import is_agent_eligible
 from app.services.agent_service import AgentService
+from app.repos import users as users_repo
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -15,10 +16,14 @@ def _compute_presence(db: Session, website_id: int) -> dict:
     """Compute website presence.
 
     Current product decision: with agent-website assignment removed from UI, any
-    eligible agent (active + available + connected) is treated as available for
+    eligible agent (active + available + recently active) is treated as available for
     any website.
     """
-    connected_user_ids = {u_id for u_id in AgentService.last_heartbeat.keys() if AgentService.is_recently_connected(u_id)}
+    # Presence is heartbeat-based so it can scale beyond a single worker.
+    connected_user_ids = users_repo.recently_heartbeat_user_ids(
+        db,
+        ttl_seconds=AgentService.heartbeat_ttl_seconds,
+    )
 
     candidates = (
         db.query(User)

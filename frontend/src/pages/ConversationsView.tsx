@@ -200,30 +200,42 @@ export default function ConversationsView() {
             // Only process messages for the current chat
             if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
                 // Visitor sent a message - add to UI
-                console.log('👤 Adding visitor message to UI:', data.message)
-                const newMessage = {
-                    id: Date.now(),
-                    conversation_id: selectedChat,
-                    sender_type: 'visitor' as const,
-                    sender: 'visitor' as const,
-                    content: data.message,
-                    created_at: new Date().toISOString()
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    console.log('👤 Adding visitor message DTO to UI')
+                    addMessage(dto)
+                } else {
+                    console.log('👤 Adding visitor message to UI:', data.message)
+                    const newMessage = {
+                        id: Date.now(),
+                        conversation_id: selectedChat,
+                        sender_type: 'visitor' as const,
+                        sender: 'visitor' as const,
+                        content: data.message,
+                        created_at: new Date().toISOString()
+                    }
+                    addMessage(newMessage)
                 }
-                addMessage(newMessage)
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 // Our message was confirmed - add to UI
-                console.log('✅ Agent message confirmed, adding to UI:', data.content)
-                const confirmedMessage = {
-                    id: Date.now(),
-                    conversation_id: selectedChat,
-                    sender_type: 'agent' as const,
-                    sender: 'agent' as const,
-                    content: data.content,
-                    created_at: new Date().toISOString(),
-                    sender_name: (user as any)?.name ?? (user as any)?.email ?? null,
-                    sender_avatar_url: (user as any)?.avatar_url ?? null,
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    console.log('✅ Agent message confirmed (DTO)')
+                    addMessage(dto)
+                } else {
+                    console.log('✅ Agent message confirmed, adding to UI:', data.content)
+                    const confirmedMessage = {
+                        id: Date.now(),
+                        conversation_id: selectedChat,
+                        sender_type: 'agent' as const,
+                        sender: 'agent' as const,
+                        content: data.content,
+                        created_at: new Date().toISOString(),
+                        sender_name: (user as any)?.name ?? (user as any)?.email ?? null,
+                        sender_avatar_url: (user as any)?.avatar_url ?? null,
+                    }
+                    addMessage(confirmedMessage)
                 }
-                addMessage(confirmedMessage)
             } else if (data.type === 'new_conversation') {
                 // New conversation arrived - refresh chat list
                 console.log('📨 New conversation arrived, refreshing...')

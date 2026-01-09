@@ -6,15 +6,12 @@
 
 **Problem:** `ChatService` has duplicate/redundant logic that's ALREADY in `ConversationOrchestrator`
 
-**Evidence:**
-- `ChatService.__init__()` creates conversation (line 14-23)
-- `ChatService.handle_visitor_message()` handles messages (line 32-82)
-- `ConversationOrchestrator.handle_visitor_message()` ALSO handles messages (line 44-95)
+**Evidence (historical):**
+- Older versions had ChatService orchestration logic.
+- Current implementation uses `ConversationOrchestrator` as the master; `ChatService` is only a websocket registry + send helper.
 
-**Impact:** 
-- `ChatService` is NOT USED anywhere in ws_chat.py
-- Only `ConversationOrchestrator` is called
-- `ChatService` is dead code for message handling
+**Impact:**
+- `ChatService` should remain a small helper only (registry + send methods). Avoid putting orchestration logic here.
 
 ---
 
@@ -33,14 +30,16 @@
 - **Used By:** Visitor message routing
 
 #### System 3: `connection_manager._connected_users` (Set)
-- **Location:** `backend/app/services/connection_manager.py:11`
-- **Stores:** `{user_id, user_id, ...}`
-- **Used By:** NOTHING - completely unused!
+- **Status:** Removed during cleanup (file was unused).
 
 **Impact:**
 - Confusion about source of truth
 - `connection_manager.py` is COMPLETELY UNUSED - can be deleted
 - Risk of sync issues between systems
+
+Current state note:
+- Presence is now intended to be heartbeat-based and DB-backed (`users.last_heartbeat_at`) so it can scale beyond a single worker.
+- Message routing is still in-memory (active agent/visitor websockets) and therefore requires Redis Pub/Sub (or similar) for multi-worker delivery.
 
 ---
 
@@ -60,9 +59,9 @@ VISITOR → ws_chat.py → ConversationOrchestrator.handle_visitor_message()
 **Issues:**
 - `ChatService` class exists but only used for:
   1. Static dict `active_visitors`  
-  2. Static method `get_by_conversation_id()`
-  3. Method `send_to_visitor()`
-- The REST of ChatService (30-82 lines) is NEVER CALLED
+    2. Method `send_to_visitor()`
+
+Note: Legacy `get_by_conversation_id()` was removed during cleanup; `ChatService` is intentionally a thin registry + send helper.
 
 ---
 
@@ -112,13 +111,10 @@ VISITOR → ws_chat.py → ConversationOrchestrator.handle_visitor_message()
 
 ---
 
-### **DELETE THESE FILES:** 🗑️
+### **DELETE THESE FILES (if present):** 🗑️
 
 1. ❌ `backend/app/services/connection_manager.py` - **COMPLETELY UNUSED**
-   - Not imported anywhere
-   - `_connected_users` Set never queried
-   - Mark/unmark functions called but data never used
-   - **SAFE TO DELETE**
+    - If it exists in your working tree, it is safe to delete.
 
 2. ❌ `backend/app/services/website_resolver.py` - **CHECK IF USED**
    - May contain unused eligibility checks
@@ -159,7 +155,7 @@ class ChatService:
         ChatService.active_visitors.pop(conversation_id, None)
 ```
 
-**Delete:** Lines 14-82 (constructor, handle_visitor_message, get_by_conversation_id)
+**Delete:** Any orchestration logic. Keep only registry + send/unregister helpers.
 
 ### **PRIORITY 3: Fix Frontend Handler Cleanup**
 
@@ -183,11 +179,7 @@ Keep only `AgentService.active_agents` - it's working fine.
 
 **Symptom:** Agent sends message but visitor doesn't receive
 
-**Root Cause Analysis:**
-```python
-# conversation_orchestrator.py line 208
-chat_service = ChatService.get_by_conversation_id(self.db, conversation_id)
-```
+**Note:** This section is historical; `ChatService.get_by_conversation_id()` no longer exists.
 
 **Problem:** `get_by_conversation_id()` creates a NEW ChatService instance WITHOUT the websocket!
 

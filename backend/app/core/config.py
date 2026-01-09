@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # Agent inactivity timeout (seconds)
     AGENT_INACTIVITY_TIMEOUT_SECONDS: int = 15 * 60  # 15 minutes
 
+    def is_production(self) -> bool:
+        env = (self.ENV or "").strip().lower()
+        return env in {"production", "prod"} or env.startswith("prod")
+
     def cors_allow_origins(self) -> List[str]:
         raw = (self.CORS_ALLOWED_ORIGINS or "").strip()
         if not raw:
@@ -37,8 +41,10 @@ class Settings(BaseSettings):
         if raw:
             return [o.strip() for o in raw.split(",") if o.strip()]
 
-        # Reasonable dev defaults (no wildcard).
-        if self.ENV == "development":
+        # Reasonable non-production defaults (no wildcard).
+        # Note: treat any non-production ENV as development-like for CORS,
+        # otherwise unexpected values (e.g. "dev", "staging") would return [].
+        if not self.is_production():
             return [
                 "http://localhost:5173",
                 "http://localhost:3000",

@@ -165,7 +165,7 @@ The widget automatically fetches per-website configuration from the backend:
 
 ### Session ID Generation
 - Generates UUID v4 session ID on first visit
-- Stored in `localStorage` as `ai_chatassist_session_{websiteId}_id`
+- Stored in `localStorage` as `ai_chatassist_session_id_{websiteId}`
 - Reuses same session across:
   - Page reloads
   - Browser tabs (same domain)
@@ -173,8 +173,8 @@ The widget automatically fetches per-website configuration from the backend:
 - New session only created when localStorage is cleared
 
 ### WebSocket Connection
-- Connects to `/ws/chat/{website_id}?session_id={session_id}`
-- Automatic reconnection on disconnect (exponential backoff)
+- Connects to `/ws/chat/{website_id}/{session_id}`
+- Automatic reconnection on disconnect
 - Connection status indicator in UI
 - Maintains message queue during disconnections
 

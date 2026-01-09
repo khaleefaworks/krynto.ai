@@ -7,9 +7,11 @@ from app.core.ws_auth import authenticate_websocket, extract_token_from_query
 from app.models.user import UserRole
 from app.models.user import User
 import json
-import traceback
 
 from app.api.message_presenter import serialize_message
+from app.repos import messages as messages_repo
+from app.repos import users as users_repo
+from datetime import datetime
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -25,6 +27,7 @@ async def agent_ws(
     agent_id = None
     websocket_id = None
     agent_service = None
+    last_db_heartbeat_at: datetime | None = None
     
     try:
         # Authenticate WebSocket connection - agent_id comes from JWT token
@@ -51,6 +54,18 @@ async def agent_ws(
         # Register agent connection
         websocket_id = agent_service.register_agent(agent_id, website_id, websocket)
         logger.info("agent_registered", agent_id=agent_id, websocket_id=websocket_id, website_id=website_id)
+
+        # Ensure DB heartbeat is set on connect (in addition to in-memory heartbeat).
+        try:
+            now = datetime.utcnow()
+            users_repo.touch_last_heartbeat_at(db, user_id=agent_id, now=now)
+            db.commit()
+            last_db_heartbeat_at = now
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         
         # Send confirmation
         await websocket.send_json({
@@ -71,6 +86,19 @@ async def agent_ws(
                 AgentService.mark_heartbeat(agent_id)
             except Exception:
                 pass
+
+            # Persist heartbeat occasionally (avoid committing every message).
+            try:
+                now = datetime.utcnow()
+                if (last_db_heartbeat_at is None) or ((now - last_db_heartbeat_at).total_seconds() >= 10):
+                    users_repo.touch_last_heartbeat_at(db, user_id=agent_id, now=now)
+                    db.commit()
+                    last_db_heartbeat_at = now
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             
             message_type = payload.get("type")
 
@@ -105,7 +133,10 @@ async def agent_ws(
                     {
                         "type": "joined",
                         "conversation_id": conversation_id,
+                        # Backwards-compatible: frontend expects `history`.
                         "history": history,
+                        # Canonical alias to match visitor socket `history.messages` naming.
+                        "messages": history,
                     }
                 )
 
@@ -139,12 +170,23 @@ async def agent_ws(
                 if result.get("error"):
                     await websocket.send_json({"type": "error", "message": result["error"]})
                     continue
+
+                message_obj = None
+                try:
+                    message_id_saved = result.get("message_id")
+                    if message_id_saved:
+                        saved_msg = messages_repo.get_message_by_id(db, int(message_id_saved))
+                        if saved_msg:
+                            message_obj = serialize_message(db, saved_msg)
+                except Exception:
+                    message_obj = None
                 
                 # Send confirmation back to agent
                 await websocket.send_json({
                     "type": "message_sent",
                     "conversation_id": conversation_id,
                     "content": content,
+                    "message_obj": message_obj,
                     "success": True
                 })
 
@@ -156,7 +198,6 @@ async def agent_ws(
             logger.error("agent_websocket_error", agent_id=agent_id, error=str(e), exc_info=True)
         else:
             logger.error("agent_websocket_error_before_auth", website_id=website_id, error=str(e), exc_info=True)
-        traceback.print_exc()
     finally:
         if agent_service and websocket_id:
             agent_service.unregister_agent(websocket_id)

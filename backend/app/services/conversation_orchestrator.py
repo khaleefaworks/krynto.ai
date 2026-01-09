@@ -24,6 +24,8 @@ from app.models.message import Message
 from app.core.logging import get_logger
 from app.services.website_resolver import is_website_online
 
+from app.api.message_presenter import serialize_message
+
 logger = get_logger(__name__)
 
 # Prevent scheduling duplicate delayed "waiting" bot messages
@@ -134,6 +136,9 @@ class ConversationOrchestrator:
                     "type": "visitor_message",
                     "conversation_id": conversation.id,
                     "message": message,
+                    # Canonical DTO for clients that want consistent schemas.
+                    # Backwards-compatible: legacy clients can keep using `message`.
+                    "message_obj": serialize_message(self.db, msg),
                 },
             )
             return None
@@ -147,6 +152,7 @@ class ConversationOrchestrator:
                 "conversation_id": conversation.id,
                 "website_id": website_id,
                 "message": message,
+                "message_obj": serialize_message(self.db, msg),
             },
             include_global=True,
         )
@@ -205,25 +211,22 @@ class ConversationOrchestrator:
         ).order_by(Message.created_at.desc()).first()
         last_message = last_msg.content if last_msg else "New conversation"
         
-        # Broadcast ONLY to global notification sockets (website_id = 0)
-        # This prevents duplicate notifications to agents connected to both sockets
-        for ws_id, agent_info in AgentService.active_agents.items():
-            # Only send to global notification socket (website_id = 0)
-            if agent_info.get("website_id") == 0:
-                try:
-                    await agent_info["websocket"].send_json({
-                        "type": "new_chat",
-                        "conversation_id": conversation.id,
-                        "website_id": conversation.website_id,
-                        "website_name": website_name,
-                        "session_id": conversation.session_id,
-                        "last_message": last_message,
-                        "status": conversation.status.value,
-                        "created_at": conversation.created_at.isoformat() if conversation.created_at else None
-                    })
-                    logger.info("broadcast_new_chat_success", agent_id=agent_info["agent_id"], conversation_id=conversation.id, via="global_socket")
-                except Exception as e:
-                    logger.error("broadcast_error", error=str(e), agent_ws_id=ws_id)
+        # Broadcast ONLY to global notification sockets (website_id = 0).
+        # This prevents duplicate notifications to agents connected to both sockets.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=None,
+            message_data={
+                "type": "new_chat",
+                "conversation_id": conversation.id,
+                "website_id": conversation.website_id,
+                "website_name": website_name,
+                "session_id": conversation.session_id,
+                "last_message": last_message,
+                "status": conversation.status.value,
+                "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
+            },
+            include_global=True,
+        )
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
         """Handle agent claiming/joining a conversation."""
@@ -347,10 +350,14 @@ class ConversationOrchestrator:
                 "message": content,
                 "agent_name": agent_name,
                 "agent_avatar": agent.avatar_url if agent else None,
+                "created_at": saved.created_at.isoformat() if getattr(saved, "created_at", None) else None,
             }
         )
 
-        return {"success": True}
+        return {
+            "success": True,
+            "message_id": getattr(saved, "id", None),
+        }
 
     async def close_conversation(self, *, conversation_id: int) -> dict:
         """Close a conversation and emit final system message."""
