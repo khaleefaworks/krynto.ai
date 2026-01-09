@@ -27,7 +27,7 @@ Additional gaps found during repo scan (actionable):
 - CI exists in `.github/workflows/ci.yml` (backend compile/tests + frontend lint/build) and backend dependencies are constrained via `backend/requirements.lock.txt`.
 - Frontend dependency versions differ from PRD assumptions (e.g., React version drift). Treat docs as descriptive, not authoritative.
 
-## Status (as of 2026-01-08)
+## Status (as of 2026-01-09)
 
 Phase 0 (Hardening):
 - Done:
@@ -38,10 +38,11 @@ Phase 0 (Hardening):
   - Upload validation hardened (type/size/content checks; block risky types).
   - Alembic history stabilized enough for `alembic upgrade head` on mixed/dirty DBs (idempotent migrations + merge head).
   - CI added (backend tests + frontend lint/build) and backend dependency constraints/lock strategy.
+  - Production runbook created (single run command + env checklist): `docs/PRODUCTION_RUNBOOK.md`.
 - Deployment decision (open):
   - Docker vs no-Docker packaging is not yet finalized.
 - Still pending:
-  - Document a single “production run command” for the backend (gunicorn/uvicorn guidance + env checklist).
+  - Choose deployment model (Docker vs no-Docker) and add the corresponding Nginx + process manager artifacts.
 
 Phase 1 (Architecture cleanup):
 - Next up (starting now): centralize sender resolution + message enrichment into a shared helper used by REST + WS paths.
