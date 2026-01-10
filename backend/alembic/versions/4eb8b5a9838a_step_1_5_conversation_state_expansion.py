@@ -87,20 +87,23 @@ def upgrade():
     elif 'agents' in tables:
         referent = 'agents'
 
-    if referent:
-        try:
-            op.create_foreign_key(
-                'conversations_assigned_agent_id_fkey',
-                'conversations',
-                referent,
-                ['assigned_agent_id'],
-                ['id'],
-                ondelete='SET NULL',
-                source_schema=schema,
-                referent_schema=schema,
-            )
-        except ProgrammingError:
-            pass
+    conversation_cols = set()
+    if 'conversations' in tables:
+        conversation_cols = {c.get('name') for c in inspector.get_columns('conversations', schema=schema)}
+
+    # Important: do not attempt a DDL that will fail and then catch it in Python.
+    # In Postgres, a caught error still marks the transaction as failed.
+    if referent and 'assigned_agent_id' in conversation_cols:
+        op.create_foreign_key(
+            'conversations_assigned_agent_id_fkey',
+            'conversations',
+            referent,
+            ['assigned_agent_id'],
+            ['id'],
+            ondelete='SET NULL',
+            source_schema=schema,
+            referent_schema=schema,
+        )
     
     # 6. Add sender_type column to messages table (idempotent)
     # Some DBs may already have this column from earlier manual/schema changes.
@@ -153,16 +156,34 @@ def downgrade():
     if 'sender_type' in message_cols:
         op.drop_column('messages', 'sender_type')
     
-    # Revert conversations FK
-    op.drop_constraint('conversations_assigned_agent_id_fkey', 'conversations', type_='foreignkey')
-    op.create_foreign_key(
-        'conversations_assigned_agent_id_fkey',
-        'conversations',
-        'agents',
-        ['assigned_agent_id'],
-        ['id'],
-        ondelete='SET NULL'
+    # Revert conversations FK (best-effort / idempotent)
+    op.execute(
+        """
+        DO $$ BEGIN
+            ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_assigned_agent_id_fkey;
+        EXCEPTION
+            WHEN undefined_table THEN null;
+        END $$;
+        """
     )
+
+    # Only re-add the old FK if the column exists.
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    try:
+        conversation_cols = {c.get('name') for c in inspector.get_columns('conversations', schema=schema)}
+    except ProgrammingError:
+        conversation_cols = set()
+    if 'assigned_agent_id' in conversation_cols:
+        op.create_foreign_key(
+            'conversations_assigned_agent_id_fkey',
+            'conversations',
+            'agents',
+            ['assigned_agent_id'],
+            ['id'],
+            ondelete='SET NULL'
+        )
     
     # Revert conversations.status to VARCHAR
     op.execute("""

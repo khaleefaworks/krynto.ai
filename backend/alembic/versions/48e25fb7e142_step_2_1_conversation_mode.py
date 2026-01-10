@@ -7,6 +7,7 @@ Create Date: 2025-12-29 14:04:49.650314
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -34,16 +35,27 @@ def upgrade():
     )
     
     # 3. Backfill existing rows
-    # - If agent is assigned → AGENT_HANDLING
-    # - Else → AI_HANDLING (default for existing conversations)
-    op.execute("""
-        UPDATE conversations 
-        SET mode = CASE
-            WHEN assigned_agent_id IS NOT NULL THEN 'agent_handling'::conversation_mode
-            ELSE 'ai_handling'::conversation_mode
-        END
-        WHERE mode IS NULL
-    """)
+    # assigned_agent_id is introduced later (phase3_agent_handoff), so guard for fresh DBs.
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    conversation_cols = {c.get('name') for c in inspector.get_columns('conversations', schema=schema)}
+
+    if 'assigned_agent_id' in conversation_cols:
+        op.execute("""
+            UPDATE conversations 
+            SET mode = CASE
+                WHEN assigned_agent_id IS NOT NULL THEN 'agent_handling'::conversation_mode
+                ELSE 'ai_handling'::conversation_mode
+            END
+            WHERE mode IS NULL
+        """)
+    else:
+        op.execute("""
+            UPDATE conversations
+            SET mode = 'ai_handling'::conversation_mode
+            WHERE mode IS NULL
+        """)
     
     # 4. Make mode NOT NULL with default
     op.execute("""

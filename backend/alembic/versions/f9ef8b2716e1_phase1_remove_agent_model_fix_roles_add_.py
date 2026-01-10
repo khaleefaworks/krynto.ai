@@ -7,6 +7,7 @@ Create Date: 2026-01-05 15:06:27.840539
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -25,17 +26,30 @@ def upgrade():
     op.execute("UPDATE users SET role = 'system_manager' WHERE role = 'full_access'")
     
     # Step 3: Clean up orphaned agent_sessions records before adding FK
-    op.execute("DELETE FROM agent_sessions WHERE agent_id NOT IN (SELECT id FROM users)")
-    
-    # Step 4: Add foreign key to agent_sessions.agent_id -> users.id
-    op.execute("""
-        ALTER TABLE agent_sessions 
-        ADD CONSTRAINT fk_agent_sessions_agent_id 
-        FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE
-    """)
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    tables = set(inspector.get_table_names(schema=schema))
+
+    if 'agent_sessions' in tables:
+        op.execute("DELETE FROM agent_sessions WHERE agent_id NOT IN (SELECT id FROM users)")
+
+        # Step 4: Add foreign key to agent_sessions.agent_id -> users.id
+        # Use a DO block so we don't abort the migration transaction if it already exists.
+        op.execute("""
+            DO $$ BEGIN
+                ALTER TABLE agent_sessions
+                ADD CONSTRAINT fk_agent_sessions_agent_id
+                FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE;
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+                WHEN undefined_table THEN null;
+            END $$;
+        """)
     
     # Step 5: Drop agents table (deprecated model)
-    op.drop_table('agents')
+    if 'agents' in tables:
+        op.drop_table('agents')
 
 
 def downgrade():
@@ -53,7 +67,15 @@ def downgrade():
     )
     
     # Drop foreign key from agent_sessions
-    op.execute("ALTER TABLE agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_agent_id")
+    op.execute(
+        """
+        DO $$ BEGIN
+            ALTER TABLE agent_sessions DROP CONSTRAINT IF EXISTS fk_agent_sessions_agent_id;
+        EXCEPTION
+            WHEN undefined_table THEN null;
+        END $$;
+        """
+    )
     
     # Revert role changes
     op.execute("UPDATE users SET role = 'full_access' WHERE role = 'system_manager'")

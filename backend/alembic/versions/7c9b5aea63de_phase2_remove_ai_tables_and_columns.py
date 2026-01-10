@@ -7,6 +7,7 @@ Create Date: 2026-01-05 15:10:30.676732
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -22,13 +23,19 @@ def upgrade():
     op.execute("UPDATE conversations SET mode = 'waiting_for_agent' WHERE mode = 'ai_handling'")
     
     # Drop AI-related tables
-    op.drop_table('knowledge_chunks')
-    op.drop_table('documents')
-    op.drop_table('knowledge_sources')
+    op.execute('DROP TABLE IF EXISTS knowledge_chunks CASCADE')
+    op.execute('DROP TABLE IF EXISTS documents CASCADE')
+    op.execute('DROP TABLE IF EXISTS knowledge_sources CASCADE')
     
     # Remove AI-related columns from websites
-    op.drop_column('websites', 'ai_enabled')
-    op.drop_column('websites', 'ai_instructions')
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    schema = inspector.default_schema_name
+    website_cols = {c.get('name') for c in inspector.get_columns('websites', schema=schema)}
+    if 'ai_enabled' in website_cols:
+        op.drop_column('websites', 'ai_enabled')
+    if 'ai_instructions' in website_cols:
+        op.drop_column('websites', 'ai_instructions')
 
 
 def downgrade():

@@ -95,11 +95,22 @@ alembic upgrade head
 # Using start script
 ./start_server.sh
 
+# Optional flags
+# - Apply Alembic migrations before starting
+RUN_MIGRATIONS=1 ./start_server.sh
+
+# - Skip DB connectivity preflight (not recommended)
+SKIP_DB_CHECK=1 ./start_server.sh
+
 # Or manually
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Server will be available at `http://localhost:8000`
+
+Notes:
+- `start_server.sh` performs a DB connectivity preflight so "CORS"-looking failures caused by a dead database show up as a clear startup error.
+- The Alembic migrations are expected to apply cleanly on a fresh database; several migrations include guards for optional tables/columns due to historical branch/merge evolution.
 
 ## Production Run (No Docker)
 
