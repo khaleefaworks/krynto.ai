@@ -7,6 +7,8 @@ from app.models.user import User, UserRole
 from app.services.agent_resolver import is_agent_eligible
 from app.services.agent_service import AgentService
 from app.repos import users as users_repo
+from app.core.config import settings
+from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -66,6 +68,31 @@ async def presence_ws(websocket: WebSocket, website_id: int):
 
     db = SessionLocal()
     try:
+        # Validate website exists and enforce domain lock.
+        from app.models.website import Website
+
+        website = db.query(Website).filter_by(id=website_id).first()
+        if not website:
+            await websocket.close(code=1008, reason="Website not found")
+            return
+
+        request_host = get_widget_request_host(websocket.headers)
+        if request_host and (not is_host_allowed_for_website(request_host=request_host, website_domain=website.domain)):
+            logger.warning(
+                "widget_origin_rejected",
+                website_id=website_id,
+                origin=str(websocket.headers.get("origin") or ""),
+                referer=str(websocket.headers.get("referer") or ""),
+                request_host=request_host,
+                website_domain=str(website.domain or ""),
+            )
+            await websocket.close(code=1008, reason="Widget origin not allowed")
+            return
+
+        if (request_host is None) and settings.is_production():
+            await websocket.close(code=1008, reason="Widget origin is required")
+            return
+
         # Send initial snapshot immediately.
         await websocket.send_json(_compute_presence(db, website_id))
 

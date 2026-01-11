@@ -12,8 +12,10 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
+from app.api.deps import require_authenticated_user
 
 
 router = APIRouter(prefix="/widget", tags=["widget"])
@@ -39,6 +41,9 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
             media_type="application/javascript",
             status_code=404
         )
+
+    # Domain lock: only allow this widget key to be used from the website domain/subdomains.
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     
     # Get widget configuration
     config = website.widget_config or {}
@@ -107,7 +112,12 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
 
 
 @router.get("/snippet/{website_id}")
-async def get_widget_snippet(request: Request, website_id: int, db: Session = Depends(get_db)):
+async def get_widget_snippet(
+    request: Request,
+    website_id: int,
+    db: Session = Depends(get_db),
+    _current_user=Depends(require_authenticated_user),
+):
     """
     Get the embed snippet code for a website.
     This is shown to admins in the dashboard to copy-paste into their website.
@@ -153,7 +163,11 @@ class WidgetStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=WidgetStatusResponse)
-def get_widget_status(website_id: int = Query(..., description="Website ID to check status for")):
+def get_widget_status(
+    request: Request,
+    website_id: int = Query(..., description="Website ID to check status for"),
+    db: Session = Depends(get_db),
+):
     """
     Get online/offline status for a website.
     
@@ -186,6 +200,13 @@ def get_widget_status(website_id: int = Query(..., description="Website ID to ch
             "online": false
         }
     """
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    # Domain lock: status is called from visitor sites.
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+
     # Check if website is online
     online = is_website_online(website_id)
     

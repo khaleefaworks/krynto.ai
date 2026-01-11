@@ -14,6 +14,7 @@ from app.api.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
 from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo
+from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -59,6 +60,34 @@ async def chat_ws(
                 "type": "error",
                 "message": error_msg
             })
+            await websocket.close(code=1008, reason=_ws_close_reason(error_msg))
+            db.close()
+            return
+
+        # Domain lock: the widget socket must originate from the website's domain/subdomains.
+        request_host = get_widget_request_host(websocket.headers)
+        if request_host and (not is_host_allowed_for_website(request_host=request_host, website_domain=website.domain)):
+            error_msg = "Widget origin not allowed"
+            logger.warning(
+                "widget_origin_rejected",
+                website_id=website_id,
+                session_id=session_id,
+                origin=str(websocket.headers.get("origin") or ""),
+                referer=str(websocket.headers.get("referer") or ""),
+                request_host=request_host,
+                website_domain=str(website.domain or ""),
+            )
+            await websocket.close(code=1008, reason=_ws_close_reason(error_msg))
+            db.close()
+            return
+
+        if (request_host is None) and settings.is_production():
+            error_msg = "Widget origin is required"
+            logger.warning(
+                "widget_origin_missing",
+                website_id=website_id,
+                session_id=session_id,
+            )
             await websocket.close(code=1008, reason=_ws_close_reason(error_msg))
             db.close()
             return
