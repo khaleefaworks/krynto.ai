@@ -136,6 +136,8 @@ export default function ConversationsView() {
 
     const [unreadRibbon, setUnreadRibbon] = useState<{ chatId: number; count: number } | null>(null)
     const unreadRibbonHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const autoMarkReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const unreadRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const connectedWebsiteIdRef = useRef<number | null>(null)
 
@@ -355,6 +357,11 @@ export default function ConversationsView() {
                 connectedWebsiteIdRef.current = null
                 joinedRef.current = false
             }
+
+            if (autoMarkReadTimerRef.current) {
+                clearTimeout(autoMarkReadTimerRef.current)
+                autoMarkReadTimerRef.current = null
+            }
         }
     }, [selectedChat])
 
@@ -439,6 +446,8 @@ export default function ConversationsView() {
                     const delta = typeof deltaRaw === 'number' && Number.isFinite(deltaRaw) ? deltaRaw : 1
                     incrementUnreadForConversation(dataConversationId, delta)
                 }
+
+                scheduleUnreadRefresh()
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 // Our message was confirmed - add to UI
                 const dto = (data as any)?.message_obj
@@ -531,6 +540,18 @@ export default function ConversationsView() {
         }
     }
 
+    const scheduleUnreadRefresh = useCallback(() => {
+        if (unreadRefreshTimerRef.current) {
+            clearTimeout(unreadRefreshTimerRef.current)
+            unreadRefreshTimerRef.current = null
+        }
+
+        unreadRefreshTimerRef.current = setTimeout(() => {
+            unreadRefreshTimerRef.current = null
+            fetchActiveChats({ showSpinner: false })
+        }, 300)
+    }, [])
+
     const loadChatData = async (
         chatId: number,
         {
@@ -570,6 +591,30 @@ export default function ConversationsView() {
                     if (!boundary) {
                         setUnreadForConversation(chatId, 0)
                         setUnreadRibbon(null)
+                        if (autoMarkReadTimerRef.current) {
+                            clearTimeout(autoMarkReadTimerRef.current)
+                            autoMarkReadTimerRef.current = null
+                        }
+                    } else {
+                        if (autoMarkReadTimerRef.current) {
+                            clearTimeout(autoMarkReadTimerRef.current)
+                            autoMarkReadTimerRef.current = null
+                        }
+
+                        autoMarkReadTimerRef.current = setTimeout(() => {
+                            autoMarkReadTimerRef.current = null
+                            // Only clear if the agent is still viewing this chat.
+                            if (selectedChat !== chatId) return
+
+                            markChatRead(chatId)
+                                .then(() => {
+                                    setFirstUnreadMessageId(null)
+                                    setUnreadForConversation(chatId, 0)
+                                    setUnreadRibbon(null)
+                                    scheduleUnreadRefresh()
+                                })
+                                .catch(() => { })
+                        }, 5000)
                     }
                 }
             } catch {

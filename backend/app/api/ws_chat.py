@@ -142,6 +142,8 @@ async def chat_ws(
             from app.services.conversation_service import ConversationService
             from app.models.message import Message
 
+            default_welcome_message = "Hi! How can we help you today?"
+
             widget_cfg = website.widget_config or {}
             automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
 
@@ -150,9 +152,14 @@ async def chat_ws(
                 welcome_enabled = True
 
             welcome_message = automations_cfg.get("welcome_message")
-            if not welcome_message:
-                # Backwards-compat: fall back to legacy widget_config.welcome_message
-                welcome_message = widget_cfg.get("welcome_message")
+            if not (isinstance(welcome_message, str) and welcome_message.strip()):
+                # Backwards-compat: fall back to legacy widget_config.welcome_message.
+                # If neither is set, use a stable default so first-open works out of the box.
+                legacy_welcome = widget_cfg.get("welcome_message")
+                if isinstance(legacy_welcome, str) and legacy_welcome.strip():
+                    welcome_message = legacy_welcome
+                else:
+                    welcome_message = default_welcome_message
 
             cooldown_hours = automations_cfg.get("welcome_cooldown_hours")
             try:
