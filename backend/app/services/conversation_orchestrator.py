@@ -53,7 +53,7 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             # Persist as a bot message so both widget + agent dashboard show it.
             from app.services.conversation_service import ConversationService
 
-            ConversationService(db).add_bot_message(
+            saved = ConversationService(db).add_bot_message(
                 conversation_id,
                 "Thanks! An agent will be with you shortly.",
                 event_type="bot",
@@ -64,6 +64,7 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
                 {
                     "type": "ai",
                     "message": "Thanks! An agent will be with you shortly.",
+                    "message_obj": serialize_message(db, saved),
                 },
             )
         finally:
@@ -191,7 +192,7 @@ class ConversationOrchestrator:
         if not is_website_online(website_id):
             if prior_message_count == 0:
                 # Persist the offline prompt as a bot message so it appears in thread history.
-                self.conversation_service.add_bot_message(
+                saved = self.conversation_service.add_bot_message(
                     conversation.id,
                     "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
                     event_type="bot",
@@ -201,6 +202,7 @@ class ConversationOrchestrator:
                     {
                         "type": "ai",
                         "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                        "message_obj": serialize_message(self.db, saved),
                     },
                 )
             return None
@@ -281,7 +283,7 @@ class ConversationOrchestrator:
         self.db.commit()
 
         agent_name = user.name or "Support Agent"
-        self.conversation_service.add_system_message(
+        saved = self.conversation_service.add_system_message(
             conversation_id,
             f"{agent_name} joined the chat.",
             event_type="agent_join",
@@ -296,6 +298,7 @@ class ConversationOrchestrator:
             {
                 "type": "agent_joined",
                 "message": f"{agent_name} joined the chat.",
+                "message_obj": serialize_message(self.db, saved),
                 "agent_avatar": agent.avatar_url if agent else None,
                 "agent_name": agent.name if agent else agent_name,
             }
@@ -335,7 +338,7 @@ class ConversationOrchestrator:
         self.db.commit()
 
         agent_name = user.name or "Support Agent"
-        self.conversation_service.add_system_message(
+        saved = self.conversation_service.add_system_message(
             conversation_id,
             f"{agent_name} joined the chat.",
             event_type="agent_join",
@@ -347,6 +350,7 @@ class ConversationOrchestrator:
             {
                 "type": "agent_joined",
                 "message": "A support agent has joined the chat",
+                "message_obj": serialize_message(self.db, saved),
                 "agent_avatar": user.avatar_url,
                 "agent_name": agent_name,
                 "previous_agent_id": previous_agent_id,
