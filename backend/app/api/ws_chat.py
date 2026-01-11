@@ -205,12 +205,18 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) or 1
                     db.commit()
 
-                service.add_bot_message(
+                saved = service.add_bot_message(
                     conversation.id,
                     str(welcome_message).strip(),
                     event_type="automation_welcome",
                 )
-                await websocket.send_json({"type": "ai", "message": str(welcome_message).strip()})
+                await websocket.send_json(
+                    {
+                        "type": "ai",
+                        "message": str(welcome_message).strip(),
+                        "message_obj": serialize_message(db, saved),
+                    }
+                )
         except Exception as e:
             try:
                 db.rollback()
