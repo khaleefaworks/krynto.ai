@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from app.api.message_presenter import serialize_message
+from app.core.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
 from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo

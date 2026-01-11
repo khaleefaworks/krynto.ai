@@ -10,7 +10,7 @@ from app.models.user import User
 from pydantic import BaseModel
 from typing import List, Optional
 
-from app.api.message_presenter import serialize_message
+from app.core.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
 from app.repos import conversation_reads as conversation_reads_repo
 from app.models.message import Message, MessageSenderType

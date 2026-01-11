@@ -9,7 +9,7 @@ from app.models.user import User
 import json
 import asyncio
 
-from app.api.message_presenter import serialize_message
+from app.core.message_presenter import serialize_message
 from app.repos import messages as messages_repo
 from app.repos import users as users_repo
 from datetime import datetime

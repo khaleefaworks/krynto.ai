@@ -24,7 +24,7 @@ from app.models.message import Message
 from app.core.logging import get_logger
 from app.services.website_resolver import is_website_online
 
-from app.api.message_presenter import serialize_message
+from app.core.message_presenter import serialize_message
 
 logger = get_logger(__name__)
 
