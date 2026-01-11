@@ -15,6 +15,7 @@ from app.repos import conversations as conversations_repo
 from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
+from app.infra.ws_rate_limit import is_chat_rate_limited
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -372,24 +373,40 @@ async def chat_ws(
             visitor_name = payload.get("visitor_name")
             visitor_email = payload.get("visitor_email")
             
-            # Rate limiting: Check message frequency
-            current_time = time.time()
-            session_messages = message_timestamps[session_id]
-            
-            # Remove timestamps older than 1 minute
-            session_messages[:] = [ts for ts in session_messages if current_time - ts < 60]
-            
-            # Check if rate limit exceeded
-            if len(session_messages) >= settings.RATE_LIMIT_CHAT_MESSAGE:
-                logger.warning("rate_limit_exceeded", session_id=session_id, message_count=len(session_messages))
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Rate limit exceeded. Please slow down."
-                })
+            # Rate limiting: multi-worker safe when REDIS_URL is configured.
+            exceeded = False
+            try:
+                exceeded = await is_chat_rate_limited(
+                    website_id=website_id,
+                    session_id=session_id,
+                    limit=settings.RATE_LIMIT_CHAT_MESSAGE,
+                )
+            except Exception:
+                exceeded = False
+
+            if exceeded:
+                logger.warning("rate_limit_exceeded", session_id=session_id)
+                await websocket.send_json(
+                    {"type": "error", "message": "Rate limit exceeded. Please slow down."}
+                )
                 continue
-            
-            # Add current timestamp
-            session_messages.append(current_time)
+
+            # Fallback in-memory limiter (single-worker) when Redis isn't enabled.
+            if not settings.REDIS_URL:
+                current_time = time.time()
+                session_messages = message_timestamps[session_id]
+                session_messages[:] = [ts for ts in session_messages if current_time - ts < 60]
+                if len(session_messages) >= settings.RATE_LIMIT_CHAT_MESSAGE:
+                    logger.warning(
+                        "rate_limit_exceeded",
+                        session_id=session_id,
+                        message_count=len(session_messages),
+                    )
+                    await websocket.send_json(
+                        {"type": "error", "message": "Rate limit exceeded. Please slow down."}
+                    )
+                    continue
+                session_messages.append(current_time)
 
             logger.info("processing_visitor_message", session_id=session_id, message_length=len(user_message))
 
