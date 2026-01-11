@@ -394,12 +394,16 @@ class ConversationOrchestrator:
 
         agent = self.db.query(User).filter(User.id == agent_id).first()
         agent_name = (agent.name if agent and agent.name else "Support Agent")
+
+        # Canonical DTO for clients that want consistent schemas.
+        message_obj = serialize_message(self.db, saved)
         
         await ChatService.send_to_visitor(
             conversation_id,
             {
                 "type": "agent",
                 "message": content,
+                "message_obj": message_obj,
                 "agent_name": agent_name,
                 "agent_avatar": agent.avatar_url if agent else None,
                 "created_at": saved.created_at.isoformat() if getattr(saved, "created_at", None) else None,
