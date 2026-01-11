@@ -46,7 +46,7 @@ function App() {
         console.error('Failed to check setup status:', error)
       }
     }
-    
+
     checkSetup()
   }, [])
 
@@ -69,7 +69,7 @@ function App() {
       }
       setInitializing(false)
     }
-    
+
     initAuth()
   }, [])
 
@@ -83,7 +83,7 @@ function App() {
       // WebSocket for real-time notifications (authenticated via query param)
       const wsUrl = `${WS_BASE}/ws/agent/0?token=${encodeURIComponent(token)}`
       console.log('🔔 Setting up global notifications (authenticated)...')
-      
+
       const ws = new WebSocket(wsUrl)
       notificationSocketRef.current = ws
 
@@ -99,8 +99,14 @@ function App() {
         const data = JSON.parse(event.data)
         console.log('🔔 Global notification:', data)
 
-        // Handle both new_chat (unassigned) and visitor_message (updates to existing chats)
-        if (data.type === 'new_chat' || data.type === 'visitor_message') {
+        // Global event signal for chat list changes + unread updates.
+        if (
+          data.type === 'new_chat' ||
+          data.type === 'conversation_unread' ||
+          data.type === 'conversation_assigned' ||
+          data.type === 'conversation_closed' ||
+          data.type === 'visitor_message'
+        ) {
           bumpChatEventsVersion({
             type: data.type,
             conversation_id: typeof data.conversation_id === 'number' ? data.conversation_id : Number(data.conversation_id) || undefined,
@@ -126,7 +132,7 @@ function App() {
       ws.onclose = (event) => {
         console.log('🔌 Global notifications closed')
         notificationSocketRef.current = null
-        
+
         // Auto-reconnect after 5 seconds if not intentional
         if (event.code !== 1000 && user?.id) {
           console.log('🔄 Will reconnect in 5 seconds...')
@@ -198,11 +204,11 @@ function App() {
     <BrowserRouter>
       <Routes>
         {/* Login route - redirect to dashboard if already authenticated */}
-        <Route 
-          path="/login" 
-          element={token ? <Navigate to="/dashboard/chats" replace /> : <LoginPage />} 
+        <Route
+          path="/login"
+          element={token ? <Navigate to="/dashboard/chats" replace /> : <LoginPage />}
         />
-        
+
         {/* Protected routes - require authentication */}
         {token ? (
           <>
@@ -212,29 +218,29 @@ function App() {
               <Route path="chats/:sessionId" element={<ConversationsView />} />
               <Route path="history" element={<ConversationHistory />} />
               <Route path="history/:conversationId" element={<ClosedChatView />} />
-              
+
               {/* Settings - All users */}
               <Route path="settings" element={<Settings />}>
                 {/* Websites management - Admin only */}
-                <Route 
-                  path="websites" 
-                  element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />} 
+                <Route
+                  path="websites"
+                  element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                <Route 
-                  path="websites/:id" 
-                  element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />} 
+                <Route
+                  path="websites/:id"
+                  element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                
+
                 {/* Agents management - Admin only */}
-                <Route 
-                  path="agents" 
-                  element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />} 
+                <Route
+                  path="agents"
+                  element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                <Route 
-                  path="agents/:id" 
-                  element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />} 
+                <Route
+                  path="agents/:id"
+                  element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                
+
                 {/* Personal settings - All users */}
                 <Route path="personal" element={<PersonalSettings />} />
                 <Route index element={
@@ -247,19 +253,19 @@ function App() {
                   </div>
                 } />
               </Route>
-              
+
               {/* Analytics - All users (placeholder) */}
               <Route path="analytics" element={<Analytics />} />
-              
+
               {/* Reset Application - Administrator only */}
-              <Route 
-                path="reset" 
-                element={isAdministrator(user) ? <ResetApplication /> : <Navigate to="/dashboard/chats" replace />} 
+              <Route
+                path="reset"
+                element={isAdministrator(user) ? <ResetApplication /> : <Navigate to="/dashboard/chats" replace />}
               />
-              
+
               {/* Legacy routes - kept for backwards compatibility */}
               <Route path="websites" element={<WebsiteManagement />} />
-              
+
               {/* Default route */}
               <Route index element={<Navigate to="/dashboard/chats" replace />} />
             </Route>

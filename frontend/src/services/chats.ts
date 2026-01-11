@@ -12,6 +12,7 @@ export type ActiveChat = {
   assigned_agent_id: number | null
   current_agent_id?: number | null  // Alias for assigned_agent_id
   message_count: number
+  unread_count?: number
   created_at?: string
   closed_at?: string
 }
@@ -24,7 +25,7 @@ export async function fetchActiveChats(): Promise<ActiveChat[]> {
       Authorization: `Bearer ${token}`,
     },
   })
-  
+
   // Map assigned_agent_id to current_agent_id for compatibility
   return chats.map(chat => ({
     ...chat,
@@ -37,6 +38,33 @@ export async function joinChat(chatId: string) {
 
   return apiRequest(`/chats/${chatId}/join`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+export async function markChatRead(chatId: number): Promise<{ success: boolean; conversation_id: number }> {
+  const token = useAppStore.getState().token
+
+  return apiRequest(`/chats/${chatId}/read`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+export type ChatReadState = {
+  conversation_id: number
+  last_read_at: string | null
+  first_unread_message_id: number | null
+}
+
+export async function fetchChatReadState(chatId: number): Promise<ChatReadState> {
+  const token = useAppStore.getState().token
+
+  return apiRequest<ChatReadState>(`/chats/${chatId}/read-state`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -67,7 +95,7 @@ export async function closeConversation(chatId: number): Promise<{ success: bool
 
 export async function fetchClosedConversations(websiteId?: number, agentId?: number, limit: number = 50): Promise<ActiveChat[]> {
   const token = useAppStore.getState().token
-  
+
   const params = new URLSearchParams()
   if (websiteId) params.append('website_id', websiteId.toString())
   if (agentId) params.append('agent_id', agentId.toString())

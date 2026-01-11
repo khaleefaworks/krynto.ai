@@ -12,6 +12,8 @@ from typing import List, Optional
 
 from app.api.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
+from app.repos import conversation_reads as conversation_reads_repo
+from app.models.message import Message, MessageSenderType
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -63,11 +65,17 @@ async def join_chat(
 @router.get("/active")
 def get_active_chats(
     website_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
 ):
     """Get list of active chats available for agent pickup"""
     # Match AgentService.get_active_chats() base visibility rules (without agent_id filter).
     rows = conversations_repo.active_conversations_with_counts_and_last_message(db, website_id=website_id)
+
+    conversation_ids: list[int] = [int(conv.id) for conv, *_rest in rows]
+    unread_counts = conversation_reads_repo.unread_counts_for_conversation_ids(
+        db, user_id=current_user.id, conversation_ids=conversation_ids
+    )
 
     result = []
     for conv, website_name, message_count, last_message in rows:
@@ -90,6 +98,7 @@ def get_active_chats(
                 "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
                 "assigned_agent_id": conv.assigned_agent_id,
                 "message_count": int(message_count or 0),
+                "unread_count": int(unread_counts.get(int(conv.id), 0)),
                 "last_message": last_message_val,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
             }
@@ -127,7 +136,8 @@ def get_resolved_conversations(
     website_id: Optional[int] = None,
     agent_id: Optional[int] = None,
     limit: int = 50,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_authenticated_user),
 ):
     """Get resolved conversation history with filters"""
     rows = conversations_repo.resolved_conversations_with_counts_and_last_message(
@@ -157,6 +167,7 @@ def get_resolved_conversations(
                 "status": conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
                 "message_count": int(message_count or 0),
+                "unread_count": 0,
                 "last_message": last_message_val,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "closed_at": conv.updated_at.isoformat() if conv.updated_at else None,
@@ -169,7 +180,8 @@ def get_resolved_conversations(
 @router.post("/{conversation_id}/close")
 async def close_conversation(
     conversation_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_authenticated_user),
 ):
     """
     Resolve a conversation.
@@ -188,4 +200,82 @@ async def close_conversation(
         "success": True,
         "conversation_id": conversation_id,
         "message": "Conversation resolved successfully",
+    }
+
+
+@router.post("/{chat_id}/read")
+async def mark_chat_read(
+    chat_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Mark a chat as read for the current user."""
+
+    conv = conversations_repo.get_conversation_by_id(db, chat_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conversation_reads_repo.mark_conversation_read(
+        db,
+        conversation_id=chat_id,
+        user_id=current_user.id,
+    )
+    db.commit()
+
+    # Best-effort: tell the agent UI (and any other tabs) to clear unread.
+    try:
+        await AgentService(db).send_to_agent(
+            current_user.id,
+            {
+                "type": "conversation_unread",
+                "conversation_id": chat_id,
+                "website_id": conv.website_id,
+                "unread_count": 0,
+            },
+        )
+    except Exception:
+        pass
+
+    return {"success": True, "conversation_id": chat_id}
+
+
+@router.get("/{chat_id}/read-state")
+def get_chat_read_state(
+    chat_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Return read state for placing an unread separator in the thread UI."""
+
+    conv = conversations_repo.get_conversation_by_id(db, chat_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    try:
+        from app.models.conversation_read import ConversationRead
+
+        row = (
+            db.query(ConversationRead)
+            .filter(ConversationRead.conversation_id == chat_id, ConversationRead.user_id == current_user.id)
+            .first()
+        )
+        last_read_at = row.last_read_at if row else None
+    except Exception:
+        last_read_at = None
+
+    # Find the earliest unread VISITOR message after last_read_at.
+    first_unread_message_id = None
+    try:
+        q = db.query(Message).filter(Message.conversation_id == chat_id, Message.sender_type == MessageSenderType.VISITOR)
+        if last_read_at is not None:
+            q = q.filter(Message.created_at > last_read_at)
+        first_unread = q.order_by(Message.created_at.asc(), Message.id.asc()).first()
+        first_unread_message_id = int(first_unread.id) if first_unread else None
+    except Exception:
+        first_unread_message_id = None
+
+    return {
+        "conversation_id": chat_id,
+        "last_read_at": last_read_at.isoformat() if last_read_at else None,
+        "first_unread_message_id": first_unread_message_id,
     }

@@ -11,6 +11,7 @@ from app.models.conversation_note import ConversationNote
 from app.models.conversation_page_view import ConversationPageView
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.message_shortcut import MessageShortcut
+from app.models.conversation_read import ConversationRead
 
 __all__ = [
     "Website",
@@ -27,4 +28,5 @@ __all__ = [
     "ConversationPageView",
     "AgentWebsiteAssignment",
     "MessageShortcut",
+    "ConversationRead",
 ]

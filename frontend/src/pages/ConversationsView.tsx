@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
-import { joinChat, closeConversation, takeoverConversation } from '@/services/chats'
+import { joinChat, closeConversation, takeoverConversation, markChatRead, fetchChatReadState } from '@/services/chats'
 import { fetchChatMessages } from '@/services/messages'
 import {
     connectAgentSocket,
@@ -120,8 +120,10 @@ export default function ConversationsView() {
         lastChatEvent,
         unreadByConversationId,
         incrementUnreadForConversation,
+        setUnreadForConversation,
         clearUnreadForConversation,
         pruneUnreadByConversationIds,
+        setUnreadMapFromServer,
         lastProcessedChatEventsVersion,
         setLastProcessedChatEventsVersion,
     } = useAppStore()
@@ -161,6 +163,13 @@ export default function ConversationsView() {
     const hasLoadedChatsRef = useRef(false)
     const loadDetailsTokenRef = useRef(0)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const messagesContainerRef = useRef<HTMLDivElement>(null)
+    const unreadDividerRef = useRef<HTMLDivElement>(null)
+    const isAtBottomRef = useRef(true)
+    const hasScrolledToUnreadRef = useRef(false)
+    const readStateTokenRef = useRef(0)
+
+    const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<number | null>(null)
 
     // Takeover confirmation (Smartsupp-like)
     const [showTakeoverConfirm, setShowTakeoverConfirm] = useState(false)
@@ -190,11 +199,11 @@ export default function ConversationsView() {
     useEffect(() => {
         fetchActiveChats({ showSpinner: true })
     }, [])
-    
+
     // Listen to global notification changes and refresh list (only on ConversationsView)
     const { unreadChatsCount } = useAppStore()
     const lastCountRef = useRef(unreadChatsCount)
-    
+
     useEffect(() => {
         // Only refresh if count actually increased (new chat arrived)
         if (unreadChatsCount > lastCountRef.current) {
@@ -232,9 +241,17 @@ export default function ConversationsView() {
     const openChat = useCallback((chatId: number) => {
         const count = unreadByConversationId[chatId] || 0
         showUnreadRibbonForChat(chatId, count)
-        clearUnreadForChat(chatId)
+
+        // Clear the list badge immediately (local-only). Server read state is updated
+        // only when the agent actually scrolls to the bottom.
+        setUnreadForConversation(chatId, 0)
+
         setSelectedChat(chatId)
-    }, [clearUnreadForChat, showUnreadRibbonForChat, unreadByConversationId])
+
+        // Reset scroll intent for this chat.
+        isAtBottomRef.current = true
+        hasScrolledToUnreadRef.current = false
+    }, [showUnreadRibbonForChat, unreadByConversationId, setUnreadForConversation])
 
     // Refresh list/messages when global chat events arrive.
     // This is a safety net: if the per-website WS misses an event, we still
@@ -252,7 +269,12 @@ export default function ConversationsView() {
             typeof eventConversationId === 'number' &&
             activeChatsRef.current.some((c) => c.id === eventConversationId)
 
-        if (eventType === 'new_chat' || (eventType === 'visitor_message' && conversationIsInList)) {
+        if (
+            eventType === 'new_chat' ||
+            eventType === 'conversation_assigned' ||
+            eventType === 'conversation_closed' ||
+            (eventType === 'visitor_message' && conversationIsInList)
+        ) {
             fetchActiveChats({ showSpinner: false })
         }
 
@@ -264,7 +286,7 @@ export default function ConversationsView() {
         // Unread badge fallback via global notifications.
         // Avoid double-counting for the currently-connected website (those messages
         // are typically delivered via the per-website WS already).
-        if (eventType === 'visitor_message' && typeof eventConversationId === 'number' && eventConversationId > 0) {
+        if (eventType === 'conversation_unread' && typeof eventConversationId === 'number' && eventConversationId > 0) {
             if (!selectedChat || eventConversationId !== selectedChat) {
                 const eventWebsiteId = lastChatEvent.website_id
                 const connectedWebsiteId = connectedWebsiteIdRef.current
@@ -321,6 +343,8 @@ export default function ConversationsView() {
         }
 
         if (selectedChat) {
+            setFirstUnreadMessageId(null)
+            hasScrolledToUnreadRef.current = false
             loadChatData(selectedChat)
             loadConversationDetails(selectedChat)
         }
@@ -352,7 +376,7 @@ export default function ConversationsView() {
             console.log('📩 WebSocket message received:', data)
 
             const dataConversationId = Number((data as any)?.conversation_id)
-            
+
             // Visitor message: either add to current chat UI, or increment unread badge.
             if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
                 // Visitor sent a message - add to UI
@@ -372,11 +396,23 @@ export default function ConversationsView() {
                     }
                     addMessage(newMessage)
                 }
+
+                // If the agent isn't pinned to the bottom, treat it as unread for UX.
+                if (!isAtBottomRef.current) {
+                    const dtoId = dto && typeof dto === 'object' ? Number((dto as any).id) : NaN
+                    if (!firstUnreadMessageId && Number.isFinite(dtoId) && dtoId > 0) {
+                        setFirstUnreadMessageId(dtoId)
+                    }
+                    incrementUnreadForConversation(selectedChat, 1)
+                } else if (!firstUnreadMessageId) {
+                    // Agent is actively viewing latest messages: keep server truth in sync.
+                    markChatRead(selectedChat).then(() => {
+                        setUnreadForConversation(selectedChat, 0)
+                    }).catch(() => { })
+                }
             } else if (data.type === 'visitor_message' && dataConversationId && dataConversationId !== selectedChat) {
                 const dto = (data as any)?.message_obj
                 const content = (dto && typeof dto === 'object' ? (dto as any)?.content : null) ?? (data as any)?.message
-
-                incrementUnreadForConversation(dataConversationId)
 
                 // Best-effort: update preview without a full refresh.
                 if (typeof content === 'string' && content.trim()) {
@@ -387,6 +423,21 @@ export default function ConversationsView() {
                         next[idx] = { ...next[idx], last_message: content }
                         setActiveChats(next)
                     }
+                }
+            } else if (data.type === 'conversation_unread' && dataConversationId) {
+                const unreadCountRaw = (data as any)?.unread_count
+                const deltaRaw = (data as any)?.delta
+
+                // If the agent is viewing this chat, don't badge it.
+                if (selectedChat && dataConversationId === selectedChat) {
+                    return
+                }
+
+                if (typeof unreadCountRaw === 'number' && Number.isFinite(unreadCountRaw)) {
+                    setUnreadForConversation(dataConversationId, unreadCountRaw)
+                } else {
+                    const delta = typeof deltaRaw === 'number' && Number.isFinite(deltaRaw) ? deltaRaw : 1
+                    incrementUnreadForConversation(dataConversationId, delta)
                 }
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 // Our message was confirmed - add to UI
@@ -408,6 +459,15 @@ export default function ConversationsView() {
                     }
                     addMessage(confirmedMessage)
                 }
+            } else if (data.type === 'conversation_assigned') {
+                // Another agent (or us) claimed a conversation.
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_closed') {
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat && dataConversationId === selectedChat) {
+                    setSelectedChat(null)
+                    navigate('/dashboard/chats')
+                }
             } else if (data.type === 'new_conversation') {
                 // New conversation arrived - refresh chat list
                 console.log('📨 New conversation arrived, refreshing...')
@@ -416,19 +476,30 @@ export default function ConversationsView() {
                 // Realtime browsing update: re-fetch history (capped)
                 getBrowsingHistory(selectedChat)
                     .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))
-                    .catch(() => {})
+                    .catch(() => { })
             }
         })
 
         // Cleanup: remove handler when chat changes or component unmounts
         return removeHandler
-    }, [selectedChat, user?.id, (conversation as any)?.website_id])
+    }, [selectedChat, user?.id, (conversation as any)?.website_id, firstUnreadMessageId, incrementUnreadForConversation, setUnreadForConversation])
 
-    // Scroll to bottom on new messages - use Layout effect for immediate scroll
+    // Scroll behavior:
+    // - If there are unread messages, jump to the unread divider once.
+    // - Otherwise, stick to bottom only if the user is already at bottom.
     useLayoutEffect(() => {
-        // Scroll immediately to bottom (no smooth animation to avoid delay)
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-    }, [messages, selectedChat])
+        if (!selectedChat) return
+
+        if (firstUnreadMessageId && unreadDividerRef.current && !hasScrolledToUnreadRef.current) {
+            hasScrolledToUnreadRef.current = true
+            unreadDividerRef.current.scrollIntoView({ behavior: 'auto', block: 'center' })
+            return
+        }
+
+        if (isAtBottomRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+        }
+    }, [messages, selectedChat, firstUnreadMessageId])
 
     const fetchActiveChats = async ({ showSpinner }: { showSpinner: boolean }) => {
         if (showSpinner) {
@@ -438,6 +509,17 @@ export default function ConversationsView() {
             const chats = await fetchChatsApi()
             setActiveChats(chats)
             hasLoadedChatsRef.current = true
+
+            // Hydrate per-conversation unread counts from server truth.
+            const unreadMap: Record<number, number> = {}
+            for (const chat of chats as any[]) {
+                const id = Number((chat as any)?.id)
+                const count = Number((chat as any)?.unread_count)
+                if (Number.isFinite(id) && id > 0 && Number.isFinite(count)) {
+                    unreadMap[id] = Math.max(0, count)
+                }
+            }
+            setUnreadMapFromServer(unreadMap)
 
             pruneUnreadByConversationIds(chats.map(c => c.id))
         } catch (error) {
@@ -478,6 +560,22 @@ export default function ConversationsView() {
             }
             addMessages(chatMessages)
 
+            // Fetch read-state after messages load so we can place an unread separator.
+            const readToken = ++readStateTokenRef.current
+            try {
+                const state = await fetchChatReadState(chatId)
+                if (readStateTokenRef.current === readToken && selectedChat === chatId) {
+                    const boundary = state.first_unread_message_id ?? null
+                    setFirstUnreadMessageId(boundary)
+                    if (!boundary) {
+                        setUnreadForConversation(chatId, 0)
+                        setUnreadRibbon(null)
+                    }
+                }
+            } catch {
+                // Best-effort: separator is optional.
+            }
+
             // Do NOT auto-join on selection.
             // Joining happens only when the agent actually starts responding (send action).
             const chatData = activeChats.find(c => c.id === chatId)
@@ -490,6 +588,23 @@ export default function ConversationsView() {
             }
         }
     }
+
+    const handleMessagesScroll = useCallback(() => {
+        const el = messagesContainerRef.current
+        if (!el) return
+
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+        isAtBottomRef.current = nearBottom
+
+        if (nearBottom && selectedChat && firstUnreadMessageId) {
+            markChatRead(selectedChat)
+                .then(() => {
+                    setFirstUnreadMessageId(null)
+                    setUnreadForConversation(selectedChat, 0)
+                })
+                .catch(() => { })
+        }
+    }, [firstUnreadMessageId, selectedChat, setUnreadForConversation])
 
     const loadConversationDetails = async (chatId: number) => {
         const token = ++loadDetailsTokenRef.current
@@ -985,7 +1100,7 @@ export default function ConversationsView() {
                                                         ? (chat as any).website_name
                                                         : `Website #${(chat as any).website_id}`}
                                                 </Badge>
-                                                {Boolean(unreadByConversationId[chat.id]) && (
+                                                {chat.id !== selectedChat && Boolean(unreadByConversationId[chat.id]) && (
                                                     <Badge
                                                         variant="destructive"
                                                         className="h-5 min-w-5 justify-center rounded-full px-1.5 text-xs flex-shrink-0"
@@ -1043,8 +1158,12 @@ export default function ConversationsView() {
                     </div>
 
                     {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
-                        {unreadRibbon && unreadRibbon.chatId === selectedChat && unreadRibbon.count > 0 && (
+                    <div
+                        ref={messagesContainerRef}
+                        onScroll={handleMessagesScroll}
+                        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900"
+                    >
+                        {unreadRibbon && unreadRibbon.chatId === selectedChat && unreadRibbon.count > 0 && !firstUnreadMessageId && (
                             <div className="flex justify-center">
                                 <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
                                     {unreadRibbon.count} unread message{unreadRibbon.count === 1 ? '' : 's'}
@@ -1071,98 +1190,113 @@ export default function ConversationsView() {
                                 {[...messages]
                                     .sort((a: any, b: any) => getMessageTimestamp(a) - getMessageTimestamp(b))
                                     .map((msg, index, sortedMessages) => {
-                                    const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
-                                    const eventType = (msg as any).event_type || null
-                                    const isSystem = senderType === 'system'
-                                    const isJoin = isSystem && eventType === 'agent_join'
-                                    const isBot = isSystem && !isJoin
-                                    const isAgent = senderType === 'agent'
-                                    const msgTimestamp = (msg as any).timestamp || msg.created_at
-                                    const showTimestamp = index === 0 ||
-                                        (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
+                                        const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
+                                        const eventType = (msg as any).event_type || null
+                                        const isSystem = senderType === 'system'
+                                        const isJoin = isSystem && eventType === 'agent_join'
+                                        const isBot = isSystem && !isJoin
+                                        const isAgent = senderType === 'agent'
+                                        const msgTimestamp = (msg as any).timestamp || msg.created_at
+                                        const showTimestamp = index === 0 ||
+                                            (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
 
-                                    return (
-                                        <div key={msg.id}>
-                                            {/* Timestamp Divider */}
-                                            {showTimestamp && (
-                                                <div className="flex items-center justify-center my-4">
-                                                    <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-400">
-                                                        {new Date(msgTimestamp).toLocaleString('en-US', {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
+                                        const numericMsgId = Number((msg as any)?.id)
+                                        const showUnreadDivider =
+                                            firstUnreadMessageId != null &&
+                                            Number.isFinite(numericMsgId) &&
+                                            numericMsgId > 0 &&
+                                            numericMsgId === firstUnreadMessageId
 
-                                            {/* Agent Joined */}
-                                            {isJoin ? (
-                                                <div className="flex justify-center">
-                                                    <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
-                                                        {msg.content}
-                                                    </div>
-                                                </div>
-                                            ) : isBot ? (
-                                                // Bot/automation/system messages render on the agent side with a robot avatar.
-                                                <div className="flex justify-end">
-                                                    <div className="flex items-end gap-2 max-w-[70%]">
-                                                        <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
-                                                            <p className="break-words whitespace-pre-wrap">{msg.content}</p>
-                                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                                                <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
-                                                            <Bot className="h-4 w-4" />
+                                        return (
+                                            <div key={msg.id}>
+                                                {/* Unread Divider */}
+                                                {showUnreadDivider && (
+                                                    <div className="flex items-center justify-center my-4" ref={unreadDividerRef}>
+                                                        <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
+                                                            Unread messages
                                                         </div>
                                                     </div>
-                                                </div>
-                                            ) : (
-                                                <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                                                    <div className="flex items-end gap-2 max-w-[70%]">
-                                                        {!isAgent && (
-                                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                                {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
+                                                )}
+                                                {/* Timestamp Divider */}
+                                                {showTimestamp && (
+                                                    <div className="flex items-center justify-center my-4">
+                                                        <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-400">
+                                                            {new Date(msgTimestamp).toLocaleString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit'
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Agent Joined */}
+                                                {isJoin ? (
+                                                    <div className="flex justify-center">
+                                                        <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
+                                                            {msg.content}
+                                                        </div>
+                                                    </div>
+                                                ) : isBot ? (
+                                                    // Bot/automation/system messages render on the agent side with a robot avatar.
+                                                    <div className="flex justify-end">
+                                                        <div className="flex items-end gap-2 max-w-[70%]">
+                                                            <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
+                                                                <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                                                                <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                                    <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                </div>
                                                             </div>
-                                                        )}
-                                                        <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                            <p className="break-words whitespace-pre-wrap">{msg.content}</p>
-                                                            <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
-                                                                <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                                {isAgent && (
-                                                                    <Check className="h-3 w-3 ml-1" />
-                                                                )}
+                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
+                                                                <Bot className="h-4 w-4" />
                                                             </div>
                                                         </div>
-                                                        {isAgent && (
-                                                            (() => {
-                                                                const avatarUrl = (msg as any).sender_avatar_url
-                                                                const name = (msg as any).sender_name
-                                                                if (avatarUrl) {
-                                                                    const fullUrl = String(avatarUrl).startsWith('http') ? avatarUrl : `${API_BASE}${avatarUrl}`
+                                                    </div>
+                                                ) : (
+                                                    <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                                                        <div className="flex items-end gap-2 max-w-[70%]">
+                                                            {!isAgent && (
+                                                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                                                    {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
+                                                                </div>
+                                                            )}
+                                                            <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
+                                                                <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                                                                <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                                                                    <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                    {isAgent && (
+                                                                        <Check className="h-3 w-3 ml-1" />
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            {isAgent && (
+                                                                (() => {
+                                                                    const avatarUrl = (msg as any).sender_avatar_url
+                                                                    const name = (msg as any).sender_name
+                                                                    if (avatarUrl) {
+                                                                        const fullUrl = String(avatarUrl).startsWith('http') ? avatarUrl : `${API_BASE}${avatarUrl}`
+                                                                        return (
+                                                                            <img
+                                                                                src={fullUrl}
+                                                                                alt={name || 'Agent'}
+                                                                                className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                                                            />
+                                                                        )
+                                                                    }
                                                                     return (
-                                                                        <img
-                                                                            src={fullUrl}
-                                                                            alt={name || 'Agent'}
-                                                                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                                                                        />
+                                                                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                                                            {getInitials(name, 'AG')}
+                                                                        </div>
                                                                     )
-                                                                }
-                                                                return (
-                                                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                                        {getInitials(name, 'AG')}
-                                                                    </div>
-                                                                )
-                                                            })()
-                                                        )}
+                                                                })()
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )
-                                })}
+                                                )}
+                                            </div>
+                                        )
+                                    })}
                                 <div ref={messagesEndRef} />
                             </>
                         )}

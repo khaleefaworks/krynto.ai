@@ -20,6 +20,22 @@ class ChatService:
     @staticmethod
     async def send_to_visitor(conversation_id: int, message_data: dict):
         """Send message to visitor's WebSocket if they're connected"""
+        # Prefer direct delivery when the visitor socket is local.
+        # This avoids occasional Redis Pub/Sub reconnect/backoff delays.
+        if conversation_id in ChatService.active_visitors:
+            websocket = ChatService.active_visitors[conversation_id]
+            try:
+                await websocket.send_json(message_data)
+                logger.info("message_sent_to_visitor", conversation_id=conversation_id, message_type=message_data.get("type"))
+                return
+            except Exception as e:
+                logger.error("failed_to_send_to_visitor", conversation_id=conversation_id, error=str(e))
+                # Drop stale socket mapping so future sends don't keep failing.
+                try:
+                    ChatService.unregister_visitor(conversation_id)
+                except Exception:
+                    pass
+
         # If Redis is enabled, publish and let the subscriber deliver to whichever
         # worker actually holds the visitor websocket.
         if realtime_bus.enabled:
@@ -32,20 +48,7 @@ class ChatService:
             )
             return
 
-        if conversation_id in ChatService.active_visitors:
-            websocket = ChatService.active_visitors[conversation_id]
-            try:
-                await websocket.send_json(message_data)
-                logger.info("message_sent_to_visitor", conversation_id=conversation_id, message_type=message_data.get("type"))
-            except Exception as e:
-                logger.error("failed_to_send_to_visitor", conversation_id=conversation_id, error=str(e))
-                # Drop stale socket mapping so future sends don't keep failing.
-                try:
-                    ChatService.unregister_visitor(conversation_id)
-                except Exception:
-                    pass
-        else:
-            logger.warning("visitor_not_connected", conversation_id=conversation_id)
+        logger.warning("visitor_not_connected", conversation_id=conversation_id)
 
     @classmethod
     async def deliver_bus_event(cls, event: dict) -> None:

@@ -146,6 +146,17 @@ class ConversationOrchestrator:
                     "message_obj": serialize_message(self.db, msg),
                 },
             )
+
+            # Explicit unread event type (client may ignore if already viewing).
+            await self.agent_service.send_to_agent(
+                conversation.assigned_agent_id,
+                {
+                    "type": "conversation_unread",
+                    "conversation_id": conversation.id,
+                    "website_id": website_id,
+                    "delta": 1,
+                },
+            )
             return None
 
         # Unassigned: still notify agents in realtime so inbox updates immediately.
@@ -158,6 +169,18 @@ class ConversationOrchestrator:
                 "website_id": website_id,
                 "message": message,
                 "message_obj": serialize_message(self.db, msg),
+            },
+            include_global=True,
+        )
+
+        # Explicit unread event type for inbox badges.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "conversation_unread",
+                "conversation_id": conversation.id,
+                "website_id": website_id,
+                "delta": 1,
             },
             include_global=True,
         )
@@ -278,6 +301,18 @@ class ConversationOrchestrator:
             }
         )
 
+        # Notify dashboards so lists refresh and unread can clear.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "conversation_assigned",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "assigned_agent_id": agent_id,
+            },
+            include_global=True,
+        )
+
         return {"success": True}
 
     async def handle_agent_takeover(self, *, conversation_id: int, agent_id: int) -> dict:
@@ -316,6 +351,18 @@ class ConversationOrchestrator:
                 "agent_name": agent_name,
                 "previous_agent_id": previous_agent_id,
             },
+        )
+
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "conversation_assigned",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "assigned_agent_id": agent_id,
+                "previous_agent_id": previous_agent_id,
+            },
+            include_global=True,
         )
 
         return {"success": True}
@@ -376,6 +423,23 @@ class ConversationOrchestrator:
                 "type": "system",
                 "message": "This conversation has been closed.",
             }
+        )
+
+        # Notify dashboards to remove/refresh the closed conversation.
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+            website_id = int(conversation.website_id) if conversation else None
+        except Exception:
+            website_id = None
+
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "conversation_closed",
+                "conversation_id": conversation_id,
+                "website_id": website_id,
+            },
+            include_global=True,
         )
 
         return {"success": True}

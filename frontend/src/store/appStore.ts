@@ -10,7 +10,7 @@ interface AppState {
   token: string | null
   setUser: (user: User | null) => void
   setToken: (token: string | null) => void
-  
+
   // Chats
   activeChats: Conversation[]
   setActiveChats: (chats: Conversation[]) => void
@@ -20,6 +20,8 @@ interface AppState {
   // Unread per conversation (agent inbox)
   unreadByConversationId: Record<number, number>
   incrementUnreadForConversation: (conversationId: number, delta?: number) => void
+  setUnreadForConversation: (conversationId: number, count: number) => void
+  setUnreadMapFromServer: (unreadByConversationId: Record<number, number>) => void
   clearUnreadForConversation: (conversationId: number) => void
   pruneUnreadByConversationIds: (validConversationIds: number[]) => void
 
@@ -31,14 +33,14 @@ interface AppState {
   // Prevent re-processing stale lastChatEvent on remount
   lastProcessedChatEventsVersion: number
   setLastProcessedChatEventsVersion: (version: number) => void
-  
+
   // Current Chat
   currentChat: Conversation | null
   messages: Message[]
   setCurrentChat: (chat: Conversation | null) => void
   setMessages: (messages: Message[]) => void
   addMessage: (message: Message) => void
-  
+
   // WebSocket
   ws: WebSocket | null
   setWebSocket: (ws: WebSocket | null) => void
@@ -52,7 +54,7 @@ export const useAppStore = create<AppState>((set) => ({
   token: null,
   setUser: (user) => set({ user }),
   setToken: (token) => set({ token }),
-  
+
   // Chats
   activeChats: [],
   setActiveChats: (chats) => set({ activeChats: chats }),
@@ -69,6 +71,17 @@ export const useAppStore = create<AppState>((set) => ({
       next[id] = (next[id] || 0) + delta
       return { unreadByConversationId: next }
     }),
+  setUnreadForConversation: (conversationId, count) =>
+    set((state) => {
+      const id = Number(conversationId)
+      if (!Number.isFinite(id) || id <= 0) return state
+      const safeCount = Math.max(0, Number(count) || 0)
+      const prev = state.unreadByConversationId[id] || 0
+      if (prev === safeCount) return state
+      return { unreadByConversationId: { ...state.unreadByConversationId, [id]: safeCount } }
+    }),
+  setUnreadMapFromServer: (unreadByConversationId) =>
+    set(() => ({ unreadByConversationId: { ...(unreadByConversationId || {}) } })),
   clearUnreadForConversation: (conversationId) =>
     set((state) => {
       const id = Number(conversationId)
@@ -104,16 +117,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   lastProcessedChatEventsVersion: 0,
   setLastProcessedChatEventsVersion: (version) => set({ lastProcessedChatEventsVersion: version }),
-  
+
   // Current Chat
   currentChat: null,
   messages: [],
   setCurrentChat: (chat) => set({ currentChat: chat }),
   setMessages: (messages) => set({ messages }),
-  addMessage: (message) => set((state) => ({ 
-    messages: [...state.messages, message] 
+  addMessage: (message) => set((state) => ({
+    messages: [...state.messages, message]
   })),
-  
+
   // WebSocket
   ws: null,
   setWebSocket: (ws) => set({ ws }),
