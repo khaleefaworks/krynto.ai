@@ -12,7 +12,9 @@ CRITICAL: This must be used by:
 
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole
+from app.repos import users as users_repo
 from app.services.agent_resolver import is_agent_eligible
+from app.services.agent_service import AgentService
 
 
 def is_website_online(website_id: int) -> bool:
@@ -56,10 +58,12 @@ def is_website_online(website_id: int) -> bool:
             .all()
         )
         
-        # Get set of currently connected user IDs from active WebSocket connections
-        from app.services.agent_service import AgentService
-
-        connected_user_ids = AgentService.connected_agent_ids()
+        # Use DB-backed heartbeat for presence so online/offline is consistent
+        # across endpoints and supports multi-worker deployments.
+        connected_user_ids = users_repo.recently_heartbeat_user_ids(
+            db,
+            ttl_seconds=AgentService.heartbeat_ttl_seconds,
+        )
         
         # Check if any assigned agent is eligible
         for agent in assigned_agents:

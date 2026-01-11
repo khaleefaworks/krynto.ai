@@ -7,6 +7,7 @@ from app.core.ws_auth import authenticate_websocket, extract_token_from_query
 from app.models.user import UserRole
 from app.models.user import User
 import json
+import asyncio
 
 from app.api.message_presenter import serialize_message
 from app.repos import messages as messages_repo
@@ -28,6 +29,7 @@ async def agent_ws(
     websocket_id = None
     agent_service = None
     last_db_heartbeat_at: datetime | None = None
+    server_heartbeat_interval_seconds: float = 25.0
     
     try:
         # Authenticate WebSocket connection - agent_id comes from JWT token
@@ -75,9 +77,36 @@ async def agent_ws(
             "message": "Agent connected successfully"
         })
         
-        # Listen for agent messages
+        # Listen for agent messages.
+        # Important: keep DB-backed presence alive even if the agent tab is idle.
         while True:
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=server_heartbeat_interval_seconds
+                )
+            except asyncio.TimeoutError:
+                # No inbound messages recently, but the socket is still connected.
+                # Treat that as "online" for presence and update heartbeat.
+                try:
+                    AgentService.mark_heartbeat(agent_id)
+                except Exception:
+                    pass
+
+                try:
+                    now = datetime.utcnow()
+                    if (last_db_heartbeat_at is None) or (
+                        (now - last_db_heartbeat_at).total_seconds() >= 10
+                    ):
+                        users_repo.touch_last_heartbeat_at(db, user_id=agent_id, now=now)
+                        db.commit()
+                        last_db_heartbeat_at = now
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+                continue
             logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
 
