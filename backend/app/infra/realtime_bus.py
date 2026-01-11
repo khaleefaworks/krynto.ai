@@ -15,9 +15,9 @@ EVENT_CHANNEL = os.getenv("AI_CHATASSIST_REDIS_CHANNEL", "aichatassist:events:v1
 
 @dataclass(frozen=True)
 class BusEvent:
-    schema_version: int = 1
     event_type: str
     payload: dict
+    schema_version: int = 1
     agent_id: int | None = None
     conversation_id: int | None = None
     website_id: int | None = None
