@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
@@ -36,12 +36,11 @@ def get_current_user(
         if token_iat:
             system_settings = db.query(SystemSettings).first()
             if system_settings and system_settings.last_reset_at:
-                token_datetime = datetime.fromtimestamp(token_iat)
-                # Make both timezone-aware for comparison
-                if token_datetime.tzinfo is None:
-                    from datetime import timezone as tz
-                    token_datetime = token_datetime.replace(tzinfo=tz.utc)
-                if token_datetime < system_settings.last_reset_at:
+                token_datetime = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+                reset_at = system_settings.last_reset_at
+                if reset_at.tzinfo is None:
+                    reset_at = reset_at.replace(tzinfo=timezone.utc)
+                if token_datetime < reset_at:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Token invalidated due to system reset",

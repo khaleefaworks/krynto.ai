@@ -100,11 +100,12 @@ async def authenticate_websocket(
         if system_settings:
             reset_at = system_settings.last_reset_at
             if reset_at is not None:
-                token_datetime = datetime.fromtimestamp(token_iat)
-                if token_datetime.tzinfo is None:
-                    token_datetime = token_datetime.replace(tzinfo=timezone.utc)
-                # Direct comparison - reset_at is datetime from DB
-                if token_datetime < reset_at:  # type: ignore
+                # Ensure both sides are timezone-aware UTC to avoid TypeError
+                # (can happen depending on DB/driver behavior).
+                token_datetime = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+                if reset_at.tzinfo is None:
+                    reset_at = reset_at.replace(tzinfo=timezone.utc)
+                if token_datetime < reset_at:
                     await send_error_and_close(
                         websocket,
                         "Token invalidated due to system reset",
