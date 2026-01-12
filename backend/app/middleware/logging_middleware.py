@@ -5,6 +5,8 @@ from app.core.logging import get_logger
 import time
 import structlog
 
+from app.infra.metrics import observe_http_request
+
 logger = get_logger(__name__)
 
 
@@ -12,14 +14,22 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     """Middleware to add request logging and context"""
     
     async def dispatch(self, request: Request, call_next):
-        # Generate unique request ID
-        request_id = str(uuid.uuid4())
+        # Propagate existing request id if present; otherwise generate.
+        incoming = (request.headers.get("x-request-id") or "").strip()
+        request_id = incoming[:200] if incoming else str(uuid.uuid4())
+
+        # Prefer the route template path when available (lower cardinality).
+        try:
+            route = request.scope.get("route")
+            path_template = getattr(route, "path", None) or request.url.path
+        except Exception:
+            path_template = request.url.path
         
         # Bind request context to logger
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             request_id=request_id,
-            path=request.url.path,
+            path=path_template,
             method=request.method,
         )
         
@@ -28,7 +38,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         logger.info("request_started", 
                    request_id=request_id, 
                    method=request.method, 
-                   path=request.url.path,
+                   path=path_template,
                    client=request.client.host if request.client else None)
         
         # Process request
@@ -43,6 +53,17 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                        request_id=request_id,
                        status_code=response.status_code,
                        duration_ms=round(duration * 1000, 2))
+
+            # Metrics
+            try:
+                observe_http_request(
+                    method=request.method,
+                    path_template=str(path_template),
+                    status_code=int(response.status_code),
+                    duration_ms=round(duration * 1000, 3),
+                )
+            except Exception:
+                pass
             
             # Add request ID to response headers
             response.headers["X-Request-ID"] = request_id
@@ -55,4 +76,15 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                         error=str(e),
                         duration_ms=round(duration * 1000, 2),
                         exc_info=True)
+
+            # Best-effort metrics for failures (no status code).
+            try:
+                observe_http_request(
+                    method=request.method,
+                    path_template=str(path_template),
+                    status_code=0,
+                    duration_ms=round(duration * 1000, 3),
+                )
+            except Exception:
+                pass
             raise

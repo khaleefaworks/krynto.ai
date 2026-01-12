@@ -16,6 +16,7 @@ from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
 from app.infra.ws_rate_limit import is_chat_rate_limited
+from app.infra.metrics import ws_connect, ws_disconnect
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -41,6 +42,10 @@ async def chat_ws(
     session_id: str,
 ):
     await websocket.accept()
+    try:
+        ws_connect(kind="chat")
+    except Exception:
+        pass
     logger.info("visitor_websocket_connected", website_id=website_id, session_id=session_id)
 
     db = SessionLocal()
@@ -481,6 +486,10 @@ async def chat_ws(
         except:
             pass
     finally:
+        try:
+            ws_disconnect(kind="chat")
+        except Exception:
+            pass
         # Always clean up visitor mapping + rate limit tracking.
         try:
             ChatService.unregister_visitor_socket(websocket)

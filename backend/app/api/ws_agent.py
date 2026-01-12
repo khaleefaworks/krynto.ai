@@ -13,6 +13,7 @@ from app.core.message_presenter import serialize_message
 from app.repos import messages as messages_repo
 from app.repos import users as users_repo
 from datetime import datetime
+from app.infra.metrics import ws_connect, ws_disconnect
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -22,6 +23,10 @@ async def agent_ws(
     website_id: int,
 ):
     await websocket.accept()
+    try:
+        ws_connect(kind="agent")
+    except Exception:
+        pass
     logger.info("agent_websocket_connection_attempt", website_id=website_id)
 
     db = SessionLocal()
@@ -243,6 +248,10 @@ async def agent_ws(
         else:
             logger.error("agent_websocket_error_before_auth", website_id=website_id, error=str(e), exc_info=True)
     finally:
+        try:
+            ws_disconnect(kind="agent")
+        except Exception:
+            pass
         if agent_service and websocket_id:
             agent_service.unregister_agent(websocket_id)
         db.close()

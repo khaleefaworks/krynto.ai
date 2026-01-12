@@ -9,6 +9,7 @@ from app.services.agent_service import AgentService
 from app.repos import users as users_repo
 from app.core.config import settings
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
+from app.infra.metrics import ws_connect, ws_disconnect
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -64,6 +65,10 @@ async def presence_ws(websocket: WebSocket, website_id: int):
     Client sends periodic pings; server replies with current presence snapshot.
     """
     await websocket.accept()
+    try:
+        ws_connect(kind="presence")
+    except Exception:
+        pass
     logger.info("presence_ws_connected", website_id=website_id)
 
     db = SessionLocal()
@@ -110,4 +115,8 @@ async def presence_ws(websocket: WebSocket, website_id: int):
         except Exception:
             pass
     finally:
+        try:
+            ws_disconnect(kind="presence")
+        except Exception:
+            pass
         db.close()
