@@ -2,6 +2,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 @pytest.fixture()
@@ -273,3 +274,192 @@ def test_agent_join_chat_invalid_conversation_id_returns_error(client_and_seeded
         agent_ws.send_text(json.dumps({"type": "join_chat", "conversation_id": "not-an-int"}))
         err = _recv_until(agent_ws, want_type="error")
         assert "Invalid conversation_id" in str(err.get("message") or "")
+
+
+def test_chat_socket_rejects_disallowed_widget_origin(client_and_seeded_db):
+    client = client_and_seeded_db
+
+    with client.websocket_connect(
+        "/ws/chat/1/sess-origin-bad",
+        headers={"Origin": "https://evil.com"},
+    ) as ws:
+        # Server closes with 1008 after accept; attempting to read should raise.
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+        assert exc.value.code == 1008
+
+
+def test_presence_socket_rejects_missing_origin_in_production(client_and_seeded_db, monkeypatch):
+    from app.core.config import settings
+
+    client = client_and_seeded_db
+
+    monkeypatch.setattr(settings, "ENV", "production")
+
+    with client.websocket_connect("/ws/presence/1") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+        assert exc.value.code == 1008
+
+
+def test_page_view_does_not_create_conversation(client_and_seeded_db):
+    from app.core.database import SessionLocal
+    from app.models.conversation import Conversation
+    from app.models.website import Website
+
+    client = client_and_seeded_db
+    session_id = "sess-pageview-no-conv"
+
+    # Disable welcome automation; it can create a conversation on connect.
+    db = SessionLocal()
+    try:
+        site = db.query(Website).filter_by(id=1).first()
+        assert site is not None
+        site.widget_config = {"automations": {"welcome_enabled": False}}
+        db.commit()
+    finally:
+        db.close()
+
+    with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws:
+        history = _recv_until(visitor_ws, want_type="history")
+        assert history.get("conversation_id") is None
+
+        visitor_ws.send_text(
+            json.dumps(
+                {
+                    "type": "page_view",
+                    "url": "https://test.local/page-1",
+                    "title": "Page 1",
+                }
+            )
+        )
+
+    db = SessionLocal()
+    try:
+        conv = db.query(Conversation).filter_by(website_id=1, session_id=session_id).first()
+        assert conv is None
+    finally:
+        db.close()
+
+
+def test_page_view_is_broadcast_to_agent_only_when_conversation_exists(client_and_seeded_db, monkeypatch):
+    from app.core.security import create_access_token
+    from app.services import conversation_orchestrator as orchestrator_module
+
+    # Avoid background sleeper tasks in tests.
+    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        session_id = "sess-pageview-with-conv"
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws:
+            _recv_until(visitor_ws, want_type="history")
+
+            # Create the conversation via first visitor message.
+            visitor_ws.send_text(json.dumps({"message": "hello"}))
+            visitor_msg = _recv_until(agent_ws, want_type="visitor_message")
+            conversation_id = int(visitor_msg["conversation_id"])
+
+            # Now send a page_view; it should be forwarded to the agent.
+            visitor_ws.send_text(
+                json.dumps(
+                    {
+                        "type": "page_view",
+                        "url": "https://test.local/page-2",
+                        "title": "Page 2",
+                    }
+                )
+            )
+
+            ev = _recv_until(agent_ws, want_type="page_view")
+            assert ev.get("website_id") == 1
+            assert ev.get("conversation_id") == conversation_id
+            assert isinstance(ev.get("page_view"), dict)
+            assert ev["page_view"].get("url") == "https://test.local/page-2"
+
+
+def test_chat_rate_limit_fallback_in_memory_when_no_redis(client_and_seeded_db, monkeypatch):
+    from app.api import ws_chat as ws_chat_module
+
+    # Disable background sleeper tasks.
+    from app.services import conversation_orchestrator as orchestrator_module
+
+    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    # Ensure Redis is disabled and set a tiny limit.
+    monkeypatch.setattr(ws_chat_module.settings, "REDIS_URL", "")
+    monkeypatch.setattr(ws_chat_module.settings, "RATE_LIMIT_CHAT_MESSAGE", 1)
+
+    # Force redis limiter path to allow (so fallback is what triggers).
+    async def _redis_limiter_false(*, website_id: int, session_id: str, limit=None) -> bool:
+        return False
+
+    monkeypatch.setattr(ws_chat_module, "is_chat_rate_limited", _redis_limiter_false)
+
+    client = client_and_seeded_db
+    with client.websocket_connect("/ws/chat/1/sess-rl-fallback") as ws:
+        _recv_until(ws, want_type="history")
+
+        ws.send_text(json.dumps({"message": "m1"}))
+        # The second message should be rejected by the fallback limiter.
+        ws.send_text(json.dumps({"message": "m2"}))
+        err = _recv_until(ws, want_type="error")
+        assert "Rate limit exceeded" in str(err.get("message") or "")
+
+
+def test_chat_rate_limit_redis_path_is_invoked_when_configured(client_and_seeded_db, monkeypatch):
+    from app.api import ws_chat as ws_chat_module
+
+    # Disable background sleeper tasks.
+    from app.services import conversation_orchestrator as orchestrator_module
+
+    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    # Pretend Redis is configured and set a small limit.
+    monkeypatch.setattr(ws_chat_module.settings, "REDIS_URL", "redis://example.invalid:6379/0")
+    monkeypatch.setattr(ws_chat_module.settings, "RATE_LIMIT_CHAT_MESSAGE", 1)
+
+    calls = {"n": 0}
+
+    async def _redis_limiter(*, website_id: int, session_id: str, limit=None) -> bool:
+        calls["n"] += 1
+        # First message allowed; second message rejected.
+        return calls["n"] >= 2
+
+    monkeypatch.setattr(ws_chat_module, "is_chat_rate_limited", _redis_limiter)
+
+    client = client_and_seeded_db
+    with client.websocket_connect("/ws/chat/1/sess-rl-redis") as ws:
+        _recv_until(ws, want_type="history")
+
+        ws.send_text(json.dumps({"message": "m1"}))
+        ws.send_text(json.dumps({"message": "m2"}))
+        err = _recv_until(ws, want_type="error")
+        assert "Rate limit exceeded" in str(err.get("message") or "")
+
+    assert calls["n"] >= 2
