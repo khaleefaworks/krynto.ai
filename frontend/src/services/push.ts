@@ -2,6 +2,8 @@ import { apiRequest } from './api'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
+const _VAPID_PUBLIC_KEY_CACHE = 'push_vapid_public_key_v1'
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -55,14 +57,34 @@ export async function ensurePushSubscription(): Promise<void> {
 
     const registration = await navigator.serviceWorker.ready
 
-    const existing = await registration.pushManager.getSubscription()
-    if (existing) {
-        await registerSubscription(existing)
-        return
-    }
-
     const publicKey = await getVapidPublicKey()
     if (!publicKey) return
+
+    // If the backend VAPID key changes, any existing subscription was created with the
+    // old applicationServerKey. In that case we must unsubscribe + resubscribe.
+    let cachedKey: string | null = null
+    try {
+        cachedKey = localStorage.getItem(_VAPID_PUBLIC_KEY_CACHE)
+    } catch {
+        cachedKey = null
+    }
+
+    const existing = await registration.pushManager.getSubscription()
+    if (existing && cachedKey && cachedKey !== publicKey) {
+        try {
+            await existing.unsubscribe()
+        } catch {
+            // best-effort
+        }
+    } else if (existing) {
+        await registerSubscription(existing)
+        try {
+            localStorage.setItem(_VAPID_PUBLIC_KEY_CACHE, publicKey)
+        } catch {
+            // ignore
+        }
+        return
+    }
 
     const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -70,6 +92,12 @@ export async function ensurePushSubscription(): Promise<void> {
     })
 
     await registerSubscription(subscription)
+
+    try {
+        localStorage.setItem(_VAPID_PUBLIC_KEY_CACHE, publicKey)
+    } catch {
+        // ignore
+    }
 }
 
 export async function registerSubscription(subscription: PushSubscription): Promise<void> {
