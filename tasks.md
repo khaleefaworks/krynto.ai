@@ -102,6 +102,7 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 - Expand test coverage + CI hardening
 
 - [x] Add unit tests for metrics registry rendering
+- [x] Expand websocket flow integration tests (presence + error handling)
 
 ## Recent commits (reference)
 - `ceaaffd` Fix unread UX and widget welcome automation

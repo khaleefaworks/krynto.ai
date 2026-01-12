@@ -42,7 +42,16 @@ def client_and_seeded_db():
                 )
             )
 
-        db.commit()
+            # Ensure presence is deterministic per test. Other tests may update
+            # last_heartbeat_at; reset it here so "offline" tests are stable.
+            try:
+                u = db.query(User).filter_by(id=1).first()
+                if u is not None and hasattr(u, "last_heartbeat_at"):
+                    setattr(u, "last_heartbeat_at", None)
+            except Exception:
+                pass
+
+            db.commit()
     finally:
         db.close()
 
@@ -199,3 +208,68 @@ def test_websocket_visitor_reconnect_gets_history(client_and_seeded_db, monkeypa
             msgs = history2.get("messages")
             assert isinstance(msgs, list)
             assert any(m.get("content") == "first" for m in msgs)
+
+
+def test_presence_socket_offline_when_no_agent_connected(client_and_seeded_db):
+    from datetime import datetime, timedelta
+
+    # Force the seeded agent heartbeat to be stale so presence is offline.
+    from app.core.database import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        stale = datetime.utcnow() - timedelta(days=3650)
+        db.query(User).filter_by(id=1).update({"last_heartbeat_at": stale})
+        db.commit()
+    finally:
+        db.close()
+
+    client = client_and_seeded_db
+
+    with client.websocket_connect("/ws/presence/1") as ws:
+        msg = _recv_until(ws, want_type="presence")
+        assert msg.get("website_id") == 1
+        assert msg.get("online") is False
+        assert msg.get("available_agents_count") == 0
+
+        # Any inbound message triggers a refresh.
+        ws.send_text("ping")
+        msg2 = _recv_until(ws, want_type="presence")
+        assert msg2.get("online") is False
+
+
+def test_presence_socket_online_when_agent_connected(client_and_seeded_db):
+    from app.core.security import create_access_token
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    # Keep agent connected so heartbeat presence is online.
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        with client.websocket_connect("/ws/presence/1") as presence_ws:
+            msg = _recv_until(presence_ws, want_type="presence")
+            assert msg.get("website_id") == 1
+            assert msg.get("online") is True
+            assert int(msg.get("available_agents_count") or 0) >= 1
+            assert isinstance(msg.get("agents"), list)
+
+            presence_ws.send_text("ping")
+            msg2 = _recv_until(presence_ws, want_type="presence")
+            assert msg2.get("online") is True
+
+
+def test_agent_join_chat_invalid_conversation_id_returns_error(client_and_seeded_db):
+    from app.core.security import create_access_token
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        agent_ws.send_text(json.dumps({"type": "join_chat", "conversation_id": "not-an-int"}))
+        err = _recv_until(agent_ws, want_type="error")
+        assert "Invalid conversation_id" in str(err.get("message") or "")
