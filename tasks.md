@@ -116,10 +116,10 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 	- Verify fallback in-memory limiter when `REDIS_URL` is not set
 	- Verify Redis limiter path is invoked when `REDIS_URL` is set (stubbed)
 
-- [ ] CI: run frontend typecheck explicitly
+- [x] CI: run frontend typecheck explicitly
 	- Add `npm run typecheck` script (tsc --noEmit) and run it in GitHub Actions
 
-- [ ] CI: add a minimal backend lint/format gate
+- [x] CI: add a minimal backend lint/format gate
 	- Pick one tool (e.g., ruff) and run it in GitHub Actions with a minimal rule set
 
 ## Recent commits (reference)

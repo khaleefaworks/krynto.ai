@@ -29,9 +29,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt -c backend/requirements.lock.txt
           python -m pip install pytest
+          python -m pip install ruff
 
       - name: Backend syntax check
         run: python -m compileall backend/app
+
+      - name: Backend lint (ruff, minimal)
+        run: ruff check backend/app backend/tests --select E9,F63,F7,F82
 
       - name: Run backend tests
         run: pytest -q backend/tests
@@ -54,6 +58,10 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
 
       - name: Build
         working-directory: frontend
