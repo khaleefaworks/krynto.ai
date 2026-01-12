@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { apiRequest } from "@/services/api"
 import { User as UserIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from "@/services/push"
 
 export default function PersonalSettings() {
   const { user, setUser } = useAppStore()
@@ -16,6 +17,11 @@ export default function PersonalSettings() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar_url || null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [avatarLoading, setAvatarLoading] = useState(false)
+  const [pushLoading, setPushLoading] = useState(false)
+  const [pushPermission, setPushPermission] = useState<ReturnType<typeof getNotificationPermission>>(
+    typeof window !== 'undefined' ? getNotificationPermission() : 'unsupported'
+  )
+  const [vapidPublicKeyPresent, setVapidPublicKeyPresent] = useState<boolean | null>(null)
 
   // Check if user is logged in
   useEffect(() => {
@@ -34,6 +40,41 @@ export default function PersonalSettings() {
       setAvatarPreview(fullAvatarUrl)
     }
   }, [user])
+
+  // Push status (best-effort; public key is safe to fetch unauthenticated)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const key = await getVapidPublicKey()
+        if (!cancelled) setVapidPublicKeyPresent(Boolean(key))
+      } catch {
+        if (!cancelled) setVapidPublicKeyPresent(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleEnablePush = async () => {
+    setPushLoading(true)
+    try {
+      const perm = await requestPermissionAndSubscribe()
+      setPushPermission(perm)
+      if (perm === 'granted') {
+        setMessage({ type: 'success', text: 'Browser notifications enabled.' })
+      } else if (perm === 'denied') {
+        setMessage({ type: 'error', text: 'Notifications were blocked in the browser.' })
+      } else {
+        setMessage({ type: 'error', text: 'Notifications permission was not granted.' })
+      }
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Failed to enable notifications' })
+    } finally {
+      setPushLoading(false)
+    }
+  }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -270,6 +311,36 @@ export default function PersonalSettings() {
                 {user?.role === 'system_manager' ? 'System Manager' : user?.role === 'manager' ? 'Manager' : 'Agent'}
               </p>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Browser Notifications</CardTitle>
+            <CardDescription>Enable push notifications for new chats while you are away</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              Permission: <span className="font-medium">{String(pushPermission)}</span>
+            </div>
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              Push supported: <span className="font-medium">{isPushSupported() ? 'yes' : 'no'}</span>
+            </div>
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              Server VAPID configured: <span className="font-medium">{vapidPublicKeyPresent === null ? 'checking…' : vapidPublicKeyPresent ? 'yes' : 'no'}</span>
+            </div>
+            {!vapidPublicKeyPresent && (
+              <div className="text-xs text-red-600 dark:text-red-400">
+                Push is disabled on the backend (missing VAPID keys). Set VAPID env vars and restart the backend.
+              </div>
+            )}
+            <Button
+              onClick={handleEnablePush}
+              disabled={pushLoading || !isPushSupported() || vapidPublicKeyPresent === false}
+              variant="outline"
+            >
+              {pushLoading ? 'Enabling…' : 'Enable Notifications'}
+            </Button>
           </CardContent>
         </Card>
       </div>

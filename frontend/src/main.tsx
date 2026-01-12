@@ -3,11 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
-if (
-  import.meta.env.PROD &&
-  'serviceWorker' in navigator &&
-  window.isSecureContext
-) {
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       // Best-effort: do not block app startup.

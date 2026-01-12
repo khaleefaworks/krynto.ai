@@ -30,6 +30,26 @@ class PushTestIn(BaseModel):
     url: str | None = ""
 
 
+@router.get("/status")
+async def push_status(
+    current_user: User = Depends(require_agent),
+    db: Session = Depends(get_db),
+):
+    subs = push_subs_repo.list_subscriptions_for_agent(db, agent_id=int(current_user.id))
+    vapid_ready = bool(
+        (settings.VAPID_PUBLIC_KEY or "").strip()
+        and (settings.VAPID_PRIVATE_KEY or "").strip()
+        and (settings.VAPID_SUBJECT or "").strip()
+    )
+
+    return {
+        "ok": True,
+        "vapid_public_key_present": bool((settings.VAPID_PUBLIC_KEY or "").strip()),
+        "vapid_configured": vapid_ready,
+        "subscription_count": len(subs),
+    }
+
+
 @router.get("/vapid-public-key")
 async def vapid_public_key():
     # Public key is safe to return.

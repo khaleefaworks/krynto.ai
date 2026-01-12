@@ -67,6 +67,61 @@
   let isConnecting = false;
   let toastTimeout = null;
 
+  // Visitor-side notifications (in-widget badge + sound)
+  let unreadCount = 0;
+  let soundEnabled = false;
+
+  function isWidgetOpen() {
+    try {
+      const win = document.getElementById('chatassist-window');
+      return !!(win && win.style && win.style.display !== 'none');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setUnreadCount(next) {
+    unreadCount = Math.max(0, Number(next) || 0);
+    const el = document.getElementById('chatassist-bubble-unread');
+    if (!el) return;
+    if (unreadCount <= 0) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
+    el.style.display = 'flex';
+  }
+
+  function bumpUnread() {
+    setUnreadCount(unreadCount + 1);
+  }
+
+  function playNotificationSound() {
+    if (!soundEnabled) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.04;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      setTimeout(() => {
+        try { osc.stop(); } catch (e) {}
+        try { ctx.close(); } catch (e) {}
+      }, 140);
+    } catch (e) {
+      // ignore
+    }
+  }
+
   // Page view tracking (browsing history)
   let pageViewTrackingInitialized = false;
   let lastTrackedUrl = null;
@@ -453,6 +508,16 @@
       if (data.agent_avatar) {
         updateAgentAvatar(data.agent_avatar);
       }
+
+      // Notify visitor (badge + sound) when widget is not in view.
+      try {
+        if (!isWidgetOpen() || (typeof document.hidden === 'boolean' && document.hidden)) {
+          bumpUnread();
+          playNotificationSound();
+          // Lightweight in-page notification.
+          showToast('New message');
+        }
+      } catch (e) {}
     } else if (data.type === 'agent_joined') {
       // Agent joined notification
       const name = data.agent_name || 'A support agent';
@@ -761,6 +826,7 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
+        <span id="chatassist-bubble-unread" aria-hidden="true" style="display:none;"></span>
         <div id="chatassist-bubble-text">${CONFIG.bubbleText}</div>
       </div>
       <div id="chatassist-window" style="display: none;">
@@ -833,12 +899,15 @@
     }
 
     bubble.addEventListener('click', function() {
+      soundEnabled = true;
+      setUnreadCount(0);
       bubble.style.display = 'none';
       window.style.display = 'flex';
       input.focus();
     });
 
     closeBtn.addEventListener('click', function() {
+      soundEnabled = true;
       window.style.display = 'none';
       bubble.style.display = 'flex';
       // If overlay open, close it and restore pending message
@@ -873,6 +942,7 @@
 
     input.addEventListener('keypress', function(e) {
       if (e.key === 'Enter') {
+        soundEnabled = true;
         handleUserMessage();
       }
     });

@@ -22,6 +22,31 @@ export async function getVapidPublicKey(): Promise<string> {
     return String(data?.public_key || '').trim()
 }
 
+export function getNotificationPermission(): NotificationPermission | 'unsupported' {
+    if (!('Notification' in window)) return 'unsupported'
+    return Notification.permission
+}
+
+export function isPushSupported(): boolean {
+    return (
+        'serviceWorker' in navigator &&
+        'PushManager' in window &&
+        'Notification' in window &&
+        window.isSecureContext
+    )
+}
+
+export async function requestPermissionAndSubscribe(): Promise<NotificationPermission | 'unsupported'> {
+    if (!('Notification' in window)) return 'unsupported'
+    if (!isPushSupported()) return Notification.permission
+
+    const perm = await Notification.requestPermission()
+    if (perm === 'granted') {
+        await ensurePushSubscription()
+    }
+    return perm
+}
+
 export async function ensurePushSubscription(): Promise<void> {
     if (!('serviceWorker' in navigator)) return
     if (!('PushManager' in window)) return

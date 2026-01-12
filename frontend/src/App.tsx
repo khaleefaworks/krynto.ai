@@ -98,7 +98,7 @@ function App() {
     if (!user?.id || !token) return
 
     // Best-effort push subscription registration.
-    // Intentionally does not prompt for notification permission.
+    // Do NOT auto-prompt permission here; browsers often require a user gesture.
     ensurePushSubscription().catch(() => { })
 
     // Single socket for both notifications + chat events.

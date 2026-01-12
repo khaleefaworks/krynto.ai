@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 
@@ -70,7 +72,9 @@ class Settings(BaseSettings):
         return []
 
     class Config:
-        env_file = ".env"
+        # Load backend/.env regardless of the process working directory.
+        # This avoids surprises when running from the repo root (PYTHONPATH=backend).
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
         extra = "ignore"  # Ignore extra fields in .env (for backward compatibility)
 
 
