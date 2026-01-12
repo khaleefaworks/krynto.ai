@@ -90,3 +90,24 @@ class ChatService:
         if conversation_id in ChatService.active_visitors:
             del ChatService.active_visitors[conversation_id]
             logger.info("visitor_unregistered", conversation_id=conversation_id)
+
+    @staticmethod
+    def unregister_visitor_socket(websocket) -> None:
+        """Remove any visitor mappings that point at the given websocket.
+
+        This is a safety-net for disconnect/error paths where the handler may not
+        know (or may have failed to compute) the conversation_id.
+        """
+
+        stale_conversation_ids = [
+            conversation_id
+            for conversation_id, ws in list(ChatService.active_visitors.items())
+            if ws is websocket
+        ]
+
+        for conversation_id in stale_conversation_ids:
+            try:
+                del ChatService.active_visitors[conversation_id]
+            except KeyError:
+                continue
+            logger.info("visitor_unregistered", conversation_id=conversation_id)

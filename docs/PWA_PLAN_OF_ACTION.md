@@ -19,11 +19,11 @@ This document is intentionally implementation-oriented (APIs, data flow, milesto
 1. Add Web App Manifest
    - Name, short_name, icons, theme_color, background_color.
    - Display mode: `standalone`.
-   - Start URL: `/dashboard`.
+  - Start URL: `/` (app routes internally; unauthenticated users land on login).
 
-2. Add Service Worker (Workbox)
-   - Precache dashboard shell and static assets.
-   - Runtime caching for API calls (careful: no caching of auth-protected JSON unless explicitly intended).
+2. Add Service Worker
+  - Start with a minimal service worker to satisfy installability (no caching).
+  - Defer caching strategy until push notifications (avoid surprises for auth-protected JSON).
 
 3. Install UX
    - Add non-intrusive install prompt handling in dashboard.
@@ -72,4 +72,5 @@ Deliverable: practical support workflow on mobile.
 
 ## Notes / Constraints
 - iOS has limitations for background WebSockets; push notifications are the reliable path.
+- PWA installability and push notifications require HTTPS (localhost is treated as secure for development).
 - A native wrapper (Capacitor) can be considered later if deeper OS integration is needed.

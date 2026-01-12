@@ -8,7 +8,6 @@ import { fetchChatMessages } from '@/services/messages'
 import {
     connectAgentSocket,
     sendAgentMessage,
-    disconnectAgentSocket,
     addMessageHandler,
 } from '@/services/agentSocket'
 import {
@@ -286,20 +285,9 @@ export default function ConversationsView() {
         }
 
         // Unread badge fallback via global notifications.
-        // Avoid double-counting for the currently-connected website (those messages
-        // are typically delivered via the per-website WS already).
         if (eventType === 'conversation_unread' && typeof eventConversationId === 'number' && eventConversationId > 0) {
             if (!selectedChat || eventConversationId !== selectedChat) {
-                const eventWebsiteId = lastChatEvent.website_id
-                const connectedWebsiteId = connectedWebsiteIdRef.current
-                const shouldSkipBecauseConnectedWebsite =
-                    typeof eventWebsiteId === 'number' &&
-                    typeof connectedWebsiteId === 'number' &&
-                    eventWebsiteId === connectedWebsiteId
-
-                if (!shouldSkipBecauseConnectedWebsite) {
-                    incrementUnreadForConversation(eventConversationId)
-                }
+                incrementUnreadForConversation(eventConversationId)
             }
         }
         // Mark this version as processed so remounts don't re-apply it.
@@ -353,7 +341,6 @@ export default function ConversationsView() {
 
         return () => {
             if (selectedChat) {
-                disconnectAgentSocket()
                 connectedWebsiteIdRef.current = null
                 joinedRef.current = false
             }
@@ -369,14 +356,10 @@ export default function ConversationsView() {
     useEffect(() => {
         if (!selectedChat || !user?.id) return
 
-        // Avoid reconnect loops: activeChats refreshes frequently.
-        // Website ID for a conversation is stable, so prefer the already-loaded conversation.
-        const websiteId = (conversation as any)?.website_id ?? activeChats.find(c => c.id === selectedChat)?.website_id
-        if (!websiteId) return
-
-        // Connect socket
-        connectAgentSocket(websiteId, user.id)
-        connectedWebsiteIdRef.current = Number(websiteId)
+        // Single global agent socket (website_id=0). Server broadcasts website-scoped
+        // events to global sockets, and we filter by conversation_id in handlers.
+        connectAgentSocket(0, user.id)
+        connectedWebsiteIdRef.current = null
 
         // Register message handler
         const removeHandler = addMessageHandler((data) => {
@@ -1395,7 +1378,7 @@ export default function ConversationsView() {
                         </div>
                         <h2 className="text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">Have a moment?</h2>
                         <p className="text-gray-500 dark:text-gray-400 mb-8">
-                            Great! Use the spare time and learn some of the best practices for using AI ChatAssist.
+                            Great! Use the spare time and learn some best practices for supporting visitors.
                         </p>
 
                         <div className="space-y-4 text-left">

@@ -30,6 +30,25 @@ interface AppState {
   lastChatEvent: { type: string; conversation_id?: number; website_id?: number } | null
   bumpChatEventsVersion: (event: { type: string; conversation_id?: number; website_id?: number }) => void
 
+  // In-app notifications (toast surface)
+  notifications: Array<{
+    id: string
+    createdAt: number
+    title: string
+    body?: string
+    conversationId?: number
+    websiteId?: number
+    type: string
+  }>
+  pushNotification: (n: {
+    title: string
+    body?: string
+    conversationId?: number
+    websiteId?: number
+    type: string
+  }) => string
+  dismissNotification: (id: string) => void
+
   // Prevent re-processing stale lastChatEvent on remount
   lastProcessedChatEventsVersion: number
   setLastProcessedChatEventsVersion: (version: number) => void
@@ -114,6 +133,31 @@ export const useAppStore = create<AppState>((set) => ({
       chatEventsVersion: state.chatEventsVersion + 1,
       lastChatEvent: event,
     })),
+
+  // In-app notifications
+  notifications: [],
+  pushNotification: (n) => {
+    const id = `n_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    set((state) => ({
+      notifications: [
+        {
+          id,
+          createdAt: Date.now(),
+          title: String(n.title || '').trim() || 'Notification',
+          body: n.body ? String(n.body) : undefined,
+          conversationId:
+            typeof n.conversationId === 'number' && Number.isFinite(n.conversationId) ? n.conversationId : undefined,
+          websiteId:
+            typeof n.websiteId === 'number' && Number.isFinite(n.websiteId) ? n.websiteId : undefined,
+          type: String(n.type || 'event'),
+        },
+        ...state.notifications,
+      ].slice(0, 5),
+    }))
+    return id
+  },
+  dismissNotification: (id) =>
+    set((state) => ({ notifications: state.notifications.filter((n) => n.id !== id) })),
 
   lastProcessedChatEventsVersion: 0,
   setLastProcessedChatEventsVersion: (version) => set({ lastProcessedChatEventsVersion: version }),

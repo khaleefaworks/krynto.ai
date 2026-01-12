@@ -1,6 +1,6 @@
 # AI ChatAssist - Backend
 
-FastAPI + PostgreSQL backend for AI-powered chat support system with human agent fallback.
+FastAPI + PostgreSQL backend for real-time live chat with a human agent dashboard.
 
 ## Tech Stack
 
@@ -9,9 +9,7 @@ FastAPI + PostgreSQL backend for AI-powered chat support system with human agent
 - **SQLAlchemy** - ORM
 - **Alembic** - Database migrations
 - **Uvicorn** - ASGI server
-- **OpenAI GPT-4o mini** - AI language model
-- **Chroma** - Vector database for embeddings
-- **Redis** - Caching and session management
+- **Redis** - Optional realtime Pub/Sub bridge + rate limiting
 - **JWT** - Token-based authentication
 - **bcrypt** - Password hashing
 
@@ -20,10 +18,7 @@ FastAPI + PostgreSQL backend for AI-powered chat support system with human agent
 - ✅ REST API with JWT authentication
 - ✅ WebSocket support for real-time chat
 - ✅ Multi-website management
-- ✅ AI-powered responses with confidence scoring
-- ✅ Agent handoff system
-- ✅ Knowledge base with RAG (Retrieval-Augmented Generation)
-- ✅ Document processing and embedding generation
+- ✅ Agent assignment and conversation workflow
 - ✅ Visitor session management
 - ✅ Widget configuration per website
 
@@ -32,7 +27,6 @@ FastAPI + PostgreSQL backend for AI-powered chat support system with human agent
 - Python 3.12+
 - PostgreSQL 16+ (installed natively)
 - Redis 7+ (optional, for caching)
-- OpenAI API key
 
 ## Setup
 
@@ -66,9 +60,6 @@ Create `.env` file in `backend/` directory:
 ```env
 # Database
 DATABASE_URL=postgresql+psycopg2://chatassist:chatassist@localhost:5432/chatassist
-
-# OpenAI
-OPENAI_API_KEY=your-openai-api-key-here
 
 # Security (generate with: openssl rand -hex 32)
 SECRET_KEY=your-secret-key-here
@@ -168,12 +159,6 @@ Notes:
 - `POST /chats/{id}/messages` - Send message to chat
 - `GET /chats/{id}` - Get chat details
 
-### Knowledge Base
-- `POST /knowledge/upload` - Upload document
-- `GET /knowledge/sources` - List knowledge sources
-- `DELETE /knowledge/sources/{id}` - Delete knowledge source
-- `POST /knowledge/reindex` - Reindex knowledge base
-
 ### WebSocket
 - `/ws/chat/{website_id}/{session_id}` - Visitor chat WebSocket
 - `/ws/agent/{website_id}` - Agent dashboard WebSocket (website_id=0 for global notifications)
@@ -181,63 +166,10 @@ Notes:
 ### Health
 - `GET /health` - Health check endpoint
 
-## Database Schema
-│   ├── eeb28dc4e63a_initial_schema.py
-│   │   ├── 65f8a6004dce_phase3_agent_handoff.py
-│   │   ├── 7b896e76a93d_phase5_knowledge_system_schema.py
-│   │   ├── 6168d0a84d56_add_widget_config_to_websites.py
-│   │   └── e06f52023418_add_password_hash_to_agents.py
-│   ├── env.py           # Alembic environment config
-│   └── script.py.mako   # Migration template
-├── app/
-│   ├── api/             # API routes
-│   │   ├── auth.py      # Authentication endpoints
-│   │   ├── chats.py     # Chat management
-│   │   ├── health.py    # Health check
-│   │   ├── knowledge.py # Knowledge base management
-│   │   ├── websites.py  # Website CRUD & config
-│   │   ├── ws_chat.py   # Visitor WebSocket
-│   │   └── ws_agent.py  # Agent WebSocket
-│   ├── core/            # Core functionality
-│   │   ├── config.py    # Settings management
-│   │   ├── database.py  # Database connection
-│   │   ├── logging.py   # Logging setup
-│   │   └── security.py  # JWT & password hashing
-│   ├── models/          # SQLAlchemy models
-│   │   ├── agent.py
-│   │   ├── agent_session.py
-│   │   ├── conversation.py
-│   │   ├── document.py
-│   │   ├── knowledge_chunk.py
-│   │   ├── knowledge_source.py
-│   │   ├── message.py
-│   │   └── website.py
-│   ├── services/        # Business logic
-│   │   ├── ai_service.py          # OpenAI integration
-│   │   ├── agent_service.py       # Agent handoff logic
-│   │   ├── chat_service.py        # Chat orchestration
-│   │   ├── chunking_service.py    # Text chunking
-│   │   ├── confidence.py          # Confidence scoring
-│   │   ├── document_parser.py     # Document processing
-│   │   ├── embedding_service.py   # Embedding generation
-│   │   ├── knowledge_indexer.py   # Knowledge indexing
-│   │   ├── prompt_builder.py      # Prompt engineering
-│   │   ├── retrieval_service.py   # RAG retrieval
-│   │   └── vector_store.py        # Chroma integration
-│   └── main.py          # FastAPI application
-├── .env                 # Environment variables (create this)
-├── alembic.ini          # Alembic configuration
-├── requirements.txt     # Python dependencies
-├── start_server.sh      # Server startup script
-└── README.md            # This file
-- **documents** - Document metadata
-  - `id`, `knowledge_source_id`, `title`, `content_hash`, `processed_at`
+## Database & Migrations
 
-- **knowledge_chunks** - Text chunks for RAG
-  - `id`, `document_id`, `chunk_index`, `content`, `embedding`, `metadata`
-
-- **agent_sessions** - Agent handoff tracking
-  - `id`, `conversation_id`, `agent_id`, `joined_at`, `left_at`
+- Migrations live in `alembic/versions/` (apply with `alembic upgrade head`)
+- SQLAlchemy models live in `app/models/`
 
 ## Alembic Commands
 
@@ -254,16 +186,11 @@ alembic downgrade -1
 # View migration history
 alembic history
 ```
- via `TimestampMixin`
 - Environment variables are loaded from `.env` file
 - PostgreSQL runs natively (not containerized)
 - JWT tokens expire after 24 hours
 - Password hashing uses bcrypt (not passlib)
 - WebSocket connections support reconnection with session persistence
-- AI confidence threshold for agent handoff: 0.7
-- OpenAI model: gpt-4o-mini (fallback: gpt-3.5-turbo)
-- Embedding model: text-embedding-3-small
-- Vector store: Chroma (persistent storage)
 
 ## Testing
 
@@ -283,7 +210,7 @@ curl http://localhost:8000/websites \
 curl -X POST http://localhost:8000/websites \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"My Site","domain":"example.com","ai_instructions":"Be helpful"}'
+  -d '{"name":"My Site","domain":"example.com"}'
 ```
 
 ### WebSocket Testing
@@ -320,12 +247,6 @@ alembic downgrade base
 alembic upgrade head
 ```
 
-### OpenAI API Issues
-
-- Verify API key is valid
-- Check billing status at platform.openai.com
-- Review rate limits
-- Check backend logs for detailed error messages
 
 ## Production Deployment
 
@@ -359,7 +280,6 @@ UPDATE agents SET password_hash = '<bcrypt_hash>' WHERE email = 'agent@test.com'
 - Limit WebSocket message payload sizes
 - Use connection pooling for database
 - Enable compression for API responses
-- Monitor OpenAI API usage and costs
 
 ## Security Best Practices
 

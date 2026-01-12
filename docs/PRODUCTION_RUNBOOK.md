@@ -51,7 +51,7 @@ From the repo root:
 
 Notes:
 - Start with `-w 2` and tune based on CPU/RAM.
-- WebSocket delivery/routing is currently **single-worker** (in-memory maps). For multi-worker WebSocket routing, Redis Pub/Sub (Phase 2) is required.
+- If you run `gunicorn -w > 1`, set `REDIS_URL` so WebSocket delivery can bridge across workers via Redis Pub/Sub.
 
 ### Option B (simple): uvicorn
 
@@ -82,7 +82,9 @@ Serve `frontend/dist/` via Nginx (or equivalent).
 
 ## Health Check
 
-- Backend health endpoint: `GET /health`
+- Liveness: `GET /health/live` (fast, no external deps)
+- Readiness: `GET /health/ready` (checks DB, and Redis if `REDIS_URL` is set)
+- Backwards-compatible: `GET /health`
 
 ## Known Limitations (Current)
 

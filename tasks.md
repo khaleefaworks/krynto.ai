@@ -41,17 +41,54 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 ### Realtime reliability fix (Jan 2026)
 - Fixed WS/HTTP auth timezone mismatch that could crash WS auth and cause abnormal close `1006` loops (restores stable realtime sockets)
 
+### Production readiness (Jan 2026)
+- Liveness + readiness probes: `/health/live` and `/health/ready` (DB + optional Redis check)
+
 ## In Progress / Next
 
 ### Phase 2 — Realtime & Presence that scales
-- Ensure visitor ↔ agent realtime routing is multi-worker safe in all paths
-- Consider collapsing/streamlining agent sockets if duplication risk remains
+- [x] Redis Pub/Sub realtime bus implemented (optional; enabled when `REDIS_URL` is set)
+- [x] Visitor delivery supports Redis bus (`visitor_direct`)
+- [x] Agent delivery supports Redis bus (`agent_direct` + `agent_broadcast`)
+- [x] Single global agent socket model (dashboard connects to `/ws/agent/0` only)
+
+- [ ] Phase 2.1 — Remove deprecated FastAPI lifecycle hooks
+	- Replace `@app.on_event("startup"/"shutdown")` with FastAPI lifespan handlers
+
+- [ ] Phase 2.2 — Multi-worker routing verification suite
+	- Add unit tests for `ChatService.deliver_bus_event()` (symmetry with agent tests)
+	- Add unit tests for `AgentService.send_to_agent()` local-delivery path
+	- Add explicit test coverage that bus events are schema-tolerant (missing fields)
+
+- [ ] Phase 2.3 — Redis “required in prod when multi-worker” guardrails
+	- Document: if running `gunicorn -w > 1`, set `REDIS_URL`
+	- Add startup log line that states whether bus is enabled
+
+- [ ] Phase 2.4 — Connection hygiene
+	- Confirm visitor socket unregister on disconnect always runs
+	- Confirm agent socket unregister on disconnect always runs
 
 ### Phase 2.5 — Agent availability (PWA / Push)
-- PWA installability + background notifications
+	- [x] Phase 2.5.1 — PWA installability
+	- Validate `site.webmanifest` + icons + service worker strategy (Vite)
+	- Ensure HTTPS-only requirements are documented
+
+- [ ] Phase 2.5.2 — In-app notifications (dashboard)
+	- Use existing global agent socket events (`new_chat`, `visitor_message`, `conversation_unread`)
+	- Add a single notification surface (toast or badge list) and wire it to events
+
+- [ ] Phase 2.5.3 — Push notifications (browser)
+	- Web Push (VAPID) key management + subscription endpoint
+	- Store per-agent subscriptions; send push on `new_chat` when agent is offline
+	- Service worker receives push and shows notification
+
+- [ ] Phase 2.5.4 — Widget notifications
+	- Decide scope: (A) only show “agent replied” badge in widget, or (B) Web Push for visitors
+	- Implement chosen option without introducing AI features
 
 ### Phase 3 — Observability
-- Metrics + structured logging coverage, readiness/liveness checks
+- [ ] Metrics + structured logging coverage
+- [x] Readiness/liveness checks
 
 ### Phase 4 — Quality gates
 - Expand test coverage + CI hardening

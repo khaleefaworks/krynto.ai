@@ -483,6 +483,11 @@ async def chat_ws(
     finally:
         # Always clean up visitor mapping + rate limit tracking.
         try:
+            ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+
+        try:
             if registered_conversation_id is not None:
                 ChatService.unregister_visitor(registered_conversation_id)
         except Exception:

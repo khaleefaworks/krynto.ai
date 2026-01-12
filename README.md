@@ -1,17 +1,16 @@
 # AI ChatAssist
 
-Self-hosted AI + Human Agent Support System for multi-website customer support.
+Self-hosted live chat + human agent support system for multi-website customer support.
 
 ## 🎯 Overview
 
-AI ChatAssist is a hybrid support system that combines AI-powered chatbots with seamless human agent fallback. Deploy once, manage multiple websites with separate knowledge bases and dedicated support teams.
+AI ChatAssist is a real-time live chat system with an agent dashboard and an embeddable website widget. Deploy once, manage multiple websites from a single dashboard.
 
 ### Key Features
 
-- 🤖 **AI-First Response** - GPT-4o mini handles initial customer queries
-- 👥 **Smart Agent Handoff** - Automatic escalation based on confidence or user request
+- 👥 **Human Agent Live Chat** - Real-time conversations via WebSockets
+- 🧑‍💼 **Agent Assignment** - Assign/close conversations from the dashboard
 - 🌐 **Multi-Website Support** - Manage multiple sites from single dashboard
-- 📚 **Knowledge Base** - Website-specific AI training with document uploads
 - 💬 **Real-Time Chat** - WebSocket-based instant messaging
 - 🎨 **Customizable Widget** - Theme colors, position, welcome messages per site
 - 🔐 **Secure by Default** - JWT authentication, bcrypt password hashing
@@ -38,12 +37,12 @@ AI ChatAssist is a hybrid support system that combines AI-powered chatbots with 
 │                    │   │Orchestrator│   │                    │
 │                    │   └─────┬──────┘   │                    │
 │                    │         │          │                    │
-│         ┌──────────┼─────────┼──────────┼──────────┐        │
-│         ▼          ▼         ▼          ▼          ▼        │
-│    ┌────────┐ ┌────────┐ ┌────────┐ ┌──────┐ ┌────────┐   │
-│    │OpenAI  │ │ Chroma │ │Postgres│ │Redis │ │  RQ    │   │
-│    │GPT-4o  │ │Vector  │ │  DB    │ │Cache │ │ Queue  │   │
-│    └────────┘ └────────┘ └────────┘ └──────┘ └────────┘   │
+│         ┌──────────┼─────────┼──────────┐                 │
+│         ▼          ▼         ▼          ▼                 │
+│    ┌────────┐  ┌────────┐ ┌────────┐ ┌────────┐          │
+│    │Postgres│  │Redis   │ │Widget  │ │Uploads │          │
+│    │  DB    │  │(opt.)  │ │Assets  │ │Storage │          │
+│    └────────┘  └────────┘ └────────┘ └────────┘          │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -54,14 +53,12 @@ AI ChatAssist is a hybrid support system that combines AI-powered chatbots with 
 - **FastAPI** - Modern async Python web framework
 - **PostgreSQL** - Primary database
 - **SQLAlchemy** - ORM with Alembic migrations
-- **Redis** - Caching layer
-- **OpenAI GPT-4o mini** - AI language model
-- **Chroma** - Vector database for embeddings
+- **Redis** - Optional realtime Pub/Sub bridge + rate limiting
 - **JWT** - Authentication tokens
 - **WebSocket** - Real-time bidirectional communication
 
 ### Frontend (Agent Dashboard)
-- **React 18** with TypeScript
+- **React 19** with TypeScript
 - **Vite** - Fast build tooling
 - **Tailwind CSS** - Utility-first styling
 - **shadcn/ui** - High-quality component library
@@ -112,7 +109,6 @@ ai-chatassist/
 - Node.js 18+
 - PostgreSQL 16+
 - Redis 7+
-- OpenAI API key
 
 ### 1. Backend Setup
 
@@ -133,7 +129,6 @@ pip install -r requirements.txt
 # Configure environment
 cat > .env << EOF
 DATABASE_URL=postgresql+psycopg2://chatassist:chatassist@localhost:5432/chatassist
-OPENAI_API_KEY=your-openai-api-key
 SECRET_KEY=$(openssl rand -hex 32)
 ENV=development
 EOF
@@ -199,22 +194,14 @@ Add to your website (recommended):
 1. Log in to agent dashboard
 2. Navigate to "Websites" tab
 3. Click "Add Website"
-4. Enter domain and AI instructions
+4. Enter name and domain
 5. Configure widget appearance
-
-### Uploading Knowledge
-
-1. Select website
-2. Go to Knowledge section
-3. Upload PDFs, text files, or add URLs
-4. System automatically processes and indexes content
 
 ### Handling Chats
 
 1. Active chats appear in "Active Chats" tab
 2. Click conversation to view full history
 3. Type and send replies in real-time
-4. AI automatically pauses when agent joins
 
 ## 🔧 Configuration
 
@@ -223,7 +210,6 @@ Add to your website (recommended):
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `OPENAI_API_KEY` | OpenAI API key | Yes |
 | `SECRET_KEY` | JWT signing key (generate with `openssl rand -hex 32`) | Yes |
 | `ENV` | Environment (`development` or `production`) | Yes |
 | `REDIS_URL` | Redis connection string | No |
@@ -292,7 +278,6 @@ npm run dev
 
 - WebSocket connection status
 - Active conversations count
-- AI confidence scores
 - Agent response times
 
 ## 🐳 Docker Deployment
@@ -335,12 +320,6 @@ MIT License - See LICENSE file for details
 - Check backend is running on port 8000
 - Verify CORS origins include your frontend URL
 - Ensure Redis is running for session management
-
-### AI Not Responding
-
-- Verify `OPENAI_API_KEY` is set correctly
-- Check OpenAI API quota and billing
-- Review backend logs for API errors
 
 ### Widget Not Loading
 

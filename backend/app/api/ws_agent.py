@@ -50,6 +50,19 @@ async def agent_ws(
         agent_id = user.id
         logger.info("agent_websocket_authenticated", agent_id=agent_id, website_id=website_id, email=user.email)
         
+        requested_website_id = website_id
+
+        # Production model: a single global agent socket (website_id=0).
+        # Keep the route param for backwards compatibility, but normalize internally
+        # to avoid duplicated connections and delivery ambiguity.
+        if requested_website_id != 0:
+            logger.info(
+                "agent_ws_website_id_normalized_to_global",
+                agent_id=agent_id,
+                requested_website_id=requested_website_id,
+            )
+            website_id = 0
+
         agent_service = AgentService(db)
         orchestrator = ConversationOrchestrator(db)
         
@@ -73,7 +86,9 @@ async def agent_ws(
         await websocket.send_json({
             "type": "connected",
             "agent_id": agent_id,
-            "website_id": website_id,
+            # Backwards-compatible: reflect requested website_id even though the
+            # server treats agent sockets as global for delivery.
+            "website_id": requested_website_id,
             "message": "Agent connected successfully"
         })
         

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -26,12 +27,43 @@ from app.core.limiter import limiter
 from app.core.database import engine
 from pathlib import Path
 from app.infra import realtime_bus
+from app.core.worker_detection import detect_configured_worker_count
+import os
 
 # Setup structured logging
 logger = setup_logging()
 logger.info("application_starting", message="AI ChatAssist application initializing")
+logger.info("realtime_bus_config", enabled=bool(realtime_bus.enabled))
 
-app = FastAPI(title="AI ChatAssist")
+configured_workers = detect_configured_worker_count(os.environ)
+if configured_workers is not None:
+    logger.info("worker_config", configured_workers=configured_workers)
+    if configured_workers > 1 and not realtime_bus.enabled:
+        logger.warning(
+            "multi_worker_without_realtime_bus",
+            configured_workers=configured_workers,
+            message="Multiple workers configured but realtime bus is disabled. Set REDIS_URL for cross-worker WebSocket fanout.",
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async def _handle_event(event: dict) -> None:
+        # Dispatch to local websocket registries.
+        from app.services.agent_service import AgentService
+        from app.services.chat_service import ChatService
+
+        await AgentService.deliver_bus_event(event)
+        await ChatService.deliver_bus_event(event)
+
+    await realtime_bus.start(_handle_event)
+    try:
+        yield
+    finally:
+        await realtime_bus.stop()
+
+
+app = FastAPI(title="AI ChatAssist", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -58,23 +90,6 @@ app.add_middleware(
     expose_headers=["*"],  # Expose all headers to frontend
 )
 
-
-@app.on_event("startup")
-async def _startup_realtime_bus() -> None:
-    async def _handle_event(event: dict) -> None:
-        # Dispatch to local websocket registries.
-        from app.services.agent_service import AgentService
-        from app.services.chat_service import ChatService
-
-        await AgentService.deliver_bus_event(event)
-        await ChatService.deliver_bus_event(event)
-
-    await realtime_bus.start(_handle_event)
-
-
-@app.on_event("shutdown")
-async def _shutdown_realtime_bus() -> None:
-    await realtime_bus.stop()
 
 app.include_router(health_router)
 app.include_router(auth_router)

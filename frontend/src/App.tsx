@@ -27,12 +27,31 @@ import Settings from './pages/Settings'
 import PersonalSettings from './pages/PersonalSettings'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
+import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
+import NotificationToasts from './components/NotificationToasts'
+
+const _lastToastByKey = new Map<string, number>()
+
+function _shouldToast(key: string, minIntervalMs: number): boolean {
+  const now = Date.now()
+  const prev = _lastToastByKey.get(key) || 0
+  if (now - prev < minIntervalMs) return false
+  _lastToastByKey.set(key, now)
+  return true
+}
 
 function App() {
-  const { token, user, setToken, setUser, setUnreadChatsCount, bumpChatEventsVersion } = useAppStore()
+  const {
+    token,
+    user,
+    setToken,
+    setUser,
+    setUnreadChatsCount,
+    bumpChatEventsVersion,
+    pushNotification,
+  } = useAppStore()
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
-  const notificationSocketRef = useRef<WebSocket | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Check if system needs initial setup
@@ -77,75 +96,90 @@ function App() {
   useEffect(() => {
     if (!user?.id || !token) return
 
-    let reconnectTimeout: NodeJS.Timeout | null = null
-
-    const setupGlobalNotifications = () => {
-      // WebSocket for real-time notifications (authenticated via query param)
-      const wsUrl = `${WS_BASE}/ws/agent/0?token=${encodeURIComponent(token)}`
-      console.log('🔔 Setting up global notifications (authenticated)...')
-
-      const ws = new WebSocket(wsUrl)
-      notificationSocketRef.current = ws
-
-      ws.onopen = () => {
-        console.log('✅ Global notifications connected')
-        if (reconnectTimeout) {
-          clearTimeout(reconnectTimeout)
-          reconnectTimeout = null
-        }
-      }
-
-      ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data)
-        console.log('🔔 Global notification:', data)
-
-        // Global event signal for chat list changes + unread updates.
-        if (
-          data.type === 'new_chat' ||
-          data.type === 'conversation_unread' ||
-          data.type === 'conversation_assigned' ||
-          data.type === 'conversation_closed' ||
-          data.type === 'visitor_message'
-        ) {
-          bumpChatEventsVersion({
-            type: data.type,
-            conversation_id: typeof data.conversation_id === 'number' ? data.conversation_id : Number(data.conversation_id) || undefined,
-            website_id: typeof data.website_id === 'number' ? data.website_id : Number(data.website_id) || undefined,
-          })
-          console.log('📨 Chat update notification - updating count...')
-          // Fetch updated chat list and count
-          try {
-            const chats = await fetchActiveChats()
-            const openChats = chats.filter(c => c.status === 'open')
-            setUnreadChatsCount(openChats.length)
-            console.log(`📊 Updated unread count: ${openChats.length}`)
-          } catch (error) {
-            console.error('Failed to update chat count:', error)
-          }
-        }
-      }
-
-      ws.onerror = (error) => {
-        console.error('❌ Global notification error:', error)
-      }
-
-      ws.onclose = (event) => {
-        console.log('🔌 Global notifications closed')
-        notificationSocketRef.current = null
-
-        // Auto-reconnect after 5 seconds if not intentional
-        if (event.code !== 1000 && user?.id) {
-          console.log('🔄 Will reconnect in 5 seconds...')
-          reconnectTimeout = setTimeout(() => {
-            console.log('🔄 Reconnecting global notifications...')
-            setupGlobalNotifications()
-          }, 5000)
-        }
-      }
+    // Single socket for both notifications + chat events.
+    // We connect only to the global agent socket (website_id=0).
+    try {
+      connectAgentSocket(0, user.id)
+    } catch (e) {
+      console.error('Failed to connect agent socket:', e)
     }
 
-    // Initial setup
-    setupGlobalNotifications()
+    const removeHandler = addMessageHandler(async (data) => {
+      console.log('🔔 Agent socket event:', data)
+
+      // In-app notifications surface (minimal toast stack).
+      // Throttle per-conversation to avoid flooding on rapid message bursts.
+      try {
+        const conversationId =
+          typeof (data as any)?.conversation_id === 'number'
+            ? (data as any).conversation_id
+            : Number((data as any)?.conversation_id) || undefined
+
+        const websiteId =
+          typeof (data as any)?.website_id === 'number'
+            ? (data as any).website_id
+            : Number((data as any)?.website_id) || undefined
+
+        if (data.type === 'new_chat') {
+          const websiteName = String((data as any)?.website_name || '').trim()
+          const lastMessage = String((data as any)?.last_message || '').trim()
+          const body = lastMessage ? lastMessage.slice(0, 120) : undefined
+
+          if (_shouldToast(`new_chat:${conversationId || 'na'}`, 3000)) {
+            pushNotification({
+              type: 'new_chat',
+              title: websiteName ? `New chat — ${websiteName}` : 'New chat',
+              body,
+              conversationId,
+              websiteId,
+            })
+          }
+        } else if (data.type === 'visitor_message' || data.type === 'conversation_unread') {
+          if (conversationId && _shouldToast(`activity:${conversationId}`, 8000)) {
+            const dto = (data as any)?.message_obj
+            const content =
+              (dto && typeof dto === 'object' ? String((dto as any)?.content || '').trim() : '') ||
+              String((data as any)?.message || '').trim()
+
+            pushNotification({
+              type: String(data.type),
+              title: 'New visitor activity',
+              body: content ? content.slice(0, 120) : undefined,
+              conversationId,
+              websiteId,
+            })
+          }
+        }
+      } catch {
+        // Never break realtime handling because of toast UI.
+      }
+
+      if (
+        data.type === 'new_chat' ||
+        data.type === 'conversation_unread' ||
+        data.type === 'conversation_assigned' ||
+        data.type === 'conversation_closed' ||
+        data.type === 'visitor_message'
+      ) {
+        bumpChatEventsVersion({
+          type: data.type,
+          conversation_id:
+            typeof data.conversation_id === 'number'
+              ? data.conversation_id
+              : Number(data.conversation_id) || undefined,
+          website_id:
+            typeof data.website_id === 'number' ? data.website_id : Number(data.website_id) || undefined,
+        })
+
+        try {
+          const chats = await fetchActiveChats()
+          const openChats = chats.filter((c) => c.status === 'open')
+          setUnreadChatsCount(openChats.length)
+        } catch (error) {
+          console.error('Failed to update chat count:', error)
+        }
+      }
+    })
 
     // Polling fallback - update count every 30 seconds
     const updateChatCount = async () => {
@@ -166,16 +200,11 @@ function App() {
 
     // Cleanup
     return () => {
-      if (notificationSocketRef.current) {
-        notificationSocketRef.current.close()
-        notificationSocketRef.current = null
-      }
+      removeHandler()
+      disconnectAgentSocket()
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
-      }
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout)
       }
     }
   }, [user?.id, token, setUnreadChatsCount, bumpChatEventsVersion])
@@ -202,6 +231,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <NotificationToasts />
       <Routes>
         {/* Login route - redirect to dashboard if already authenticated */}
         <Route

@@ -27,12 +27,12 @@ export default function ResetApplication() {
       await apiRequest('/system/reset', {
         method: 'POST',
       })
-      
+
       // Clear auth and redirect to login
       localStorage.removeItem('auth_token')
       setToken(null)
       setUser(null)
-      
+
       // Show success message and redirect
       alert('Application reset successfully! You will be redirected to login.')
       navigate('/login')
@@ -76,12 +76,9 @@ export default function ResetApplication() {
               Resetting the application will:
             </p>
             <ul className="list-disc list-inside space-y-2 text-red-800 dark:text-red-300 mb-6">
-              <li>Delete all users (except the initial administrator)</li>
-              <li>Remove all websites and configurations</li>
-              <li>Clear all conversations and chat history</li>
-              <li>Delete all knowledge base articles</li>
-              <li>Reset all settings to defaults</li>
+              <li>Delete all application data (users, websites, conversations, messages)</li>
               <li>Re-run database migrations</li>
+              <li>Seed initial data (including the default administrator)</li>
             </ul>
             <p className="text-sm font-medium text-red-800 dark:text-red-300">
               You will be logged out after the reset and need to log in again with the default administrator credentials.

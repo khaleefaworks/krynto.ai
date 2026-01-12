@@ -177,7 +177,10 @@ class AgentService:
             ws_website_id = agent_info.get("website_id")
             should_send = False
 
-            if include_global and ws_website_id == 0:
+            # A socket connected to website_id=0 is treated as a global agent socket.
+            # In production we prefer a single global socket per agent, which must
+            # receive website-scoped events too.
+            if ws_website_id == 0 and (include_global or website_id is not None):
                 should_send = True
             if website_id is not None and ws_website_id == website_id:
                 should_send = True
@@ -231,7 +234,7 @@ class AgentService:
             for agent_info in cls.active_agents.values():
                 ws_website_id = agent_info.get("website_id")
                 should_send = False
-                if include_global and ws_website_id == 0:
+                if ws_website_id == 0 and (include_global or website_id is not None):
                     should_send = True
                 if website_id is not None and ws_website_id == website_id:
                     should_send = True

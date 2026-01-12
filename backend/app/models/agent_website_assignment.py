@@ -10,7 +10,7 @@ class AgentWebsiteAssignment(Base, TimestampMixin):
     Many-to-many relationship between agents and websites.
     
     This allows pre-assigning agents to specific websites so they can
-    access conversations and knowledge for those websites.
+    access conversations for those websites.
     """
     __tablename__ = "agent_website_assignments"
 

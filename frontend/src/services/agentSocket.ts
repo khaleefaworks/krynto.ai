@@ -45,9 +45,18 @@ function generateMessageId(): string {
 }
 
 export function connectAgentSocket(websiteId: number, agentId: number) {
+  // Production model: a single global agent socket (website_id=0).
+  // Keep the signature for backwards-compatibility, but ignore non-zero website IDs.
+  const normalizedWebsiteId = 0
+  if (websiteId !== normalizedWebsiteId) {
+    console.warn(
+      `⚠️ connectAgentSocket called with websiteId=${websiteId}; using websiteId=0 (single-socket mode)`
+    )
+  }
+
   // Reuse existing socket if already connected or in-flight (CONNECTING)
   if (socket) {
-    const isSameTarget = currentWebsiteId === websiteId && currentAgentId === agentId
+    const isSameTarget = currentWebsiteId === normalizedWebsiteId && currentAgentId === agentId
 
     if (socket.readyState === WebSocket.OPEN && isSameTarget) {
       console.log("♻️ Reusing existing WebSocket connection")
@@ -74,13 +83,16 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   }
 
   // Store connection params for reconnection
-  currentWebsiteId = websiteId
+  currentWebsiteId = normalizedWebsiteId
   currentAgentId = agentId
   isIntentionalClose = false
 
   // Include JWT token in query parameter for authentication
-  const wsUrl = `${WS_BASE}/ws/agent/${websiteId}?token=${encodeURIComponent(token)}`
-  console.log("🔌 Connecting to WebSocket (authenticated):", `${WS_BASE}/ws/agent/${websiteId}`)
+  const wsUrl = `${WS_BASE}/ws/agent/${normalizedWebsiteId}?token=${encodeURIComponent(token)}`
+  console.log(
+    "🔌 Connecting to WebSocket (authenticated):",
+    `${WS_BASE}/ws/agent/${normalizedWebsiteId}`
+  )
   socket = new WebSocket(wsUrl)
 
   socket.onopen = () => {
@@ -106,13 +118,13 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
         // ignore
       }
     }, HEARTBEAT_INTERVAL_MS)
-    
+
     // Clear any pending reconnect
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout)
       reconnectTimeout = null
     }
-    
+
     // Flush queued messages
     flushMessageQueue()
   }
@@ -121,12 +133,12 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data)
     console.log("📨 WebSocket message received:", data)
-    
+
     // Handle acknowledgments
     if (data.type === "ack" && data.message_id) {
       handleAck(data.message_id)
     }
-    
+
     // Dispatch to all registered handlers
     messageHandlers.forEach(handler => {
       try {
@@ -145,7 +157,7 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
       clearInterval(heartbeatInterval)
       heartbeatInterval = null
     }
-    
+
     // Only auto-reconnect if not intentional and connection params exist
     if (!isIntentionalClose && event.code !== 1000 && currentWebsiteId && currentAgentId) {
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -153,11 +165,11 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
         // TODO: Show user notification that connection failed
         return
       }
-      
+
       // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s...
       const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 32000)
       reconnectAttempts++
-      
+
       console.log(`🔄 Will attempt reconnect #${reconnectAttempts} in ${delay}ms...`)
       if (reconnectTimeout) clearTimeout(reconnectTimeout)
       reconnectTimeout = setTimeout(() => {
@@ -176,14 +188,14 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
 
 function handleAck(messageId: string) {
   console.log("✅ Message acknowledged:", messageId)
-  
+
   // Clear pending timeout
   const timeout = pendingAcks.get(messageId)
   if (timeout) {
     clearTimeout(timeout)
     pendingAcks.delete(messageId)
   }
-  
+
   // Remove from queue if present
   const queueIndex = messageQueue.findIndex(m => m.id === messageId)
   if (queueIndex >= 0) {
@@ -194,12 +206,12 @@ function handleAck(messageId: string) {
 
 function flushMessageQueue() {
   if (messageQueue.length === 0) return
-  
+
   console.log(`📤 Flushing message queue (${messageQueue.length} messages)`)
-  
+
   const messages = [...messageQueue]
   messageQueue.length = 0
-  
+
   messages.forEach(msg => {
     if (msg.retries < MAX_RETRIES) {
       sendAgentMessage(msg.content, msg.conversationId, msg.id)
@@ -212,7 +224,7 @@ function flushMessageQueue() {
 export function addMessageHandler(handler: MessageHandler): () => void {
   messageHandlers.add(handler)
   console.log(`📝 Added message handler (total: ${messageHandlers.size})`)
-  
+
   // Return cleanup function
   return () => {
     messageHandlers.delete(handler)
@@ -222,10 +234,10 @@ export function addMessageHandler(handler: MessageHandler): () => void {
 
 export function sendAgentMessage(content: string, conversationId: string, messageId?: string) {
   const id = messageId || generateMessageId()
-  
+
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     console.warn("⚠️ WebSocket not connected, queueing message")
-    
+
     // Add to queue
     const queuedMsg: QueuedMessage = {
       id,
@@ -234,13 +246,13 @@ export function sendAgentMessage(content: string, conversationId: string, messag
       timestamp: Date.now(),
       retries: messageId ? messageQueue.find(m => m.id === messageId)?.retries || 0 : 0
     }
-    
+
     // Only add if not already in queue
     if (!messageQueue.find(m => m.id === id)) {
       messageQueue.push(queuedMsg)
       console.log(`📥 Queued message (total: ${messageQueue.length})`)
     }
-    
+
     return id
   }
 
@@ -253,12 +265,12 @@ export function sendAgentMessage(content: string, conversationId: string, messag
 
   socket.send(JSON.stringify(payload))
   console.log("📤 Message sent via WebSocket:", { conversationId, messageId: id, contentLength: content.length })
-  
+
   // Set up acknowledgment timeout
   const ackTimeout = setTimeout(() => {
     console.warn("⚠️ No ACK received for message, requeueing:", id)
     pendingAcks.delete(id)
-    
+
     // Requeue message with incremented retry count
     const existingMsg = messageQueue.find(m => m.id === id)
     if (existingMsg) {
@@ -272,7 +284,7 @@ export function sendAgentMessage(content: string, conversationId: string, messag
         retries: 1
       })
     }
-    
+
     // Retry after delay
     if (messageQueue.find(m => m.id === id && m.retries < MAX_RETRIES)) {
       setTimeout(() => {
@@ -283,9 +295,9 @@ export function sendAgentMessage(content: string, conversationId: string, messag
       }, RETRY_DELAY)
     }
   }, 5000) // 5 second timeout for ACK
-  
+
   pendingAcks.set(id, ackTimeout)
-  
+
   return id
 }
 
@@ -301,18 +313,18 @@ export function disconnectAgentSocket() {
     clearInterval(heartbeatInterval)
     heartbeatInterval = null
   }
-  
+
   // Clear all handlers
   messageHandlers.clear()
-  
+
   // Clear pending acknowledgments
   pendingAcks.forEach(timeout => clearTimeout(timeout))
   pendingAcks.clear()
-  
+
   // Clear reconnection params
   currentWebsiteId = null
   currentAgentId = null
-  
+
   // Clear any pending reconnect
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout)
