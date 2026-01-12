@@ -37,3 +37,6 @@ class Conversation(Base, TimestampMixin):
     browser_info = Column(String(255), nullable=True)  # e.g., "Chrome 143.0.0.0"
     visit_count = Column(Integer, default=1, nullable=False)  # Number of visits by this visitor
     last_seen_at = Column(DateTime, nullable=True)  # When visitor was last active
+
+    # Read state for visitor
+    visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)

@@ -71,6 +71,10 @@
   let unreadCount = 0;
   let soundEnabled = false;
   let notificationAudioCtx = null;
+  let originalTitle = document.title;
+  let firstUnreadMessageId = null;
+  let isAtBottom = true;
+  let hasScrolledToUnread = false;
 
   function isWidgetOpen() {
     try {
@@ -83,19 +87,57 @@
 
   function setUnreadCount(next) {
     unreadCount = Math.max(0, Number(next) || 0);
+    
+    // Update bubble badge
     const el = document.getElementById('chatassist-bubble-unread');
-    if (!el) return;
-    if (unreadCount <= 0) {
-      el.style.display = 'none';
-      el.textContent = '';
-      return;
+    if (el) {
+      if (unreadCount <= 0) {
+        el.style.display = 'none';
+        el.textContent = '';
+      } else {
+        el.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
+        el.style.display = 'flex';
+      }
     }
-    el.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
-    el.style.display = 'flex';
+
+    // Update page title
+    if (unreadCount > 0) {
+      document.title = `(${unreadCount}) ${originalTitle}`;
+    } else {
+      document.title = originalTitle;
+    }
   }
 
   function bumpUnread() {
     setUnreadCount(unreadCount + 1);
+  }
+
+  async function fetchReadState() {
+    try {
+      const response = await fetch(`${CONFIG.apiUrl}/widget/read-state?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        firstUnreadMessageId = data.first_unread_message_id;
+        console.log('[ChatWidget] Read state fetched:', data);
+      }
+    } catch (e) {
+      console.error('[ChatWidget] Failed to fetch read state:', e);
+    }
+  }
+
+  async function markRead() {
+    try {
+      const response = await fetch(`${CONFIG.apiUrl}/widget/read?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`, {
+        method: 'POST'
+      });
+      if (response.ok) {
+        firstUnreadMessageId = null;
+        setUnreadCount(0);
+        console.log('[ChatWidget] Conversation marked as read');
+      }
+    } catch (e) {
+      console.error('[ChatWidget] Failed to mark read:', e);
+    }
   }
 
   function enableNotificationSound() {
@@ -477,7 +519,7 @@
         const eventType = m.event_type || null;
 
         if (senderType === 'visitor') {
-          appendMessage('visitor', m.content, m.created_at);
+          appendMessage('visitor', m.content, m.created_at, null, m.id);
           return;
         }
         if (senderType === 'agent') {
@@ -487,7 +529,7 @@
           appendMessage('agent', m.content, m.created_at, {
             avatarUrl: m.sender_avatar_url,
             name: m.sender_name,
-          });
+          }, m.id);
           return;
         }
 
@@ -498,11 +540,11 @@
             return;
           }
           if (eventType && String(eventType).startsWith('automation')) {
-            appendMessage('ai', m.content, m.created_at);
+            appendMessage('ai', m.content, m.created_at, null, m.id);
             return;
           }
           if (eventType === 'bot') {
-            appendMessage('ai', m.content, m.created_at);
+            appendMessage('ai', m.content, m.created_at, null, m.id);
             return;
           }
           showSystemMessage(m.content);
@@ -510,22 +552,26 @@
         }
 
         // Backwards-compatible fallback
-        appendMessage('ai', m.content, m.created_at);
+        appendMessage('ai', m.content, m.created_at, null, m.id);
       });
 
+      smartScroll();
       return;
     }
 
     if (data.type === 'ai') {
       // AI response
-      appendMessage('ai', data.message, data.created_at);
+      const mId = data.message_obj ? data.message_obj.id : null;
+      appendMessage('ai', data.message, data.created_at, null, mId);
+      smartScroll();
     } else if (data.type === 'agent') {
       // Agent message
       if (data.agent_name) updateAgentName(data.agent_name);
+      const mId = data.message_obj ? data.message_obj.id : null;
       appendMessage('agent', data.message, data.created_at, {
         avatarUrl: data.agent_avatar,
         name: data.agent_name,
-      });
+      }, mId);
 
       // Update agent avatar if provided
       if (data.agent_avatar) {
@@ -541,6 +587,7 @@
           showToast('New message');
         }
       } catch (e) { }
+      smartScroll();
     } else if (data.type === 'agent_joined') {
       // Agent joined notification
       const name = data.agent_name || 'A support agent';
@@ -552,11 +599,42 @@
       if (data.agent_avatar) {
         updateAgentAvatar(data.agent_avatar);
       }
+      smartScroll();
     } else if (data.message) {
       // Generic message format
       const rawSender = data.sender || 'ai';
       const sender = rawSender === 'user' ? 'visitor' : rawSender;
-      appendMessage(sender, data.message, data.created_at);
+      const mId = data.message_obj ? data.message_obj.id : (data.id || null);
+      appendMessage(sender, data.message, data.created_at, null, mId);
+      smartScroll();
+    }
+  }
+
+  function smartScroll() {
+    const el = document.getElementById('chatassist-messages');
+    if (!el) return;
+
+    const unreadDivider = document.getElementById('chatassist-unread-divider');
+    if (unreadDivider && !hasScrolledToUnread) {
+      hasScrolledToUnread = true;
+      unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
+      return;
+    }
+
+    if (isAtBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  function handleMessagesScroll() {
+    const el = document.getElementById('chatassist-messages');
+    if (!el) return;
+
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    isAtBottom = nearBottom;
+
+    if (nearBottom && firstUnreadMessageId) {
+      markRead();
     }
   }
 
@@ -624,9 +702,18 @@
   /**
    * Append message to chat window
    */
-  function appendMessage(sender, content, createdAtIso, meta) {
+  function appendMessage(sender, content, createdAtIso, meta, messageId) {
     const messagesContainer = document.getElementById('chatassist-messages');
     if (!messagesContainer) return;
+
+    const numericMsgId = Number(messageId);
+    if (firstUnreadMessageId && numericMsgId === firstUnreadMessageId) {
+      const divider = document.createElement('div');
+      divider.className = 'chatassist-unread-divider';
+      divider.id = 'chatassist-unread-divider';
+      divider.innerHTML = '<span>Unread messages</span>';
+      messagesContainer.appendChild(divider);
+    }
 
     const metaSafe = meta && typeof meta === 'object' ? meta : {};
 
@@ -899,6 +986,11 @@
 
     document.body.appendChild(container);
 
+    // Trigger slide-up animation
+    setTimeout(function() {
+      container.classList.add('chatassist-visible');
+    }, 100);
+
     // Event listeners
     const bubble = document.getElementById('chatassist-bubble');
     const window = document.getElementById('chatassist-window');
@@ -969,6 +1061,11 @@
         handleUserMessage();
       }
     });
+
+    const messagesContainer = document.getElementById('chatassist-messages');
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', handleMessagesScroll);
+    }
 
     // Initialize icon once DOM exists
     refreshHeaderIcon();
@@ -1236,6 +1333,9 @@
     // STEP 3: Create UI only after all validations pass
     createWidget();
 
+    // Fetch read state to place unread ribbon
+    await fetchReadState();
+
     // Apply configuration styling (either fetched or defaults)
     applyConfiguration();
 
@@ -1249,11 +1349,13 @@
     connectPresenceWebSocket();
   }
 
-  // Auto-initialize when DOM is ready
+  // Auto-initialize when DOM is ready with a 3-second delay
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(init, 3000);
+    });
   } else {
-    init();
+    setTimeout(init, 3000);
   }
 
 })();

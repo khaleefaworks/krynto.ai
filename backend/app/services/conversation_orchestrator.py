@@ -158,6 +158,24 @@ class ConversationOrchestrator:
                     "delta": 1,
                 },
             )
+
+            # Web Push for assigned agent if they are not active on WebSocket
+            try:
+                if not self.agent_service.has_active_socket(conversation.assigned_agent_id):
+                    from app.repos import push_subscriptions as push_subs_repo
+                    from app.services.push_service import send_web_push_to_subscriptions
+                    
+                    subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
+                    if subs:
+                        send_web_push_to_subscriptions(
+                            subscriptions=subs,
+                            title=f"New message in conversation #{conversation.id}",
+                            body=(message or "New message")[:120],
+                            url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                        )
+            except Exception as e:
+                logger.error("assigned_agent_push_failed", error=str(e))
+
             return None
 
         # Unassigned: still notify agents in realtime so inbox updates immediately.

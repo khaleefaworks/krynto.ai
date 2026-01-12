@@ -118,6 +118,39 @@ function App() {
     const removeHandler = addMessageHandler(async (data) => {
       console.log('🔔 Agent socket event:', data)
 
+      const maybeBrowserNotify = (opts: { title: string; body?: string; url?: string; tag?: string }) => {
+        try {
+          if (typeof window === 'undefined') return
+          if (!('Notification' in window)) return
+          if (Notification.permission !== 'granted') return
+          // Only show OS notifications when the tab is not actively visible.
+          if (!document.hidden) return
+
+          const n = new Notification(String(opts.title || 'Notification'), {
+            body: opts.body ? String(opts.body) : undefined,
+            tag: opts.tag ? String(opts.tag) : undefined,
+          })
+
+          const url = opts.url ? String(opts.url) : ''
+          if (url) {
+            n.onclick = () => {
+              try {
+                window.focus()
+              } catch {
+                // ignore
+              }
+              try {
+                window.location.assign(url)
+              } catch {
+                // ignore
+              }
+            }
+          }
+        } catch {
+          // Best-effort: never break realtime handling.
+        }
+      }
+
       // In-app notifications surface (minimal toast stack).
       // Throttle per-conversation to avoid flooding on rapid message bursts.
       try {
@@ -136,6 +169,16 @@ function App() {
           const lastMessage = String((data as any)?.last_message || '').trim()
           const body = lastMessage ? lastMessage.slice(0, 120) : undefined
 
+          const sessionId = String((data as any)?.session_id || '').trim()
+          const url = sessionId ? `/dashboard/chats?sessionId=${encodeURIComponent(sessionId)}` : '/dashboard/chats'
+
+          maybeBrowserNotify({
+            title: websiteName ? `New chat — ${websiteName}` : 'New chat',
+            body,
+            url,
+            tag: conversationId ? `new_chat:${conversationId}` : 'new_chat',
+          })
+
           if (_shouldToast(`new_chat:${conversationId || 'na'}`, 3000)) {
             pushNotification({
               type: 'new_chat',
@@ -151,6 +194,13 @@ function App() {
             const content =
               (dto && typeof dto === 'object' ? String((dto as any)?.content || '').trim() : '') ||
               String((data as any)?.message || '').trim()
+
+            maybeBrowserNotify({
+              title: 'New visitor activity',
+              body: content ? content.slice(0, 120) : undefined,
+              url: '/dashboard/chats',
+              tag: `activity:${conversationId}`,
+            })
 
             pushNotification({
               type: String(data.type),

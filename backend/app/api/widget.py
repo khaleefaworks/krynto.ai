@@ -5,6 +5,7 @@ These endpoints are called by the embedded chat widget on visitor websites.
 They must be fast, reliable, and not require authentication.
 """
 
+from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends, Request
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session
@@ -18,7 +19,80 @@ from app.services.website_resolver import is_website_online
 from app.api.deps import require_authenticated_user
 
 
+from app.models.message import Message, MessageSenderType
+from datetime import datetime, timezone
+
 router = APIRouter(prefix="/widget", tags=["widget"])
+
+
+class WidgetReadStateResponse(BaseModel):
+    conversation_id: int
+    last_read_at: Optional[datetime]
+    first_unread_message_id: Optional[int]
+
+
+@router.post("/read")
+async def mark_widget_read(
+    website_id: int = Query(...),
+    session_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Mark a conversation as read by the visitor."""
+    from app.models.conversation import Conversation
+    
+    conv = db.query(Conversation).filter(
+        Conversation.website_id == website_id,
+        Conversation.session_id == session_id
+    ).first()
+    
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+        
+    conv.visitor_last_read_at = datetime.now(timezone.utc)
+    db.commit()
+    
+    return {"success": True, "conversation_id": conv.id}
+
+
+@router.get("/read-state", response_model=WidgetReadStateResponse)
+async def get_widget_read_state(
+    website_id: int = Query(...),
+    session_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return read state for the visitor thread UI."""
+    from app.models.conversation import Conversation
+    
+    conv = db.query(Conversation).filter(
+        Conversation.website_id == website_id,
+        Conversation.session_id == session_id
+    ).first()
+    
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+        
+    last_read_at = conv.visitor_last_read_at
+    
+    # Find the earliest AGENT or BOT or SYSTEM message after last_read_at.
+    first_unread_message_id = None
+    try:
+        q = db.query(Message).filter(
+            Message.conversation_id == conv.id,
+            Message.sender_type != MessageSenderType.VISITOR
+        )
+        if last_read_at is not None:
+            q = q.filter(Message.created_at > last_read_at)
+        
+        first_unread = q.order_by(Message.created_at.asc(), Message.id.asc()).first()
+        first_unread_message_id = int(first_unread.id) if first_unread else None
+    except Exception:
+        first_unread_message_id = None
+        
+    return {
+        "conversation_id": conv.id,
+        "last_read_at": last_read_at,
+        "first_unread_message_id": first_unread_message_id,
+    }
 
 
 @router.get("/loader.js")
