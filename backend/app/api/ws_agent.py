@@ -13,7 +13,9 @@ from app.core.message_presenter import serialize_message
 from app.repos import messages as messages_repo
 from app.repos import users as users_repo
 from datetime import datetime
-from app.infra.metrics import ws_connect, ws_disconnect
+from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
+import structlog
+import uuid
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -22,6 +24,18 @@ async def agent_ws(
     websocket: WebSocket,
     website_id: int,
 ):
+    connection_id = str(uuid.uuid4())
+    incoming = (websocket.headers.get("x-request-id") or "").strip()
+    request_id = incoming[:200] if incoming else connection_id
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        connection_id=connection_id,
+        ws_kind="agent",
+        website_id=website_id,
+    )
+
     await websocket.accept()
     try:
         ws_connect(kind="agent")
@@ -53,6 +67,7 @@ async def agent_ws(
         
         # Use agent_id from authenticated token, not URL
         agent_id = user.id
+        structlog.contextvars.bind_contextvars(agent_id=agent_id)
         logger.info("agent_websocket_authenticated", agent_id=agent_id, website_id=website_id, email=user.email)
         
         requested_website_id = website_id
@@ -127,6 +142,10 @@ async def agent_ws(
                         pass
 
                 continue
+            try:
+                ws_message(kind="agent", direction="in", message_type="text")
+            except Exception:
+                pass
             logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
 
@@ -150,6 +169,11 @@ async def agent_ws(
                     pass
             
             message_type = payload.get("type")
+
+            try:
+                ws_message(kind="agent", direction="in", message_type=str(message_type or "unknown"))
+            except Exception:
+                pass
 
             if message_type == "heartbeat":
                 # No-op response; presence socket polls separately.
@@ -243,6 +267,10 @@ async def agent_ws(
         if agent_id:
             logger.info("agent_disconnected", agent_id=agent_id)
     except Exception as e:
+        try:
+            ws_error(kind="agent", where="handler")
+        except Exception:
+            pass
         if agent_id:
             logger.error("agent_websocket_error", agent_id=agent_id, error=str(e), exc_info=True)
         else:
@@ -257,3 +285,8 @@ async def agent_ws(
         db.close()
         if agent_id:
             logger.info("agent_cleanup_complete", agent_id=agent_id)
+
+        try:
+            structlog.contextvars.clear_contextvars()
+        except Exception:
+            pass

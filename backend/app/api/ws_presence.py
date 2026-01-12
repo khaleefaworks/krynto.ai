@@ -9,7 +9,9 @@ from app.services.agent_service import AgentService
 from app.repos import users as users_repo
 from app.core.config import settings
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
-from app.infra.metrics import ws_connect, ws_disconnect
+from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
+import structlog
+import uuid
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -64,6 +66,18 @@ async def presence_ws(websocket: WebSocket, website_id: int):
 
     Client sends periodic pings; server replies with current presence snapshot.
     """
+    connection_id = str(uuid.uuid4())
+    incoming = (websocket.headers.get("x-request-id") or "").strip()
+    request_id = incoming[:200] if incoming else connection_id
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        connection_id=connection_id,
+        ws_kind="presence",
+        website_id=website_id,
+    )
+
     await websocket.accept()
     try:
         ws_connect(kind="presence")
@@ -104,11 +118,19 @@ async def presence_ws(websocket: WebSocket, website_id: int):
         while True:
             # We don't require a specific message format; any message triggers a refresh.
             await websocket.receive_text()
+            try:
+                ws_message(kind="presence", direction="in", message_type="text")
+            except Exception:
+                pass
             await websocket.send_json(_compute_presence(db, website_id))
 
     except WebSocketDisconnect:
         logger.info("presence_ws_disconnected", website_id=website_id)
     except Exception as e:
+        try:
+            ws_error(kind="presence", where="handler")
+        except Exception:
+            pass
         logger.error("presence_ws_error", website_id=website_id, error=str(e), exc_info=True)
         try:
             await websocket.close(code=1011)
@@ -120,3 +142,8 @@ async def presence_ws(websocket: WebSocket, website_id: int):
         except Exception:
             pass
         db.close()
+
+        try:
+            structlog.contextvars.clear_contextvars()
+        except Exception:
+            pass

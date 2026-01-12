@@ -48,6 +48,12 @@ def observe_http_request(*, method: str, path_template: str, status_code: int, d
 _ws_connections: DefaultDict[str, int] = defaultdict(int)
 _ws_connections_total: DefaultDict[str, int] = defaultdict(int)
 
+# Keys: (kind, direction, type)
+_ws_messages_total: DefaultDict[Tuple[str, str, str], int] = defaultdict(int)
+
+# Keys: (kind, where)
+_ws_errors_total: DefaultDict[Tuple[str, str], int] = defaultdict(int)
+
 
 def ws_connect(*, kind: str) -> None:
     kind = _safe_label(kind, fallback="unknown")
@@ -61,6 +67,21 @@ def ws_disconnect(*, kind: str) -> None:
     with _lock:
         if _ws_connections[kind] > 0:
             _ws_connections[kind] -= 1
+
+
+def ws_message(*, kind: str, direction: str, message_type: str) -> None:
+    kind = _safe_label(kind, fallback="unknown")
+    direction = _safe_label(direction, fallback="unknown")
+    message_type = _safe_label(message_type, fallback="unknown")
+    with _lock:
+        _ws_messages_total[(kind, direction, message_type)] += 1
+
+
+def ws_error(*, kind: str, where: str) -> None:
+    kind = _safe_label(kind, fallback="unknown")
+    where = _safe_label(where, fallback="unknown")
+    with _lock:
+        _ws_errors_total[(kind, where)] += 1
 
 
 def _format_labels(labels: Dict[str, str]) -> str:
@@ -91,6 +112,12 @@ def render_prometheus_text() -> str:
     lines.append("# HELP ws_connections_total Total number of WebSocket connections opened")
     lines.append("# TYPE ws_connections_total counter")
 
+    lines.append("# HELP ws_messages_total Total number of WebSocket messages observed")
+    lines.append("# TYPE ws_messages_total counter")
+
+    lines.append("# HELP ws_errors_total Total number of WebSocket errors observed")
+    lines.append("# TYPE ws_errors_total counter")
+
     with _lock:
         for (method, path, status), value in sorted(_http_requests_total.items()):
             lines.append(
@@ -112,6 +139,14 @@ def render_prometheus_text() -> str:
 
         for kind, value in sorted(_ws_connections_total.items()):
             lines.append(f"ws_connections_total{_format_labels({'kind': kind})} {value}")
+
+        for (kind, direction, message_type), value in sorted(_ws_messages_total.items()):
+            lines.append(
+                f"ws_messages_total{_format_labels({'kind': kind, 'direction': direction, 'type': message_type})} {value}"
+            )
+
+        for (kind, where), value in sorted(_ws_errors_total.items()):
+            lines.append(f"ws_errors_total{_format_labels({'kind': kind, 'where': where})} {value}")
 
     lines.append("")
     return "\n".join(lines)

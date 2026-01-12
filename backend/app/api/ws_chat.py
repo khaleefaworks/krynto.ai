@@ -16,7 +16,9 @@ from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
 from app.infra.ws_rate_limit import is_chat_rate_limited
-from app.infra.metrics import ws_connect, ws_disconnect
+from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
+import structlog
+import uuid
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -41,6 +43,19 @@ async def chat_ws(
     website_id: int,
     session_id: str,
 ):
+    connection_id = str(uuid.uuid4())
+    incoming = (websocket.headers.get("x-request-id") or "").strip()
+    request_id = incoming[:200] if incoming else connection_id
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        connection_id=connection_id,
+        ws_kind="chat",
+        website_id=website_id,
+        session_id=session_id,
+    )
+
     await websocket.accept()
     try:
         ws_connect(kind="chat")
@@ -249,10 +264,19 @@ async def chat_ws(
     try:
         while True:
             data = await websocket.receive_text()
+            try:
+                ws_message(kind="chat", direction="in", message_type="text")
+            except Exception:
+                pass
             logger.debug("visitor_message_received", session_id=session_id, data=data)
             payload = json.loads(data)
 
             message_type = payload.get("type")
+
+            try:
+                ws_message(kind="chat", direction="in", message_type=str(message_type or "unknown"))
+            except Exception:
+                pass
 
             # Page view / browsing history event.
             # This can arrive even before the first visitor message, so it must NOT create
@@ -480,6 +504,10 @@ async def chat_ws(
     except WebSocketDisconnect:
         logger.info("visitor_websocket_disconnected", session_id=session_id)
     except Exception as e:
+        try:
+            ws_error(kind="chat", where="handler")
+        except Exception:
+            pass
         logger.error("websocket_handler_error", session_id=session_id, error=str(e), exc_info=True)
         try:
             await websocket.close(code=1011, reason=_ws_close_reason(str(e)))
@@ -508,3 +536,8 @@ async def chat_ws(
         except Exception:
             pass
         db.close()
+
+        try:
+            structlog.contextvars.clear_contextvars()
+        except Exception:
+            pass

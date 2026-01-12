@@ -93,7 +93,9 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 	- Implement chosen option without introducing AI features
 
 ### Phase 3 — Observability
-- [ ] Metrics + structured logging coverage
+- [x] Metrics + structured logging coverage
+	- `/metrics` Prometheus-text endpoint (HTTP + WS)
+	- Request correlation via `X-Request-ID` (HTTP) + per-WS connection correlation fields
 - [x] Readiness/liveness checks
 
 ### Phase 4 — Quality gates
