@@ -38,6 +38,20 @@ class AgentService:
         return ids
 
     @classmethod
+    def has_active_socket(cls, agent_id: int) -> bool:
+        try:
+            target = int(agent_id)
+        except Exception:
+            return False
+        for info in cls.active_agents.values():
+            try:
+                if int(info.get("agent_id")) == target:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    @classmethod
     def recently_active_agent_ids(cls) -> set[int]:
         """Agent IDs considered online by heartbeat TTL."""
         return {

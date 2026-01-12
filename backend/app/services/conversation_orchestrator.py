@@ -258,6 +258,39 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
+        # Web Push: notify agents who are not currently connected.
+        # This is best-effort and requires VAPID keys to be configured.
+        try:
+            from app.repos import push_subscriptions as push_subs_repo
+            from app.services.push_service import send_web_push_to_subscriptions
+
+            connected = AgentService.connected_agent_ids()
+
+            from app.models.user import User, UserRole
+
+            candidates = (
+                self.db.query(User)
+                .filter(
+                    User.is_active == True,  # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                )
+                .all()
+            )
+
+            offline_agent_ids = {int(u.id) for u in candidates if int(u.id) not in connected}
+            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=offline_agent_ids)
+
+            if subs:
+                send_web_push_to_subscriptions(
+                    subscriptions=subs,
+                    title="New chat",
+                    body=(last_message or "New conversation")[:120],
+                    url="/dashboard/chats",
+                )
+        except Exception:
+            pass
+
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
         """Handle agent claiming/joining a conversation."""
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()

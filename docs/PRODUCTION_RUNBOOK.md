@@ -10,6 +10,9 @@ This is the minimal, actionable guide to run AI ChatAssist safely in production.
 - You will serve the frontend as static assets (built via Vite) behind a reverse proxy.
 - TLS termination and domain routing are handled by a reverse proxy (e.g., Nginx).
 
+Optional (if enabling browser push notifications):
+- The agent dashboard is served over **HTTPS** (required for service workers + push).
+
 ## Required Environment Variables (Backend)
 
 Set these in the backend environment (systemd unit / supervisor / container env):
@@ -24,6 +27,11 @@ Recommended:
 
 Optional (recommended if running multiple workers/instances):
 - `REDIS_URL=redis://localhost:6379/0`
+
+Optional (browser push notifications - Web Push / VAPID):
+- `VAPID_PUBLIC_KEY=<base64url public key>`
+- `VAPID_PRIVATE_KEY=<base64url private key>`
+- `VAPID_SUBJECT=mailto:ops@example.com` (or an https URL)
 
 Notes:
 - In production, the backend will refuse to start if `SECRET_KEY` is empty or if `CORS_ALLOWED_ORIGINS` is empty.
@@ -40,6 +48,20 @@ Notes:
 3) Apply migrations
 - From `backend/`:
   - `alembic upgrade head`
+
+4) (Optional) Enable browser push notifications
+
+4.1) Generate VAPID keys
+- From anywhere with Node.js available:
+  - `npx --yes web-push generate-vapid-keys`
+
+4.2) Configure env vars
+- Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in the backend environment.
+
+4.3) Verify
+- Ensure the agent dashboard is opened over HTTPS.
+- The backend exposes `GET /push/vapid-public-key` and supports `POST /push/subscribe`.
+- To send a manual test notification (agent-authenticated): `POST /push/test`.
 
 ## Run Command (Backend)
 

@@ -28,6 +28,7 @@ import PersonalSettings from './pages/PersonalSettings'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
+import { ensurePushSubscription } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
 
 const _lastToastByKey = new Map<string, number>()
@@ -95,6 +96,10 @@ function App() {
   // Global notification system - runs when user is authenticated
   useEffect(() => {
     if (!user?.id || !token) return
+
+    // Best-effort push subscription registration.
+    // Intentionally does not prompt for notification permission.
+    ensurePushSubscription().catch(() => { })
 
     // Single socket for both notifications + chat events.
     // We connect only to the global agent socket (website_id=0).

@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     # Optional - Redis (Pub/Sub for multi-worker WebSocket routing)
     REDIS_URL: str = ""
 
+    # Optional - Web Push (VAPID)
+    # Public key is safe to expose to clients.
+    VAPID_PUBLIC_KEY: str = ""
+    # Private key must never be exposed to clients.
+    VAPID_PRIVATE_KEY: str = ""
+    # RFC 8292: must be a URL or a mailto:
+    VAPID_SUBJECT: str = ""
+
     # Public base URL for generating widget loader/snippets (e.g. https://api.example.com)
     # If not set, endpoints will fall back to request.base_url.
     PUBLIC_BASE_URL: Optional[str] = None
