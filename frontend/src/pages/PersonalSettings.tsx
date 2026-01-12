@@ -34,9 +34,9 @@ export default function PersonalSettings() {
   // Load existing avatar when user data is available
   useEffect(() => {
     if (user?.avatar_url) {
-          const fullAvatarUrl = user.avatar_url.startsWith('http') 
-            ? user.avatar_url 
-            : `${API_BASE}${user.avatar_url}`
+      const fullAvatarUrl = user.avatar_url.startsWith('http')
+        ? user.avatar_url
+        : `${API_BASE}${user.avatar_url}`
       setAvatarPreview(fullAvatarUrl)
     }
   }, [user])
@@ -44,14 +44,14 @@ export default function PersonalSettings() {
   // Push status (best-effort; public key is safe to fetch unauthenticated)
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const key = await getVapidPublicKey()
-        if (!cancelled) setVapidPublicKeyPresent(Boolean(key))
-      } catch {
-        if (!cancelled) setVapidPublicKeyPresent(false)
-      }
-    })()
+      ; (async () => {
+        try {
+          const key = await getVapidPublicKey()
+          if (!cancelled) setVapidPublicKeyPresent(Boolean(key))
+        } catch {
+          if (!cancelled) setVapidPublicKeyPresent(false)
+        }
+      })()
     return () => {
       cancelled = true
     }
@@ -99,7 +99,7 @@ export default function PersonalSettings() {
     }
 
     setSelectedFile(file)
-    
+
     // Create preview
     const reader = new FileReader()
     reader.onloadend = () => {
@@ -164,8 +164,8 @@ export default function PersonalSettings() {
         throw new Error(error.detail || 'Failed to upload avatar')
       }
       const data = await response.json()
-          const avatarUrl = data.avatar_url ? `${API_BASE}${data.avatar_url}` : null
-      
+      const avatarUrl = data.avatar_url ? `${API_BASE}${data.avatar_url}` : null
+
       setUser({ ...user, avatar_url: avatarUrl })
       setAvatarPreview(avatarUrl)
       setSelectedFile(null)
@@ -227,11 +227,10 @@ export default function PersonalSettings() {
         <p className="text-gray-600 dark:text-gray-400 mb-8">Manage your profile information</p>
 
         {message && (
-          <div className={`mb-6 p-4 rounded-md ${
-            message.type === 'success' 
-              ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300' 
+          <div className={`mb-6 p-4 rounded-md ${message.type === 'success'
+              ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300'
               : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'
-          }`}>
+            }`}>
             {message.text}
           </div>
         )}
@@ -260,7 +259,7 @@ export default function PersonalSettings() {
                     </div>
                   )}
                 </div>
-                
+
                 <div className="flex-1 space-y-2">
                   <Input
                     type="file"

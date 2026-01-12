@@ -30,6 +30,7 @@ import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
+import { installNotificationSoundArm } from './lib/notificationSound'
 
 const _lastToastByKey = new Map<string, number>()
 
@@ -54,6 +55,11 @@ function App() {
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Arm notification audio on first user gesture (required by browsers).
+  useEffect(() => {
+    installNotificationSoundArm()
+  }, [])
 
   // Check if system needs initial setup
   useEffect(() => {

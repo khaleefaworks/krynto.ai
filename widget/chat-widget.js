@@ -4,7 +4,7 @@
  * Loaded dynamically via loader.js with website-specific configuration
  */
 
-(function() {
+(function () {
   'use strict';
 
   // Get configuration from loader (set by loader.js)
@@ -13,7 +13,7 @@
   // Try to locate the script element that loaded this widget, so we can derive a base URL
   // for self-hosted deployments when explicit apiUrl/wsUrl are not provided.
   const scriptElement = document.currentScript || document.querySelector('script[src*="chat-widget.js"]');
-  
+
   function deriveBaseFromScriptSrc() {
     try {
       const src = scriptElement && scriptElement.src ? scriptElement.src : '';
@@ -54,7 +54,7 @@
     showAttachments: globalConfig.showAttachments || false,
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist'
   };
-  
+
   // Validate required config
   if (!CONFIG.websiteId || !CONFIG.widgetKey) {
     console.error('[ChatWidget] Missing required configuration: websiteId or widgetKey');
@@ -70,6 +70,7 @@
   // Visitor-side notifications (in-widget badge + sound)
   let unreadCount = 0;
   let soundEnabled = false;
+  let notificationAudioCtx = null;
 
   function isWidgetOpen() {
     try {
@@ -97,26 +98,48 @@
     setUnreadCount(unreadCount + 1);
   }
 
-  function playNotificationSound() {
-    if (!soundEnabled) return;
+  function enableNotificationSound() {
+    soundEnabled = true;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
-      const ctx = new AC();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      if (!notificationAudioCtx) {
+        notificationAudioCtx = new AC();
+      }
+      if (notificationAudioCtx && notificationAudioCtx.state !== 'running') {
+        // Must be called during a user gesture to reliably unlock audio.
+        notificationAudioCtx.resume().catch(function () { });
+      }
+      // Tiny silent tick to finish unlocking on some browsers.
+      if (notificationAudioCtx && notificationAudioCtx.state === 'running') {
+        const osc = notificationAudioCtx.createOscillator();
+        const gain = notificationAudioCtx.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(notificationAudioCtx.destination);
+        osc.start();
+        osc.stop(notificationAudioCtx.currentTime + 0.01);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function playNotificationSound() {
+    if (!soundEnabled) return;
+    if (!notificationAudioCtx || notificationAudioCtx.state !== 'running') return;
+    try {
+      const osc = notificationAudioCtx.createOscillator();
+      const gain = notificationAudioCtx.createGain();
 
       osc.type = 'sine';
       osc.frequency.value = 880;
       gain.gain.value = 0.04;
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(notificationAudioCtx.destination);
       osc.start();
-      setTimeout(() => {
-        try { osc.stop(); } catch (e) {}
-        try { ctx.close(); } catch (e) {}
-      }, 140);
+      osc.stop(notificationAudioCtx.currentTime + 0.14);
     } catch (e) {
       // ignore
     }
@@ -174,7 +197,7 @@
    * Generate a unique session ID (UUID v4)
    */
   function generateSessionId() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
       const r = Math.random() * 16 | 0;
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
@@ -204,13 +227,13 @@
 
     isConnecting = true;
     const wsEndpoint = `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}`;
-    
+
     console.log('[ChatWidget] Connecting to:', wsEndpoint);
-    
+
     try {
       ws = new WebSocket(wsEndpoint);
 
-      ws.onopen = function() {
+      ws.onopen = function () {
         console.log('[ChatWidget] WebSocket connected');
         isConnecting = false;
         hideToast();
@@ -225,7 +248,7 @@
             // keep it queued; it will retry on next connect
           }
         }
-        
+
         // Clear any pending reconnect
         if (reconnectTimeout) {
           clearTimeout(reconnectTimeout);
@@ -233,22 +256,22 @@
         }
       };
 
-      ws.onmessage = function(event) {
+      ws.onmessage = function (event) {
         console.log('[ChatWidget] Message received:', event.data);
         const data = JSON.parse(event.data);
         handleIncomingMessage(data);
       };
 
-      ws.onerror = function(error) {
+      ws.onerror = function (error) {
         console.error('[ChatWidget] WebSocket error:', error);
         isConnecting = false;
       };
 
-      ws.onclose = function() {
+      ws.onclose = function () {
         console.log('[ChatWidget] WebSocket closed');
         isConnecting = false;
         ws = null;
-        
+
         // Attempt to reconnect after 3 seconds
         showToast('Connection lost. Reconnecting...');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
@@ -265,14 +288,14 @@
       if (uaData && typeof uaData.platform === 'string' && uaData.platform.trim()) {
         return uaData.platform.trim();
       }
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       const platform = navigator.platform;
       if (typeof platform === 'string' && platform.trim()) {
         return platform.trim();
       }
-    } catch (e) {}
+    } catch (e) { }
 
     // Fallback: very lightweight OS guess from UA
     try {
@@ -282,7 +305,7 @@
       if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
       if (/Mac OS X/i.test(ua)) return 'macOS';
       if (/Linux/i.test(ua)) return 'Linux';
-    } catch (e) {}
+    } catch (e) { }
 
     return null;
   }
@@ -309,7 +332,7 @@
         if (m && m[1]) return `Safari ${m[1]}`;
         return 'Safari';
       }
-    } catch (e) {}
+    } catch (e) { }
 
     return null;
   }
@@ -345,7 +368,7 @@
       try {
         const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
         sessionStorage.setItem(key, url);
-      } catch (e) {}
+      } catch (e) { }
 
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(payload));
@@ -372,7 +395,7 @@
       if (restored && String(restored).trim()) {
         lastTrackedUrl = String(restored).trim();
       }
-    } catch (e) {}
+    } catch (e) { }
 
     let previousUrl = null;
     try { previousUrl = window.location.href; } catch (e) { previousUrl = null; }
@@ -389,24 +412,24 @@
 
     try {
       const originalPushState = history.pushState;
-      history.pushState = function() {
+      history.pushState = function () {
         const ret = originalPushState.apply(this, arguments);
         handleNavigation();
         return ret;
       };
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       const originalReplaceState = history.replaceState;
-      history.replaceState = function() {
+      history.replaceState = function () {
         const ret = originalReplaceState.apply(this, arguments);
         handleNavigation();
         return ret;
       };
-    } catch (e) {}
+    } catch (e) { }
 
-    try { window.addEventListener('popstate', handleNavigation); } catch (e) {}
-    try { window.addEventListener('hashchange', handleNavigation); } catch (e) {}
+    try { window.addEventListener('popstate', handleNavigation); } catch (e) { }
+    try { window.addEventListener('hashchange', handleNavigation); } catch (e) { }
 
     // Initial capture (will be queued until WS connects)
     sendPageView(null);
@@ -503,7 +526,7 @@
         avatarUrl: data.agent_avatar,
         name: data.agent_name,
       });
-      
+
       // Update agent avatar if provided
       if (data.agent_avatar) {
         updateAgentAvatar(data.agent_avatar);
@@ -517,14 +540,14 @@
           // Lightweight in-page notification.
           showToast('New message');
         }
-      } catch (e) {}
+      } catch (e) { }
     } else if (data.type === 'agent_joined') {
       // Agent joined notification
       const name = data.agent_name || 'A support agent';
       showJoinMessage(`${name} joined the chat.`, null);
 
       if (data.agent_name) updateAgentName(data.agent_name);
-      
+
       // Update agent avatar if provided
       if (data.agent_avatar) {
         updateAgentAvatar(data.agent_avatar);
@@ -641,7 +664,7 @@
 
     messageDiv.appendChild(row);
     messagesContainer.appendChild(messageDiv);
-    
+
     // Scroll to bottom
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
@@ -656,7 +679,7 @@
     const messageDiv = document.createElement('div');
     messageDiv.className = 'chatassist-message chatassist-message-system';
     messageDiv.textContent = content;
-    
+
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
@@ -812,7 +835,7 @@
     // Create main container
     const container = document.createElement('div');
     container.id = 'chatassist-widget';
-    
+
     // Placeholder; actual icon is set after config/presence loads
     const avatarHTML = `<div class="chatassist-header-avatar-placeholder">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -820,7 +843,7 @@
         <circle cx="12" cy="7" r="4"></circle>
       </svg>
     </div>`;
-    
+
     container.innerHTML = `
       <div id="chatassist-bubble">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -898,16 +921,16 @@
       // ignore
     }
 
-    bubble.addEventListener('click', function() {
-      soundEnabled = true;
+    bubble.addEventListener('click', function () {
+      enableNotificationSound();
       setUnreadCount(0);
       bubble.style.display = 'none';
       window.style.display = 'flex';
       input.focus();
     });
 
-    closeBtn.addEventListener('click', function() {
-      soundEnabled = true;
+    closeBtn.addEventListener('click', function () {
+      enableNotificationSound();
       window.style.display = 'none';
       bubble.style.display = 'flex';
       // If overlay open, close it and restore pending message
@@ -919,19 +942,19 @@
     }
 
     if (overlayCloseBtn) {
-      overlayCloseBtn.addEventListener('click', function() {
+      overlayCloseBtn.addEventListener('click', function () {
         hideContactOverlay(true);
       });
     }
 
     if (overlaySubmitBtn) {
-      overlaySubmitBtn.addEventListener('click', function() {
+      overlaySubmitBtn.addEventListener('click', function () {
         submitContactAndSendPending();
       });
     }
 
     if (contactEmailInput) {
-      contactEmailInput.addEventListener('keypress', function(e) {
+      contactEmailInput.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
           submitContactAndSendPending();
         }
@@ -940,9 +963,9 @@
 
     sendBtn.addEventListener('click', handleUserMessage);
 
-    input.addEventListener('keypress', function(e) {
+    input.addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
-        soundEnabled = true;
+        enableNotificationSound();
         handleUserMessage();
       }
     });
@@ -966,7 +989,7 @@
     try {
       presenceWs = new WebSocket(wsEndpoint);
 
-      presenceWs.onopen = function() {
+      presenceWs.onopen = function () {
         // Ping frequently to keep presence extremely fresh (local dev).
         if (presencePingInterval) clearInterval(presencePingInterval);
         presencePingInterval = setInterval(() => {
@@ -983,7 +1006,7 @@
         presenceWs.send('ping');
       };
 
-      presenceWs.onmessage = function(event) {
+      presenceWs.onmessage = function (event) {
         try {
           const data = JSON.parse(event.data);
           if (data && data.type === 'presence') {
@@ -994,7 +1017,7 @@
         }
       };
 
-      presenceWs.onclose = function() {
+      presenceWs.onclose = function () {
         if (presencePingInterval) {
           clearInterval(presencePingInterval);
           presencePingInterval = null;
@@ -1078,10 +1101,10 @@
   async function fetchWidgetConfig() {
     try {
       const response = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`);
-      
+
       if (response.ok) {
         const config = await response.json();
-        
+
         // Apply fetched configuration with fallbacks to defaults
         CONFIG.theme = config.theme || CONFIG.theme;
         CONFIG.position = config.position || CONFIG.position;
@@ -1099,7 +1122,7 @@
         }
         CONFIG.brandingText = config.branding_text || CONFIG.brandingText;
         // Note: agentAvatar would come from agent's profile dynamically
-        
+
         console.log('[ChatWidget] Configuration loaded from backend:', config);
         refreshHeaderIcon();
         return true;
@@ -1124,18 +1147,18 @@
     const bubble = document.getElementById('chatassist-bubble');
     const header = document.getElementById('chatassist-header');
     const sendBtn = document.getElementById('chatassist-send');
-    
+
     if (!container) return;
 
     // Apply position class - clear any existing position
     container.className = 'chatassist-position-' + CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
-    
+
     // Apply position inline styles as fallback
     container.style.bottom = '';
     container.style.top = '';
     container.style.left = '';
     container.style.right = '';
-    
+
     if (CONFIG.position === 'bottom-right') {
       container.style.bottom = '20px';
       container.style.right = '20px';
@@ -1161,14 +1184,14 @@
       sendBtn.style.background = CONFIG.primaryColor;
       sendBtn.style.borderColor = CONFIG.primaryColor;
     }
-    
+
     // Apply theme class for additional styling
     if (CONFIG.theme === 'light') {
       container.classList.add('chatassist-theme-light');
     } else {
       container.classList.add('chatassist-theme-dark');
     }
-    
+
     console.log('[ChatWidget] Applied configuration - Position:', CONFIG.position, 'Color:', CONFIG.primaryColor);
   }
 
@@ -1177,13 +1200,13 @@
    */
   async function init() {
     console.log('[ChatWidget] Initializing with config:', CONFIG);
-    
+
     // Configuration already set by loader.js, just validate
     if (!CONFIG.websiteId) {
       console.error('[ChatWidget] Missing websiteId in configuration');
       return;
     }
-    
+
     // Initialize session ID
     CONFIG.sessionId = getSessionId();
     console.log('[ChatWidget] Session ID:', CONFIG.sessionId);
@@ -1199,7 +1222,7 @@
     // STEP 2: Fetch widget configuration from backend
     // This validates that the website exists
     const configResult = await fetchWidgetConfig();
-    
+
     // If website doesn't exist (404 or network error), don't load widget
     if (configResult === null) {
       console.error('[ChatWidget] Website validation failed. Widget will not be loaded.');
@@ -1212,13 +1235,13 @@
 
     // STEP 3: Create UI only after all validations pass
     createWidget();
-    
+
     // Apply configuration styling (either fetched or defaults)
     applyConfiguration();
 
     // Browsing history tracking (page views)
     setupPageViewTracking();
-    
+
     // Connect WebSocket
     connectWebSocket();
 
