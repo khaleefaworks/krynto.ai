@@ -12,12 +12,31 @@ class DummyWebSocket:
         self.sent.append(payload)
 
 
+class FailingWebSocket:
+    async def send_json(self, payload: dict):
+        raise RuntimeError("send failed")
+
+
 def test_chatservice_deliver_bus_event_sends_to_registered_visitor_socket():
     ws = DummyWebSocket()
     ChatService.active_visitors = {123: ws}
 
     event = {
         "schema_version": 1,
+        "event_type": "visitor_direct",
+        "conversation_id": 123,
+        "payload": {"type": "agent_message", "conversation_id": 123, "message": "hi"},
+    }
+
+    asyncio.run(ChatService.deliver_bus_event(event))
+    assert ws.sent == [event["payload"]]
+
+
+def test_chatservice_deliver_bus_event_tolerates_missing_schema_version():
+    ws = DummyWebSocket()
+    ChatService.active_visitors = {123: ws}
+
+    event = {
         "event_type": "visitor_direct",
         "conversation_id": 123,
         "payload": {"type": "agent_message", "conversation_id": 123, "message": "hi"},
@@ -40,6 +59,50 @@ def test_chatservice_deliver_bus_event_ignores_wrong_event_type():
 
     asyncio.run(ChatService.deliver_bus_event(event))
     assert ws.sent == []
+
+
+def test_chatservice_deliver_bus_event_ignores_non_dict_payload():
+    ws = DummyWebSocket()
+    ChatService.active_visitors = {123: ws}
+
+    event = {
+        "schema_version": 1,
+        "event_type": "visitor_direct",
+        "conversation_id": 123,
+        "payload": "not-a-dict",
+    }
+
+    asyncio.run(ChatService.deliver_bus_event(event))
+    assert ws.sent == []
+
+
+def test_chatservice_deliver_bus_event_ignores_invalid_conversation_id():
+    ws = DummyWebSocket()
+    ChatService.active_visitors = {123: ws}
+
+    event = {
+        "schema_version": 1,
+        "event_type": "visitor_direct",
+        "conversation_id": "not-an-int",
+        "payload": {"type": "agent_message", "conversation_id": 123, "message": "hi"},
+    }
+
+    asyncio.run(ChatService.deliver_bus_event(event))
+    assert ws.sent == []
+
+
+def test_chatservice_deliver_bus_event_drops_stale_socket_on_send_failure():
+    ChatService.active_visitors = {123: FailingWebSocket()}
+
+    event = {
+        "schema_version": 1,
+        "event_type": "visitor_direct",
+        "conversation_id": 123,
+        "payload": {"type": "agent_message", "conversation_id": 123, "message": "hi"},
+    }
+
+    asyncio.run(ChatService.deliver_bus_event(event))
+    assert 123 not in ChatService.active_visitors
 
 
 def test_agentservice_deliver_bus_event_direct_sends_only_to_target_agent():

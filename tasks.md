@@ -56,7 +56,7 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 - [x] Phase 2.1 — Remove deprecated FastAPI lifecycle hooks
 	- Replace `@app.on_event("startup"/"shutdown")` with FastAPI lifespan handlers
 
-- [ ] Phase 2.2 — Multi-worker routing verification suite
+- [x] Phase 2.2 — Multi-worker routing verification suite
 	- Add unit tests for `ChatService.deliver_bus_event()` (symmetry with agent tests)
 	- Add unit tests for `AgentService.send_to_agent()` local-delivery path
 	- Add explicit test coverage that bus events are schema-tolerant (missing fields)

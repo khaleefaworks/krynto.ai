@@ -147,7 +147,12 @@ class AgentService:
         logger.info("send_to_agent_attempt", agent_id=agent_id, message_type=message_data.get("type"))
         sent_count = 0
         for ws_id, agent_info in AgentService.active_agents.items():
-            if agent_info["agent_id"] == agent_id:
+            try:
+                info_agent_id = int(agent_info.get("agent_id"))
+            except Exception:
+                continue
+
+            if info_agent_id == int(agent_id):
                 try:
                     await agent_info["websocket"].send_json(message_data)
                     sent_count += 1
