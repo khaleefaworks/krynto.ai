@@ -474,6 +474,13 @@
   justify-content: center;
   margin: 16px 0;
   position: relative;
+  transition: opacity 1s ease, transform 1s ease;
+}
+
+.chatassist-unread-divider-hidden {
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
 }
 
 .chatassist-unread-divider::before {
@@ -525,20 +532,36 @@
 /* Toast (small transient notification, not part of transcript) */
 #chatassist-toast-container {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 78px;
-  background: rgba(17, 24, 39, 0.92);
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111827;
   color: #fff;
-  font-size: 13px;
-  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
   border-radius: 10px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   z-index: 1000000;
+  white-space: nowrap;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .chatassist-toast-visible {
-  display: block;
+  display: block !important;
+  animation: chatassist-toast-fade-in 0.3s ease-out;
+}
+
+@keyframes chatassist-toast-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 /* Input container */

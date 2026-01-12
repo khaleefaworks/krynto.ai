@@ -73,6 +73,8 @@
   let notificationAudioCtx = null;
   let originalTitle = document.title;
   let firstUnreadMessageId = null;
+  let historyQueue = null;
+  let isReadStateFetched = false;
   let isAtBottom = true;
   let hasScrolledToUnread = false;
 
@@ -118,10 +120,23 @@
       if (response.ok) {
         const data = await response.json();
         firstUnreadMessageId = data.first_unread_message_id;
+        
+        // Persist unread count from backend
+        if (typeof data.unread_count === 'number') {
+          setUnreadCount(data.unread_count);
+        }
+        
         console.log('[ChatWidget] Read state fetched:', data);
       }
     } catch (e) {
       console.error('[ChatWidget] Failed to fetch read state:', e);
+    } finally {
+      isReadStateFetched = true;
+      // If history arrived while we were fetching read state, process it now
+      if (historyQueue) {
+        handleIncomingMessage(historyQueue);
+        historyQueue = null;
+      }
     }
   }
 
@@ -507,6 +522,13 @@
    */
   function handleIncomingMessage(data) {
     if (data.type === 'history' && Array.isArray(data.messages)) {
+      // Buffer history if read state isn't here yet
+      if (!isReadStateFetched) {
+        console.log('[ChatWidget] Buffering history until read state is fetched');
+        historyQueue = data;
+        return;
+      }
+
       // Render full history (on initial connect)
       const messagesContainer = document.getElementById('chatassist-messages');
       if (!messagesContainer) return;
@@ -618,10 +640,22 @@
     if (unreadDivider && !hasScrolledToUnread) {
       hasScrolledToUnread = true;
       unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
+
+      // Auto-remove after 5 seconds of being viewed
+      setTimeout(() => {
+        unreadDivider.classList.add('chatassist-unread-divider-hidden');
+        setTimeout(() => {
+          if (unreadDivider.parentNode) {
+            unreadDivider.parentNode.removeChild(unreadDivider);
+          }
+        }, 1000); // Wait for transition
+      }, 5000);
+
       return;
     }
 
-    if (isAtBottom) {
+    // Force scroll to bottom if we haven't scrolled to unread or if there's no divider
+    if (isAtBottom || !unreadDivider) {
       el.scrollTop = el.scrollHeight;
     }
   }

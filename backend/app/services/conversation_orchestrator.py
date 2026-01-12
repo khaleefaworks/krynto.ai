@@ -159,20 +159,19 @@ class ConversationOrchestrator:
                 },
             )
 
-            # Web Push for assigned agent if they are not active on WebSocket
+            # Web Push for assigned agent
             try:
-                if not self.agent_service.has_active_socket(conversation.assigned_agent_id):
-                    from app.repos import push_subscriptions as push_subs_repo
-                    from app.services.push_service import send_web_push_to_subscriptions
-                    
-                    subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
-                    if subs:
-                        send_web_push_to_subscriptions(
-                            subscriptions=subs,
-                            title=f"New message in conversation #{conversation.id}",
-                            body=(message or "New message")[:120],
-                            url=f"/dashboard/chats?sessionId={conversation.session_id}",
-                        )
+                from app.repos import push_subscriptions as push_subs_repo
+                from app.services.push_service import send_web_push_to_subscriptions
+                
+                subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
+                if subs:
+                    send_web_push_to_subscriptions(
+                        subscriptions=subs,
+                        title=f"New message in conversation #{conversation.id}",
+                        body=(message or "New message")[:120],
+                        url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                    )
             except Exception as e:
                 logger.error("assigned_agent_push_failed", error=str(e))
 
@@ -191,6 +190,33 @@ class ConversationOrchestrator:
             },
             include_global=True,
         )
+
+        # Web Push for unassigned: notify all available agents
+        try:
+            from app.repos import push_subscriptions as push_subs_repo
+            from app.services.push_service import send_web_push_to_subscriptions
+            from app.models.user import User, UserRole
+
+            candidates = (
+                self.db.query(User)
+                .filter(
+                    User.is_active == True,  # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                )
+                .all()
+            )
+            agent_ids = {int(u.id) for u in candidates}
+            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
+            if subs:
+                send_web_push_to_subscriptions(
+                    subscriptions=subs,
+                    title=f"Unassigned message - Website {website_id}",
+                    body=(message or "New message")[:120],
+                    url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                )
+        except Exception:
+            pass
 
         # Explicit unread event type for inbox badges.
         await self.agent_service.broadcast_to_active_agents(
@@ -276,13 +302,11 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push: notify agents who are not currently connected.
+        # Web Push: notify all available agents.
         # This is best-effort and requires VAPID keys to be configured.
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
-
-            connected = AgentService.connected_agent_ids()
 
             from app.models.user import User, UserRole
 
@@ -296,8 +320,8 @@ class ConversationOrchestrator:
                 .all()
             )
 
-            offline_agent_ids = {int(u.id) for u in candidates if int(u.id) not in connected}
-            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=offline_agent_ids)
+            agent_ids = {int(u.id) for u in candidates}
+            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
                 send_web_push_to_subscriptions(

@@ -29,6 +29,7 @@ class WidgetReadStateResponse(BaseModel):
     conversation_id: int
     last_read_at: Optional[datetime]
     first_unread_message_id: Optional[int]
+    unread_count: int = 0
 
 
 @router.post("/read")
@@ -75,6 +76,7 @@ async def get_widget_read_state(
     
     # Find the earliest AGENT or BOT or SYSTEM message after last_read_at.
     first_unread_message_id = None
+    unread_count = 0
     try:
         q = db.query(Message).filter(
             Message.conversation_id == conv.id,
@@ -83,15 +85,18 @@ async def get_widget_read_state(
         if last_read_at is not None:
             q = q.filter(Message.created_at > last_read_at)
         
+        unread_count = q.count()
         first_unread = q.order_by(Message.created_at.asc(), Message.id.asc()).first()
         first_unread_message_id = int(first_unread.id) if first_unread else None
     except Exception:
         first_unread_message_id = None
+        unread_count = 0
         
     return {
         "conversation_id": conv.id,
         "last_read_at": last_read_at,
         "first_unread_message_id": first_unread_message_id,
+        "unread_count": unread_count,
     }
 
 

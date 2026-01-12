@@ -30,6 +30,7 @@ import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
+import NotificationPermissionPrompt from './components/NotificationPermissionPrompt'
 import { installNotificationSoundArm } from './lib/notificationSound'
 
 const _lastToastByKey = new Map<string, number>()
@@ -123,8 +124,8 @@ function App() {
           if (typeof window === 'undefined') return
           if (!('Notification' in window)) return
           if (Notification.permission !== 'granted') return
-          // Only show OS notifications when the tab is not actively visible.
-          if (!document.hidden) return
+          // Browser notifications are requested all the time by user preference.
+          // if (!document.hidden) return
 
           const n = new Notification(String(opts.title || 'Notification'), {
             body: opts.body ? String(opts.body) : undefined,
@@ -293,6 +294,7 @@ function App() {
   return (
     <BrowserRouter>
       <NotificationToasts />
+      <NotificationPermissionPrompt />
       <Routes>
         {/* Login route - redirect to dashboard if already authenticated */}
         <Route
