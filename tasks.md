@@ -101,6 +101,8 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 ### Phase 4 — Quality gates
 - Expand test coverage + CI hardening
 
+- [x] Add unit tests for metrics registry rendering
+
 ## Recent commits (reference)
 - `ceaaffd` Fix unread UX and widget welcome automation
 - `a64defa` Fix WebSocket auth timezone mismatch
