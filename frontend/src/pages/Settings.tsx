@@ -7,8 +7,9 @@ export default function Settings() {
   const { user } = useAppStore()
   const location = useLocation()
 
-  const isActive = (path: string) => {
+  const isActive = (path: string, opts?: { exact?: boolean }) => {
     if (location.pathname === path) return true
+    if (opts?.exact) return false
     return location.pathname.startsWith(`${path}/`)
   }
 
@@ -31,8 +32,8 @@ export default function Settings() {
                 <Link
                   to="/dashboard/settings/websites"
                   className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/websites')
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   <Globe className="h-4 w-4" />
@@ -41,8 +42,8 @@ export default function Settings() {
                 <Link
                   to="/dashboard/settings/agents"
                   className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/agents')
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   <Users className="h-4 w-4" />
@@ -51,8 +52,8 @@ export default function Settings() {
                 <Link
                   to="/dashboard/settings/tags"
                   className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/tags')
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   <Tag className="h-4 w-4" />
@@ -68,9 +69,9 @@ export default function Settings() {
             </div>
             <Link
               to="/dashboard/settings/personal"
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/personal')
-                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/personal', { exact: true })
+                ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                 }`}
             >
               <UserIcon className="h-4 w-4" />
@@ -80,8 +81,8 @@ export default function Settings() {
             <Link
               to="/dashboard/settings/personal/shortcuts"
               className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/personal/shortcuts')
-                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                 }`}
             >
               <Zap className="h-4 w-4" />

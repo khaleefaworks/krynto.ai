@@ -37,7 +37,15 @@ export async function apiRequest<T>(
   })
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}))
+    const text = await res.text().catch(() => "")
+    const error = (() => {
+      if (!text) return {}
+      try {
+        return JSON.parse(text)
+      } catch {
+        return { detail: text }
+      }
+    })()
     
     // If unauthorized, clear token
     if (res.status === 401) {
@@ -47,5 +55,20 @@ export async function apiRequest<T>(
     throw new Error(error.detail || "Request failed")
   }
 
-  return res.json()
+  // 204 No Content (common for DELETE)
+  if (res.status === 204) {
+    return undefined as T
+  }
+
+  const responseText = await res.text()
+  if (!responseText) {
+    return undefined as T
+  }
+
+  try {
+    return JSON.parse(responseText) as T
+  } catch {
+    // For rare endpoints that return plain text.
+    return responseText as unknown as T
+  }
 }
