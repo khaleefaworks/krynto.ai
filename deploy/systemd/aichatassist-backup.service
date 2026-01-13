@@ -1,0 +1,19 @@
+[Unit]
+Description=AI ChatAssist Backup (Postgres + uploads)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash /opt/aichatassist/ai-chatassist/deploy/backup/aichatassist-backup.sh
+
+# Hardening (keep compatible with writing to /var/backups)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Runs as root by default (required if /etc/aichatassist/backend.env is 600 root)
+
+[Install]
+WantedBy=multi-user.target
