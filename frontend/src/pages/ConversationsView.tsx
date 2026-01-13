@@ -247,14 +247,14 @@ export default function ConversationsView() {
     // Load personal shortcuts (best-effort)
     useEffect(() => {
         let cancelled = false
-        ;(async () => {
-            try {
-                const data = await apiRequest<PersonalShortcut[]>("/shortcuts?active_only=true")
-                if (!cancelled) setPersonalShortcuts(Array.isArray(data) ? data : [])
-            } catch {
-                if (!cancelled) setPersonalShortcuts([])
-            }
-        })()
+            ; (async () => {
+                try {
+                    const data = await apiRequest<PersonalShortcut[]>("/shortcuts?active_only=true")
+                    if (!cancelled) setPersonalShortcuts(Array.isArray(data) ? data : [])
+                } catch {
+                    if (!cancelled) setPersonalShortcuts([])
+                }
+            })()
         return () => {
             cancelled = true
         }
@@ -1612,8 +1612,8 @@ export default function ConversationsView() {
                                     <DropdownMenuSeparator />
                                     <div className="grid grid-cols-8 gap-2 p-2">
                                         {[
-                                            '😀','😁','😂','😊','😍','🤔','👍','🙏',
-                                            '🎉','😢','😡','😎','❤️','🔥','✅','❓'
+                                            '😀', '😁', '😂', '😊', '😍', '🤔', '👍', '🙏',
+                                            '🎉', '😢', '😡', '😎', '❤️', '🔥', '✅', '❓'
                                         ].map((emoji) => (
                                             <button
                                                 key={emoji}

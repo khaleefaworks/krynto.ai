@@ -26,7 +26,7 @@ export async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getToken()
-  
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -46,12 +46,12 @@ export async function apiRequest<T>(
         return { detail: text }
       }
     })()
-    
+
     // If unauthorized, clear token
     if (res.status === 401) {
       clearToken()
     }
-    
+
     throw new Error(error.detail || "Request failed")
   }
 
