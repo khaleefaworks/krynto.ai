@@ -17,6 +17,7 @@ import {
     deleteNote,
     type Note
 } from '@/services/conversationMetadata'
+import { apiRequest } from '@/services/api'
 import { updateConversationMetadata } from '@/services/conversationMetadata'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,6 +92,29 @@ function getVisitorAvatarText(visitorName: string | null | undefined, sessionId:
     const displayId = shortSessionId(sessionId)
     const ch = String(displayId || '').trim().charAt(0)
     return (ch || '?').toUpperCase()
+}
+
+function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
+    const raw = String(hexColor || '').trim()
+    if (!raw.startsWith('#')) return 'white'
+
+    const hex = raw.slice(1)
+    const normalized =
+        hex.length === 3
+            ? hex.split('').map((c) => c + c).join('')
+            : hex.length === 6
+                ? hex
+                : ''
+
+    if (!normalized) return 'white'
+    const r = parseInt(normalized.slice(0, 2), 16)
+    const g = parseInt(normalized.slice(2, 4), 16)
+    const b = parseInt(normalized.slice(4, 6), 16)
+    if (![r, g, b].every((n) => Number.isFinite(n))) return 'white'
+
+    // Relative luminance (sRGB), quick approximation is good enough here.
+    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    return luminance > 0.6 ? 'black' : 'white'
 }
 
 interface ConversationDetails {
@@ -180,6 +204,9 @@ export default function ConversationsView() {
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
+    const [availableTags, setAvailableTags] = useState<any[]>([])
+    const [conversationTags, setConversationTags] = useState<any[]>([])
+    const [tagToAddId, setTagToAddId] = useState<string>('')
 
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
@@ -335,6 +362,7 @@ export default function ConversationsView() {
         if (selectedChat) {
             setFirstUnreadMessageId(null)
             hasScrolledToUnreadRef.current = false
+            isAtBottomRef.current = true
             loadChatData(selectedChat)
             loadConversationDetails(selectedChat)
         }
@@ -480,17 +508,26 @@ export default function ConversationsView() {
     // - If there are unread messages, jump to the unread divider once.
     // - Otherwise, stick to bottom only if the user is already at bottom.
     useLayoutEffect(() => {
-        if (!selectedChat) return
+        if (!selectedChat || messages.length === 0) return
 
-        if (firstUnreadMessageId && unreadDividerRef.current && !hasScrolledToUnreadRef.current) {
-            hasScrolledToUnreadRef.current = true
-            unreadDividerRef.current.scrollIntoView({ behavior: 'auto', block: 'center' })
-            return
+        const doScroll = () => {
+            if (firstUnreadMessageId && unreadDividerRef.current && !hasScrolledToUnreadRef.current) {
+                hasScrolledToUnreadRef.current = true
+                unreadDividerRef.current.scrollIntoView({ behavior: 'auto', block: 'center' })
+                return
+            }
+
+            if (isAtBottomRef.current) {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+            }
         }
 
-        if (isAtBottomRef.current) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-        }
+        // Initial jump
+        doScroll()
+
+        // Some browsers or layout shifts (images) might need a tiny delay
+        const timer = setTimeout(doScroll, 100)
+        return () => clearTimeout(timer)
     }, [messages, selectedChat, firstUnreadMessageId])
 
     const fetchActiveChats = async ({ showSpinner }: { showSpinner: boolean }) => {
@@ -640,6 +677,18 @@ export default function ConversationsView() {
             const chatData = activeChats.find(c => c.id === chatId)
             if (chatData) {
                 setConversation(chatData as any)
+                setConversationTags((chatData as any).tags || [])
+
+                // Tags are global (not website-scoped)
+                apiRequest<any[]>(`/tags`).then(tags => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setAvailableTags(Array.isArray(tags) ? tags : [])
+                    }
+                }).catch(() => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setAvailableTags([])
+                    }
+                })
             }
 
             const fetchedNotes = await getNotes(chatId)
@@ -663,6 +712,49 @@ export default function ConversationsView() {
 
     const handleChatSelect = (chatId: number) => {
         openChat(chatId)
+    }
+
+    const handleAddTag = async (tagId: number) => {
+        if (!selectedChat) return
+        try {
+            await apiRequest(`/conversations/${selectedChat}/tags`, {
+                method: 'POST',
+                body: JSON.stringify({ tag_id: tagId })
+            })
+            // Update local state
+            const tag = availableTags.find(t => t.id === tagId)
+            if (tag) {
+                setConversationTags(prev => [...prev.filter(t => t.id !== tagId), tag])
+            }
+            // Also update in activeChats list to keep it in sync
+            setActiveChats(activeChats.map(c =>
+                c.id === selectedChat
+                    ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => t.id !== tagId), tag] }
+                    : c
+            ))
+            setTagToAddId('')
+        } catch (error) {
+            console.error("Failed to add tag:", error)
+        }
+    }
+
+    const handleRemoveTag = async (tagId: number) => {
+        if (!selectedChat) return
+        try {
+            await apiRequest(`/conversations/${selectedChat}/tags/${tagId}`, {
+                method: 'DELETE'
+            })
+            // Update local state
+            setConversationTags(prev => prev.filter(t => t.id !== tagId))
+            // Also update in activeChats list
+            setActiveChats(activeChats.map(c =>
+                c.id === selectedChat
+                    ? { ...c, tags: ((c as any).tags || []).filter((t: any) => t.id !== tagId) }
+                    : c
+            ))
+        } catch (error) {
+            console.error("Failed to remove tag:", error)
+        }
     }
 
     const handleSendMessage = async () => {
@@ -1179,6 +1271,73 @@ export default function ConversationsView() {
                                 >
                                     <Check className="h-4 w-4 mr-1" />
                                     {resolving ? "Resolving..." : "Resolve"}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Tags Row (below header) */}
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                {conversationTags.length === 0 ? (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">No tags</span>
+                                ) : (
+                                    conversationTags
+                                        .slice()
+                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                                        .map((t: any) => (
+                                            <Badge
+                                                key={t.id}
+                                                variant="secondary"
+                                                className="gap-1 border border-transparent"
+                                                style={{
+                                                    backgroundColor: String(t?.color || ''),
+                                                    color: getContrastTextColor(t?.color),
+                                                }}
+                                            >
+                                                <span className="truncate max-w-40">{t.name}</span>
+                                                <button
+                                                    type="button"
+                                                    className="ml-1 opacity-80 hover:opacity-100"
+                                                    onClick={() => handleRemoveTag(Number(t.id))}
+                                                    aria-label={`Remove tag ${String(t.name || '')}`}
+                                                    title="Remove"
+                                                >
+                                                    ×
+                                                </button>
+                                            </Badge>
+                                        ))
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                <select
+                                    value={tagToAddId}
+                                    onChange={(e) => setTagToAddId(e.target.value)}
+                                    className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 text-sm text-gray-900 dark:text-white"
+                                >
+                                    <option value="">Add tag…</option>
+                                    {availableTags
+                                        .filter((t: any) => !conversationTags.some((ct: any) => ct?.id === t?.id))
+                                        .slice()
+                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                                        .map((t: any) => (
+                                            <option key={t.id} value={String(t.id)}>
+                                                {String(t.name || '')}
+                                            </option>
+                                        ))}
+                                </select>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                        const id = Number(tagToAddId)
+                                        if (!Number.isFinite(id) || id <= 0) return
+                                        handleAddTag(id)
+                                    }}
+                                    disabled={!tagToAddId}
+                                >
+                                    Add
                                 </Button>
                             </div>
                         </div>

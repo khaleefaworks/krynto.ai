@@ -1,5 +1,6 @@
 import enum
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum, DateTime, Text
+from sqlalchemy.orm import relationship
 
 from app.models.base import TimestampMixin
 from app.core.database import Base
@@ -40,3 +41,7 @@ class Conversation(Base, TimestampMixin):
 
     # Read state for visitor
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
+
+    website = relationship("Website", back_populates="conversations")
+    tags = relationship("ConversationTag", back_populates="conversation", cascade="all, delete-orphan")
+    assigned_agent = relationship("User", foreign_keys=[assigned_agent_id])

@@ -432,3 +432,29 @@ class ConversationService:
         )
         
         return message
+
+    def tag_conversation(self, conversation_id: int, tag_id: int, agent_id: int) -> bool:
+        """
+        Add a tag to a conversation.
+        """
+        from app.repos import tags as tag_repo
+        
+        # Verify conversation exists
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return False
+            
+        # Verify tag exists
+        tag = tag_repo.get_tag(self.db, tag_id)
+        if not tag:
+            return False
+            
+        tag_repo.add_tag_to_conversation(self.db, conversation_id, tag_id, created_by=agent_id)
+        return True
+
+    def untag_conversation(self, conversation_id: int, tag_id: int) -> bool:
+        """
+        Remove a tag from a conversation.
+        """
+        from app.repos import tags as tag_repo
+        return tag_repo.remove_tag_from_conversation(self.db, conversation_id, tag_id)

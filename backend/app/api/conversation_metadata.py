@@ -1,6 +1,9 @@
-"""
-Conversation Tags and Notes API
-Endpoints for managing tags and private notes on conversations
+"""Conversation metadata API.
+
+This module intentionally focuses on metadata that is not part of the core
+conversation lifecycle (notes, visitor metadata, page views).
+
+Conversation tag management is handled by the dedicated tags endpoints.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -10,7 +13,6 @@ from typing import List
 from datetime import datetime
 
 from app.core.database import get_db
-from app.models.conversation_tag import ConversationTag
 from app.models.conversation_note import ConversationNote
 from app.models.conversation import Conversation
 from app.models.conversation_page_view import ConversationPageView
@@ -22,19 +24,6 @@ router = APIRouter(prefix="/conversations", tags=["conversation-metadata"])
 
 
 # ==================== Request/Response Models ====================
-
-class TagCreate(BaseModel):
-    tag_name: str
-
-class TagResponse(BaseModel):
-    id: int
-    tag_name: str
-    created_at: datetime
-    created_by: int | None
-
-    class Config:
-        from_attributes = True
-
 
 class NoteCreate(BaseModel):
     content: str
@@ -72,76 +61,6 @@ class PageViewResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-# ==================== Tags Endpoints ====================
-
-@router.post("/{conversation_id}/tags", response_model=TagResponse)
-def add_tag(
-    conversation_id: int,
-    tag: TagCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Add a tag to a conversation"""
-    # Verify conversation exists
-    conversation = db.query(Conversation).filter_by(id=conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    
-    # Check if tag already exists
-    existing = db.query(ConversationTag).filter_by(
-        conversation_id=conversation_id,
-        tag_name=tag.tag_name
-    ).first()
-    
-    if existing:
-        return existing
-    
-    # Create new tag
-    new_tag = ConversationTag(
-        conversation_id=conversation_id,
-        tag_name=tag.tag_name,
-        created_by=current_user.id
-    )
-    db.add(new_tag)
-    db.commit()
-    db.refresh(new_tag)
-    
-    return new_tag
-
-
-@router.get("/{conversation_id}/tags", response_model=List[TagResponse])
-def get_tags(
-    conversation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get all tags for a conversation"""
-    tags = db.query(ConversationTag).filter_by(conversation_id=conversation_id).all()
-    return tags
-
-
-@router.delete("/{conversation_id}/tags/{tag_id}")
-def delete_tag(
-    conversation_id: int,
-    tag_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Delete a tag from a conversation"""
-    tag = db.query(ConversationTag).filter_by(
-        id=tag_id,
-        conversation_id=conversation_id
-    ).first()
-    
-    if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
-    
-    db.delete(tag)
-    db.commit()
-    
-    return {"message": "Tag deleted"}
 
 
 # ==================== Notes Endpoints ====================

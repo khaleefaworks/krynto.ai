@@ -83,6 +83,8 @@ export default function WebsiteDetail() {
     }
   }, [id, isNew])
 
+
+
   const loadSnippet = async () => {
     if (!id) return
     try {
@@ -128,6 +130,7 @@ export default function WebsiteDetail() {
       setLoading(false)
     }
   }
+
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -284,33 +287,30 @@ export default function WebsiteDetail() {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab('installation')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'installation'
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'installation'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
             >
               <Code className="w-4 h-4 inline-block mr-2 mb-1" />
               Installation
             </button>
             <button
               onClick={() => setActiveTab('settings')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'settings'
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'settings'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
             >
               <Settings className="w-4 h-4 inline-block mr-2 mb-1" />
               Settings
             </button>
             <button
               onClick={() => setActiveTab('widget')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'widget'
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'widget'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
             >
               <Palette className="w-4 h-4 inline-block mr-2 mb-1" />
               Widget Customization
@@ -423,284 +423,286 @@ export default function WebsiteDetail() {
               <CardDescription>Customize the chat widget appearance and behavior</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Header Icon (Optional)
-              </label>
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-                  {formData.widget_config.header_icon_url ? (
-                    <img
-                      src={`${API_BASE}${formData.widget_config.header_icon_url}`}
-                      alt="Widget icon"
-                      className="w-full h-full object-cover"
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Header Icon (Optional)
+                </label>
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                    {formData.widget_config.header_icon_url ? (
+                      <img
+                        src={`${API_BASE}${formData.widget_config.header_icon_url}`}
+                        alt="Widget icon"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">None</span>
+                    )}
+                  </div>
+
+                  {isAdmin(user) && (
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) handleUploadWidgetIcon(file)
+                        e.currentTarget.value = ''
+                      }}
+                      className="text-sm text-gray-700 dark:text-gray-300"
+                      disabled={saving}
                     />
-                  ) : (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">None</span>
                   )}
                 </div>
-
-                {isAdmin(user) && (
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) handleUploadWidgetIcon(file)
-                      e.currentTarget.value = ''
-                    }}
-                    className="text-sm text-gray-700 dark:text-gray-300"
-                    disabled={saving}
-                  />
-                )}
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Shown as the single header icon until an agent joins (then agent avatar replaces it).
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Theme
-                </label>
-                <select
-                  value={formData.widget_config.theme}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, theme: e.target.value }
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                >
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Shown as the single header icon until an agent joins (then agent avatar replaces it).
+                </p>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Position
-                </label>
-                <select
-                  value={formData.widget_config.position}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, position: e.target.value }
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                >
-                  <option value="bottom-right">Bottom Right</option>
-                  <option value="bottom-left">Bottom Left</option>
-                  <option value="top-right">Top Right</option>
-                  <option value="top-left">Top Left</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Header Title
-              </label>
-              <Input
-                value={formData.widget_config.header_title}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, header_title: e.target.value }
-                })}
-                placeholder="How can we help?"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Text shown in the widget header
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Online Status Text
-              </label>
-              <Input
-                value={formData.widget_config.online_status_text}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, online_status_text: e.target.value }
-                })}
-                placeholder="We reply immediately"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Status message shown below header
-              </p>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Welcome Automation
-                  </label>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Sends a bot welcome message for new visitors, or when they return after the cooldown.
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.widget_config.automations?.welcome_enabled ?? true}
-                  onCheckedChange={(checked) => setFormData({
-                    ...formData,
-                    widget_config: {
-                      ...formData.widget_config,
-                      automations: {
-                        ...(formData.widget_config.automations || {}),
-                        welcome_enabled: checked,
-                        welcome_message: (formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string,
-                        welcome_cooldown_hours: (formData.widget_config.automations?.welcome_cooldown_hours ?? 24) as number,
-                      }
-                    }
-                  })}
-                />
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Welcome Message
+                    Theme
                   </label>
-                  <Input
-                    value={(formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string}
+                  <select
+                    value={formData.widget_config.theme}
                     onChange={(e) => setFormData({
                       ...formData,
-                      widget_config: {
-                        ...formData.widget_config,
-                        welcome_message: e.target.value,
-                        automations: {
-                          ...(formData.widget_config.automations || {}),
-                          welcome_message: e.target.value,
-                        }
-                      }
+                      widget_config: { ...formData.widget_config, theme: e.target.value }
                     })}
-                    placeholder="Hi! How can we help you today?"
-                  />
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Cooldown (hours)
+                    Position
                   </label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={String(formData.widget_config.automations?.welcome_cooldown_hours ?? 24)}
+                  <select
+                    value={formData.widget_config.position}
                     onChange={(e) => setFormData({
                       ...formData,
-                      widget_config: {
-                        ...formData.widget_config,
-                        automations: {
-                          ...(formData.widget_config.automations || {}),
-                          welcome_cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
-                        }
-                      }
+                      widget_config: { ...formData.widget_config, position: e.target.value }
                     })}
-                  />
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="bottom-right">Bottom Right</option>
+                    <option value="bottom-left">Bottom Left</option>
+                    <option value="top-right">Top Right</option>
+                    <option value="top-left">Top Left</option>
+                  </select>
                 </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Bubble Text
-              </label>
-              <Input
-                value={formData.widget_config.bubble_text}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, bubble_text: e.target.value }
-                })}
-                placeholder="Chat"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Text shown on the minimized chat bubble
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Primary Color
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={formData.widget_config.primary_color}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, primary_color: e.target.value }
-                  })}
-                  className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600"
-                />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Header Title
+                </label>
                 <Input
-                  value={formData.widget_config.primary_color}
+                  value={formData.widget_config.header_title}
                   onChange={(e) => setFormData({
                     ...formData,
-                    widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                    widget_config: { ...formData.widget_config, header_title: e.target.value }
                   })}
-                  placeholder="#000000"
-                  className="flex-1"
+                  placeholder="How can we help?"
                 />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Text shown in the widget header
+                </p>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Main color for header, buttons, and bubble
-              </p>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Branding Text (Optional)
-              </label>
-              <Input
-                value={formData.widget_config.branding_text || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
-                })}
-                placeholder="Powered by Your Company"
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Optional branding text shown at bottom of widget
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-2 border-t dark:border-gray-700">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="show_emoji_picker"
-                  checked={formData.widget_config.show_emoji_picker}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, show_emoji_picker: e.target.checked }
-                  })}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="show_emoji_picker" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Enable Emoji Picker
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Online Status Text
                 </label>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="show_attachments"
-                  checked={formData.widget_config.show_attachments}
+                <Input
+                  value={formData.widget_config.online_status_text}
                   onChange={(e) => setFormData({
                     ...formData,
-                    widget_config: { ...formData.widget_config, show_attachments: e.target.checked }
+                    widget_config: { ...formData.widget_config, online_status_text: e.target.value }
                   })}
-                  className="w-4 h-4"
+                  placeholder="We reply immediately"
                 />
-                <label htmlFor="show_attachments" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Enable File Attachments (Coming Soon)
-                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Status message shown below header
+                </p>
               </div>
-            </div>
-          </CardContent>
+
+              <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Welcome Automation
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Sends a bot welcome message for new visitors, or when they return after the cooldown.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.widget_config.automations?.welcome_enabled ?? true}
+                    onCheckedChange={(checked) => setFormData({
+                      ...formData,
+                      widget_config: {
+                        ...formData.widget_config,
+                        automations: {
+                          ...(formData.widget_config.automations || {}),
+                          welcome_enabled: checked,
+                          welcome_message: (formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string,
+                          welcome_cooldown_hours: (formData.widget_config.automations?.welcome_cooldown_hours ?? 24) as number,
+                        }
+                      }
+                    })}
+                  />
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Welcome Message
+                    </label>
+                    <Input
+                      value={(formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        widget_config: {
+                          ...formData.widget_config,
+                          welcome_message: e.target.value,
+                          automations: {
+                            ...(formData.widget_config.automations || {}),
+                            welcome_message: e.target.value,
+                          }
+                        }
+                      })}
+                      placeholder="Hi! How can we help you today?"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Cooldown (hours)
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={String(formData.widget_config.automations?.welcome_cooldown_hours ?? 24)}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        widget_config: {
+                          ...formData.widget_config,
+                          automations: {
+                            ...(formData.widget_config.automations || {}),
+                            welcome_cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
+                          }
+                        }
+                      })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Bubble Text
+                </label>
+                <Input
+                  value={formData.widget_config.bubble_text}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, bubble_text: e.target.value }
+                  })}
+                  placeholder="Chat"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Text shown on the minimized chat bubble
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Primary Color
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={formData.widget_config.primary_color}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                    })}
+                    className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600"
+                  />
+                  <Input
+                    value={formData.widget_config.primary_color}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                    })}
+                    placeholder="#000000"
+                    className="flex-1"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Main color for header, buttons, and bubble
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Branding Text (Optional)
+                </label>
+                <Input
+                  value={formData.widget_config.branding_text || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
+                  })}
+                  placeholder="Powered by Your Company"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Optional branding text shown at bottom of widget
+                </p>
+              </div>
+
+              <div className="space-y-3 pt-2 border-t dark:border-gray-700">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="show_emoji_picker"
+                    checked={formData.widget_config.show_emoji_picker}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, show_emoji_picker: e.target.checked }
+                    })}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="show_emoji_picker" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Enable Emoji Picker
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="show_attachments"
+                    checked={formData.widget_config.show_attachments}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, show_attachments: e.target.checked }
+                    })}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="show_attachments" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Enable File Attachments (Coming Soon)
+                  </label>
+                </div>
+              </div>
+            </CardContent>
           </Card>
+
         )}
+
 
         <div className="flex items-center gap-4">
           <Button type="submit" disabled={saving} className="gap-2">

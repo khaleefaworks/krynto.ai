@@ -13,6 +13,7 @@ from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.message_shortcut import MessageShortcut
 from app.models.conversation_read import ConversationRead
 from app.models.push_subscription import PushSubscription
+from app.models.tag import Tag
 
 __all__ = [
     "Website",
@@ -31,4 +32,5 @@ __all__ = [
     "MessageShortcut",
     "ConversationRead",
     "PushSubscription",
+    "Tag",
 ]

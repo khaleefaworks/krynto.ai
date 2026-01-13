@@ -18,6 +18,36 @@ from app.models.message import Message, MessageSenderType
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
+def _safe_serialize_conversation_tags(conv) -> list[dict]:
+    """Best-effort tag serialization.
+
+    This endpoint is used by the agent dashboard. If the DB schema is
+    temporarily out of sync (e.g. tag refactor in progress), we prefer to
+    return an empty list rather than raising and causing a 500.
+    """
+
+    try:
+        conv_tags = getattr(conv, "tags", None)
+        if not conv_tags:
+            return []
+
+        result: list[dict] = []
+        for ct in conv_tags:
+            tag = getattr(ct, "tag", None)
+            if not tag:
+                continue
+            result.append(
+                {
+                    "id": tag.id,
+                    "name": tag.name,
+                    "color": tag.color,
+                }
+            )
+        return result
+    except Exception:
+        return []
+
+
 class ConversationResponse(BaseModel):
     id: int
     website_id: int
@@ -101,6 +131,7 @@ def get_active_chats(
                 "unread_count": int(unread_counts.get(int(conv.id), 0)),
                 "last_message": last_message_val,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "tags": _safe_serialize_conversation_tags(conv),
             }
         )
 
@@ -171,6 +202,7 @@ def get_resolved_conversations(
                 "last_message": last_message_val,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "closed_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                "tags": _safe_serialize_conversation_tags(conv),
             }
         )
 

@@ -25,6 +25,7 @@ import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
 import PersonalSettings from './pages/PersonalSettings'
+import TagsSettings from './pages/TagsSettings'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
@@ -332,6 +333,12 @@ function App() {
                 <Route
                   path="agents/:id"
                   element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
+                />
+
+                {/* Tags management - Admin only */}
+                <Route
+                  path="tags"
+                  element={isAdmin(user) ? <TagsSettings /> : <Navigate to="/dashboard/chats" replace />}
                 />
 
                 {/* Personal settings - All users */}

@@ -26,6 +26,10 @@ class ClaimResponse(BaseModel):
     conversation_id: int
 
 
+class TagActionRequest(BaseModel):
+    tag_id: int
+
+
 @router.post("/{conversation_id}/claim", response_model=ClaimResponse)
 def claim_conversation(
     conversation_id: int,
@@ -104,3 +108,40 @@ async def takeover_conversation(
         raise HTTPException(status_code=400, detail=result["error"])
 
     return {"success": True, "conversation_id": conversation_id}
+
+
+@router.post("/{conversation_id}/tags")
+def tag_conversation(
+    conversation_id: int,
+    payload: TagActionRequest,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Add a tag to a conversation"""
+    conversation_service = ConversationService(db)
+    success = conversation_service.tag_conversation(
+        conversation_id=conversation_id,
+        tag_id=payload.tag_id,
+        agent_id=current_user.id
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to add tag")
+    return {"success": True}
+
+
+@router.delete("/{conversation_id}/tags/{tag_id}")
+def untag_conversation(
+    conversation_id: int,
+    tag_id: int,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """Remove a tag from a conversation"""
+    conversation_service = ConversationService(db)
+    success = conversation_service.untag_conversation(
+        conversation_id=conversation_id,
+        tag_id=tag_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Tag not found on conversation")
+    return {"success": True}
