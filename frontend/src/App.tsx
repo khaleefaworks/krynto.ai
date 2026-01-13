@@ -296,7 +296,7 @@ function App() {
   return (
     <BrowserRouter>
       <NotificationToasts />
-      <NotificationPermissionPrompt />
+      {token ? <NotificationPermissionPrompt /> : null}
       <Routes>
         {/* Login route - redirect to dashboard if already authenticated */}
         <Route

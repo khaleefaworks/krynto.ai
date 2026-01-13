@@ -122,6 +122,8 @@ if not widget_dir.is_dir():
 app.mount("/widget", StaticFiles(directory=str(widget_dir)), name="widget")
 
 # Serve uploaded files (avatars, etc.)
-uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+# NOTE: Upload endpoints write into the repo-root `uploads/` folder.
+# Mount that same folder so returned `/uploads/...` URLs resolve.
+uploads_dir = project_root / "uploads"
 uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
