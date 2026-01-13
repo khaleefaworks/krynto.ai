@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel, Field
+from datetime import datetime
 
 from app.core.database import get_db
 from app.api.deps import require_authenticated_user
@@ -36,8 +37,8 @@ class MessageShortcutResponse(BaseModel):
     shortcut: str
     message: str
     is_active: bool
-    created_at: str
-    updated_at: str | None
+    created_at: datetime
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True
