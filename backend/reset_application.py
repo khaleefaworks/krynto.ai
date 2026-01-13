@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""
+Reset the AI ChatAssist application to fresh state.
+This will delete ALL data and reset system initialization.
+
+Use this for:
+- Testing onboarding flow
+- Fresh start
+- Development reset
+
+WARNING: This is DESTRUCTIVE and cannot be undone!
+
+Usage:
+  python reset_application.py          # Fresh reset (onboarding flow)
+  python reset_application.py --seed   # Reset with test data
+"""
+
+import sys
+from pathlib import Path
+import shutil
+from app.core.database import SessionLocal, engine
+from app.models.base import Base
+from app.models.user import User
+from app.models.website import Website
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.system_settings import SystemSettings
+from app.models.agent_website_assignment import AgentWebsiteAssignment
+from seed_data import seed_database
+
+# Ensure all models are imported so Base.metadata knows about every table.
+# This keeps the reset logic resilient as new tables are added.
+import app.models  # noqa: F401
+
+
+def delete_uploaded_files():
+    """Delete uploaded files from backend/uploads (keeps the folder itself)."""
+    uploads_dir = Path(__file__).resolve().parent / "uploads"
+    if not uploads_dir.exists() or not uploads_dir.is_dir():
+        return
+
+    for child in uploads_dir.iterdir():
+        # keep placeholder files if you ever add them
+        if child.name == ".gitkeep":
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"  ⚠️  Failed to delete uploaded file(s) at {child}: {e}")
+
+def confirm_reset(with_seed):
+    """Ask for confirmation before resetting"""
+    print("⚠️  WARNING: This will DELETE ALL DATA from the database!")
+    print("   - All users")
+    print("   - All websites")
+    print("   - All conversations and messages")
+    if with_seed:
+        print("   - Will seed with test data (admin + agent)")
+    else:
+        print("   - Fresh start (will trigger onboarding)")
+    print()
+    response = input("Are you sure you want to continue? Type 'YES' to confirm: ")
+    return response == "YES"
+
+def reset_database(with_seed=False):
+    """Reset the database to fresh state"""
+    if not confirm_reset(with_seed):
+        print("❌ Reset cancelled.")
+        return
+    
+    print("\n🔄 Resetting database...")
+
+    print("  Deleting uploaded files...")
+    delete_uploaded_files()
+    
+    db = SessionLocal()
+    try:
+        # Delete all data in reverse table dependency order (FK-safe).
+        # This prevents failures when new tables are added (e.g. push_subscriptions).
+        print("  Deleting database rows...")
+        from sqlalchemy import text
+
+        for table in reversed(Base.metadata.sorted_tables):
+            # Keep Alembic bookkeeping intact.
+            if table.name == "alembic_version":
+                continue
+            db.execute(table.delete())
+
+        db.commit()
+        
+        # Reset all sequences to start from 1
+        print("  Resetting ID sequences...")
+
+        seq_rows = db.execute(
+            text(
+                """
+                SELECT sequence_name
+                FROM information_schema.sequences
+                WHERE sequence_schema = 'public'
+                """
+            )
+        ).fetchall()
+
+        for (seq_name,) in seq_rows:
+            # Quote sequence names defensively.
+            db.execute(text(f'ALTER SEQUENCE "{seq_name}" RESTART WITH 1'))
+
+        db.commit()
+        
+        print("\n✅ Database reset successfully!")
+        
+        if with_seed:
+            # Seed database with test data
+            print("\n📦 Seeding database with test data...")
+            seed_database()
+            
+            # Set reset timestamp to invalidate old tokens
+            from datetime import datetime, timezone
+            settings = db.query(SystemSettings).first()
+            if settings:
+                settings.last_reset_at = datetime.now(timezone.utc)
+                db.commit()
+                print("\n🔐 All previous auth tokens invalidated")
+            
+            print("\n🎉 System is now ready!")
+            print("\n📍 Next Steps:")
+            print("   1. Navigate to http://localhost:5173 to login")
+            print("   2. Widget demo: http://localhost:8080/demo.html")
+        else:
+            print("\n🎉 Fresh database created!")
+            print("\n📍 Next Steps:")
+            print("   1. Navigate to http://localhost:5173")
+            print("   2. Complete the onboarding process")
+            print("   3. Create your admin account and first website")
+        
+    except Exception as e:
+        print(f"\n❌ Error during reset: {e}")
+        db.rollback()
+        sys.exit(1)
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    # Check for --seed argument
+    with_seed = "--seed" in sys.argv
+    reset_database(with_seed=with_seed)

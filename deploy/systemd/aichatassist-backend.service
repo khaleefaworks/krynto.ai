@@ -1,0 +1,29 @@
+[Unit]
+Description=AI ChatAssist Backend (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+
+# Adjust these paths for your host
+WorkingDirectory=/home/frappe/Applications/ai-chatassist
+EnvironmentFile=/etc/aichatassist/backend.env
+
+# Run Alembic manually during deploy; keep startup fast and predictable
+ExecStart=/usr/bin/env PYTHONPATH=backend gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 127.0.0.1:8000 app.main:app
+
+Restart=on-failure
+RestartSec=2
+
+# Recommended hardening (safe defaults)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Pick a real service user/group on your machine
+User=frappe
+Group=frappe
+
+[Install]
+WantedBy=multi-user.target
