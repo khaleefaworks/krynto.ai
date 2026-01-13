@@ -7,11 +7,8 @@
 (function () {
   'use strict';
 
-  // Get configuration from loader (set by loader.js)
-  var globalConfig = window._aichatassist || {};
-
-  // Try to locate the script element that loaded this widget, so we can derive a base URL
-  // for self-hosted deployments when explicit apiUrl/wsUrl are not provided.
+  // --- Configuration & State ---
+  const globalConfig = window._aichatassist || {};
   const scriptElement = document.currentScript || document.querySelector('script[src*="chat-widget.js"]');
 
   function deriveBaseFromScriptSrc() {
@@ -34,7 +31,6 @@
         : derivedApiBase)
     : null;
 
-  // Widget configuration - populated from global config
   const CONFIG = {
     websiteId: globalConfig.websiteId || (scriptElement ? scriptElement.getAttribute('data-website-id') : null) || null,
     widgetKey: globalConfig.widgetKey || null,
@@ -55,42 +51,49 @@
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist'
   };
 
-  // Validate required config
-  if (!CONFIG.websiteId || !CONFIG.widgetKey) {
-    console.error('[ChatWidget] Missing required configuration: websiteId or widgetKey');
-    return;
-  }
-
-  // WebSocket connection
+  // State
   let ws = null;
-  let reconnectTimeout = null;
+  let presenceWs = null;
   let isConnecting = false;
+  let reconnectTimeout = null;
+  let presencePingInterval = null;
   let toastTimeout = null;
 
-  // Visitor-side notifications (in-widget badge + sound)
   let unreadCount = 0;
   let soundEnabled = false;
   let notificationAudioCtx = null;
-  let originalTitle = document.title;
+  const originalTitle = document.title;
   let firstUnreadMessageId = null;
   let historyQueue = null;
   let isReadStateFetched = false;
   let isAtBottom = true;
   let hasScrolledToUnread = false;
 
+  let presenceOnline = true;
+  let activeAgentAvatarUrl = null;
+  let activeAgentName = null;
+  let pendingOfflineMessage = null;
+
+  let pageViewTrackingInitialized = false;
+  let lastTrackedUrl = null;
+  let pendingPageView = null;
+
+  // --- Core Logic ---
+
+  if (!CONFIG.websiteId || !CONFIG.widgetKey) {
+    console.error('[ChatWidget] Missing required configuration: websiteId or widgetKey');
+    return;
+  }
+
+  // --- UI Helpers ---
+
   function isWidgetOpen() {
-    try {
-      const win = document.getElementById('chatassist-window');
-      return !!(win && win.style && win.style.display !== 'none');
-    } catch (e) {
-      return false;
-    }
+    const win = document.getElementById('chatassist-window');
+    return !!(win && win.style.display !== 'none');
   }
 
   function setUnreadCount(next) {
     unreadCount = Math.max(0, Number(next) || 0);
-    
-    // Update bubble badge
     const el = document.getElementById('chatassist-bubble-unread');
     if (el) {
       if (unreadCount <= 0) {
@@ -101,18 +104,69 @@
         el.style.display = 'flex';
       }
     }
-
-    // Update page title
-    if (unreadCount > 0) {
-      document.title = `(${unreadCount}) ${originalTitle}`;
-    } else {
-      document.title = originalTitle;
-    }
+    document.title = unreadCount > 0 ? `(${unreadCount}) ${originalTitle}` : originalTitle;
   }
 
   function bumpUnread() {
     setUnreadCount(unreadCount + 1);
   }
+
+  function showToast(message) {
+    const container = document.getElementById('chatassist-toast-container');
+    if (!container) return;
+    container.textContent = message;
+    container.style.display = 'block';
+    container.classList.add('chatassist-toast-visible');
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(hideToast, 3000);
+  }
+
+  function hideToast() {
+    const container = document.getElementById('chatassist-toast-container');
+    if (!container) return;
+    container.classList.remove('chatassist-toast-visible');
+    container.style.display = 'none';
+  }
+
+  // --- Audio ---
+
+  function enableNotificationSound() {
+    soundEnabled = true;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!notificationAudioCtx) notificationAudioCtx = new AC();
+      if (notificationAudioCtx.state !== 'running') {
+        notificationAudioCtx.resume().catch(() => {});
+      }
+      if (notificationAudioCtx.state === 'running') {
+        const osc = notificationAudioCtx.createOscillator();
+        const gain = notificationAudioCtx.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(notificationAudioCtx.destination);
+        osc.start();
+        osc.stop(notificationAudioCtx.currentTime + 0.01);
+      }
+    } catch (e) {}
+  }
+
+  function playNotificationSound() {
+    if (!soundEnabled || !notificationAudioCtx || notificationAudioCtx.state !== 'running') return;
+    try {
+      const osc = notificationAudioCtx.createOscillator();
+      const gain = notificationAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.04;
+      osc.connect(gain);
+      gain.connect(notificationAudioCtx.destination);
+      osc.start();
+      osc.stop(notificationAudioCtx.currentTime + 0.14);
+    } catch (e) {}
+  }
+
+  // --- API & State Management ---
 
   async function fetchReadState() {
     try {
@@ -120,19 +174,12 @@
       if (response.ok) {
         const data = await response.json();
         firstUnreadMessageId = data.first_unread_message_id;
-        
-        // Persist unread count from backend
-        if (typeof data.unread_count === 'number') {
-          setUnreadCount(data.unread_count);
-        }
-        
-        console.log('[ChatWidget] Read state fetched:', data);
+        if (typeof data.unread_count === 'number') setUnreadCount(data.unread_count);
       }
     } catch (e) {
       console.error('[ChatWidget] Failed to fetch read state:', e);
     } finally {
       isReadStateFetched = true;
-      // If history arrived while we were fetching read state, process it now
       if (historyQueue) {
         handleIncomingMessage(historyQueue);
         historyQueue = null;
@@ -148,72 +195,163 @@
       if (response.ok) {
         firstUnreadMessageId = null;
         setUnreadCount(0);
-        console.log('[ChatWidget] Conversation marked as read');
       }
     } catch (e) {
       console.error('[ChatWidget] Failed to mark read:', e);
     }
   }
 
-  function enableNotificationSound() {
-    soundEnabled = true;
+  // --- WebSocket Communication ---
+
+  function connectWebSocket() {
+    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
+    isConnecting = true;
+    const wsEndpoint = `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}`;
+
     try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!notificationAudioCtx) {
-        notificationAudioCtx = new AC();
-      }
-      if (notificationAudioCtx && notificationAudioCtx.state !== 'running') {
-        // Must be called during a user gesture to reliably unlock audio.
-        notificationAudioCtx.resume().catch(function () { });
-      }
-      // Tiny silent tick to finish unlocking on some browsers.
-      if (notificationAudioCtx && notificationAudioCtx.state === 'running') {
-        const osc = notificationAudioCtx.createOscillator();
-        const gain = notificationAudioCtx.createGain();
-        gain.gain.value = 0;
-        osc.connect(gain);
-        gain.connect(notificationAudioCtx.destination);
-        osc.start();
-        osc.stop(notificationAudioCtx.currentTime + 0.01);
-      }
+      ws = new WebSocket(wsEndpoint);
+      ws.onopen = () => {
+        isConnecting = false;
+        hideToast();
+        if (pendingPageView) {
+          ws.send(JSON.stringify(pendingPageView));
+          pendingPageView = null;
+        }
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+        }
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleIncomingMessage(data);
+      };
+      ws.onerror = () => { isConnecting = false; };
+      ws.onclose = () => {
+        isConnecting = false;
+        ws = null;
+        showToast('Connection lost. Reconnecting...');
+        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+      };
     } catch (e) {
-      // ignore
+      isConnecting = false;
     }
   }
 
-  function playNotificationSound() {
-    if (!soundEnabled) return;
-    if (!notificationAudioCtx || notificationAudioCtx.state !== 'running') return;
-    try {
-      const osc = notificationAudioCtx.createOscillator();
-      const gain = notificationAudioCtx.createGain();
+  function sendMessage(message, meta) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('Not connected. Please wait...');
+      connectWebSocket();
+      return false;
+    }
+    const payload = { message };
+    if (meta && typeof meta === 'object') {
+      if (meta.visitor_name) payload.visitor_name = meta.visitor_name;
+      if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
+    }
+    ws.send(JSON.stringify(payload));
+    return true;
+  }
 
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.value = 0.04;
+  function handleIncomingMessage(data) {
+    if (data.type === 'history' && Array.isArray(data.messages)) {
+      if (!isReadStateFetched) {
+        historyQueue = data;
+        return;
+      }
+      const container = document.getElementById('chatassist-messages');
+      if (!container) return;
+      container.innerHTML = '';
+      data.messages.forEach(m => {
+        const sender = m.sender_type || m.sender || 'system';
+        const eventType = m.event_type || null;
+        if (sender === 'visitor') appendMessage('visitor', m.content, m.created_at, null, m.id);
+        else if (sender === 'agent') {
+          if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
+          if (m.sender_name) updateAgentName(m.sender_name);
+          appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
+        } else if (sender === 'system') {
+          if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
+          else if (eventType && (eventType.startsWith('automation') || eventType === 'bot')) appendMessage('ai', m.content, m.created_at, null, m.id);
+          else showSystemMessage(m.content);
+        } else appendMessage('ai', m.content, m.created_at, null, m.id);
+      });
+      smartScroll();
+      return;
+    }
 
-      osc.connect(gain);
-      gain.connect(notificationAudioCtx.destination);
-      osc.start();
-      osc.stop(notificationAudioCtx.currentTime + 0.14);
-    } catch (e) {
-      // ignore
+    if (data.type === 'ai') {
+      appendMessage('ai', data.message, data.created_at, null, data.message_obj?.id);
+      smartScroll();
+    } else if (data.type === 'agent') {
+      if (data.agent_name) updateAgentName(data.agent_name);
+      if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
+      appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
+      if (!isWidgetOpen() || document.hidden) {
+        bumpUnread();
+        playNotificationSound();
+        showToast('New message');
+      }
+      smartScroll();
+    } else if (data.type === 'agent_joined') {
+      showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, null);
+      if (data.agent_name) updateAgentName(data.agent_name);
+      if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
+      smartScroll();
+    } else if (data.message) {
+      const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
+      appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
+      smartScroll();
     }
   }
 
-  // Page view tracking (browsing history)
-  let pageViewTrackingInitialized = false;
-  let lastTrackedUrl = null;
-  let pendingPageView = null;
+  // --- Scrolling Logic ---
 
-  // Presence WebSocket (online/offline + agent avatars)
-  let presenceWs = null;
-  let presencePingInterval = null;
-  let presenceOnline = true;
-  let activeAgentAvatarUrl = null;
-  let activeAgentName = null;
-  let pendingOfflineMessage = null;
+  function smartScroll() {
+    const el = document.getElementById('chatassist-messages');
+    if (!el) return;
+
+    // Use multiple requestAnimationFrame to ensure the browser has actually painted
+    // and layout is fully recalculated, which is critical for accurate scrollHeight.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const unreadDivider = document.getElementById('chatassist-unread-divider');
+        
+        // If widget is closed, we can't accurately scroll, but we mark it as "needs scroll"
+        if (!isWidgetOpen()) {
+          return;
+        }
+
+        if (unreadDivider && !hasScrolledToUnread) {
+          hasScrolledToUnread = true;
+          unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
+          
+          // Auto-remove divider after 5 seconds of viewing
+          setTimeout(() => {
+            unreadDivider.classList.add('chatassist-unread-divider-hidden');
+            setTimeout(() => {
+              if (unreadDivider.parentNode) unreadDivider.parentNode.removeChild(unreadDivider);
+            }, 1000);
+          }, 5000);
+          return;
+        }
+
+        if (isAtBottom || !unreadDivider) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+    });
+  }
+
+  function handleMessagesScroll() {
+    const el = document.getElementById('chatassist-messages');
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40; // Increased threshold for better reliability
+    isAtBottom = nearBottom;
+    if (nearBottom && firstUnreadMessageId) markRead();
+  }
+
+  // --- UI Construction ---
 
   function getFullAssetUrl(url) {
     if (!url || typeof url !== 'string') return null;
@@ -223,540 +361,52 @@
   function setHeaderIcon(urlOrNull) {
     const iconInner = document.getElementById('chatassist-header-icon-inner');
     if (!iconInner) return;
-
     const url = getFullAssetUrl(urlOrNull);
     if (!url) {
-      iconInner.innerHTML = `<div class="chatassist-header-avatar-placeholder">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-          <circle cx="12" cy="7" r="4"></circle>
-        </svg>
-      </div>`;
+      iconInner.innerHTML = `<div class="chatassist-header-avatar-placeholder"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>`;
       return;
     }
-
     iconInner.innerHTML = `<img class="chatassist-header-avatar" src="${url}" alt="Icon">`;
   }
 
   function refreshHeaderIcon() {
-    if (activeAgentAvatarUrl) {
-      setHeaderIcon(activeAgentAvatarUrl);
-      return;
-    }
-    if (CONFIG.headerIconUrl) {
-      setHeaderIcon(CONFIG.headerIconUrl);
-      return;
-    }
-    setHeaderIcon(null);
+    setHeaderIcon(activeAgentAvatarUrl || CONFIG.headerIconUrl || null);
   }
 
-  /**
-   * Generate a unique session ID (UUID v4)
-   */
-  function generateSessionId() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-      const r = Math.random() * 16 | 0;
-      const v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
-  }
-
-  /**
-   * Get or create session ID
-   */
-  function getSessionId() {
-    const storageKey = `ai_chatassist_session_id_${CONFIG.websiteId}`;
-    let sessionId = localStorage.getItem(storageKey);
-    if (!sessionId) {
-      sessionId = generateSessionId();
-      localStorage.setItem(storageKey, sessionId);
-    }
-    return sessionId;
-  }
-
-  /**
-   * Initialize WebSocket connection
-   */
-  function connectWebSocket() {
-    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) {
-      return;
-    }
-
-    isConnecting = true;
-    const wsEndpoint = `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}`;
-
-    console.log('[ChatWidget] Connecting to:', wsEndpoint);
-
-    try {
-      ws = new WebSocket(wsEndpoint);
-
-      ws.onopen = function () {
-        console.log('[ChatWidget] WebSocket connected');
-        isConnecting = false;
-        hideToast();
-
-        // Flush any queued page view captured before the socket opened
-        if (pendingPageView) {
-          try {
-            ws.send(JSON.stringify(pendingPageView));
-            console.log('[ChatWidget] Page view sent:', pendingPageView);
-            pendingPageView = null;
-          } catch (e) {
-            // keep it queued; it will retry on next connect
-          }
-        }
-
-        // Clear any pending reconnect
-        if (reconnectTimeout) {
-          clearTimeout(reconnectTimeout);
-          reconnectTimeout = null;
-        }
-      };
-
-      ws.onmessage = function (event) {
-        console.log('[ChatWidget] Message received:', event.data);
-        const data = JSON.parse(event.data);
-        handleIncomingMessage(data);
-      };
-
-      ws.onerror = function (error) {
-        console.error('[ChatWidget] WebSocket error:', error);
-        isConnecting = false;
-      };
-
-      ws.onclose = function () {
-        console.log('[ChatWidget] WebSocket closed');
-        isConnecting = false;
-        ws = null;
-
-        // Attempt to reconnect after 3 seconds
-        showToast('Connection lost. Reconnecting...');
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
-      };
-    } catch (error) {
-      console.error('[ChatWidget] Failed to create WebSocket:', error);
-      isConnecting = false;
-    }
-  }
-
-  function getDeviceInfo() {
-    try {
-      const uaData = navigator.userAgentData;
-      if (uaData && typeof uaData.platform === 'string' && uaData.platform.trim()) {
-        return uaData.platform.trim();
-      }
-    } catch (e) { }
-
-    try {
-      const platform = navigator.platform;
-      if (typeof platform === 'string' && platform.trim()) {
-        return platform.trim();
-      }
-    } catch (e) { }
-
-    // Fallback: very lightweight OS guess from UA
-    try {
-      const ua = String(navigator.userAgent || '');
-      if (/Windows NT/i.test(ua)) return 'Windows';
-      if (/Android/i.test(ua)) return 'Android';
-      if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
-      if (/Mac OS X/i.test(ua)) return 'macOS';
-      if (/Linux/i.test(ua)) return 'Linux';
-    } catch (e) { }
-
-    return null;
-  }
-
-  function getBrowserInfo() {
-    try {
-      const ua = String(navigator.userAgent || '');
-
-      // Edge (Chromium)
-      let m = ua.match(/Edg\/([0-9\.]+)/);
-      if (m && m[1]) return `Edge ${m[1]}`;
-
-      // Chrome (exclude Edge)
-      m = ua.match(/Chrome\/([0-9\.]+)/);
-      if (m && m[1] && !/Edg\//.test(ua)) return `Chrome ${m[1]}`;
-
-      // Firefox
-      m = ua.match(/Firefox\/([0-9\.]+)/);
-      if (m && m[1]) return `Firefox ${m[1]}`;
-
-      // Safari (exclude Chrome)
-      if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) {
-        m = ua.match(/Version\/([0-9\.]+)/);
-        if (m && m[1]) return `Safari ${m[1]}`;
-        return 'Safari';
-      }
-    } catch (e) { }
-
-    return null;
-  }
-
-  function sendPageView(referrerOverride) {
-    try {
-      const url = String(window.location && window.location.href ? window.location.href : '').trim();
-      if (!url) return;
-      if (lastTrackedUrl === url) return;
-
-      const title = (typeof document !== 'undefined' && typeof document.title === 'string' && document.title.trim())
-        ? document.title.trim()
-        : null;
-
-      const referrer = (referrerOverride != null)
-        ? String(referrerOverride).trim() || null
-        : (typeof document !== 'undefined' && typeof document.referrer === 'string' && document.referrer.trim())
-          ? document.referrer.trim()
-          : null;
-
-      const payload = {
-        type: 'page_view',
-        url,
-        title,
-        referrer,
-        device_info: getDeviceInfo(),
-        browser_info: getBrowserInfo(),
-      };
-
-      lastTrackedUrl = url;
-
-      // Persist across refreshes in the same tab.
-      try {
-        const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
-        sessionStorage.setItem(key, url);
-      } catch (e) { }
-
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(payload));
-        pendingPageView = null;
-        console.log('[ChatWidget] Page view sent:', payload);
-        return;
-      }
-
-      // Queue until WS is connected
-      pendingPageView = payload;
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  function setupPageViewTracking() {
-    if (pageViewTrackingInitialized) return;
-    pageViewTrackingInitialized = true;
-
-    // Restore last tracked URL so refreshes don't create duplicates.
-    try {
-      const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
-      const restored = sessionStorage.getItem(key);
-      if (restored && String(restored).trim()) {
-        lastTrackedUrl = String(restored).trim();
-      }
-    } catch (e) { }
-
-    let previousUrl = null;
-    try { previousUrl = window.location.href; } catch (e) { previousUrl = null; }
-
-    function handleNavigation() {
-      let currentUrl = null;
-      try { currentUrl = window.location.href; } catch (e) { currentUrl = null; }
-      if (!currentUrl) return;
-
-      const ref = previousUrl;
-      previousUrl = currentUrl;
-      sendPageView(ref);
-    }
-
-    try {
-      const originalPushState = history.pushState;
-      history.pushState = function () {
-        const ret = originalPushState.apply(this, arguments);
-        handleNavigation();
-        return ret;
-      };
-    } catch (e) { }
-
-    try {
-      const originalReplaceState = history.replaceState;
-      history.replaceState = function () {
-        const ret = originalReplaceState.apply(this, arguments);
-        handleNavigation();
-        return ret;
-      };
-    } catch (e) { }
-
-    try { window.addEventListener('popstate', handleNavigation); } catch (e) { }
-    try { window.addEventListener('hashchange', handleNavigation); } catch (e) { }
-
-    // Initial capture (will be queued until WS connects)
-    sendPageView(null);
-  }
-
-  /**
-   * Send message to WebSocket
-   */
-  function sendMessage(message, meta) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error('[ChatWidget] WebSocket not connected');
-      showToast('Not connected. Please wait...');
-      connectWebSocket();
-      return false;
-    }
-
-    const payload = {
-      message: message
-    };
-
-    if (meta && typeof meta === 'object') {
-      if (meta.visitor_name) payload.visitor_name = meta.visitor_name;
-      if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
-    }
-
-    ws.send(JSON.stringify(payload));
-    console.log('[ChatWidget] Message sent:', payload);
-    return true;
-  }
-
-  /**
-   * Handle incoming WebSocket messages
-   */
-  function handleIncomingMessage(data) {
-    if (data.type === 'history' && Array.isArray(data.messages)) {
-      // Buffer history if read state isn't here yet
-      if (!isReadStateFetched) {
-        console.log('[ChatWidget] Buffering history until read state is fetched');
-        historyQueue = data;
-        return;
-      }
-
-      // Render full history (on initial connect)
-      const messagesContainer = document.getElementById('chatassist-messages');
-      if (!messagesContainer) return;
-
-      // Clear existing UI messages (welcome/toasts are not part of history)
-      messagesContainer.innerHTML = '';
-
-      data.messages.forEach((m) => {
-        const senderType = m.sender_type || m.sender || 'system';
-        const eventType = m.event_type || null;
-
-        if (senderType === 'visitor') {
-          appendMessage('visitor', m.content, m.created_at, null, m.id);
-          return;
-        }
-        if (senderType === 'agent') {
-          // Track the most recent agent identity for the header (supports takeover).
-          if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
-          if (m.sender_name) updateAgentName(m.sender_name);
-          appendMessage('agent', m.content, m.created_at, {
-            avatarUrl: m.sender_avatar_url,
-            name: m.sender_name,
-          }, m.id);
-          return;
-        }
-
-        // SYSTEM messages are sub-typed via event_type
-        if (senderType === 'system') {
-          if (eventType === 'agent_join') {
-            showJoinMessage(m.content, m.created_at);
-            return;
-          }
-          if (eventType && String(eventType).startsWith('automation')) {
-            appendMessage('ai', m.content, m.created_at, null, m.id);
-            return;
-          }
-          if (eventType === 'bot') {
-            appendMessage('ai', m.content, m.created_at, null, m.id);
-            return;
-          }
-          showSystemMessage(m.content);
-          return;
-        }
-
-        // Backwards-compatible fallback
-        appendMessage('ai', m.content, m.created_at, null, m.id);
-      });
-
-      smartScroll();
-      return;
-    }
-
-    if (data.type === 'ai') {
-      // AI response
-      const mId = data.message_obj ? data.message_obj.id : null;
-      appendMessage('ai', data.message, data.created_at, null, mId);
-      smartScroll();
-    } else if (data.type === 'agent') {
-      // Agent message
-      if (data.agent_name) updateAgentName(data.agent_name);
-      const mId = data.message_obj ? data.message_obj.id : null;
-      appendMessage('agent', data.message, data.created_at, {
-        avatarUrl: data.agent_avatar,
-        name: data.agent_name,
-      }, mId);
-
-      // Update agent avatar if provided
-      if (data.agent_avatar) {
-        updateAgentAvatar(data.agent_avatar);
-      }
-
-      // Notify visitor (badge + sound) when widget is not in view.
-      try {
-        if (!isWidgetOpen() || (typeof document.hidden === 'boolean' && document.hidden)) {
-          bumpUnread();
-          playNotificationSound();
-          // Lightweight in-page notification.
-          showToast('New message');
-        }
-      } catch (e) { }
-      smartScroll();
-    } else if (data.type === 'agent_joined') {
-      // Agent joined notification
-      const name = data.agent_name || 'A support agent';
-      showJoinMessage(`${name} joined the chat.`, null);
-
-      if (data.agent_name) updateAgentName(data.agent_name);
-
-      // Update agent avatar if provided
-      if (data.agent_avatar) {
-        updateAgentAvatar(data.agent_avatar);
-      }
-      smartScroll();
-    } else if (data.message) {
-      // Generic message format
-      const rawSender = data.sender || 'ai';
-      const sender = rawSender === 'user' ? 'visitor' : rawSender;
-      const mId = data.message_obj ? data.message_obj.id : (data.id || null);
-      appendMessage(sender, data.message, data.created_at, null, mId);
-      smartScroll();
-    }
-  }
-
-  function smartScroll() {
-    const el = document.getElementById('chatassist-messages');
-    if (!el) return;
-
-    const unreadDivider = document.getElementById('chatassist-unread-divider');
-    if (unreadDivider && !hasScrolledToUnread) {
-      hasScrolledToUnread = true;
-      unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
-
-      // Auto-remove after 5 seconds of being viewed
-      setTimeout(() => {
-        unreadDivider.classList.add('chatassist-unread-divider-hidden');
-        setTimeout(() => {
-          if (unreadDivider.parentNode) {
-            unreadDivider.parentNode.removeChild(unreadDivider);
-          }
-        }, 1000); // Wait for transition
-      }, 5000);
-
-      return;
-    }
-
-    // Force scroll to bottom if we haven't scrolled to unread or if there's no divider
-    if (isAtBottom || !unreadDivider) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }
-
-  function handleMessagesScroll() {
-    const el = document.getElementById('chatassist-messages');
-    if (!el) return;
-
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-    isAtBottom = nearBottom;
-
-    if (nearBottom && firstUnreadMessageId) {
-      markRead();
-    }
-  }
-
-  /**
-   * Update agent avatar in header
-   */
-  function updateAgentAvatar(avatarUrl) {
-    activeAgentAvatarUrl = avatarUrl;
-    CONFIG.agentAvatar = avatarUrl;
+  function updateAgentAvatar(url) {
+    activeAgentAvatarUrl = url;
+    CONFIG.agentAvatar = url;
     refreshHeaderIcon();
   }
 
   function updateAgentName(name) {
-    if (!name) return;
-    activeAgentName = String(name);
+    if (name) activeAgentName = String(name);
   }
 
-  function createRobotAvatarNode() {
-    const avatar = document.createElement('div');
-    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-bot';
-    avatar.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 8V4H8" />
-        <rect width="16" height="12" x="4" y="8" rx="2" />
-        <path d="M9 16h.01" />
-        <path d="M15 16h.01" />
-      </svg>
-    `;
-    return avatar;
-  }
-
-  function createAgentAvatarNode(avatarUrl, name) {
-    const avatar = document.createElement('div');
-    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-agent';
-
-    const url = getFullAssetUrl(avatarUrl || activeAgentAvatarUrl);
-    const displayName = String(name || activeAgentName || 'Agent');
-
-    if (url) {
-      const img = document.createElement('img');
-      img.className = 'chatassist-message-avatar-img';
-      img.src = url;
-      img.alt = displayName;
-      avatar.appendChild(img);
-      return avatar;
-    }
-
-    const initials = (displayName.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('') || 'AG').toUpperCase();
-    avatar.textContent = initials;
-    return avatar;
-  }
-
-  /**
-   * Format timestamp
-   */
   function formatTimestamp(date) {
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12;
-    const displayMinutes = minutes < 10 ? '0' + minutes : minutes;
-    return `${displayHours}:${displayMinutes} ${ampm}`;
+    const h = date.getHours();
+    const m = date.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${m < 10 ? '0' + m : m} ${ampm}`;
   }
 
-  /**
-   * Append message to chat window
-   */
   function appendMessage(sender, content, createdAtIso, meta, messageId) {
-    const messagesContainer = document.getElementById('chatassist-messages');
-    if (!messagesContainer) return;
+    const container = document.getElementById('chatassist-messages');
+    if (!container) return;
 
-    const numericMsgId = Number(messageId);
-    if (firstUnreadMessageId && numericMsgId === firstUnreadMessageId) {
+    if (firstUnreadMessageId && Number(messageId) === firstUnreadMessageId) {
       const divider = document.createElement('div');
       divider.className = 'chatassist-unread-divider';
       divider.id = 'chatassist-unread-divider';
       divider.innerHTML = '<span>Unread messages</span>';
-      messagesContainer.appendChild(divider);
+      container.appendChild(divider);
     }
-
-    const metaSafe = meta && typeof meta === 'object' ? meta : {};
 
     const messageDiv = document.createElement('div');
     messageDiv.className = `chatassist-message chatassist-message-${sender}`;
-
+    
     const row = document.createElement('div');
-    row.className = 'chatassist-message-row';
-    row.classList.add(sender === 'visitor' ? 'chatassist-message-row-right' : 'chatassist-message-row-left');
+    row.className = `chatassist-message-row ${sender === 'visitor' ? 'chatassist-message-row-right' : 'chatassist-message-row-left'}`;
 
     const contentWrap = document.createElement('div');
     contentWrap.className = 'chatassist-message-content';
@@ -767,210 +417,134 @@
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
-    const ts = createdAtIso ? new Date(createdAtIso) : new Date();
-    timestamp.textContent = formatTimestamp(ts);
+    timestamp.textContent = formatTimestamp(createdAtIso ? new Date(createdAtIso) : new Date());
 
     contentWrap.appendChild(bubble);
     contentWrap.appendChild(timestamp);
 
-    if (sender === 'agent') {
-      row.appendChild(createAgentAvatarNode(metaSafe.avatarUrl, metaSafe.name));
-      row.appendChild(contentWrap);
-    } else if (sender === 'ai') {
-      row.appendChild(createRobotAvatarNode());
-      row.appendChild(contentWrap);
-    } else {
-      row.appendChild(contentWrap);
+    if (sender === 'agent' || sender === 'ai') {
+      const avatar = document.createElement('div');
+      avatar.className = `chatassist-message-avatar chatassist-message-avatar-${sender}`;
+      if (sender === 'ai') {
+        avatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M9 16h.01" /><path d="M15 16h.01" /></svg>`;
+      } else {
+        const url = getFullAssetUrl(meta?.avatarUrl || activeAgentAvatarUrl);
+        const name = meta?.name || activeAgentName || 'Agent';
+        if (url) {
+          avatar.innerHTML = `<img class="chatassist-message-avatar-img" src="${url}" alt="${name}">`;
+        } else {
+          avatar.textContent = (name.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('') || 'AG').toUpperCase();
+        }
+      }
+      row.appendChild(avatar);
     }
-
+    row.appendChild(contentWrap);
     messageDiv.appendChild(row);
-    messagesContainer.appendChild(messageDiv);
-
-    // Scroll to bottom
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    container.appendChild(messageDiv);
   }
 
-  /**
-   * Show system message
-   */
   function showSystemMessage(content) {
-    const messagesContainer = document.getElementById('chatassist-messages');
-    if (!messagesContainer) return;
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'chatassist-message chatassist-message-system';
-    messageDiv.textContent = content;
-
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    const container = document.getElementById('chatassist-messages');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'chatassist-message chatassist-message-system';
+    div.textContent = content;
+    container.appendChild(div);
+    smartScroll();
   }
 
   function showJoinMessage(content, createdAtIso) {
-    const messagesContainer = document.getElementById('chatassist-messages');
-    if (!messagesContainer) return;
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'chatassist-message chatassist-message-join';
-
-    const ts = createdAtIso ? new Date(createdAtIso) : new Date();
-    const time = formatTimestamp(ts);
-    messageDiv.textContent = `${content} ${time}`;
-
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-  }
-
-  /**
-   * Show a small toast notification (outside the transcript).
-   */
-  function showToast(message) {
-    const container = document.getElementById('chatassist-toast-container');
+    const container = document.getElementById('chatassist-messages');
     if (!container) return;
-
-    container.textContent = message;
-    container.style.display = 'block';
-    container.classList.add('chatassist-toast-visible');
-
-    if (toastTimeout) {
-      clearTimeout(toastTimeout);
-      toastTimeout = null;
-    }
-
-    toastTimeout = setTimeout(() => {
-      hideToast();
-    }, 3000);
+    const div = document.createElement('div');
+    div.className = 'chatassist-message chatassist-message-join';
+    div.textContent = `${content} ${formatTimestamp(createdAtIso ? new Date(createdAtIso) : new Date())}`;
+    container.appendChild(div);
+    smartScroll();
   }
 
-  function hideToast() {
-    const container = document.getElementById('chatassist-toast-container');
-    if (!container) return;
-    container.classList.remove('chatassist-toast-visible');
-    container.style.display = 'none';
-  }
+  // --- Event Handlers ---
 
-  /**
-   * Handle user message submission
-   */
   function handleUserMessage() {
     const input = document.getElementById('chatassist-input');
     if (!input) return;
-
     const message = input.value.trim();
     if (!message) return;
 
-    // Online: normal flow
     if (presenceOnline) {
       appendMessage('visitor', message);
       input.value = '';
       sendMessage(message);
+      smartScroll();
       return;
     }
 
-    // Offline: if we already have email, send immediately; otherwise show overlay.
-    const contactNameInput = document.getElementById('chatassist-contact-name');
-    const contactEmailInput = document.getElementById('chatassist-contact-email');
-
-    const visitor_name = contactNameInput ? String(contactNameInput.value || '').trim() : '';
-    const visitor_email = contactEmailInput ? String(contactEmailInput.value || '').trim() : '';
-
-    if (visitor_email) {
+    const email = document.getElementById('chatassist-contact-email')?.value.trim();
+    if (email) {
       appendMessage('visitor', message);
       input.value = '';
-      try {
-        if (visitor_name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitor_name);
-        if (visitor_email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitor_email);
-      } catch (e) {
-        // ignore
-      }
-      sendMessage(message, { visitor_name, visitor_email });
+      sendMessage(message, { 
+        visitor_name: document.getElementById('chatassist-contact-name')?.value.trim(), 
+        visitor_email: email 
+      });
+      smartScroll();
       return;
     }
 
-    // Capture message and prompt for contact info
     pendingOfflineMessage = message;
     input.value = '';
     showContactOverlay();
-    return;
   }
 
   function showContactOverlay() {
-    const overlay = document.getElementById('chatassist-contact-overlay');
-    if (!overlay) return;
-    overlay.style.display = 'flex';
-    overlay.classList.add('chatassist-contact-overlay-visible');
-
-    const emailInput = document.getElementById('chatassist-contact-email');
-    if (emailInput) {
-      try {
-        emailInput.focus();
-      } catch (e) {
-        // ignore
-      }
+    const el = document.getElementById('chatassist-contact-overlay');
+    if (el) {
+      el.style.display = 'flex';
+      el.classList.add('chatassist-contact-overlay-visible');
+      document.getElementById('chatassist-contact-email')?.focus();
     }
   }
 
-  function hideContactOverlay(restorePendingToInput) {
-    const overlay = document.getElementById('chatassist-contact-overlay');
-    if (!overlay) return;
-    overlay.classList.remove('chatassist-contact-overlay-visible');
-    overlay.style.display = 'none';
-
-    if (restorePendingToInput && pendingOfflineMessage) {
-      const input = document.getElementById('chatassist-input');
-      if (input) input.value = pendingOfflineMessage;
+  function hideContactOverlay(restore) {
+    const el = document.getElementById('chatassist-contact-overlay');
+    if (el) {
+      el.classList.remove('chatassist-contact-overlay-visible');
+      el.style.display = 'none';
+      if (restore && pendingOfflineMessage) {
+        const input = document.getElementById('chatassist-input');
+        if (input) input.value = pendingOfflineMessage;
+      }
     }
   }
 
   function submitContactAndSendPending() {
-    const emailInput = document.getElementById('chatassist-contact-email');
-    const nameInput = document.getElementById('chatassist-contact-name');
-    const visitor_name = nameInput ? String(nameInput.value || '').trim() : '';
-    const visitor_email = emailInput ? String(emailInput.value || '').trim() : '';
-
-    if (!visitor_email) {
+    const email = document.getElementById('chatassist-contact-email')?.value.trim();
+    const name = document.getElementById('chatassist-contact-name')?.value.trim();
+    if (!email) {
       showToast('Please enter your email so we can contact you.');
       return;
     }
-
-    const message = pendingOfflineMessage;
+    const msg = pendingOfflineMessage;
     pendingOfflineMessage = null;
     hideContactOverlay(false);
-
-    try {
-      if (visitor_name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitor_name);
-      if (visitor_email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitor_email);
-    } catch (e) {
-      // ignore
-    }
-
-    if (message) {
-      appendMessage('visitor', message);
-      sendMessage(message, { visitor_name, visitor_email });
+    if (name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
+    localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
+    if (msg) {
+      appendMessage('visitor', msg);
+      sendMessage(msg, { visitor_name: name, visitor_email: email });
+      smartScroll();
     }
   }
 
-  /**
-   * Create chat widget UI
-   */
+  // --- Initialization ---
+
   function createWidget() {
-    // Create main container
     const container = document.createElement('div');
     container.id = 'chatassist-widget';
-
-    // Placeholder; actual icon is set after config/presence loads
-    const avatarHTML = `<div class="chatassist-header-avatar-placeholder">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-        <circle cx="12" cy="7" r="4"></circle>
-      </svg>
-    </div>`;
-
     container.innerHTML = `
       <div id="chatassist-bubble">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        </svg>
-        <span id="chatassist-bubble-unread" aria-hidden="true" style="display:none;"></span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        <span id="chatassist-bubble-unread" style="display:none;"></span>
         <div id="chatassist-bubble-text">${CONFIG.bubbleText}</div>
       </div>
       <div id="chatassist-window" style="display: none;">
@@ -979,29 +553,27 @@
           <div class="chatassist-contact-overlay-panel">
             <div class="chatassist-contact-overlay-header">
               <div class="chatassist-contact-overlay-title">Please introduce yourself</div>
-              <button id="chatassist-contact-overlay-close" class="chatassist-contact-overlay-close" type="button">&times;</button>
+              <button id="chatassist-contact-overlay-close" class="chatassist-contact-overlay-close">&times;</button>
             </div>
             <div class="chatassist-contact-overlay-subtitle">We'll use your contact info only if all agents are offline and can't reply immediately.</div>
-            <div id="chatassist-contact-form" class="chatassist-contact-form">
-              <input type="text" id="chatassist-contact-name" name="name" placeholder="Your name" autocomplete="name" />
-              <input type="email" id="chatassist-contact-email" name="email" placeholder="Your email" autocomplete="email" />
+            <div class="chatassist-contact-form">
+              <input type="text" id="chatassist-contact-name" placeholder="Your name" autocomplete="name" />
+              <input type="email" id="chatassist-contact-email" placeholder="Your email" autocomplete="email" />
             </div>
             <div class="chatassist-contact-overlay-actions">
-              <button id="chatassist-contact-overlay-submit" type="button" class="chatassist-contact-overlay-submit">Send message</button>
+              <button id="chatassist-contact-overlay-submit" class="chatassist-contact-overlay-submit">Send message</button>
             </div>
           </div>
         </div>
         <div id="chatassist-header">
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
-              <div id="chatassist-header-icon-inner">${avatarHTML}</div>
-              <span id="chatassist-presence-badge" class="chatassist-presence-badge" aria-hidden="true"></span>
+              <div id="chatassist-header-icon-inner"></div>
+              <span id="chatassist-presence-badge" class="chatassist-presence-badge"></span>
             </div>
             <div class="chatassist-header-info">
               <span class="chatassist-header-title">${CONFIG.headerTitle}</span>
-              <div class="chatassist-online-status">
-                <span class="chatassist-online-text">${CONFIG.onlineStatusText}</span>
-              </div>
+              <div class="chatassist-online-status"><span class="chatassist-online-text">${CONFIG.onlineStatusText}</span></div>
             </div>
           </div>
           <button id="chatassist-close">&times;</button>
@@ -1017,79 +589,35 @@
       </div>
       <div id="chatassist-toast-container" style="display:none;"></div>
     `;
-
     document.body.appendChild(container);
+    setTimeout(() => container.classList.add('chatassist-visible'), 100);
 
-    // Trigger slide-up animation
-    setTimeout(function() {
-      container.classList.add('chatassist-visible');
-    }, 100);
-
-    // Event listeners
+    // Event Listeners
     const bubble = document.getElementById('chatassist-bubble');
-    const window = document.getElementById('chatassist-window');
-    const closeBtn = document.getElementById('chatassist-close');
+    const win = document.getElementById('chatassist-window');
     const input = document.getElementById('chatassist-input');
-    const sendBtn = document.getElementById('chatassist-send');
-    const overlay = document.getElementById('chatassist-contact-overlay');
-    const overlayCloseBtn = document.getElementById('chatassist-contact-overlay-close');
-    const overlaySubmitBtn = document.getElementById('chatassist-contact-overlay-submit');
-    const contactNameInput = document.getElementById('chatassist-contact-name');
-    const contactEmailInput = document.getElementById('chatassist-contact-email');
 
-    // Prefill contact fields from localStorage (if any)
-    try {
-      const storedName = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`);
-      const storedEmail = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
-      if (contactNameInput && storedName) contactNameInput.value = storedName;
-      if (contactEmailInput && storedEmail) contactEmailInput.value = storedEmail;
-    } catch (e) {
-      // ignore
-    }
-
-    bubble.addEventListener('click', function () {
+    bubble.addEventListener('click', () => {
       enableNotificationSound();
       setUnreadCount(0);
       bubble.style.display = 'none';
-      window.style.display = 'flex';
+      win.style.display = 'flex';
       input.focus();
+      isAtBottom = true;
+      smartScroll();
     });
 
-    closeBtn.addEventListener('click', function () {
-      enableNotificationSound();
-      window.style.display = 'none';
+    document.getElementById('chatassist-close').addEventListener('click', () => {
+      win.style.display = 'none';
       bubble.style.display = 'flex';
-      // If overlay open, close it and restore pending message
       hideContactOverlay(true);
     });
 
-    if (overlay) {
-      overlay.style.display = 'none';
-    }
-
-    if (overlayCloseBtn) {
-      overlayCloseBtn.addEventListener('click', function () {
-        hideContactOverlay(true);
-      });
-    }
-
-    if (overlaySubmitBtn) {
-      overlaySubmitBtn.addEventListener('click', function () {
-        submitContactAndSendPending();
-      });
-    }
-
-    if (contactEmailInput) {
-      contactEmailInput.addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-          submitContactAndSendPending();
-        }
-      });
-    }
-
-    sendBtn.addEventListener('click', handleUserMessage);
-
-    input.addEventListener('keypress', function (e) {
+    document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
+    document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
+    document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
+    
+    input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         enableNotificationSound();
         handleUserMessage();
@@ -1097,299 +625,191 @@
     });
 
     const messagesContainer = document.getElementById('chatassist-messages');
-    if (messagesContainer) {
-      messagesContainer.addEventListener('scroll', handleMessagesScroll);
-    }
+    if (messagesContainer) messagesContainer.addEventListener('scroll', handleMessagesScroll);
 
-    // Initialize icon once DOM exists
+    // Prefill
+    try {
+      const name = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`);
+      const email = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
+      if (name) document.getElementById('chatassist-contact-name').value = name;
+      if (email) document.getElementById('chatassist-contact-email').value = email;
+    } catch (e) {}
+
     refreshHeaderIcon();
   }
 
-  function updateContactFormVisibility() {
-    // Contact form is now an overlay shown only when the visitor attempts to send while offline.
-    // If we come online while the overlay is open, close it.
-    if (presenceOnline) {
-      hideContactOverlay(false);
-    }
+  function setupPageViewTracking() {
+    if (pageViewTrackingInitialized) return;
+    pageViewTrackingInitialized = true;
+    try {
+      const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+      lastTrackedUrl = sessionStorage.getItem(key) || null;
+    } catch (e) {}
+
+    const sendTrack = (ref) => {
+      const url = window.location.href;
+      const payload = {
+        type: 'page_view',
+        url,
+        title: document.title,
+        referrer: ref || document.referrer || null,
+        device_info: getDeviceInfo(),
+        browser_info: getBrowserInfo(),
+      };
+      lastTrackedUrl = url;
+      try { sessionStorage.setItem(`aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`, url); } catch (e) {}
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+      else pendingPageView = payload;
+    };
+
+    const wrap = (obj, prop, cb) => {
+      const orig = obj[prop];
+      obj[prop] = function() {
+        const res = orig.apply(this, arguments);
+        cb();
+        return res;
+      };
+    };
+
+    wrap(history, 'pushState', () => sendTrack(lastTrackedUrl));
+    wrap(history, 'replaceState', () => sendTrack(lastTrackedUrl));
+    window.addEventListener('popstate', () => sendTrack(lastTrackedUrl));
+    sendTrack(null);
   }
 
   function connectPresenceWebSocket() {
     if (presenceWs && presenceWs.readyState === WebSocket.OPEN) return;
-
-    const wsEndpoint = `${CONFIG.wsUrl}/ws/presence/${CONFIG.websiteId}`;
     try {
-      presenceWs = new WebSocket(wsEndpoint);
-
-      presenceWs.onopen = function () {
-        // Ping frequently to keep presence extremely fresh (local dev).
+      presenceWs = new WebSocket(`${CONFIG.wsUrl}/ws/presence/${CONFIG.websiteId}`);
+      presenceWs.onopen = () => {
         if (presencePingInterval) clearInterval(presencePingInterval);
         presencePingInterval = setInterval(() => {
-          try {
-            if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
-              presenceWs.send('ping');
-            }
-          } catch (e) {
-            // ignore
-          }
-        }, 1000);
-
-        // Trigger immediate refresh
+          if (presenceWs.readyState === WebSocket.OPEN) presenceWs.send('ping');
+        }, 10000); // 10s ping
         presenceWs.send('ping');
       };
-
-      presenceWs.onmessage = function (event) {
-        try {
-          const data = JSON.parse(event.data);
-          if (data && data.type === 'presence') {
-            applyPresence(data);
-          }
-        } catch (e) {
-          // ignore
-        }
+      presenceWs.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'presence') applyPresence(data);
       };
-
-      presenceWs.onclose = function () {
-        if (presencePingInterval) {
-          clearInterval(presencePingInterval);
-          presencePingInterval = null;
-        }
+      presenceWs.onclose = () => {
+        if (presencePingInterval) clearInterval(presencePingInterval);
         presenceWs = null;
       };
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
   function applyPresence(presence) {
     const titleEl = document.querySelector('.chatassist-header-title');
     const statusTextEl = document.querySelector('.chatassist-online-text');
     const badgeEl = document.getElementById('chatassist-presence-badge');
-
     if (!titleEl || !statusTextEl) return;
 
-    const count = (typeof presence.available_agents_count === 'number')
-      ? presence.available_agents_count
-      : (Array.isArray(presence.agents) ? presence.agents.length : 0);
+    const count = presence.available_agents_count ?? (presence.agents?.length || 0);
+    presenceOnline = count > 0;
+    if (presenceOnline) hideContactOverlay(false);
 
-    const online = count > 0;
-    presenceOnline = online;
-    updateContactFormVisibility();
-
-    // Badge: green + count, or red with no number
     if (badgeEl) {
       badgeEl.style.display = 'flex';
-      if (online) {
-        badgeEl.classList.remove('chatassist-presence-badge-offline');
-        badgeEl.textContent = String(count);
-      } else {
-        badgeEl.classList.add('chatassist-presence-badge-offline');
-        badgeEl.textContent = '';
-      }
+      badgeEl.classList.toggle('chatassist-presence-badge-offline', !presenceOnline);
+      badgeEl.textContent = presenceOnline ? String(count) : '';
     }
 
-    if (!online) {
+    if (!presenceOnline) {
       titleEl.textContent = 'Send us a message';
       statusTextEl.textContent = 'Happy to answer you later';
-
-      // Everyone offline: revert header icon to website/default.
       activeAgentAvatarUrl = null;
       activeAgentName = null;
-
-      refreshHeaderIcon();
-      return;
+    } else {
+      titleEl.textContent = CONFIG.headerTitle;
+      statusTextEl.textContent = CONFIG.onlineStatusText;
     }
-
-    titleEl.textContent = CONFIG.headerTitle;
-    statusTextEl.textContent = CONFIG.onlineStatusText;
-
     refreshHeaderIcon();
   }
 
-  /**
-   * Check if system is initialized
-   * Returns: true if initialized, false if needs setup
-   */
-  async function checkSystemStatus() {
-    try {
-      const response = await fetch(`${CONFIG.apiUrl}/auth/setup/status`);
-      if (response.ok) {
-        const data = await response.json();
-        // needs_setup: true means system is NOT initialized
-        return !data.needs_setup;
-      }
-      // If endpoint fails, assume system needs setup
-      return false;
-    } catch (error) {
-      console.error('[ChatWidget] Failed to check system status:', error);
-      return false;
-    }
+  function getDeviceInfo() {
+    const ua = navigator.userAgent;
+    if (/Windows/i.test(ua)) return 'Windows';
+    if (/Android/i.test(ua)) return 'Android';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+    if (/Mac/i.test(ua)) return 'macOS';
+    if (/Linux/i.test(ua)) return 'Linux';
+    return 'Unknown';
   }
 
-  /**
-   * Fetch widget configuration from backend
-   * Returns: true if config loaded, false if using defaults, null if website doesn't exist
-   */
-  async function fetchWidgetConfig() {
-    try {
-      const response = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`);
-
-      if (response.ok) {
-        const config = await response.json();
-
-        // Apply fetched configuration with fallbacks to defaults
-        CONFIG.theme = config.theme || CONFIG.theme;
-        CONFIG.position = config.position || CONFIG.position;
-        CONFIG.welcomeMessage = config.welcome_message || CONFIG.welcomeMessage;
-        CONFIG.primaryColor = config.primary_color || CONFIG.primaryColor;
-        CONFIG.headerTitle = config.header_title || CONFIG.headerTitle;
-        CONFIG.onlineStatusText = config.online_status_text || CONFIG.onlineStatusText;
-        CONFIG.bubbleText = config.bubble_text || CONFIG.bubbleText;
-        CONFIG.headerIconUrl = config.header_icon_url || CONFIG.headerIconUrl;
-        if (config.show_emoji_picker !== undefined) {
-          CONFIG.showEmojiPicker = !!config.show_emoji_picker;
-        }
-        if (config.show_attachments !== undefined) {
-          CONFIG.showAttachments = !!config.show_attachments;
-        }
-        CONFIG.brandingText = config.branding_text || CONFIG.brandingText;
-        // Note: agentAvatar would come from agent's profile dynamically
-
-        console.log('[ChatWidget] Configuration loaded from backend:', config);
-        refreshHeaderIcon();
-        return true;
-      } else if (response.status === 404) {
-        console.error('[ChatWidget] Website not found (404). Widget cannot be initialized.');
-        return null; // Website doesn't exist
-      } else {
-        console.warn('[ChatWidget] Failed to fetch config (HTTP ' + response.status + '), using defaults');
-        return false; // Use defaults
-      }
-    } catch (error) {
-      console.error('[ChatWidget] Failed to fetch config:', error);
-      return null; // Treat network errors as fatal
-    }
+  function getBrowserInfo() {
+    const ua = navigator.userAgent;
+    if (/Edg/i.test(ua)) return 'Edge';
+    if (/Chrome/i.test(ua)) return 'Chrome';
+    if (/Firefox/i.test(ua)) return 'Firefox';
+    if (/Safari/i.test(ua)) return 'Safari';
+    return 'Unknown';
   }
 
-  /**
-   * Apply configuration to widget styling
-   */
-  function applyConfiguration() {
-    const container = document.getElementById('chatassist-widget');
-    const bubble = document.getElementById('chatassist-bubble');
-    const header = document.getElementById('chatassist-header');
-    const sendBtn = document.getElementById('chatassist-send');
-
-    if (!container) return;
-
-    // Apply position class - clear any existing position
-    container.className = 'chatassist-position-' + CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
-
-    // Apply position inline styles as fallback
-    container.style.bottom = '';
-    container.style.top = '';
-    container.style.left = '';
-    container.style.right = '';
-
-    if (CONFIG.position === 'bottom-right') {
-      container.style.bottom = '20px';
-      container.style.right = '20px';
-    } else if (CONFIG.position === 'bottom-left') {
-      container.style.bottom = '20px';
-      container.style.left = '20px';
-    } else if (CONFIG.position === 'top-right') {
-      container.style.top = '20px';
-      container.style.right = '20px';
-    } else if (CONFIG.position === 'top-left') {
-      container.style.top = '20px';
-      container.style.left = '20px';
+  function getSessionId() {
+    const key = `ai_chatassist_session_id_${CONFIG.websiteId}`;
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+      localStorage.setItem(key, id);
     }
-
-    // Apply theme/primary color
-    if (bubble) {
-      bubble.style.background = CONFIG.primaryColor;
-    }
-    if (header) {
-      header.style.background = CONFIG.primaryColor;
-    }
-    if (sendBtn) {
-      sendBtn.style.background = CONFIG.primaryColor;
-      sendBtn.style.borderColor = CONFIG.primaryColor;
-    }
-
-    // Apply theme class for additional styling
-    if (CONFIG.theme === 'light') {
-      container.classList.add('chatassist-theme-light');
-    } else {
-      container.classList.add('chatassist-theme-dark');
-    }
-
-    console.log('[ChatWidget] Applied configuration - Position:', CONFIG.position, 'Color:', CONFIG.primaryColor);
+    return id;
   }
 
-  /**
-   * Initialize the chat widget
-   */
   async function init() {
-    console.log('[ChatWidget] Initializing with config:', CONFIG);
-
-    // Configuration already set by loader.js, just validate
-    if (!CONFIG.websiteId) {
-      console.error('[ChatWidget] Missing websiteId in configuration');
-      return;
-    }
-
-    // Initialize session ID
     CONFIG.sessionId = getSessionId();
-    console.log('[ChatWidget] Session ID:', CONFIG.sessionId);
+    try {
+      const [statusRes, configRes] = await Promise.all([
+        fetch(`${CONFIG.apiUrl}/auth/setup/status`),
+        fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`)
+      ]);
+      
+      const status = await statusRes.json();
+      if (status.needs_setup) return;
 
-    // STEP 1: Check if system is initialized
-    const systemInitialized = await checkSystemStatus();
-    if (!systemInitialized) {
-      console.warn('[ChatWidget] System not initialized. Widget will not be loaded.');
-      console.warn('[ChatWidget] Please complete onboarding first at the admin dashboard.');
-      return;
+      if (configRes.ok) {
+        const c = await configRes.json();
+        Object.assign(CONFIG, {
+          theme: c.theme || CONFIG.theme,
+          position: c.position || CONFIG.position,
+          welcomeMessage: c.welcome_message || CONFIG.welcomeMessage,
+          primaryColor: c.primary_color || CONFIG.primaryColor,
+          headerTitle: c.header_title || CONFIG.headerTitle,
+          onlineStatusText: c.online_status_text || CONFIG.onlineStatusText,
+          bubbleText: c.bubble_text || CONFIG.bubbleText,
+          headerIconUrl: c.header_icon_url || CONFIG.headerIconUrl,
+          showEmojiPicker: c.show_emoji_picker ?? CONFIG.showEmojiPicker,
+          showAttachments: c.show_attachments ?? CONFIG.showAttachments,
+          brandingText: c.branding_text || CONFIG.brandingText,
+        });
+      } else if (configRes.status === 404) return;
+
+      createWidget();
+      await fetchReadState();
+      
+      // Apply config styles
+      const widget = document.getElementById('chatassist-widget');
+      const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
+      widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
+      document.getElementById('chatassist-bubble').style.background = CONFIG.primaryColor;
+      document.getElementById('chatassist-header').style.background = CONFIG.primaryColor;
+      document.getElementById('chatassist-send').style.background = CONFIG.primaryColor;
+
+      setupPageViewTracking();
+      connectWebSocket();
+      connectPresenceWebSocket();
+    } catch (e) {
+      console.error('[ChatWidget] Init failed:', e);
     }
-
-    // STEP 2: Fetch widget configuration from backend
-    // This validates that the website exists
-    const configResult = await fetchWidgetConfig();
-
-    // If website doesn't exist (404 or network error), don't load widget
-    if (configResult === null) {
-      console.error('[ChatWidget] Website validation failed. Widget will not be loaded.');
-      console.error('[ChatWidget] Please ensure:');
-      console.error('[ChatWidget]   1. The system is initialized (complete onboarding)');
-      console.error('[ChatWidget]   2. A website with ID ' + CONFIG.websiteId + ' exists in the dashboard');
-      console.error('[ChatWidget]   3. The website ID in the embed code is correct');
-      return;
-    }
-
-    // STEP 3: Create UI only after all validations pass
-    createWidget();
-
-    // Fetch read state to place unread ribbon
-    await fetchReadState();
-
-    // Apply configuration styling (either fetched or defaults)
-    applyConfiguration();
-
-    // Browsing history tracking (page views)
-    setupPageViewTracking();
-
-    // Connect WebSocket
-    connectWebSocket();
-
-    // Connect presence WebSocket
-    connectPresenceWebSocket();
   }
 
-  // Auto-initialize when DOM is ready with a 3-second delay
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-      setTimeout(init, 3000);
-    });
+    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 1000));
   } else {
-    setTimeout(init, 3000);
+    setTimeout(init, 1000);
   }
 
 })();
