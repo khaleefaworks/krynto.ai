@@ -4,6 +4,7 @@ from fastapi import HTTPException, UploadFile
 
 
 _MAX_DEFAULT_BYTES = 5 * 1024 * 1024
+_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 
 def _detect_image_kind(header: bytes) -> str | None:
@@ -59,3 +60,40 @@ def validate_image_upload(
         raise HTTPException(status_code=400, detail="Unsupported image format. Use PNG, JPG, GIF, or WEBP")
 
     return kind
+
+
+def validate_attachment_upload(
+    file: UploadFile,
+    *,
+    max_bytes: int = _MAX_ATTACHMENT_BYTES,
+) -> str:
+    """Validate an uploaded attachment and return a safe file extension.
+
+    Allowed:
+    - PNG/JPEG/GIF/WEBP images (strict magic-byte validation)
+    - PDF documents (magic-byte validation)
+
+    This is intentionally strict.
+    """
+    if not file.content_type:
+        raise HTTPException(status_code=400, detail="File type is required")
+
+    # Validate size
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > max_bytes:
+        raise HTTPException(status_code=400, detail=f"File size must be less than {max_bytes // (1024 * 1024)}MB")
+
+    if file.content_type.startswith("image/"):
+        # Reuse strict image validation
+        return validate_image_upload(file, max_bytes=max_bytes)
+
+    if file.content_type == "application/pdf":
+        header = file.file.read(8)
+        file.file.seek(0)
+        if not header.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="Invalid PDF file")
+        return "pdf"
+
+    raise HTTPException(status_code=400, detail="Unsupported attachment type. Use an image or PDF")

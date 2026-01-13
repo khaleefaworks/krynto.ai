@@ -22,6 +22,7 @@ from app.api.shortcuts import router as shortcuts_router
 from app.api.push import router as push_router
 from app.api.metrics import router as metrics_router
 from app.api.tags import router as tags_router
+from app.api.attachments import router as attachments_router
 from app import models  # Import models to register them with SQLAlchemy
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -111,6 +112,7 @@ app.include_router(shortcuts_router)
 app.include_router(push_router)
 app.include_router(metrics_router)
 app.include_router(tags_router)
+app.include_router(attachments_router)
 
 # Serve widget files statically
 project_root = Path(__file__).resolve().parents[2]

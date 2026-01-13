@@ -21,7 +21,9 @@ import { apiRequest } from '@/services/api'
 import { updateConversationMetadata } from '@/services/conversationMetadata'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
     Send,
     Check,
@@ -82,6 +84,13 @@ function getInitials(name: string | null | undefined, fallback: string): string 
     const first = parts[0]?.[0] || ''
     const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
     return (first + second).toUpperCase() || fallback
+}
+
+type PersonalShortcut = {
+    id: number
+    shortcut: string
+    message: string
+    is_active: boolean
 }
 
 function getVisitorAvatarText(visitorName: string | null | undefined, sessionId: string | null | undefined): string {
@@ -194,6 +203,13 @@ export default function ConversationsView() {
     const hasScrolledToUnreadRef = useRef(false)
     const readStateTokenRef = useRef(0)
 
+    const composerRef = useRef<HTMLTextAreaElement>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [personalShortcuts, setPersonalShortcuts] = useState<PersonalShortcut[]>([])
+    const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false)
+    const [shortcutMenuIndex, setShortcutMenuIndex] = useState(0)
+    const [uploadingAttachment, setUploadingAttachment] = useState(false)
+
     const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<number | null>(null)
 
     // Takeover confirmation (Smartsupp-like)
@@ -227,6 +243,78 @@ export default function ConversationsView() {
     useEffect(() => {
         fetchActiveChats({ showSpinner: true })
     }, [])
+
+    // Load personal shortcuts (best-effort)
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                const data = await apiRequest<PersonalShortcut[]>("/shortcuts?active_only=true")
+                if (!cancelled) setPersonalShortcuts(Array.isArray(data) ? data : [])
+            } catch {
+                if (!cancelled) setPersonalShortcuts([])
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    const insertAtCursor = (text: string) => {
+        const el = composerRef.current
+        if (!el) {
+            setInput((prev) => prev + text)
+            return
+        }
+        const start = el.selectionStart ?? input.length
+        const end = el.selectionEnd ?? input.length
+        const next = input.slice(0, start) + text + input.slice(end)
+        setInput(next)
+        requestAnimationFrame(() => {
+            el.focus()
+            const pos = start + text.length
+            el.setSelectionRange(pos, pos)
+        })
+    }
+
+    const wrapSelection = (left: string, right: string) => {
+        const el = composerRef.current
+        if (!el) return
+
+        const start = el.selectionStart ?? 0
+        const end = el.selectionEnd ?? 0
+        const hasSelection = end > start
+        const selected = input.slice(start, end)
+        const replacement = hasSelection ? `${left}${selected}${right}` : `${left}${right}`
+        const next = input.slice(0, start) + replacement + input.slice(end)
+        setInput(next)
+
+        requestAnimationFrame(() => {
+            el.focus()
+            if (hasSelection) {
+                el.setSelectionRange(start + left.length, start + left.length + selected.length)
+            } else {
+                el.setSelectionRange(start + left.length, start + left.length)
+            }
+        })
+    }
+
+    const getShortcutMatches = (value: string) => {
+        const v = value.trimStart()
+        const m = v.match(/^[/.]([^\s]*)$/)
+        if (!m) return { open: false, query: '', matches: [] as PersonalShortcut[] }
+
+        const query = (m[1] || '').toLowerCase()
+        const matches = personalShortcuts
+            .filter((s) => s.is_active)
+            .filter((s) => {
+                const name = String(s.shortcut || '').toLowerCase()
+                return query ? name.startsWith(query) : true
+            })
+            .slice(0, 8)
+
+        return { open: true, query, matches }
+    }
 
     // Listen to global notification changes and refresh list (only on ConversationsView)
     const { unreadChatsCount } = useAppStore()
@@ -1491,33 +1579,190 @@ export default function ConversationsView() {
 
                     {/* Input Area */}
                     <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0">
-                        <div className="flex gap-2 mb-2">
-                            <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                        <div className="flex gap-2 mb-2 items-center">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="dark:text-gray-400"
+                                onClick={() => wrapSelection('**', '**')}
+                                title="Bold"
+                            >
                                 <Bold className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="dark:text-gray-400">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="dark:text-gray-400"
+                                onClick={() => wrapSelection('*', '*')}
+                                title="Italic"
+                            >
                                 <Italic className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="dark:text-gray-400">
-                                <Smile className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="dark:text-gray-400">
+
+                            <DropdownMenu>
+                                <DropdownMenuTrigger>
+                                    <Button type="button" variant="ghost" size="sm" className="dark:text-gray-400" title="Emoji">
+                                        <Smile className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent className="w-64">
+                                    <DropdownMenuLabel>Emojis</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <div className="grid grid-cols-8 gap-2 p-2">
+                                        {[
+                                            '😀','😁','😂','😊','😍','🤔','👍','🙏',
+                                            '🎉','😢','😡','😎','❤️','🔥','✅','❓'
+                                        ].map((emoji) => (
+                                            <button
+                                                key={emoji}
+                                                type="button"
+                                                className="h-8 w-8 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-lg"
+                                                onClick={() => insertAtCursor(emoji)}
+                                            >
+                                                {emoji}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (!file || !selectedChat) return
+
+                                    setUploadingAttachment(true)
+                                    try {
+                                        const form = new FormData()
+                                        form.append('file', file)
+
+                                        const token = localStorage.getItem('auth_token')
+                                        const resp = await fetch(
+                                            `${API_BASE}/attachments/upload?conversation_id=${selectedChat}`,
+                                            {
+                                                method: 'POST',
+                                                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                                                body: form,
+                                            }
+                                        )
+
+                                        if (!resp.ok) {
+                                            const err = await resp.json().catch(() => ({}))
+                                            throw new Error(err?.detail || 'Failed to upload attachment')
+                                        }
+
+                                        const data = await resp.json()
+                                        const url = data?.url ? String(data.url) : ''
+                                        const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`
+                                        insertAtCursor(fullUrl)
+                                    } catch (err) {
+                                        console.error('Attachment upload failed:', err)
+                                    } finally {
+                                        setUploadingAttachment(false)
+                                        // allow re-selecting the same file
+                                        if (fileInputRef.current) fileInputRef.current.value = ''
+                                    }
+                                }}
+                            />
+
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="dark:text-gray-400"
+                                title="Attach file"
+                                disabled={!selectedChat || uploadingAttachment}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
                                 <Paperclip className="h-4 w-4" />
                             </Button>
                         </div>
-                        <div className="flex gap-2">
-                            <Input
+
+                        <div className="relative flex gap-2">
+                            {(() => {
+                                const { open, matches } = getShortcutMatches(input)
+                                if (!open || matches.length === 0) return null
+
+                                return (
+                                    <div className="absolute bottom-full left-0 mb-2 w-full max-w-lg rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden z-50">
+                                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Shortcuts</div>
+                                        <div className="max-h-64 overflow-auto">
+                                            {matches.map((s, idx) => (
+                                                <button
+                                                    key={s.id}
+                                                    type="button"
+                                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${idx === shortcutMenuIndex ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
+                                                    onMouseEnter={() => setShortcutMenuIndex(idx)}
+                                                    onClick={() => {
+                                                        setInput(s.message)
+                                                        setShortcutMenuOpen(false)
+                                                        setShortcutMenuIndex(0)
+                                                        requestAnimationFrame(() => composerRef.current?.focus())
+                                                    }}
+                                                >
+                                                    <div className="font-mono text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
+                                                    <div className="text-gray-600 dark:text-gray-400 truncate">{s.message}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            })()}
+
+                            <Textarea
+                                ref={composerRef}
                                 value={input}
-                                onChange={(e) => setInput(e.target.value)}
+                                onChange={(e) => {
+                                    const v = e.target.value
+                                    setInput(v)
+                                    const { open, matches } = getShortcutMatches(v)
+                                    setShortcutMenuOpen(open && matches.length > 0)
+                                    setShortcutMenuIndex(0)
+                                }}
                                 onKeyDown={(e) => {
+                                    const { open, matches } = getShortcutMatches(input)
+                                    if (open && matches.length > 0) {
+                                        if (e.key === 'ArrowDown') {
+                                            e.preventDefault()
+                                            setShortcutMenuIndex((i) => Math.min(i + 1, matches.length - 1))
+                                            return
+                                        }
+                                        if (e.key === 'ArrowUp') {
+                                            e.preventDefault()
+                                            setShortcutMenuIndex((i) => Math.max(i - 1, 0))
+                                            return
+                                        }
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault()
+                                            const picked = matches[shortcutMenuIndex] || matches[0]
+                                            if (picked) {
+                                                setInput(picked.message)
+                                                setShortcutMenuOpen(false)
+                                                setShortcutMenuIndex(0)
+                                            }
+                                            return
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault()
+                                            setShortcutMenuOpen(false)
+                                            return
+                                        }
+                                    }
+
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault()
                                         handleSendMessage()
                                     }
                                 }}
                                 placeholder="Reply to live chat"
-                                className="flex-1 dark:bg-gray-700 dark:border-gray-600"
+                                className="flex-1 dark:bg-gray-700 dark:border-gray-600 min-h-[44px]"
                             />
+
                             <Button
                                 onClick={handleSendMessage}
                                 disabled={!input.trim()}

@@ -25,6 +25,7 @@ import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
 import PersonalSettings from './pages/PersonalSettings'
+import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import TagsSettings from './pages/TagsSettings'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
@@ -343,6 +344,7 @@ function App() {
 
                 {/* Personal settings - All users */}
                 <Route path="personal" element={<PersonalSettings />} />
+                <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
                 <Route index element={
                   <div className="p-8">
                     <div className="max-w-4xl">
