@@ -1,6 +1,5 @@
 import { apiRequest } from './api'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '../config/endpoints'
 
 const _VAPID_PUBLIC_KEY_CACHE = 'push_vapid_public_key_v1'
 

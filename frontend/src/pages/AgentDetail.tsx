@@ -8,6 +8,7 @@ import { ArrowLeft, Save, Trash2, User, Mail, Lock, CheckCircle, XCircle } from 
 import { Badge } from '../components/ui/badge'
 import { useAppStore } from '@/store/appStore'
 import { isAdministrator, isAdmin } from '@/lib/roles'
+import { API_BASE } from '@/config/endpoints'
 
 interface Agent {
   id: number
@@ -24,8 +25,7 @@ export default function AgentDetail() {
   const navigate = useNavigate()
   const { user: currentUser } = useAppStore()
   const isNew = id === 'new'
-  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
-  
+
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -103,7 +103,7 @@ export default function AgentDetail() {
       // Load all agents and find the one we need
       const data = await apiRequest<Agent[]>('/auth/users')
       const foundAgent = data.find(a => a.id === parseInt(id!))
-      
+
       if (!foundAgent) {
         setError('Agent not found')
         return
@@ -154,7 +154,7 @@ export default function AgentDetail() {
         // Update existing user
         // Check if role changed
         const roleChanged = agent && agent.role !== formData.role
-        
+
         if (roleChanged) {
           // Update role first
           await apiRequest(`/users/${id}/role`, {
@@ -162,7 +162,7 @@ export default function AgentDetail() {
             body: JSON.stringify({ role: formData.role }),
           })
         }
-        
+
         // Update status if changed
         if (agent && agent.is_active !== formData.is_active) {
           await apiRequest(`/users/${id}/status`, {
@@ -170,7 +170,7 @@ export default function AgentDetail() {
             body: JSON.stringify({ is_active: formData.is_active }),
           })
         }
-        
+
         setSuccessMessage('User updated successfully')
         loadAgent()
       }
@@ -463,7 +463,7 @@ export default function AgentDetail() {
                 )}
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {isNew 
+                {isNew
                   ? 'Determines user permissions and access level'
                   : !isAdministrator(currentUser) && agent?.role === 'full_access'
                     ? 'Only administrators can modify administrator accounts'

@@ -6,8 +6,8 @@ They must be fast, reliable, and not require authentication.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Query, HTTPException, Depends, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi import APIRouter, Query, HTTPException, Depends, Request, Response as FastAPIResponse
+from fastapi.responses import Response as RawResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -25,8 +25,26 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/widget", tags=["widget"])
 
 
+def _set_widget_cors_headers(*, response: FastAPIResponse, request: Request) -> None:
+    origin = request.headers.get("origin") or request.headers.get("Origin")
+    if not origin:
+        return
+
+    request_headers = request.headers.get("access-control-request-headers") or request.headers.get(
+        "Access-Control-Request-Headers"
+    )
+
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Max-Age"] = "600"
+    response.headers["Access-Control-Allow-Headers"] = request_headers or "*"
+
+
 class WidgetReadStateResponse(BaseModel):
-    conversation_id: int
+    # A new visitor session may not have a Conversation row yet.
+    # Use 0 to represent "not created yet".
+    conversation_id: int = 0
     last_read_at: Optional[datetime]
     first_unread_message_id: Optional[int]
     unread_count: int = 0
@@ -34,12 +52,21 @@ class WidgetReadStateResponse(BaseModel):
 
 @router.post("/read")
 async def mark_widget_read(
+    request: Request,
+    response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
     db: Session = Depends(get_db),
 ):
     """Mark a conversation as read by the visitor."""
     from app.models.conversation import Conversation
+
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    _set_widget_cors_headers(response=response, request=request)
     
     conv = db.query(Conversation).filter(
         Conversation.website_id == website_id,
@@ -47,22 +74,52 @@ async def mark_widget_read(
     ).first()
     
     if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        # Conversation is created lazily (typically on first message / WS activity).
+        # Returning 200 avoids noisy 404s in browser consoles.
+        return {"success": True, "conversation_id": 0}
         
     conv.visitor_last_read_at = datetime.now(timezone.utc)
     db.commit()
-    
+
     return {"success": True, "conversation_id": conv.id}
+
+
+@router.options("/read")
+async def mark_widget_read_options(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(None),
+    db: Session = Depends(get_db),
+):
+    if website_id is not None:
+        website = db.query(Website).filter(Website.id == website_id).first()
+        if website:
+            try:
+                enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+            except HTTPException:
+                # Return preflight response without ACAO if not allowed.
+                return RawResponse(status_code=204)
+    _set_widget_cors_headers(response=response, request=request)
+    return RawResponse(status_code=204)
 
 
 @router.get("/read-state", response_model=WidgetReadStateResponse)
 async def get_widget_read_state(
+    request: Request,
+    response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
     db: Session = Depends(get_db),
 ):
     """Return read state for the visitor thread UI."""
     from app.models.conversation import Conversation
+
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    _set_widget_cors_headers(response=response, request=request)
     
     conv = db.query(Conversation).filter(
         Conversation.website_id == website_id,
@@ -70,7 +127,12 @@ async def get_widget_read_state(
     ).first()
     
     if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        return {
+            "conversation_id": 0,
+            "last_read_at": None,
+            "first_unread_message_id": None,
+            "unread_count": 0,
+        }
         
     last_read_at = conv.visitor_last_read_at
     
@@ -100,6 +162,24 @@ async def get_widget_read_state(
     }
 
 
+@router.options("/read-state")
+async def get_widget_read_state_options(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(None),
+    db: Session = Depends(get_db),
+):
+    if website_id is not None:
+        website = db.query(Website).filter(Website.id == website_id).first()
+        if website:
+            try:
+                enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+            except HTTPException:
+                return RawResponse(status_code=204)
+    _set_widget_cors_headers(response=response, request=request)
+    return RawResponse(status_code=204)
+
+
 @router.get("/loader.js")
 async def get_widget_loader(request: Request, key: str, db: Session = Depends(get_db)):
     """
@@ -115,14 +195,27 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     
     if not website:
         # Return 404 as JavaScript comment to avoid console errors
-        return Response(
+        return RawResponse(
             content=f"// Error: Invalid widget key",
             media_type="application/javascript",
             status_code=404
         )
 
     # Domain lock: only allow this widget key to be used from the website domain/subdomains.
-    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    try:
+        enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    except HTTPException as exc:
+        # Always return JavaScript to avoid browser OpaqueResponseBlocking on JSON error payloads.
+        return RawResponse(
+            content=f"// Error: {exc.detail}",
+            media_type="application/javascript",
+            status_code=exc.status_code,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     
     # Get widget configuration
     config = website.widget_config or {}
@@ -179,7 +272,7 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
 }})();
 """
     
-    return Response(
+    return RawResponse(
         content=js_content,
         media_type="application/javascript",
         headers={
@@ -221,6 +314,9 @@ async def get_widget_snippet(
       var s,c,o=aichatassist=function(){{ o._.push(arguments)}}; o._=[];
       s=d.getElementsByTagName('script')[0];c=d.createElement('script');
       c.type='text/javascript';c.charset='utf-8';c.async=true;
+            // Ensure the loader request includes a Referer on sites that set Referrer-Policy: no-referrer
+            // (required for server-side domain lock verification).
+            c.referrerPolicy='origin';
       c.src='{api_base}/widget/loader.js?key=' + _aichatassist.key;
       s.parentNode.insertBefore(c,s);
     }})(document);

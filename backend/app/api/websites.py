@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.website import Website
+from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.user import User
 from app.api.deps import require_admin, require_authenticated_user
 from pydantic import BaseModel
@@ -167,7 +168,7 @@ def delete_website(
 
 
 @router.get("/{website_id}/widget-config")
-def get_widget_config(website_id: int, db: Session = Depends(get_db)):
+def get_widget_config(request: Request, website_id: int, db: Session = Depends(get_db)):
     """
     Get widget configuration for a website (public endpoint for widget).
     Returns default config if not set.
@@ -176,6 +177,10 @@ def get_widget_config(website_id: int, db: Session = Depends(get_db)):
     
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+
+    # This endpoint is consumed by the embedded widget from the visitor's site.
+    # Enforce that Origin/Referer matches the website's configured domain.
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     
     # Get widget config or use defaults
     config = website.widget_config or {}

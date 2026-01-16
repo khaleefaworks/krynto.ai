@@ -34,12 +34,27 @@ self.addEventListener('push', (event) => {
     const url = String(data.url || '/')
 
     event.waitUntil(
-        self.registration.showNotification(title, {
-            body,
-            icon: '/android-chrome-192x192.png',
-            badge: '/favicon-32x32.png',
-            data: { url },
-        })
+        (async () => {
+            try {
+                const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+
+                // Always show an OS notification for a push event.
+                await self.registration.showNotification(title, {
+                    body,
+                    icon: '/android-chrome-192x192.png',
+                    badge: '/favicon-32x32.png',
+                    data: { url },
+                })
+
+                // If the dashboard is already open, notify it so it can play a sound.
+                // (Audio cannot be played directly from a service worker.)
+                for (const client of allClients) {
+                    client.postMessage({ type: 'push', title, body, url })
+                }
+            } catch {
+                // ignore
+            }
+        })()
     )
 })
 

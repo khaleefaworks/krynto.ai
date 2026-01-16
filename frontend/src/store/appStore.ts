@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { User, Conversation, Message } from '../types/index'
-import { playNotificationBeep } from '../lib/notificationSound'
 
 // Re-export types for convenience
 export type { User, Conversation, Message }
@@ -139,12 +138,6 @@ export const useAppStore = create<AppState>((set) => ({
   notifications: [],
   pushNotification: (n) => {
     const id = `n_${Date.now()}_${Math.random().toString(16).slice(2)}`
-    // Best-effort sound (may be blocked until the user interacts once).
-    try {
-      playNotificationBeep()
-    } catch {
-      // ignore
-    }
     set((state) => ({
       notifications: [
         {

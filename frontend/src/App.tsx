@@ -1,11 +1,3 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
-const WS_BASE =
-  import.meta.env.VITE_WS_BASE ||
-  (API_BASE.startsWith("https://")
-    ? "wss://" + API_BASE.slice("https://".length)
-    : API_BASE.startsWith("http://")
-      ? "ws://" + API_BASE.slice("http://".length)
-      : API_BASE)
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
@@ -30,10 +22,11 @@ import TagsSettings from './pages/TagsSettings'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
-import { ensurePushSubscription } from './services/push'
+import { ensurePushSubscription, isPushSupported } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
 import NotificationPermissionPrompt from './components/NotificationPermissionPrompt'
-import { installNotificationSoundArm } from './lib/notificationSound'
+import { installNotificationSoundArm, playNotificationBeep } from './lib/notificationSound'
+import { API_BASE } from './config/endpoints'
 
 const _lastToastByKey = new Map<string, number>()
 
@@ -43,6 +36,10 @@ function _shouldToast(key: string, minIntervalMs: number): boolean {
   if (now - prev < minIntervalMs) return false
   _lastToastByKey.set(key, now)
   return true
+}
+
+function _shouldBeep(key: string, minIntervalMs: number): boolean {
+  return _shouldToast(`beep:${key}`, minIntervalMs)
 }
 
 function App() {
@@ -63,6 +60,40 @@ function App() {
   useEffect(() => {
     installNotificationSoundArm()
   }, [])
+
+  // If a push arrives while the dashboard is already open, the service worker
+  // forwards it via postMessage so we can play an in-app sound.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const sw = navigator.serviceWorker
+    if (!sw) return
+
+    const handler = (event: MessageEvent) => {
+      try {
+        const data: any = event?.data || {}
+        if (data?.type !== 'push') return
+
+        // If the dashboard is open + realtime is connected, avoid double-beeping.
+        // In that case the WebSocket event handler will produce the in-app beep.
+        const isRealtimeConnected = Boolean((useAppStore as any).getState?.()?.isConnected)
+        if (document.visibilityState === 'visible' && isRealtimeConnected) return
+
+        if (_shouldBeep('sw_push', 1200)) {
+          try { playNotificationBeep() } catch { }
+        }
+
+        const title = String(data?.title || 'Notification')
+        void title
+      } catch {
+        // ignore
+      }
+    }
+
+    sw.addEventListener('message', handler)
+    return () => {
+      try { sw.removeEventListener('message', handler) } catch { }
+    }
+  }, [pushNotification])
 
   // Check if system needs initial setup
   useEffect(() => {
@@ -126,8 +157,11 @@ function App() {
           if (typeof window === 'undefined') return
           if (!('Notification' in window)) return
           if (Notification.permission !== 'granted') return
-          // Browser notifications are requested all the time by user preference.
-          // if (!document.hidden) return
+          // Prevent duplicates: if push is supported, rely on SW push for OS notifications.
+          if (isPushSupported()) return
+
+          // Only show OS notifications when the tab isn't visible.
+          if (!document.hidden) return
 
           const n = new Notification(String(opts.title || 'Notification'), {
             body: opts.body ? String(opts.body) : undefined,
@@ -168,6 +202,9 @@ function App() {
             : Number((data as any)?.website_id) || undefined
 
         if (data.type === 'new_chat') {
+          if (_shouldBeep('new_chat', 1200)) {
+            try { playNotificationBeep() } catch { }
+          }
           const websiteName = String((data as any)?.website_name || '').trim()
           const lastMessage = String((data as any)?.last_message || '').trim()
           const body = lastMessage ? lastMessage.slice(0, 120) : undefined
@@ -192,6 +229,9 @@ function App() {
             })
           }
         } else if (data.type === 'visitor_message' || data.type === 'conversation_unread') {
+          if (_shouldBeep(String(conversationId || 'activity'), 1200)) {
+            try { playNotificationBeep() } catch { }
+          }
           if (conversationId && _shouldToast(`activity:${conversationId}`, 8000)) {
             const dto = (data as any)?.message_obj
             const content =

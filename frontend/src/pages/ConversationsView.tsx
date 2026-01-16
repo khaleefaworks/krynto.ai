@@ -44,8 +44,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import { formatDistanceToNow } from 'date-fns'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/config/endpoints'
 
 function getMessageTimestamp(m: any): number {
     const ts = m?.timestamp || m?.created_at

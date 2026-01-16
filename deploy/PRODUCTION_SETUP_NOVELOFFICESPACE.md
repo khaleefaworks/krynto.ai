@@ -7,6 +7,38 @@ This runbook deploys:
 
 Target OS: Ubuntu Server (single machine)
 
+This variant deploys everything under the existing Linux user `frappe` (no dedicated `aichatassist` user) and avoids `/opt`.
+Recommended install paths:
+- Repo: `/home/frappe/ai-chatassist`
+- Persistent data: `/home/frappe/aichatassist-data/` (uploads, backups, etc.)
+
+## What is already done on this production server
+
+Use this as the “source of truth” for dev/staging automation.
+
+- Linux user: `frappe`
+- Repo: `/home/frappe/ai-chatassist`
+- Python venv: `/home/frappe/ai-chatassist/.venv`
+- Backend env file: `/etc/aichatassist/backend.env`
+- Uploads persistence:
+	- Persistent folder: `/home/frappe/aichatassist-data/uploads`
+	- Repo path: `/home/frappe/ai-chatassist/uploads` (symlink)
+- Dashboard deploy:
+	- Build output: `/home/frappe/ai-chatassist/frontend/dist`
+	- Served from: `/var/www/aichatassist-dashboard` (Nginx `root`)
+	- Deploy command: `rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/`
+- systemd services:
+	- `aichatassist-backend.service` runs FastAPI via Gunicorn + Uvicorn worker
+	- Optional: `aichatassist-backup.timer` and `aichatassist-backup.service` for daily backups
+- Nginx:
+	- `api.novelofficespace.com` proxies backend and WebSockets
+	- `dashboard.novelofficespace.com` serves the static dashboard
+- Notifications:
+	- In-app toast + in-app beep: WebSocket agent socket events
+	- Browser/OS notifications: Web Push via the service worker at `/sw.js`
+
+Note: the dashboard build no longer falls back to `http://localhost:8000` in production. If `VITE_API_BASE` is not provided at build time, the dashboard derives the API host by rewriting the current hostname to `api.<domain>` (e.g., `dashboard.novelofficespace.com` → `api.novelofficespace.com`).
+
 Assumptions
 - You control DNS for novelofficespace.com.
 - The server is reachable from the public internet on ports 80/443 (or NAT port-forwarding is configured).
@@ -14,8 +46,6 @@ Assumptions
 - PostgreSQL and Redis run on the same server.
 - You want Redis enabled for multi-worker realtime delivery.
 - You want Web Push notifications enabled in production.
-
----
 
 ## 0) DNS records
 
@@ -47,7 +77,6 @@ Optional (only if you will build the dashboard on the server): install Node 18+.
 ---
 
 ## 2) Firewall
-
 Minimum:
 
 ```bash
@@ -63,25 +92,28 @@ Also ensure your perimeter firewall/NAT forwards 80 and 443 to this Ubuntu host.
 
 ## 3) Create service user
 
+Skip this step in the `frappe`-only deployment model.
+
+Create a persistent data directory owned by `frappe`:
+
 ```bash
-sudo adduser --system --group --home /opt/aichatassist aichatassist
+mkdir -p /home/frappe/aichatassist-data
+sudo chown -R frappe:frappe /home/frappe/aichatassist-data
 ```
 
 ---
 
 ## 4) Clone repo
 
-Recommended clone location: /opt/aichatassist/ai-chatassist
-
+Recommended clone location: `/home/frappe/ai-chatassist`
 ```bash
-sudo mkdir -p /opt/aichatassist
-sudo chown -R aichatassist:aichatassist /opt/aichatassist
-sudo -u aichatassist git clone https://github.com/crazy-explore-r/ai-chatassist.git /opt/aichatassist/ai-chatassist
+cd /home/frappe
+git clone https://github.com/crazy-explore-r/ai-chatassist.git /home/frappe/ai-chatassist
 ```
 
 Why here?
-- /opt is a standard place for application code.
-- Keeps your home directory clean.
+- Keeps everything owned by `frappe`.
+- Avoids `/opt` permissions and dedicated Linux users.
 
 ---
 
@@ -101,6 +133,9 @@ CREATE DATABASE aichatassist OWNER aichatassist;
 \q
 ```
 
+Note
+- It’s fine for the database user to be named `aichatassist` even if your Linux service user is `frappe`.
+
 ---
 
 ## 6) Redis setup (required for multi-worker realtime)
@@ -110,7 +145,6 @@ sudo systemctl enable --now redis-server
 sudo systemctl status redis-server --no-pager
 ```
 
-Backend env will use:
 - REDIS_URL=redis://127.0.0.1:6379/0
 
 ---
@@ -122,15 +156,15 @@ You want uploads from both widget and dashboard. Store uploads outside the git c
 Create persistent path:
 
 ```bash
-sudo mkdir -p /var/lib/aichatassist/uploads
-sudo chown -R aichatassist:aichatassist /var/lib/aichatassist/uploads
+mkdir -p /home/frappe/aichatassist-data/uploads
+sudo chown -R frappe:frappe /home/frappe/aichatassist-data/uploads
 ```
 
 Symlink repo uploads/ to persistent storage:
 
 ```bash
-sudo -u aichatassist rm -rf /opt/aichatassist/ai-chatassist/uploads
-sudo -u aichatassist ln -s /var/lib/aichatassist/uploads /opt/aichatassist/ai-chatassist/uploads
+rm -rf /home/frappe/ai-chatassist/uploads
+ln -s /home/frappe/aichatassist-data/uploads /home/frappe/ai-chatassist/uploads
 ```
 
 ---
@@ -140,10 +174,10 @@ sudo -u aichatassist ln -s /var/lib/aichatassist/uploads /opt/aichatassist/ai-ch
 Install Python deps in a venv:
 
 ```bash
-cd /opt/aichatassist/ai-chatassist/backend
+cd /home/frappe/ai-chatassist/backend
 
-python3 -m venv /opt/aichatassist/ai-chatassist/.venv
-/opt/aichatassist/ai-chatassist/.venv/bin/pip install -r requirements.txt
+python3 -m venv /home/frappe/ai-chatassist/.venv
+/home/frappe/ai-chatassist/.venv/bin/pip install -r requirements.txt
 ```
 
 ---
@@ -221,13 +255,13 @@ sudo chmod 600 /etc/aichatassist/backend.env
 ## 11) Run migrations
 
 ```bash
-cd /opt/aichatassist/ai-chatassist/backend
+cd /home/frappe/ai-chatassist/backend
 
 set -a
 source /etc/aichatassist/backend.env
 set +a
 
-/opt/aichatassist/ai-chatassist/.venv/bin/alembic upgrade head
+/home/frappe/ai-chatassist/.venv/bin/alembic upgrade head
 ```
 
 ---
@@ -250,11 +284,11 @@ After=network.target
 [Service]
 Type=simple
 
-WorkingDirectory=/opt/aichatassist/ai-chatassist
+WorkingDirectory=/home/frappe/ai-chatassist
 EnvironmentFile=/etc/aichatassist/backend.env
 
 # Multi-worker; Redis is enabled for cross-worker WebSocket fanout
-ExecStart=/usr/bin/env PYTHONPATH=backend /opt/aichatassist/ai-chatassist/.venv/bin/gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 127.0.0.1:8000 app.main:app
+ExecStart=/usr/bin/env PYTHONPATH=backend /home/frappe/ai-chatassist/.venv/bin/gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 127.0.0.1:8000 app.main:app
 
 Restart=on-failure
 RestartSec=2
@@ -263,10 +297,9 @@ RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=true
-
-User=aichatassist
-Group=aichatassist
+# Do NOT enable ProtectHome when deploying under /home.
+User=frappe
+Group=frappe
 
 [Install]
 WantedBy=multi-user.target
@@ -297,13 +330,15 @@ You can build either:
 If building on the server:
 
 ```bash
-cd /opt/aichatassist/ai-chatassist/frontend
+cd /home/frappe/ai-chatassist/frontend
 
 npm ci
 
-# IMPORTANT: this codebase expects VITE_API_BASE and VITE_WS_BASE
-VITE_API_BASE=https://api.novelofficespace.com \
-VITE_WS_BASE=wss://api.novelofficespace.com \
+# Production build
+# - If you do NOT set VITE_API_BASE, the dashboard derives API host as api.<domain>
+#   from window.location.hostname (dashboard.* -> api.*).
+# - If you have a non-standard domain layout, override explicitly:
+#   VITE_API_BASE=https://api.novelofficespace.com VITE_WS_BASE=wss://api.novelofficespace.com npm run build
 npm run build
 ```
 
@@ -311,7 +346,7 @@ Deploy build output:
 
 ```bash
 sudo mkdir -p /var/www/aichatassist-dashboard
-sudo rsync -a --delete /opt/aichatassist/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
+sudo rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
 sudo chown -R www-data:www-data /var/www/aichatassist-dashboard
 ```
 
@@ -466,7 +501,7 @@ Minimum recommended
 
 Paths to back up
 - Database: aichatassist
-- Uploads: /var/lib/aichatassist/uploads
+- Uploads: /home/frappe/aichatassist-data/uploads
 
 ### Automated daily backups (systemd timer)
 
@@ -481,10 +516,10 @@ What it does
 Install:
 
 ```bash
-sudo install -m 0755 /opt/aichatassist/ai-chatassist/deploy/backup/aichatassist-backup.sh /usr/local/bin/aichatassist-backup
+sudo install -m 0755 /home/frappe/ai-chatassist/deploy/backup/aichatassist-backup.sh /usr/local/bin/aichatassist-backup
 
-sudo install -m 0644 /opt/aichatassist/ai-chatassist/deploy/systemd/aichatassist-backup.service /etc/systemd/system/aichatassist-backup.service
-sudo install -m 0644 /opt/aichatassist/ai-chatassist/deploy/systemd/aichatassist-backup.timer /etc/systemd/system/aichatassist-backup.timer
+sudo install -m 0644 /home/frappe/ai-chatassist/deploy/systemd/aichatassist-backup.service /etc/systemd/system/aichatassist-backup.service
+sudo install -m 0644 /home/frappe/ai-chatassist/deploy/systemd/aichatassist-backup.timer /etc/systemd/system/aichatassist-backup.timer
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now aichatassist-backup.timer
@@ -492,11 +527,11 @@ sudo systemctl list-timers --all | grep aichatassist-backup || true
 ```
 
 Note
-- The service assumes your repo is at /opt/aichatassist/ai-chatassist. If you use a different path, edit ExecStart in the service file.
+- The service assumes your repo is at `/home/frappe/ai-chatassist`. If you use a different path, edit ExecStart in the service file.
 - To override defaults, you can add Environment= lines to the service file:
 	- BACKEND_ENV_FILE (default /etc/aichatassist/backend.env)
 	- BACKUP_ROOT (default /var/backups/aichatassist)
-	- UPLOADS_DIR (default /var/lib/aichatassist/uploads)
+	- UPLOADS_DIR (default /home/frappe/aichatassist-data/uploads)
 	- RETENTION_DAYS (default 30)
 
 ---
@@ -508,22 +543,22 @@ Typical safe flow
 ```bash
 sudo systemctl stop aichatassist-backend
 
-cd /opt/aichatassist/ai-chatassist
-sudo -u aichatassist git pull
+cd /home/frappe/ai-chatassist
+git pull
 
-/opt/aichatassist/ai-chatassist/.venv/bin/pip install -r backend/requirements.txt
+/home/frappe/ai-chatassist/.venv/bin/pip install -r backend/requirements.txt
 
-cd /opt/aichatassist/ai-chatassist/backend
+cd /home/frappe/ai-chatassist/backend
 set -a
 source /etc/aichatassist/backend.env
 set +a
-/opt/aichatassist/ai-chatassist/.venv/bin/alembic upgrade head
+/home/frappe/ai-chatassist/.venv/bin/alembic upgrade head
 
 # Rebuild and deploy dashboard
-cd /opt/aichatassist/ai-chatassist/frontend
+cd /home/frappe/ai-chatassist/frontend
 npm ci
-VITE_API_BASE=https://api.novelofficespace.com VITE_WS_BASE=wss://api.novelofficespace.com npm run build
-sudo rsync -a --delete /opt/aichatassist/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
+npm run build
+sudo rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
 
 sudo systemctl start aichatassist-backend
 sudo nginx -t && sudo systemctl reload nginx

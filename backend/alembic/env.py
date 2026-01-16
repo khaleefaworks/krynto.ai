@@ -21,7 +21,10 @@ config = context.config
 # Override sqlalchemy.url with DATABASE_URL from environment
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # Alembic stores options in a ConfigParser which treats '%' as interpolation.
+    # DB passwords commonly include '%' (or URL-encoded sequences like %2F), so
+    # escape it to avoid: ValueError: invalid interpolation syntax
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 fileConfig(config.config_file_name)

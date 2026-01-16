@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
 import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check } from 'lucide-react'
+import { API_BASE } from '@/config/endpoints'
 
 interface Website {
   id: number
@@ -50,7 +51,6 @@ export default function WebsiteDetail() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [snippetCopied, setSnippetCopied] = useState(false)
   const [widgetSnippet, setWidgetSnippet] = useState('')
-  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
   // Form data
   const [formData, setFormData] = useState({

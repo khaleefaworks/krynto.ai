@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -8,6 +7,7 @@ import { apiRequest } from "@/services/api"
 import { User as UserIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from "@/services/push"
+import { API_BASE } from "@/config/endpoints"
 
 export default function PersonalSettings() {
   const { user, setUser } = useAppStore()
@@ -228,8 +228,8 @@ export default function PersonalSettings() {
 
         {message && (
           <div className={`mb-6 p-4 rounded-md ${message.type === 'success'
-              ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300'
-              : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'
+            ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300'
+            : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'
             }`}>
             {message.text}
           </div>

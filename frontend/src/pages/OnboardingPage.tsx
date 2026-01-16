@@ -4,13 +4,13 @@ import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { saveToken } from '@/services/api'
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import Logo from '@/components/Logo'
+import { API_BASE } from '@/config/endpoints'
 
 const setupSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
@@ -28,7 +28,7 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  
+
   const {
     register,
     handleSubmit,
@@ -40,7 +40,7 @@ export default function OnboardingPage() {
   const onSubmit = async (data: SetupForm) => {
     try {
       setError(null)
-      
+
       // Create Administrator user
       const response = await fetch(`${API_BASE}/auth/bootstrap`, {
         method: 'POST',
@@ -62,7 +62,7 @@ export default function OnboardingPage() {
 
       const result = await response.json()
       console.log('Setup complete:', result)
-      
+
       // Now login with the created credentials (using 'Administrator' as username)
       const loginResponse = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -80,12 +80,12 @@ export default function OnboardingPage() {
       }
 
       const loginData = await loginResponse.json()
-      
+
       // Save token and user
       saveToken(loginData.access_token)
       setUser(loginData.user)
       setToken(loginData.access_token)
-      
+
       // Redirect to dashboard
       navigate('/dashboard/chats')
     } catch (err: any) {

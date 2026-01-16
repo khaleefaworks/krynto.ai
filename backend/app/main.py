@@ -88,10 +88,16 @@ if settings.is_production():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    # Auth uses Bearer tokens (Authorization header), not cookies.
+    # Disabling credentials is safer when allowing broad origins.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],  # Expose all headers to frontend
+    # Widgets are embedded on arbitrary customer domains and use fetch() which
+    # requires CORS. Restricting CORS purely via static env lists breaks embeds.
+    # Security is still enforced server-side via per-website Origin/Referer checks.
+    allow_origin_regex=r"^https?://.+$",
 )
 
 

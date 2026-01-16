@@ -6,6 +6,7 @@ import { apiRequest } from "@/services/api"
 import { UserPlus, Trash2, Check, X } from "lucide-react"
 import { useAppStore } from "@/store/appStore"
 import { isAdmin } from "@/lib/roles"
+import { API_BASE } from "@/config/endpoints"
 
 interface Agent {
   id: number
@@ -25,8 +26,7 @@ export default function AgentsManagement() {
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
-  
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -57,7 +57,7 @@ export default function AgentsManagement() {
     try {
       setError(null)
       setSuccess(null)
-      
+
       await apiRequest("/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -65,7 +65,7 @@ export default function AgentsManagement() {
           role: "limited_access", // Agent role
         }),
       })
-      
+
       setSuccess("Agent created successfully")
       setShowCreateForm(false)
       setFormData({ name: "", email: "", password: "" })
@@ -237,9 +237,9 @@ export default function AgentsManagement() {
                 <Button type="submit">
                   Create User
                 </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => {
                     setShowCreateForm(false)
                     setFormData({ name: "", email: "", password: "" })
@@ -338,11 +338,10 @@ export default function AgentsManagement() {
                     {agent.email}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      agent.is_active 
+                    <span className={`px-2 py-1 text-xs rounded-full ${agent.is_active
                         ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
                         : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300"
-                    }`}>
+                      }`}>
                       {agent.is_active ? "Active" : "Inactive"}
                     </span>
                   </td>

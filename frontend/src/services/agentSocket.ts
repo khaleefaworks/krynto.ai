@@ -1,13 +1,5 @@
 import { useAppStore } from "../store/appStore"
-
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
-const WS_BASE =
-  import.meta.env.VITE_WS_BASE ||
-  (API_BASE.startsWith("https://")
-    ? "wss://" + API_BASE.slice("https://".length)
-    : API_BASE.startsWith("http://")
-      ? "ws://" + API_BASE.slice("http://".length)
-      : API_BASE)
+import { WS_BASE } from "../config/endpoints"
 
 let socket: WebSocket | null = null
 let reconnectTimeout: NodeJS.Timeout | null = null
@@ -60,11 +52,22 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
 
     if (socket.readyState === WebSocket.OPEN && isSameTarget) {
       console.log("♻️ Reusing existing WebSocket connection")
+      try {
+        useAppStore.getState().setWebSocket(socket)
+        useAppStore.getState().setConnected(true)
+      } catch {
+        // ignore
+      }
       return socket
     }
 
     if (socket.readyState === WebSocket.CONNECTING && isSameTarget) {
       console.log("⏳ WebSocket is connecting; reusing in-flight connection")
+      try {
+        useAppStore.getState().setWebSocket(socket)
+      } catch {
+        // ignore
+      }
       return socket
     }
   }
@@ -98,6 +101,13 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   socket.onopen = () => {
     console.log("✅ WebSocket connected")
     reconnectAttempts = 0 // Reset on successful connection
+
+    try {
+      useAppStore.getState().setWebSocket(socket)
+      useAppStore.getState().setConnected(true)
+    } catch {
+      // ignore
+    }
 
     // Start heartbeat (presence is TTL-based on backend).
     if (heartbeatInterval) {
@@ -152,6 +162,13 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
   socket.onclose = (event) => {
     console.log("🔌 WebSocket closed", event.code, event.reason)
     socket = null
+
+    try {
+      useAppStore.getState().setWebSocket(null)
+      useAppStore.getState().setConnected(false)
+    } catch {
+      // ignore
+    }
 
     if (heartbeatInterval) {
       clearInterval(heartbeatInterval)
@@ -307,6 +324,13 @@ export function disconnectAgentSocket() {
     isIntentionalClose = true
     socket.close()
     socket = null
+  }
+
+  try {
+    useAppStore.getState().setWebSocket(null)
+    useAppStore.getState().setConnected(false)
+  } catch {
+    // ignore
   }
 
   if (heartbeatInterval) {

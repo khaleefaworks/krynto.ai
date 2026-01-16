@@ -63,3 +63,7 @@ htmlcov/
 # Uploads (runtime data)
 backend/uploads/
 !backend/uploads/.gitkeep
+
+# Repo-root uploads dir (prod uses a symlink here)
+uploads/
+uploads

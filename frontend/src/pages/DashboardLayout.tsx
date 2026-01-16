@@ -10,8 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
 import { isAdministrator } from '@/lib/roles'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/config/endpoints'
 
 function getFullAvatarUrl(url: string | null | undefined): string | null {
   if (!url) return null
@@ -52,7 +51,7 @@ export default function DashboardLayout() {
 
   const handleAvailabilityToggle = async (checked: boolean) => {
     if (!user) return
-    
+
     try {
       const response = await updateAvailability(checked)
       setUser({ ...user, is_available: response.is_available })
@@ -78,11 +77,10 @@ export default function DashboardLayout() {
     <>
       <Link
         to="/dashboard/chats"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all relative ${
-          isActive('/dashboard/chats') 
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all relative ${isActive('/dashboard/chats')
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
+          }`}
       >
         <div className="relative">
           <MessageSquare className="h-5 w-5" />
@@ -102,11 +100,10 @@ export default function DashboardLayout() {
 
       <Link
         to="/dashboard/settings"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-          isActive('/dashboard/settings') 
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/settings')
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
+          }`}
       >
         <Settings className="h-5 w-5" />
         <span className="md:hidden lg:block">Settings</span>
@@ -114,11 +111,10 @@ export default function DashboardLayout() {
 
       <Link
         to="/dashboard/analytics"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-          isActive('/dashboard/analytics') 
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
+          }`}
       >
         <BarChart3 className="h-5 w-5" />
         <span className="md:hidden lg:block">Analytics</span>
@@ -128,11 +124,10 @@ export default function DashboardLayout() {
       {isAdministrator(user) && (
         <Link
           to="/dashboard/reset"
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-            isActive('/dashboard/reset') 
-              ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' 
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/reset')
+              ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
               : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-          }`}
+            }`}
         >
           <RotateCcw className="h-5 w-5" />
           <span className="md:hidden lg:block">Reset App</span>
@@ -157,7 +152,7 @@ export default function DashboardLayout() {
             <span className="font-semibold text-gray-900 dark:text-white">AI ChatAssist</span>
           </div>
         </div>
-        
+
         {/* Mobile Profile */}
         <div className="flex items-center gap-2">
           <button
@@ -171,7 +166,7 @@ export default function DashboardLayout() {
 
       {/* Mobile Sidebar Overlay */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           className="md:hidden fixed inset-0 bg-black/50 z-50"
           onClick={() => setIsMobileMenuOpen(false)}
         />
@@ -267,11 +262,10 @@ export default function DashboardLayout() {
               <TooltipTrigger asChild>
                 <Link
                   to="/dashboard/chats"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-                    isActive('/dashboard/chats') 
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/chats')
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   <MessageSquare className="h-5 w-5" />
                 </Link>
@@ -285,11 +279,10 @@ export default function DashboardLayout() {
               <TooltipTrigger asChild>
                 <Link
                   to="/dashboard/settings"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-                    isActive('/dashboard/settings') 
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/settings')
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   <Settings className="h-5 w-5" />
                 </Link>
@@ -303,11 +296,10 @@ export default function DashboardLayout() {
               <TooltipTrigger asChild>
                 <Link
                   to="/dashboard/analytics"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${
-                    isActive('/dashboard/analytics') 
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm' 
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   <BarChart3 className="h-5 w-5" />
                 </Link>
@@ -333,7 +325,7 @@ export default function DashboardLayout() {
                 <p>{darkMode ? 'Light mode' : 'Dark mode'}</p>
               </TooltipContent>
             </Tooltip>
-            
+
             {/* Desktop Profile Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger>

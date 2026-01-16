@@ -7,11 +7,11 @@ set -euo pipefail
 #
 # Expected configuration:
 # - /etc/aichatassist/backend.env (contains DATABASE_URL)
-# - uploads stored at /var/lib/aichatassist/uploads (recommended)
+# - uploads stored outside the git checkout (recommended)
 
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-/etc/aichatassist/backend.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/aichatassist}"
-UPLOADS_DIR="${UPLOADS_DIR:-/var/lib/aichatassist/uploads}"
+UPLOADS_DIR="${UPLOADS_DIR:-/home/frappe/aichatassist-data/uploads}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 
 if [[ $EUID -ne 0 ]]; then

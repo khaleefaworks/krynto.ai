@@ -137,7 +137,7 @@
       if (!AC) return;
       if (!notificationAudioCtx) notificationAudioCtx = new AC();
       if (notificationAudioCtx.state !== 'running') {
-        notificationAudioCtx.resume().catch(() => {});
+        notificationAudioCtx.resume().catch(() => { });
       }
       if (notificationAudioCtx.state === 'running') {
         const osc = notificationAudioCtx.createOscillator();
@@ -148,22 +148,34 @@
         osc.start();
         osc.stop(notificationAudioCtx.currentTime + 0.01);
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   function playNotificationSound() {
-    if (!soundEnabled || !notificationAudioCtx || notificationAudioCtx.state !== 'running') return;
+    if (!soundEnabled || !notificationAudioCtx) return;
+    if (notificationAudioCtx.state !== 'running') {
+      notificationAudioCtx.resume().catch(() => { });
+      if (notificationAudioCtx.state !== 'running') return;
+    }
     try {
       const osc = notificationAudioCtx.createOscillator();
       const gain = notificationAudioCtx.createGain();
       osc.type = 'sine';
       osc.frequency.value = 880;
       gain.gain.value = 0.04;
+      // Best-effort: arm audio on first user gesture so notification beeps can work.
+      // Browsers block audio until the user interacts.
+      try {
+        const _arm = () => enableNotificationSound();
+        document.addEventListener('pointerdown', _arm, { once: true, passive: true });
+        document.addEventListener('keydown', _arm, { once: true });
+        document.addEventListener('touchstart', _arm, { once: true, passive: true });
+      } catch (e) { }
       osc.connect(gain);
       gain.connect(notificationAudioCtx.destination);
       osc.start();
       osc.stop(notificationAudioCtx.currentTime + 0.14);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // --- API & State Management ---
@@ -316,7 +328,7 @@
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const unreadDivider = document.getElementById('chatassist-unread-divider');
-        
+
         // If widget is closed, we can't accurately scroll, but we mark it as "needs scroll"
         if (!isWidgetOpen()) {
           return;
@@ -325,7 +337,7 @@
         if (unreadDivider && !hasScrolledToUnread) {
           hasScrolledToUnread = true;
           unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
-          
+
           // Auto-remove divider after 5 seconds of viewing
           setTimeout(() => {
             unreadDivider.classList.add('chatassist-unread-divider-hidden');
@@ -404,7 +416,7 @@
 
     const messageDiv = document.createElement('div');
     messageDiv.className = `chatassist-message chatassist-message-${sender}`;
-    
+
     const row = document.createElement('div');
     row.className = `chatassist-message-row ${sender === 'visitor' ? 'chatassist-message-row-right' : 'chatassist-message-row-left'}`;
 
@@ -483,9 +495,9 @@
     if (email) {
       appendMessage('visitor', message);
       input.value = '';
-      sendMessage(message, { 
-        visitor_name: document.getElementById('chatassist-contact-name')?.value.trim(), 
-        visitor_email: email 
+      sendMessage(message, {
+        visitor_name: document.getElementById('chatassist-contact-name')?.value.trim(),
+        visitor_email: email
       });
       smartScroll();
       return;
@@ -616,7 +628,7 @@
     document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
-    
+
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         enableNotificationSound();
@@ -633,7 +645,7 @@
       const email = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
       if (name) document.getElementById('chatassist-contact-name').value = name;
       if (email) document.getElementById('chatassist-contact-email').value = email;
-    } catch (e) {}
+    } catch (e) { }
 
     refreshHeaderIcon();
   }
@@ -644,7 +656,7 @@
     try {
       const key = `aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`;
       lastTrackedUrl = sessionStorage.getItem(key) || null;
-    } catch (e) {}
+    } catch (e) { }
 
     const sendTrack = (ref) => {
       const url = window.location.href;
@@ -657,14 +669,14 @@
         browser_info: getBrowserInfo(),
       };
       lastTrackedUrl = url;
-      try { sessionStorage.setItem(`aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`, url); } catch (e) {}
+      try { sessionStorage.setItem(`aichatassist_last_tracked_url_${CONFIG.websiteId}_${CONFIG.sessionId}`, url); } catch (e) { }
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
       else pendingPageView = payload;
     };
 
     const wrap = (obj, prop, cb) => {
       const orig = obj[prop];
-      obj[prop] = function() {
+      obj[prop] = function () {
         const res = orig.apply(this, arguments);
         cb();
         return res;
@@ -696,7 +708,7 @@
         if (presencePingInterval) clearInterval(presencePingInterval);
         presenceWs = null;
       };
-    } catch (e) {}
+    } catch (e) { }
   }
 
   function applyPresence(presence) {
@@ -762,41 +774,19 @@
   async function init() {
     CONFIG.sessionId = getSessionId();
     try {
-      const [statusRes, configRes] = await Promise.all([
-        fetch(`${CONFIG.apiUrl}/auth/setup/status`),
-        fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/widget-config`)
-      ]);
-      
-      const status = await statusRes.json();
-      if (status.needs_setup) return;
-
-      if (configRes.ok) {
-        const c = await configRes.json();
-        Object.assign(CONFIG, {
-          theme: c.theme || CONFIG.theme,
-          position: c.position || CONFIG.position,
-          welcomeMessage: c.welcome_message || CONFIG.welcomeMessage,
-          primaryColor: c.primary_color || CONFIG.primaryColor,
-          headerTitle: c.header_title || CONFIG.headerTitle,
-          onlineStatusText: c.online_status_text || CONFIG.onlineStatusText,
-          bubbleText: c.bubble_text || CONFIG.bubbleText,
-          headerIconUrl: c.header_icon_url || CONFIG.headerIconUrl,
-          showEmojiPicker: c.show_emoji_picker ?? CONFIG.showEmojiPicker,
-          showAttachments: c.show_attachments ?? CONFIG.showAttachments,
-          brandingText: c.branding_text || CONFIG.brandingText,
-        });
-      } else if (configRes.status === 404) return;
-
       createWidget();
+
+      // Apply config styles immediately to avoid flicker/jump on reload.
+      try {
+        const widget = document.getElementById('chatassist-widget');
+        const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
+        widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
+        document.getElementById('chatassist-bubble').style.background = CONFIG.primaryColor;
+        document.getElementById('chatassist-header').style.background = CONFIG.primaryColor;
+        document.getElementById('chatassist-send').style.background = CONFIG.primaryColor;
+      } catch (e) { }
+
       await fetchReadState();
-      
-      // Apply config styles
-      const widget = document.getElementById('chatassist-widget');
-      const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
-      widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
-      document.getElementById('chatassist-bubble').style.background = CONFIG.primaryColor;
-      document.getElementById('chatassist-header').style.background = CONFIG.primaryColor;
-      document.getElementById('chatassist-send').style.background = CONFIG.primaryColor;
 
       setupPageViewTracking();
       connectWebSocket();

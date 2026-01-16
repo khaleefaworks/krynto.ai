@@ -7,6 +7,18 @@ These are **templates** for the two open deployment models mentioned in `docs/PR
 
 This folder does not change runtime behavior; it only provides example configs.
 
+## Current production conventions (novelofficespace.com)
+
+The current production deployment uses the **No-Docker** model with these conventions:
+
+- Repo checkout: `/home/frappe/ai-chatassist`
+- Python venv: `/home/frappe/ai-chatassist/.venv`
+- Backend env file: `/etc/aichatassist/backend.env`
+- Dashboard static root (served by Nginx): `/var/www/aichatassist-dashboard`
+- Uploads persistence: `/home/frappe/aichatassist-data/uploads` symlinked to `/home/frappe/ai-chatassist/uploads`
+
+For the full end-to-end runbook, use `deploy/PRODUCTION_SETUP_NOVELOFFICESPACE.md`.
+
 ## Option A: No-Docker (recommended starting point)
 
 ### 1) Backend (systemd)

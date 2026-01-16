@@ -5,13 +5,15 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/env bash /opt/aichatassist/ai-chatassist/deploy/backup/aichatassist-backup.sh
+ExecStart=/usr/local/bin/aichatassist-backup
 
 # Hardening (keep compatible with writing to /var/backups)
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=true
+# If uploads are under /home (e.g. /home/frappe/aichatassist-data/uploads),
+# ProtectHome=true would block access.
+ProtectHome=false
 
 # Runs as root by default (required if /etc/aichatassist/backend.env is 600 root)
 
