@@ -15,3 +15,6 @@ def pytest_configure():
     # doesn't provide DATABASE_URL.
     os.environ.setdefault("ENV", "test")
     os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    # Tests should not depend on developer machine services.
+    # Explicitly disable Redis even if backend/.env enables it.
+    os.environ.setdefault("REDIS_URL", "")

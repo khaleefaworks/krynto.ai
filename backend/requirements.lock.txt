@@ -82,8 +82,10 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-jose==3.5.0
 python-multipart==0.0.21
+pywebpush==2.2.0
 PyYAML==6.0.3
 referencing==0.37.0
+redis==7.1.0
 requests==2.32.5
 requests-oauthlib==2.0.0
 rich==14.2.0
