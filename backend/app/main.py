@@ -5,6 +5,10 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+# Import models as early as possible so SQLAlchemy metadata includes
+# every table before any routers/services touch the ORM.
+from app import models  # noqa: F401
+
 from app.api.health import router as health_router
 from app.api.ws_chat import router as ws_chat_router
 from app.api.ws_agent import router as ws_agent_router
@@ -23,7 +27,6 @@ from app.api.push import router as push_router
 from app.api.metrics import router as metrics_router
 from app.api.tags import router as tags_router
 from app.api.attachments import router as attachments_router
-from app import models  # Import models to register them with SQLAlchemy
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings

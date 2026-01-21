@@ -33,6 +33,32 @@ from seed_data import seed_database
 import app.models  # noqa: F401
 
 
+def _get_existing_table_names(db_session) -> set[str]:
+    """Return the set of existing table names in the connected database.
+
+    This makes reset resilient when the database schema is behind the current
+    code's SQLAlchemy metadata (e.g. migrations not applied yet).
+    """
+    from sqlalchemy import inspect
+
+    inspector = inspect(db_session.get_bind())
+    table_names: set[str] = set()
+
+    # Prefer the default Postgres schema.
+    try:
+        table_names.update(inspector.get_table_names(schema="public"))
+    except Exception:
+        pass
+
+    # Fallback: some DBs/tests may not use 'public' explicitly.
+    try:
+        table_names.update(inspector.get_table_names())
+    except Exception:
+        pass
+
+    return table_names
+
+
 def delete_uploaded_files():
     """Delete uploaded files from backend/uploads (keeps the folder itself)."""
     uploads_dir = Path(__file__).resolve().parent / "uploads"
@@ -82,12 +108,32 @@ def reset_database(with_seed=False):
         # This prevents failures when new tables are added (e.g. push_subscriptions).
         print("  Deleting database rows...")
         from sqlalchemy import text
+        from sqlalchemy.exc import ProgrammingError
+
+        existing_tables = _get_existing_table_names(db)
+        if not existing_tables:
+            print("  ⚠️  No tables detected in the database. If this is a fresh DB, run: alembic upgrade head")
 
         for table in reversed(Base.metadata.sorted_tables):
             # Keep Alembic bookkeeping intact.
             if table.name == "alembic_version":
                 continue
-            db.execute(table.delete())
+
+            # If the DB schema is behind, skip tables that don't exist yet.
+            if table.name not in existing_tables:
+                continue
+
+            try:
+                db.execute(table.delete())
+            except ProgrammingError as e:
+                # Safety net for cases where the table disappears or isn't present
+                # in the current schema despite inspector results.
+                msg = str(getattr(e, "orig", e))
+                if "UndefinedTable" in msg or "does not exist" in msg:
+                    print(f"  ⚠️  Skipping missing table: {table.name}")
+                    db.rollback()
+                    continue
+                raise
 
         db.commit()
         
