@@ -3,10 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.logging import get_logger
-from app.models.user import User, UserRole
-from app.services.agent_resolver import is_agent_eligible
-from app.services.agent_service import AgentService
-from app.repos import users as users_repo
+from app.services.presence_service import PresenceService
 from app.core.config import settings
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
 from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
@@ -18,46 +15,7 @@ logger = get_logger(__name__)
 
 
 def _compute_presence(db: Session, website_id: int) -> dict:
-    """Compute website presence.
-
-    Current product decision: with agent-website assignment removed from UI, any
-    eligible agent (active + available + recently active) is treated as available for
-    any website.
-    """
-    # Presence is heartbeat-based so it can scale beyond a single worker.
-    connected_user_ids = users_repo.recently_heartbeat_user_ids(
-        db,
-        ttl_seconds=AgentService.heartbeat_ttl_seconds,
-    )
-
-    candidates = (
-        db.query(User)
-        .filter(
-            User.is_active == True,  # noqa: E712
-            User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
-        )
-        .all()
-    )
-
-    online_agents = [
-        {
-            "id": u.id,
-            "name": u.name or "Support",
-            "avatar_url": u.avatar_url,
-        }
-        for u in candidates
-        if is_agent_eligible(u, u.id in connected_user_ids)
-    ]
-
-    available_agents_count = len(online_agents)
-
-    return {
-        "type": "presence",
-        "website_id": website_id,
-        "online": available_agents_count > 0,
-        "available_agents_count": available_agents_count,
-        "agents": online_agents[:3],
-    }
+    return PresenceService.compute_presence(db, website_id)
 
 
 @router.websocket("/ws/presence/{website_id}")
@@ -87,6 +45,8 @@ async def presence_ws(websocket: WebSocket, website_id: int):
 
     db = SessionLocal()
     try:
+        await PresenceService.register(website_id, websocket)
+
         # Validate website exists and enforce domain lock.
         from app.models.website import Website
 
@@ -137,6 +97,10 @@ async def presence_ws(websocket: WebSocket, website_id: int):
         except Exception:
             pass
     finally:
+        try:
+            await PresenceService.unregister(website_id, websocket)
+        except Exception:
+            pass
         try:
             ws_disconnect(kind="presence")
         except Exception:

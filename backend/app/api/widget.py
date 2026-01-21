@@ -6,6 +6,7 @@ They must be fast, reliable, and not require authentication.
 """
 
 from typing import Optional
+import json
 from fastapi import APIRouter, Query, HTTPException, Depends, Request, Response as FastAPIResponse
 from fastapi.responses import Response as RawResponse, JSONResponse
 from sqlalchemy.orm import Session
@@ -223,6 +224,14 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     position = config.get('position', 'bottom-right')
     welcome_message = config.get('welcome_message', 'Hi! How can we help you today?')
     primary_color = config.get('primary_color', '#000000')
+
+    header_title = config.get("header_title", "How can we help?")
+    online_status_text = config.get("online_status_text", "We reply immediately")
+    bubble_text = config.get("bubble_text", "Chat")
+    header_icon_url = config.get("header_icon_url")
+    show_emoji_picker = config.get("show_emoji_picker", True)
+    show_attachments = config.get("show_attachments", False)
+    branding_text = config.get("branding_text")
     
     def _normalize_base(base: str) -> str:
         b = (base or "").strip()
@@ -249,8 +258,17 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     _aichatassist.wsUrl = '{ws_base}';
   _aichatassist.theme = '{theme}';
   _aichatassist.position = '{position}';
-  _aichatassist.welcomeMessage = {repr(welcome_message)};
+    _aichatassist.welcomeMessage = {json.dumps(welcome_message)};
   _aichatassist.primaryColor = '{primary_color}';
+
+    // Optional UI config (if not provided, widget defaults apply)
+    _aichatassist.headerTitle = {json.dumps(header_title)};
+    _aichatassist.onlineStatusText = {json.dumps(online_status_text)};
+    _aichatassist.bubbleText = {json.dumps(bubble_text)};
+    _aichatassist.headerIconUrl = {json.dumps(header_icon_url)};
+    _aichatassist.showEmojiPicker = {json.dumps(bool(show_emoji_picker))};
+    _aichatassist.showAttachments = {json.dumps(bool(show_attachments))};
+    _aichatassist.brandingText = {json.dumps(branding_text)};
   
   // Load the widget CSS
   var link = document.createElement('link');

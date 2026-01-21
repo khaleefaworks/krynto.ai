@@ -31,11 +31,15 @@ from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.core.database import engine, init_db
+from app.core.database import engine
 from pathlib import Path
 from app.infra import realtime_bus
 from app.core.worker_detection import detect_configured_worker_count
 import os
+from typing import cast
+
+from starlette.requests import Request
+from starlette.responses import Response
 
 # Setup structured logging
 logger = setup_logging()
@@ -55,13 +59,15 @@ if configured_workers is not None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Development convenience: when using SQLite, bootstrap tables automatically.
-    # Production should always run Alembic migrations against Postgres.
-    try:
-        if (not settings.is_production()) and str(settings.DATABASE_URL or "").startswith("sqlite"):
-            init_db()
-    except Exception as e:
-        logger.warning("sqlite_init_db_failed", error=str(e))
+    # Enforce Postgres for development/runtime.
+    # Tests explicitly set ENV=test and use SQLite in-memory.
+    if (not settings.is_production()) and (settings.ENV or "").strip().lower() != "test":
+        if str(settings.DATABASE_URL or "").startswith("sqlite"):
+            raise RuntimeError(
+                "SQLite is not supported for development. Install PostgreSQL and set DATABASE_URL "
+                "(e.g. postgresql+psycopg2://chatassist:chatassist@localhost:5432/chatassist), "
+                "then run: alembic upgrade head"
+            )
 
     async def _handle_event(event: dict) -> None:
         # Dispatch to local websocket registries.
@@ -80,7 +86,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI ChatAssist", lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _rate_limit_handler(request: Request, exc: Exception) -> Response:
+    # FastAPI's typing expects `Exception`, but this handler is only registered
+    # for `RateLimitExceeded` so runtime will always pass that type.
+    return _rate_limit_exceeded_handler(request, cast(RateLimitExceeded, exc))
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # Add logging middleware (before CORS)
 app.add_middleware(LoggingMiddleware)

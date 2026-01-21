@@ -4,7 +4,12 @@
 ```bash
 cd /home/frappe/Applications/ai-chatassist/backend
 source .venv/bin/activate
+# Ensure backend/.env exists (DATABASE_URL, VAPID keys, etc.)
+# Development requires PostgreSQL.
+
+# Run migrations (required):
 alembic upgrade head
+
 ./start_server.sh
 ```
 
@@ -113,3 +118,25 @@ curl -X POST http://localhost:8000/auth/bootstrap \
 - **Dashboard:** http://localhost:5173
 - **API Docs:** http://localhost:8000/docs
 - **Widget Demo:** http://localhost:8080/demo.html
+
+---
+
+## Push Notifications (Development)
+
+Push requires:
+- HTTPS *or* a secure context (localhost is OK)
+- VAPID keys configured in backend/.env
+
+Generate VAPID keys:
+
+```bash
+cd /home/frappe/Applications/ai-chatassist/frontend
+npx --yes web-push generate-vapid-keys
+```
+
+Paste them into backend/.env as:
+- VAPID_PUBLIC_KEY
+- VAPID_PRIVATE_KEY
+- VAPID_SUBJECT (e.g. mailto:dev@localhost)
+
+Then restart backend + open the dashboard and enable notifications.

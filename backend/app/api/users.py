@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
+from app.services.presence_service import PresenceService
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -37,7 +38,7 @@ class AvatarResponse(BaseModel):
 
 
 @router.post("/me/availability", response_model=AvailabilityResponse)
-def update_availability(
+async def update_availability(
     payload: AvailabilityRequest,
     current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db)
@@ -63,6 +64,15 @@ def update_availability(
     current_user.is_available = payload.is_available
     db.commit()
     db.refresh(current_user)
+
+    # Push presence updates to all connected visitor widgets.
+    # Presence currently treats eligible agents as available for ANY website.
+    # So a single agent toggling availability can affect multiple sites.
+    try:
+        await PresenceService.broadcast_all()
+    except Exception:
+        # Never fail the availability toggle because of a best-effort broadcast.
+        pass
     
     return AvailabilityResponse(is_available=current_user.is_available)
 
