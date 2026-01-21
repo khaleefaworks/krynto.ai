@@ -107,7 +107,12 @@ async def takeover_conversation(
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
 
-    return {"success": True, "conversation_id": conversation_id}
+    return {
+        "success": True,
+        "conversation_id": conversation_id,
+        "message_obj": result.get("message_obj"),
+        "message_id": result.get("message_id"),
+    }
 
 
 @router.post("/{conversation_id}/tags")

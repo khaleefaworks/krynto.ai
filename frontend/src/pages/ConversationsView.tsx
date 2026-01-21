@@ -52,6 +52,28 @@ function getMessageTimestamp(m: any): number {
     return Number.isFinite(t) ? t : 0
 }
 
+function getMessageNumericId(m: any): number {
+    const raw = m?.id
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER
+}
+
+function compareMessagesChronologically(a: any, b: any): number {
+    const aId = getMessageNumericId(a)
+    const bId = getMessageNumericId(b)
+
+    const aHasId = aId !== Number.MAX_SAFE_INTEGER
+    const bHasId = bId !== Number.MAX_SAFE_INTEGER
+    if (aHasId && bHasId && aId !== bId) return aId - bId
+
+    const at = getMessageTimestamp(a)
+    const bt = getMessageTimestamp(b)
+    if (at !== bt) return at - bt
+
+    return aId - bId
+}
+
 function formatShortAge(dateLike: any): string {
     const t = dateLike ? new Date(dateLike).getTime() : NaN
     if (!Number.isFinite(t)) return ''
@@ -490,16 +512,8 @@ export default function ConversationsView() {
                     console.log('👤 Adding visitor message DTO to UI')
                     addMessage(dto)
                 } else {
-                    console.log('👤 Adding visitor message to UI:', data.message)
-                    const newMessage = {
-                        id: Date.now(),
-                        conversation_id: selectedChat,
-                        sender_type: 'visitor' as const,
-                        sender: 'visitor' as const,
-                        content: data.message,
-                        created_at: new Date().toISOString()
-                    }
-                    addMessage(newMessage)
+                    console.warn('👤 Missing visitor message DTO; refreshing thread')
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
 
                 // If the agent isn't pinned to the bottom, treat it as unread for UX.
@@ -553,18 +567,8 @@ export default function ConversationsView() {
                     console.log('✅ Agent message confirmed (DTO)')
                     addMessage(dto)
                 } else {
-                    console.log('✅ Agent message confirmed, adding to UI:', data.content)
-                    const confirmedMessage = {
-                        id: Date.now(),
-                        conversation_id: selectedChat,
-                        sender_type: 'agent' as const,
-                        sender: 'agent' as const,
-                        content: data.content,
-                        created_at: new Date().toISOString(),
-                        sender_name: (user as any)?.name ?? (user as any)?.email ?? null,
-                        sender_avatar_url: (user as any)?.avatar_url ?? null,
-                    }
-                    addMessage(confirmedMessage)
+                    console.warn('✅ Missing agent message DTO; refreshing thread')
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
             } else if (data.type === 'conversation_assigned') {
                 // Another agent (or us) claimed a conversation.
@@ -856,20 +860,16 @@ export default function ConversationsView() {
 
             if (!joinedRef.current && !alreadyJoinedByMe) {
                 try {
-                    await joinChat(selectedChat.toString())
+                    const joinResult: any = await joinChat(selectedChat.toString())
                     joinedRef.current = true
 
-                    // Backend persists an agent-join system message, but the agent UI
-                    // doesn't refetch messages on join. Add it locally for immediate UX.
-                    addMessage({
-                        id: `temp-join-${Date.now()}`,
-                        conversation_id: selectedChat,
-                        sender_type: 'system' as const,
-                        sender: 'system' as const,
-                        event_type: 'agent_join',
-                        content: `${(user as any)?.name || 'Support Agent'} joined the chat.`,
-                        created_at: new Date().toISOString(),
-                    } as any)
+                    // Prefer server-truth join message (stable timestamp/id).
+                    if (joinResult?.message_obj) {
+                        addMessage(joinResult.message_obj)
+                    } else {
+                        // Fallback: refresh thread so join event is represented correctly.
+                        loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                    }
                 } catch (e: any) {
                     // If another agent already owns it, ask for explicit confirmation.
                     const msg = String(e?.message || '')
@@ -904,18 +904,14 @@ export default function ConversationsView() {
         if (!selectedChat || !content) return
 
         try {
-            await takeoverConversation(selectedChat)
+            const takeoverResult: any = await takeoverConversation(selectedChat)
             joinedRef.current = true
 
-            addMessage({
-                id: `temp-join-${Date.now()}`,
-                conversation_id: selectedChat,
-                sender_type: 'system' as const,
-                sender: 'system' as const,
-                event_type: 'agent_join',
-                content: `${(user as any)?.name || 'Support Agent'} joined the chat.`,
-                created_at: new Date().toISOString(),
-            } as any)
+            if (takeoverResult?.message_obj) {
+                addMessage(takeoverResult.message_obj)
+            } else {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            }
 
             sendAgentMessage(content, selectedChat.toString())
         } catch (error) {
@@ -1462,7 +1458,7 @@ export default function ConversationsView() {
                         ) : (
                             <>
                                 {[...messages]
-                                    .sort((a: any, b: any) => getMessageTimestamp(a) - getMessageTimestamp(b))
+                                    .sort(compareMessagesChronologically)
                                     .map((msg, index, sortedMessages) => {
                                         const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
                                         const eventType = (msg as any).event_type || null

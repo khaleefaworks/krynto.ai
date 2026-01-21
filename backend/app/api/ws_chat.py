@@ -156,6 +156,15 @@ async def chat_ws(
             # Let the widget render an empty thread; conversation will be created on first message.
             await websocket.send_json({"type": "history", "conversation_id": None, "messages": []})
 
+        # IMPORTANT: Close any read-only transaction opened by the initial SELECTs.
+        # PostgreSQL's `now()`/`func.now()` is transaction timestamp; if we keep a transaction
+        # open from connect until the first visitor message commit, that first message will
+        # get a stale `created_at` and may sort above later events (agent join/agent message).
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
         # Welcome automation: send on first visit or if returning after cooldown.
         # This replaces the widget's always-on placeholder greeting.
         try:
@@ -250,6 +259,13 @@ async def chat_ws(
             except Exception:
                 pass
             logger.warning("welcome_automation_failed", website_id=website_id, session_id=session_id, error=str(e))
+
+        # Close any transaction that may have been opened by read-only checks
+        # (e.g. last_welcome lookup) so subsequent inserts get a fresh timestamp.
+        try:
+            db.rollback()
+        except Exception:
+            pass
     except Exception as e:
         logger.error("chat_service_init_error", website_id=website_id, session_id=session_id, error=str(e), exc_info=True)
         db.close()
@@ -412,6 +428,9 @@ async def chat_ws(
             if not user_message:
                 continue
 
+            # Optional client-generated message id (widget can use this to reconcile optimistic sends)
+            client_message_id = payload.get("message_id") or payload.get("client_message_id")
+
             visitor_name = payload.get("visitor_name")
             visitor_email = payload.get("visitor_email")
             
@@ -457,6 +476,7 @@ async def chat_ws(
                 session_id=session_id,
                 message=user_message,
                 visitor_ws=websocket,
+                client_message_id=str(client_message_id) if client_message_id else None,
             )
 
             # Conversation may have been created on first message; register for cleanup.

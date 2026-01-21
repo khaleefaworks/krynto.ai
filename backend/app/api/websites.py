@@ -11,7 +11,7 @@ from datetime import datetime
 import uuid
 import shutil
 from pathlib import Path
-from app.core.uploads import validate_image_upload
+from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
 
 router = APIRouter(prefix="/websites", tags=["websites"])
 
@@ -236,7 +236,7 @@ async def upload_widget_icon(
 
     file_extension = validate_image_upload(file)
 
-    upload_dir = Path("uploads/websites") / str(website_id)
+    upload_dir = get_uploads_root() / "websites" / str(website_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     unique_filename = f"widget_icon_{uuid.uuid4().hex[:10]}.{file_extension}"
@@ -246,8 +246,8 @@ async def upload_widget_icon(
     existing_config = website.widget_config or {}
     old_url = existing_config.get("header_icon_url")
     if old_url and isinstance(old_url, str) and old_url.startswith('/uploads/'):
-        old_file = Path(old_url.lstrip('/'))
-        if old_file.exists():
+        old_file = uploads_url_to_path(old_url)
+        if old_file and old_file.exists():
             try:
                 old_file.unlink()
             except Exception:

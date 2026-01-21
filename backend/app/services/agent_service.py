@@ -318,4 +318,4 @@ class AgentService:
         """Get all messages in a conversation"""
         return self.db.query(Message).filter_by(
             conversation_id=conversation_id
-        ).order_by(Message.created_at).all()
+        ).order_by(Message.id).all()

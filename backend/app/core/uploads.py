@@ -1,10 +1,55 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Final
+
 from fastapi import HTTPException, UploadFile
+
+from app.core.config import settings
 
 
 _MAX_DEFAULT_BYTES = 5 * 1024 * 1024
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+_UPLOADS_URL_PREFIX: Final[str] = "/uploads/"
+
+
+def get_uploads_root() -> Path:
+    """Return the filesystem directory backing the public `/uploads/*` URLs.
+
+    This must be stable across environments and must not depend on the process
+    working directory (which differs in dev vs systemd).
+    """
+
+    override = (getattr(settings, "UPLOADS_DIR", "") or "").strip()
+    if override:
+        return Path(override)
+
+    # Repo root is 3 levels up from app/core/uploads.py:
+    # backend/app/core/uploads.py -> backend/app/core -> backend/app -> backend -> repo root
+    repo_root = Path(__file__).resolve().parents[3]
+    return repo_root / "uploads"
+
+
+def uploads_url_to_path(url: str) -> Path | None:
+    """Map a public `/uploads/...` URL to a filesystem path under uploads root.
+
+    Returns None for non-uploads URLs.
+    """
+    if not (isinstance(url, str) and url.startswith(_UPLOADS_URL_PREFIX)):
+        return None
+
+    rel = url[len(_UPLOADS_URL_PREFIX) :]
+    uploads_root = get_uploads_root().resolve()
+    candidate = (uploads_root / rel).resolve()
+
+    # Prevent path traversal.
+    try:
+        candidate.relative_to(uploads_root)
+    except Exception:
+        return None
+
+    return candidate
 
 
 def _detect_image_kind(header: bytes) -> str | None:

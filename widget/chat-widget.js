@@ -74,6 +74,9 @@
   let activeAgentName = null;
   let pendingOfflineMessage = null;
 
+  // Pending optimistic visitor sends: client_message_id -> timestamp element
+  const pendingVisitorSends = new Map();
+
   let pageViewTrackingInitialized = false;
   let lastTrackedUrl = null;
   let pendingPageView = null;
@@ -257,6 +260,17 @@
       return false;
     }
     const payload = { message };
+    // Client-generated id so the server can ack with canonical timestamp/id.
+    try {
+      const existingId = meta && typeof meta === 'object' ? meta._client_message_id : null;
+      const id = existingId || ((window.crypto && window.crypto.randomUUID)
+        ? window.crypto.randomUUID()
+        : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      payload.message_id = id;
+      if (meta && typeof meta === 'object' && !meta._client_message_id) {
+        meta._client_message_id = id;
+      }
+    } catch (e) { }
     if (meta && typeof meta === 'object') {
       if (meta.visitor_name) payload.visitor_name = meta.visitor_name;
       if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
@@ -293,8 +307,22 @@
     }
 
     if (data.type === 'ai') {
-      appendMessage('ai', data.message, data.created_at, null, data.message_obj?.id);
+      const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
+      appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       smartScroll();
+    } else if (data.type === 'visitor_message_saved') {
+      const clientId = data.message_id;
+      const dto = data.message_obj;
+      const createdAt = dto && dto.created_at;
+      if (clientId && pendingVisitorSends.has(String(clientId))) {
+        const tsEl = pendingVisitorSends.get(String(clientId));
+        pendingVisitorSends.delete(String(clientId));
+        try {
+          if (tsEl && createdAt) {
+            tsEl.textContent = formatTimestamp(new Date(createdAt));
+          }
+        } catch (e) { }
+      }
     } else if (data.type === 'agent') {
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
@@ -306,7 +334,8 @@
       }
       smartScroll();
     } else if (data.type === 'agent_joined') {
-      showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, null);
+      const createdAt = (data.message_obj && data.message_obj.created_at) || null;
+      showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, createdAt);
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       smartScroll();
@@ -453,6 +482,16 @@
     row.appendChild(contentWrap);
     messageDiv.appendChild(row);
     container.appendChild(messageDiv);
+
+    // If this is an optimistic visitor message, track it so we can reconcile
+    // timestamp once the server acks with canonical created_at.
+    try {
+      const pendingId = meta && meta._client_message_id;
+      if (sender === 'visitor' && pendingId) {
+        pendingVisitorSends.set(String(pendingId), timestamp);
+        messageDiv.dataset.clientMessageId = String(pendingId);
+      }
+    } catch (e) { }
   }
 
   function showSystemMessage(content) {
@@ -484,21 +523,33 @@
     if (!message) return;
 
     if (presenceOnline) {
-      appendMessage('visitor', message);
+      const meta = {};
+      try {
+        meta._client_message_id = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      } catch (e) { }
+      appendMessage('visitor', message, new Date().toISOString(), meta, null);
       input.value = '';
-      sendMessage(message);
+      sendMessage(message, meta);
       smartScroll();
       return;
     }
 
     const email = document.getElementById('chatassist-contact-email')?.value.trim();
     if (email) {
-      appendMessage('visitor', message);
-      input.value = '';
-      sendMessage(message, {
+      const meta = {
         visitor_name: document.getElementById('chatassist-contact-name')?.value.trim(),
         visitor_email: email
-      });
+      };
+      try {
+        meta._client_message_id = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      } catch (e) { }
+      appendMessage('visitor', message, new Date().toISOString(), meta, null);
+      input.value = '';
+      sendMessage(message, meta);
       smartScroll();
       return;
     }
@@ -542,8 +593,14 @@
     if (name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
     localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
     if (msg) {
-      appendMessage('visitor', msg);
-      sendMessage(msg, { visitor_name: name, visitor_email: email });
+      const meta = { visitor_name: name, visitor_email: email };
+      try {
+        meta._client_message_id = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      } catch (e) { }
+      appendMessage('visitor', msg, new Date().toISOString(), meta, null);
+      sendMessage(msg, meta);
       smartScroll();
     }
   }

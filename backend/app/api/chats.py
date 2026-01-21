@@ -89,6 +89,8 @@ async def join_chat(
         "website_id": conversation.website_id if conversation else None,
         "assigned_agent_id": current_user.id,
         "message": "Chat successfully assigned to agent",
+        "message_obj": result.get("message_obj"),
+        "message_id": result.get("message_id"),
     }
 
 

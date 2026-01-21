@@ -13,7 +13,7 @@ def list_messages_for_conversation(db: Session, conversation_id: int):
     return (
         db.query(Message)
         .filter_by(conversation_id=conversation_id)
-        .order_by(Message.created_at)
+        .order_by(Message.id)
         .all()
     )
 
@@ -23,6 +23,6 @@ def get_last_welcome_message(db: Session, conversation_id: int) -> Message | Non
         db.query(Message)
         .filter_by(conversation_id=conversation_id)
         .filter(Message.event_type == "automation_welcome")
-        .order_by(Message.created_at.desc())
+        .order_by(Message.id.desc())
         .first()
     )

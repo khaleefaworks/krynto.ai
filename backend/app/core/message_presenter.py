@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timezone
 from typing import Any, Optional, Tuple, Dict
 
 
@@ -73,6 +74,11 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
 
     created_at = getattr(msg, "created_at", None)
     try:
+        # Some DB/driver combinations can yield a naive datetime even when the column
+        # is intended to be timezone-aware. A naive ISO string is interpreted by
+        # browsers as *local time*, which can display shifted chat timestamps.
+        if created_at is not None and getattr(created_at, "tzinfo", None) is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         created_at_iso = created_at.isoformat() if created_at else None
     except Exception:
         created_at_iso = None

@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from app.core.database import get_db
-from app.core.uploads import validate_image_upload
+from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
 
@@ -90,7 +90,7 @@ async def upload_avatar(
     file_extension = validate_image_upload(file)
     
     # Create uploads directory if it doesn't exist
-    upload_dir = Path("uploads/avatars")
+    upload_dir = get_uploads_root() / "avatars"
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate unique filename
@@ -99,9 +99,12 @@ async def upload_avatar(
     
     # Delete old avatar file if exists
     if current_user.avatar_url and current_user.avatar_url.startswith('/uploads/'):
-        old_file = Path(current_user.avatar_url.lstrip('/'))
-        if old_file.exists():
-            old_file.unlink()
+        old_file = uploads_url_to_path(current_user.avatar_url)
+        if old_file and old_file.exists():
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
     
     # Save file
     with file_path.open("wb") as buffer:
@@ -125,9 +128,12 @@ def delete_avatar(
     """
     # Delete file if exists
     if current_user.avatar_url and current_user.avatar_url.startswith('/uploads/'):
-        file_path = Path(current_user.avatar_url.lstrip('/'))
-        if file_path.exists():
-            file_path.unlink()
+        file_path = uploads_url_to_path(current_user.avatar_url)
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
     
     current_user.avatar_url = None
     db.commit()
@@ -160,15 +166,15 @@ async def upload_user_avatar(
 
     file_extension = validate_image_upload(file)
 
-    upload_dir = Path("uploads/avatars")
+    upload_dir = get_uploads_root() / "avatars"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     unique_filename = f"{user.id}_{uuid.uuid4().hex[:8]}.{file_extension}"
     file_path = upload_dir / unique_filename
 
     if user.avatar_url and user.avatar_url.startswith('/uploads/'):
-        old_file = Path(user.avatar_url.lstrip('/'))
-        if old_file.exists():
+        old_file = uploads_url_to_path(user.avatar_url)
+        if old_file and old_file.exists():
             try:
                 old_file.unlink()
             except Exception:
@@ -195,8 +201,8 @@ def delete_user_avatar(
         raise HTTPException(status_code=404, detail="User not found")
 
     if user.avatar_url and user.avatar_url.startswith('/uploads/'):
-        file_path = Path(user.avatar_url.lstrip('/'))
-        if file_path.exists():
+        file_path = uploads_url_to_path(user.avatar_url)
+        if file_path and file_path.exists():
             try:
                 file_path.unlink()
             except Exception:

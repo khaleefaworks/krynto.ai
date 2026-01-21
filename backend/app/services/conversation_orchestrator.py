@@ -94,6 +94,7 @@ class ConversationOrchestrator:
         session_id: str,
         message: str,
         visitor_ws: Any | None = None,
+        client_message_id: str | None = None,
     ) -> Optional[str]:
         """Process a visitor message and route appropriately.
 
@@ -129,6 +130,21 @@ class ConversationOrchestrator:
         )
         if not msg:
             return "Unable to process your message right now."
+
+        # Best-effort: acknowledge back to the visitor with server truth.
+        # This lets the widget reconcile optimistic timestamps/IDs.
+        if visitor_ws is not None and client_message_id:
+            try:
+                await visitor_ws.send_json(
+                    {
+                        "type": "visitor_message_saved",
+                        "message_id": str(client_message_id),
+                        "conversation_id": conversation.id,
+                        "message_obj": serialize_message(self.db, msg),
+                    }
+                )
+            except Exception:
+                pass
 
         # If an agent owns the conversation, forward to that agent
         if conversation.assigned_agent_id:
@@ -391,7 +407,11 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        return {"success": True}
+        return {
+            "success": True,
+            "message_id": getattr(saved, "id", None),
+            "message_obj": serialize_message(self.db, saved),
+        }
 
     async def handle_agent_takeover(self, *, conversation_id: int, agent_id: int) -> dict:
         """Force-assign a conversation to a different agent (explicit confirmation UX)."""
@@ -444,7 +464,11 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        return {"success": True}
+        return {
+            "success": True,
+            "message_id": getattr(saved, "id", None),
+            "message_obj": serialize_message(self.db, saved),
+        }
 
     async def handle_agent_message(
         self, *, conversation_id: int, agent_id: int, content: str

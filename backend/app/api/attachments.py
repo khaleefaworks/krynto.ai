@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_agent
 from app.core.database import get_db
-from app.core.uploads import validate_attachment_upload
+from app.core.uploads import get_uploads_root, validate_attachment_upload
 from app.models.conversation import Conversation
 from app.models.user import User
 
@@ -41,7 +41,7 @@ async def upload_attachment(
 
     ext = validate_attachment_upload(file)
 
-    upload_dir = Path("uploads/attachments") / str(conversation_id)
+    upload_dir = get_uploads_root() / "attachments" / str(conversation_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     unique_filename = f"{uuid4().hex}.{ext}"

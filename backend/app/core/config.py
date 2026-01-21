@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # If not set, endpoints will fall back to request.base_url.
     PUBLIC_BASE_URL: Optional[str] = None
 
+    # Filesystem directory used to store uploaded files served under `/uploads/*`.
+    # If unset, defaults to <repo-root>/uploads.
+    UPLOADS_DIR: str = ""
+
     # CORS
     # Comma-separated list of allowed origins. In development, defaults are applied if empty.
     CORS_ALLOWED_ORIGINS: str = ""

@@ -1,6 +1,34 @@
 import { create } from "zustand"
 import type { Message } from "../types/index"
 
+function messageKey(m: Message, fallback: string): string {
+  const id = (m as any)?.id
+  if (id === 0 || id) return String(id)
+  return fallback
+}
+
+function sortMessages(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const aIdRaw = (a as any).id
+    const bIdRaw = (b as any).id
+    const aId = typeof aIdRaw === 'number' ? aIdRaw : Number(aIdRaw)
+    const bId = typeof bIdRaw === 'number' ? bIdRaw : Number(bIdRaw)
+    const aHasId = Number.isFinite(aId)
+    const bHasId = Number.isFinite(bId)
+    if (aHasId && bHasId && aId !== bId) return aId - bId
+
+    const at = a.created_at ? Date.parse(a.created_at) : NaN
+    const bt = b.created_at ? Date.parse(b.created_at) : NaN
+    const aTime = Number.isFinite(at) ? at : 0
+    const bTime = Number.isFinite(bt) ? bt : 0
+    if (aTime !== bTime) return aTime - bTime
+
+    const aKey = aHasId ? aId : Number.MAX_SAFE_INTEGER
+    const bKey = bHasId ? bId : Number.MAX_SAFE_INTEGER
+    return aKey - bKey
+  })
+}
+
 type MessageState = {
   messages: Message[]
   addMessages: (m: Message[]) => void
@@ -14,26 +42,31 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   addMessages: (incoming) => {
     const existing = get().messages
-    const map = new Map(
-      existing.map((m, idx) => [m.id || `temp-${idx}`, m])
-    )
+    const map = new Map(existing.map((m, idx) => [messageKey(m, `temp-${idx}`), m]))
 
     incoming.forEach((m, idx) => {
-      const key = m.id || `temp-${Date.now()}-${idx}`
-      if (!map.has(key)) {
-        map.set(key, m)
-      }
+      const key = messageKey(m, `temp-${Date.now()}-${idx}`)
+      // Prefer the latest version of the same message id.
+      map.set(key, m)
     })
 
-    set({ messages: Array.from(map.values()) })
+    set({ messages: sortMessages(Array.from(map.values())) })
   },
 
   addMessage: (m) =>
-    set((state) => ({
-      messages: [...state.messages, m],
-    })),
+    set((state) => {
+      const key = messageKey(m, `temp-${Date.now()}`)
+      const existing = state.messages
+      const idx = existing.findIndex((x, i) => messageKey(x, `temp-${i}`) === key)
+      if (idx >= 0) {
+        const next = [...existing]
+        next[idx] = m
+        return { messages: sortMessages(next) }
+      }
+      return { messages: sortMessages([...existing, m]) }
+    }),
 
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => set({ messages: sortMessages(messages) }),
 
   reset: () => set({ messages: [] }),
 }))

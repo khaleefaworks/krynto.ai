@@ -13,11 +13,14 @@
     <!-- AI ChatAssist Live Chat script -->
     <script type="text/javascript">
         var _aichatassist = _aichatassist || {};
-        _aichatassist.key = '52afe135cb9b3a8731e8732d1f9be4e34f26d3e110597fa0403c33202134178c';
+        _aichatassist.key = 'd2349dce69f74632cfeb9c85417f19bf84f30686337b52be09f2e835189c31f6';
         window.aichatassist || (function (d) {
             var s, c, o = aichatassist = function () { o._.push(arguments) }; o._ = [];
             s = d.getElementsByTagName('script')[0]; c = d.createElement('script');
             c.type = 'text/javascript'; c.charset = 'utf-8'; c.async = true;
+            // Ensure the loader request includes a Referer on sites that set Referrer-Policy: no-referrer
+            // (required for server-side domain lock verification).
+            c.referrerPolicy = 'origin';
             c.src = 'http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
             s.parentNode.insertBefore(c, s);
         })(document);

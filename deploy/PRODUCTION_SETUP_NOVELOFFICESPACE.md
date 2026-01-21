@@ -231,6 +231,10 @@ CORS_ALLOWED_ORIGINS=https://dashboard.novelofficespace.com
 # Used for widget snippet generation
 PUBLIC_BASE_URL=https://api.novelofficespace.com
 
+# Uploads persistence (recommended). If unset, backend defaults to <repo>/uploads.
+# You can keep using the symlink approach below; this env var just makes it explicit.
+UPLOADS_DIR=/home/frappe/aichatassist-data/uploads
+
 # Redis required for multi-worker websocket delivery
 REDIS_URL=redis://127.0.0.1:6379/0
 
