@@ -31,7 +31,7 @@ from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.core.database import engine
+from app.core.database import engine, init_db
 from pathlib import Path
 from app.infra import realtime_bus
 from app.core.worker_detection import detect_configured_worker_count
@@ -55,6 +55,14 @@ if configured_workers is not None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Development convenience: when using SQLite, bootstrap tables automatically.
+    # Production should always run Alembic migrations against Postgres.
+    try:
+        if (not settings.is_production()) and str(settings.DATABASE_URL or "").startswith("sqlite"):
+            init_db()
+    except Exception as e:
+        logger.warning("sqlite_init_db_failed", error=str(e))
+
     async def _handle_event(event: dict) -> None:
         # Dispatch to local websocket registries.
         from app.services.agent_service import AgentService
