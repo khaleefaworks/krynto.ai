@@ -25,7 +25,7 @@ import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './
 import { ensurePushSubscription, isPushSupported } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
 import NotificationPermissionPrompt from './components/NotificationPermissionPrompt'
-import { installNotificationSoundArm, playNotificationBeep } from './lib/notificationSound'
+import { installNotificationSoundArm, playMessageNotificationSound, playNewVisitorNotificationSound } from './lib/notificationSound'
 import { API_BASE } from './config/endpoints'
 
 const _lastToastByKey = new Map<string, number>()
@@ -79,7 +79,7 @@ function App() {
         if (document.visibilityState === 'visible' && isRealtimeConnected) return
 
         if (_shouldBeep('sw_push', 1200)) {
-          try { playNotificationBeep() } catch { }
+          try { playMessageNotificationSound() } catch { }
         }
 
         const title = String(data?.title || 'Notification')
@@ -203,7 +203,7 @@ function App() {
 
         if (data.type === 'new_chat') {
           if (_shouldBeep('new_chat', 1200)) {
-            try { playNotificationBeep() } catch { }
+            try { playNewVisitorNotificationSound() } catch { }
           }
           const websiteName = String((data as any)?.website_name || '').trim()
           const lastMessage = String((data as any)?.last_message || '').trim()
@@ -230,7 +230,7 @@ function App() {
           }
         } else if (data.type === 'visitor_message' || data.type === 'conversation_unread') {
           if (_shouldBeep(String(conversationId || 'activity'), 1200)) {
-            try { playNotificationBeep() } catch { }
+            try { playMessageNotificationSound() } catch { }
           }
           if (conversationId && _shouldToast(`activity:${conversationId}`, 8000)) {
             const dto = (data as any)?.message_obj

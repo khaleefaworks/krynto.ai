@@ -57,6 +57,7 @@ export default function PersonalSettings() {
     }
   }, [])
 
+
   const handleEnablePush = async () => {
     setPushLoading(true)
     try {
