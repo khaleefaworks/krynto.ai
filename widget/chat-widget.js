@@ -57,6 +57,9 @@
   let isConnecting = false;
   let reconnectTimeout = null;
   let presencePingInterval = null;
+  let presenceReconnectTimeout = null;
+  let presenceReconnectAttempts = 0;
+  const PRESENCE_RECONNECT_BASE_MS = 1000;
   let toastTimeout = null;
 
   let unreadCount = 0;
@@ -73,6 +76,11 @@
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
   let pendingOfflineMessage = null;
+
+  let agentTypingActive = false;
+  let agentTypingTimer = null;
+  let visitorTypingActive = false;
+  let visitorTypingTimer = null;
 
   // Pending optimistic visitor sends: client_message_id -> timestamp element
   const pendingVisitorSends = new Map();
@@ -129,6 +137,25 @@
     if (!container) return;
     container.classList.remove('chatassist-toast-visible');
     container.style.display = 'none';
+  }
+
+  function setAgentTyping(isTyping, name) {
+    const el = document.getElementById('chatassist-typing');
+    if (!el) return;
+    if (isTyping) {
+      const label = el.querySelector('.chatassist-typing-label');
+      if (label) label.textContent = `${name || 'Agent'} is typing`;
+      el.style.display = 'flex';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  function sendTyping(isTyping) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ type: 'typing', is_typing: Boolean(isTyping) }));
+    } catch (e) { }
   }
 
   // --- Audio ---
@@ -324,6 +351,7 @@
         } catch (e) { }
       }
     } else if (data.type === 'agent') {
+      setAgentTyping(false);
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
@@ -334,11 +362,27 @@
       }
       smartScroll();
     } else if (data.type === 'agent_joined') {
+      setAgentTyping(false);
       const createdAt = (data.message_obj && data.message_obj.created_at) || null;
       showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, createdAt);
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       smartScroll();
+    } else if (data.type === 'agent_typing') {
+      const isTyping = Boolean(data.is_typing);
+      if (agentTypingTimer) {
+        clearTimeout(agentTypingTimer);
+        agentTypingTimer = null;
+      }
+      if (isTyping) {
+        setAgentTyping(true, data.agent_name);
+        agentTypingTimer = setTimeout(() => {
+          agentTypingTimer = null;
+          setAgentTyping(false);
+        }, 3000);
+      } else {
+        setAgentTyping(false);
+      }
     } else if (data.message) {
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
@@ -522,6 +566,15 @@
     const message = input.value.trim();
     if (!message) return;
 
+    if (visitorTypingTimer) {
+      clearTimeout(visitorTypingTimer);
+      visitorTypingTimer = null;
+    }
+    if (visitorTypingActive) {
+      visitorTypingActive = false;
+      sendTyping(false);
+    }
+
     if (presenceOnline) {
       const meta = {};
       try {
@@ -649,6 +702,12 @@
         </div>
         <div id="chatassist-messages"></div>
         <div id="chatassist-footer">
+          <div id="chatassist-typing" class="chatassist-typing" style="display:none;">
+            <span class="chatassist-typing-label">Agent is typing</span>
+            <span class="chatassist-typing-dots">
+              <span></span><span></span><span></span>
+            </span>
+          </div>
           <div id="chatassist-input-container">
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
@@ -691,6 +750,40 @@
         enableNotificationSound();
         handleUserMessage();
       }
+    });
+
+    input.addEventListener('input', () => {
+      const value = input.value || '';
+      const hasText = value.trim().length > 0;
+
+      if (!hasText) {
+        if (visitorTypingTimer) {
+          clearTimeout(visitorTypingTimer);
+          visitorTypingTimer = null;
+        }
+        if (visitorTypingActive) {
+          visitorTypingActive = false;
+          sendTyping(false);
+        }
+        return;
+      }
+
+      if (!visitorTypingActive) {
+        visitorTypingActive = true;
+        sendTyping(true);
+      }
+
+      if (visitorTypingTimer) {
+        clearTimeout(visitorTypingTimer);
+      }
+
+      visitorTypingTimer = setTimeout(() => {
+        visitorTypingTimer = null;
+        if (visitorTypingActive) {
+          visitorTypingActive = false;
+          sendTyping(false);
+        }
+      }, 1600);
     });
 
     const messagesContainer = document.getElementById('chatassist-messages');
@@ -751,6 +844,7 @@
     try {
       presenceWs = new WebSocket(`${CONFIG.wsUrl}/ws/presence/${CONFIG.websiteId}`);
       presenceWs.onopen = () => {
+        presenceReconnectAttempts = 0;
         if (presencePingInterval) clearInterval(presencePingInterval);
         presencePingInterval = setInterval(() => {
           if (presenceWs.readyState === WebSocket.OPEN) presenceWs.send('ping');
@@ -764,6 +858,15 @@
       presenceWs.onclose = () => {
         if (presencePingInterval) clearInterval(presencePingInterval);
         presenceWs = null;
+        if (presenceReconnectTimeout) {
+          clearTimeout(presenceReconnectTimeout);
+          presenceReconnectTimeout = null;
+        }
+        const delay = Math.min(PRESENCE_RECONNECT_BASE_MS * Math.pow(2, presenceReconnectAttempts), 30000);
+        presenceReconnectAttempts += 1;
+        presenceReconnectTimeout = setTimeout(() => {
+          connectPresenceWebSocket();
+        }, delay);
       };
     } catch (e) { }
   }

@@ -318,6 +318,22 @@ export function sendAgentMessage(content: string, conversationId: string, messag
   return id
 }
 
+export function sendAgentTyping(conversationId: string, isTyping: boolean) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return
+
+  const payload = {
+    type: "typing",
+    conversation_id: conversationId,
+    is_typing: Boolean(isTyping),
+  }
+
+  try {
+    socket.send(JSON.stringify(payload))
+  } catch {
+    // ignore
+  }
+}
+
 export function disconnectAgentSocket() {
   if (socket) {
     console.log("👋 Disconnecting agent WebSocket")

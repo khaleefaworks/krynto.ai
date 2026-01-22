@@ -9,6 +9,7 @@ import {
     connectAgentSocket,
     sendAgentMessage,
     addMessageHandler,
+    sendAgentTyping,
 } from '@/services/agentSocket'
 import {
     addNote,
@@ -191,11 +192,16 @@ export default function ConversationsView() {
     const unreadRibbonHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const autoMarkReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const unreadRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const visitorTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const agentTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const agentTypingActiveRef = useRef(false)
+    const lastTypingConversationIdRef = useRef<number | null>(null)
 
     const connectedWebsiteIdRef = useRef<number | null>(null)
 
     const [resolvedChats, setResolvedChats] = useState<any[]>([])
     const [resolvedLoading, setResolvedLoading] = useState(false)
+    const [visitorTyping, setVisitorTyping] = useState(false)
 
     // Filter state
     const [activeFilter, setActiveFilter] = useState<FilterCategory>('all')
@@ -358,6 +364,45 @@ export default function ConversationsView() {
         clearUnreadForConversation(chatId)
     }, [clearUnreadForConversation])
 
+    const stopAgentTyping = useCallback((conversationId?: number | null) => {
+        const id = conversationId ?? lastTypingConversationIdRef.current
+        if (!id) return
+        if (agentTypingActiveRef.current) {
+            agentTypingActiveRef.current = false
+            sendAgentTyping(String(id), false)
+        }
+        if (agentTypingTimerRef.current) {
+            clearTimeout(agentTypingTimerRef.current)
+            agentTypingTimerRef.current = null
+        }
+    }, [])
+
+    const scheduleAgentTyping = useCallback((value: string) => {
+        if (!selectedChat) return
+
+        const hasText = Boolean(value.trim())
+        lastTypingConversationIdRef.current = selectedChat
+
+        if (hasText && !agentTypingActiveRef.current) {
+            agentTypingActiveRef.current = true
+            sendAgentTyping(String(selectedChat), true)
+        }
+
+        if (!hasText) {
+            stopAgentTyping(selectedChat)
+            return
+        }
+
+        if (agentTypingTimerRef.current) {
+            clearTimeout(agentTypingTimerRef.current)
+        }
+
+        agentTypingTimerRef.current = setTimeout(() => {
+            agentTypingTimerRef.current = null
+            stopAgentTyping(selectedChat)
+        }, 1600)
+    }, [selectedChat, stopAgentTyping])
+
     const showUnreadRibbonForChat = useCallback((chatId: number, count: number) => {
         if (unreadRibbonHideTimerRef.current) {
             clearTimeout(unreadRibbonHideTimerRef.current)
@@ -472,6 +517,7 @@ export default function ConversationsView() {
             setFirstUnreadMessageId(null)
             hasScrolledToUnreadRef.current = false
             isAtBottomRef.current = true
+            setVisitorTyping(false)
             loadChatData(selectedChat)
             loadConversationDetails(selectedChat)
         }
@@ -506,6 +552,11 @@ export default function ConversationsView() {
 
             // Visitor message: either add to current chat UI, or increment unread badge.
             if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
+                setVisitorTyping(false)
+                if (visitorTypingTimerRef.current) {
+                    clearTimeout(visitorTypingTimerRef.current)
+                    visitorTypingTimerRef.current = null
+                }
                 // Visitor sent a message - add to UI
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
@@ -561,6 +612,7 @@ export default function ConversationsView() {
 
                 scheduleUnreadRefresh()
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
+                stopAgentTyping(selectedChat)
                 // Our message was confirmed - add to UI
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
@@ -583,6 +635,30 @@ export default function ConversationsView() {
                 // New conversation arrived - refresh chat list
                 console.log('📨 New conversation arrived, refreshing...')
                 fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'connected') {
+                // Socket reconnected; refresh list and current thread for consistency.
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat) {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+            } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
+                const isTyping = Boolean((data as any)?.is_typing)
+                if (isTyping) {
+                    setVisitorTyping(true)
+                    if (visitorTypingTimerRef.current) {
+                        clearTimeout(visitorTypingTimerRef.current)
+                    }
+                    visitorTypingTimerRef.current = setTimeout(() => {
+                        visitorTypingTimerRef.current = null
+                        setVisitorTyping(false)
+                    }, 3000)
+                } else {
+                    setVisitorTyping(false)
+                    if (visitorTypingTimerRef.current) {
+                        clearTimeout(visitorTypingTimerRef.current)
+                        visitorTypingTimerRef.current = null
+                    }
+                }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
                 // Realtime browsing update: re-fetch history (capped)
                 getBrowsingHistory(selectedChat)
@@ -593,7 +669,13 @@ export default function ConversationsView() {
 
         // Cleanup: remove handler when chat changes or component unmounts
         return removeHandler
-    }, [selectedChat, user?.id, (conversation as any)?.website_id, firstUnreadMessageId, incrementUnreadForConversation, setUnreadForConversation])
+    }, [selectedChat, user?.id, (conversation as any)?.website_id, firstUnreadMessageId, incrementUnreadForConversation, setUnreadForConversation, stopAgentTyping])
+
+    useEffect(() => {
+        return () => {
+            stopAgentTyping()
+        }
+    }, [selectedChat, stopAgentTyping])
 
     // Scroll behavior:
     // - If there are unread messages, jump to the unread divider once.
@@ -853,6 +935,7 @@ export default function ConversationsView() {
 
         const messageContent = input.trim()
         setInput('')
+        stopAgentTyping(selectedChat)
 
         try {
             const chatData = activeChats.find(c => c.id === selectedChat)
@@ -913,6 +996,7 @@ export default function ConversationsView() {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             }
 
+            stopAgentTyping(selectedChat)
             sendAgentMessage(content, selectedChat.toString())
         } catch (error) {
             console.error('Failed to takeover and send:', error)
@@ -1678,6 +1762,10 @@ export default function ConversationsView() {
                             </Button>
                         </div>
 
+                        <div className="min-h-[20px] text-xs text-gray-500 dark:text-gray-400 px-1">
+                            {visitorTyping ? 'Visitor is typing…' : ''}
+                        </div>
+
                         <div className="relative flex gap-2">
                             {(() => {
                                 const { open, matches } = getShortcutMatches(input)
@@ -1718,6 +1806,7 @@ export default function ConversationsView() {
                                     const { open, matches } = getShortcutMatches(v)
                                     setShortcutMenuOpen(open && matches.length > 0)
                                     setShortcutMenuIndex(0)
+                                    scheduleAgentTyping(v)
                                 }}
                                 onKeyDown={(e) => {
                                     const { open, matches } = getShortcutMatches(input)

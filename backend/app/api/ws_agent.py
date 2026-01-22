@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.database import SessionLocal
 from app.services.agent_service import AgentService
 from app.services.conversation_orchestrator import ConversationOrchestrator
+from app.services.chat_service import ChatService
 from app.core.logging import get_logger
 from app.core.ws_auth import authenticate_websocket, extract_token_from_query
 from app.models.user import UserRole
@@ -177,6 +178,29 @@ async def agent_ws(
 
             if message_type == "heartbeat":
                 # No-op response; presence socket polls separately.
+                continue
+
+            if message_type == "typing":
+                conversation_id_raw = payload.get("conversation_id")
+                try:
+                    conversation_id = int(conversation_id_raw)
+                except Exception:
+                    await websocket.send_json({"type": "error", "message": "Invalid conversation_id"})
+                    continue
+
+                is_typing = bool(payload.get("is_typing"))
+
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {
+                        "type": "agent_typing",
+                        "conversation_id": conversation_id,
+                        "is_typing": is_typing,
+                        "agent_id": agent_id,
+                        "agent_name": user.name,
+                        "agent_avatar": user.avatar_url,
+                    },
+                )
                 continue
             
             if message_type == "join_chat":

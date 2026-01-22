@@ -424,6 +424,51 @@ async def chat_ws(
 
                 continue
 
+            if message_type == "typing":
+                is_typing = bool(payload.get("is_typing"))
+
+                conversation_id: int | None = registered_conversation_id
+                conversation = None
+                if conversation_id is None:
+                    try:
+                        conversation = conversations_repo.get_conversation_by_session(
+                            db,
+                            website_id=website_id,
+                            session_id=session_id,
+                        )
+                        if conversation:
+                            conversation_id = conversation.id
+                    except Exception:
+                        conversation = None
+
+                if conversation_id is None:
+                    continue
+
+                if conversation is None:
+                    try:
+                        conversation = conversations_repo.get_conversation_by_id(db, conversation_id)
+                    except Exception:
+                        conversation = None
+
+                event = {
+                    "type": "visitor_typing",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                    "session_id": session_id,
+                    "is_typing": is_typing,
+                }
+
+                if conversation and conversation.assigned_agent_id:
+                    await agent_service.send_to_agent(conversation.assigned_agent_id, event)
+                else:
+                    await agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data=event,
+                        include_global=True,
+                    )
+
+                continue
+
             user_message = payload.get("message")
             if not user_message:
                 continue
