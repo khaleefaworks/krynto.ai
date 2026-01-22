@@ -12,14 +12,15 @@ The chat widget provides a complete chat interface that connects directly to the
 
 1. ✅ **Complete system initialization** - Run onboarding to create admin account
 2. ✅ **Create a website** - Add website in Dashboard → Settings → Websites
-3. ✅ **Get website ID** - Note the ID assigned to your website (e.g., 1, 2, 3...)
-4. ✅ **Embed widget code** - Use the correct website ID in the embed code
+3. ✅ **Get the widget key** - Copy the embed snippet from the dashboard (it includes a unique key)
+4. ✅ **Embed widget code** - Paste the loader snippet on your site (recommended)
 
 **The widget will NOT load if:**
 - ❌ System is not initialized
-- ❌ Website ID doesn't exist in database
+- ❌ Widget key doesn't exist in database
 - ❌ Backend is not running
-- ❌ Website ID is incorrect
+- ❌ Widget key is incorrect
+- ❌ Domain lock fails (widget key used on a different domain)
 
 ## Features
 
@@ -68,94 +69,116 @@ The chat widget provides a complete chat interface that connects directly to the
    - Name: "My Website"
    - Domain: "example.com"
    - AI Instructions: (optional)
-5. Save and note the **Website ID** (e.g., ID: 1)
+5. Save and copy the **Widget Snippet** (includes the widget key)
 
 ### Step 3: Embed Widget
 
 Add this code to your website's HTML (usually before `</body>`):
 
 ```html
-<!-- Widget Styles -->
-<link rel="stylesheet" href="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.css">
-
-<!-- Widget Script -->
-<script 
-  src="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.js" 
-  data-website-id="1"
-  data-ws-url="<YOUR_WS_BASE_URL>"
-  data-api-url="<YOUR_BACKEND_BASE_URL>">
+<!-- AI ChatAssist Live Chat script -->
+<script type="text/javascript">
+  var _aichatassist = _aichatassist || {};
+  _aichatassist.key = "YOUR_WIDGET_KEY";
+  window.aichatassist||(function(d) {
+    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
+    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+    c.type='text/javascript';c.charset='utf-8';c.async=true;
+    c.referrerPolicy='origin';
+    c.src='https://your-backend.com/widget/loader.js?key=' + _aichatassist.key;
+    s.parentNode.insertBefore(c,s);
+  })(document);
 </script>
 ```
 
-**Replace `data-website-id="1"` with your actual website ID!**
+**Replace `YOUR_WIDGET_KEY` with the key shown in your dashboard snippet.**
 
 ## Installation
 
-### Method 1: Backend Static Files (Recommended)
+### Method 1: Loader Snippet (Recommended)
 
 When backend is running, it serves widget files at `/widget/` endpoint:
 
 ```html
-<!-- Widget Styles -->
-<link rel="stylesheet" href="http://your-backend.com/widget/chat-widget.css">
-
-<!-- Widget Script -->
-<script 
-  src="http://your-backend.com/widget/chat-widget.js" 
-  data-website-id="1"
-  data-ws-url="ws://your-backend.com"
-  data-api-url="http://your-backend.com">
+<script type="text/javascript">
+  var _aichatassist = _aichatassist || {};
+  _aichatassist.key = "YOUR_WIDGET_KEY";
+  window.aichatassist||(function(d) {
+    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
+    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+    c.type='text/javascript';c.charset='utf-8';c.async=true;
+    c.referrerPolicy='origin';
+    c.src='https://your-backend.com/widget/loader.js?key=' + _aichatassist.key;
+    s.parentNode.insertBefore(c,s);
+  })(document);
 </script>
 ```
 
-### Method 2: Direct File Serving
+### Method 2: Direct File Serving (Advanced)
 
 Host the files on your CDN or static server:
 
 ```html
 <link rel="stylesheet" href="https://cdn.example.com/chat-widget.css">
-<script 
-  src="https://cdn.example.com/chat-widget.js" 
-  data-website-id="1"
-  data-ws-url="ws://your-backend.com"
-  data-api-url="http://your-backend.com">
+<script>
+  window._aichatassist = {
+    websiteId: 1,
+    widgetKey: "YOUR_WIDGET_KEY",
+    apiUrl: "https://your-backend.com",
+    wsUrl: "wss://your-backend.com",
+  };
 </script>
+<script src="https://cdn.example.com/chat-widget.js"></script>
 ```
 
 ## Configuration
 
-### Required Attributes
+### Required Configuration
 
-| Attribute | Description | Example |
-|-----------|-------------|---------|
-| `data-website-id` | Your website ID from backend | `"1"` |
+The recommended loader snippet only needs the widget key (`YOUR_WIDGET_KEY`).
+
+If you directly host `chat-widget.js`, you must provide a global config object:
+
+- `window._aichatassist.websiteId`
+- `window._aichatassist.widgetKey`
+- `window._aichatassist.apiUrl`
+- `window._aichatassist.wsUrl`
 
 ### Optional Attributes
 
-| Attribute | Description | Default |
-|-----------|-------------|---------|
-| `data-ws-url` | WebSocket server URL | `"ws://your-backend.example.com"` |
-| `data-api-url` | REST API base URL | `"https://your-backend.example.com"` |
+If you use the loader snippet, no additional attributes are required.
 
 ### Example Configurations
 
-**Development:**
+**Development (loader):**
 ```html
-<script 
-  src="<YOUR_BACKEND_BASE_URL>/widget/chat-widget.js" 
-  data-website-id="1"
-  data-ws-url="<YOUR_WS_BASE_URL>"
-  data-api-url="<YOUR_BACKEND_BASE_URL>">
+<script type="text/javascript">
+  var _aichatassist = _aichatassist || {};
+  _aichatassist.key = "YOUR_WIDGET_KEY";
+  window.aichatassist||(function(d) {
+    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
+    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+    c.type='text/javascript';c.charset='utf-8';c.async=true;
+    c.referrerPolicy='origin';
+    c.src='http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
+    s.parentNode.insertBefore(c,s);
+  })(document);
 </script>
 ```
 
-**Production:**
+**Production (loader):**
 ```html
-<script 
-  src="https://chat.example.com/widget/chat-widget.js" 
-  data-website-id="42"
-  data-ws-url="wss://chat.example.com"
-  data-api-url="https://chat.example.com">
+<script type="text/javascript">
+  var _aichatassist = _aichatassist || {};
+  _aichatassist.key = "YOUR_WIDGET_KEY";
+  window.aichatassist||(function(d) {
+    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
+    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
+    c.type='text/javascript';c.charset='utf-8';c.async=true;
+    c.referrerPolicy='origin';
+    c.src='https://api.example.com/widget/loader.js?key=' + _aichatassist.key;
+    s.parentNode.insertBefore(c,s);
+  })(document);
 </script>
 ```
 

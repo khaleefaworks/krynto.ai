@@ -122,7 +122,7 @@ def update_website(
 ):
     """
     Update a website.
-    Requires admin access (FULL_ACCESS role).
+    Requires admin access (SYSTEM_MANAGER or MANAGER role).
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
@@ -156,7 +156,7 @@ def delete_website(
 ):
     """
     Delete a website.
-    Requires admin access (FULL_ACCESS role).
+    Requires admin access (SYSTEM_MANAGER or MANAGER role).
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:

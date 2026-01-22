@@ -304,22 +304,22 @@ def update_user_role(
     # Managers cannot create administrators or modify administrator roles
     if current_admin.role == UserRole.MANAGER:
         # Cannot change any user TO administrator
-        if payload.role == UserRole.FULL_ACCESS:
+        if payload.role == UserRole.SYSTEM_MANAGER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators can grant administrator role"
             )
         # Cannot modify existing administrators
-        if user.role == UserRole.FULL_ACCESS:
+        if user.role == UserRole.SYSTEM_MANAGER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators can modify administrator accounts"
             )
     
     # Prevent removing the last administrator
-    if user.role == UserRole.FULL_ACCESS and payload.role != UserRole.FULL_ACCESS:
+    if user.role == UserRole.SYSTEM_MANAGER and payload.role != UserRole.SYSTEM_MANAGER:
         admin_count = db.query(User).filter(
-            User.role == UserRole.FULL_ACCESS,
+            User.role == UserRole.SYSTEM_MANAGER,
             User.is_active == True
         ).count()
         if admin_count <= 1:
@@ -375,14 +375,14 @@ def delete_user(
         )
     
     # Managers cannot delete administrators
-    if current_admin.role == UserRole.MANAGER and user.role == UserRole.FULL_ACCESS:
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can delete administrator accounts"
         )
     
     # Prevent deleting the last administrator
-    if user.role == UserRole.FULL_ACCESS:
+    if user.role == UserRole.SYSTEM_MANAGER:
         admin_count = db.query(User).filter(
             User.role == user.role,
             User.is_active == True

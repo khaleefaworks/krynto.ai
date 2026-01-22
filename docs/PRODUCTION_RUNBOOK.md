@@ -25,7 +25,7 @@ Set these in the backend environment (systemd unit / supervisor / container env)
 Recommended:
 - `PUBLIC_BASE_URL=https://api.example.com` (used for widget snippet generation)
 
-Optional (recommended if running multiple workers/instances):
+Required when running multiple workers/instances:
 - `REDIS_URL=redis://localhost:6379/0`
 
 Optional (browser push notifications - Web Push / VAPID):
@@ -35,6 +35,7 @@ Optional (browser push notifications - Web Push / VAPID):
 
 Notes:
 - In production, the backend will refuse to start if `SECRET_KEY` is empty or if `CORS_ALLOWED_ORIGINS` is empty.
+- The backend will refuse to start with multiple workers unless `REDIS_URL` is set.
 - Do **not** include `*` in CORS origins when `allow_credentials=true`.
 
 ## One-time Setup

@@ -323,7 +323,7 @@ MIT License - See LICENSE file for details
 
 ### Widget Not Loading
 
-- Verify script tag has correct `data-website-id`
+- Verify the widget loader snippet uses the correct widget key
 - Check browser console for CORS errors
 - Ensure backend serves static files at `/widget/`
 

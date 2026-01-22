@@ -50,7 +50,9 @@ export default function WebsiteDetail() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [snippetCopied, setSnippetCopied] = useState(false)
+  const [widgetKeyCopied, setWidgetKeyCopied] = useState(false)
   const [widgetSnippet, setWidgetSnippet] = useState('')
+  const [widgetKey, setWidgetKey] = useState<string | null>(null)
 
   // Form data
   const [formData, setFormData] = useState({
@@ -100,6 +102,7 @@ export default function WebsiteDetail() {
       setLoading(true)
       setError(null)
       const data = await apiRequest<Website>(`/websites/${id}`)
+      setWidgetKey(data.widget_key || null)
       const automations = data.widget_config?.automations || {}
       const defaultWelcome = data.widget_config?.welcome_message || 'Hi! How can we help you today?'
       setFormData({
@@ -166,6 +169,13 @@ export default function WebsiteDetail() {
     navigator.clipboard.writeText(widgetSnippet)
     setSnippetCopied(true)
     setTimeout(() => setSnippetCopied(false), 2000)
+  }
+
+  const copyWidgetKey = () => {
+    if (!widgetKey) return
+    navigator.clipboard.writeText(widgetKey)
+    setWidgetKeyCopied(true)
+    setTimeout(() => setWidgetKeyCopied(false), 2000)
   }
 
   const handleDelete = async () => {
@@ -331,6 +341,40 @@ export default function WebsiteDetail() {
               <CardDescription>Copy and paste this code into your website before the closing &lt;/body&gt; tag</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Website ID (internal)</p>
+                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100">{websiteId ?? '—'}</p>
+                </div>
+                <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Widget Key (public)</p>
+                    <Button
+                      type="button"
+                      onClick={copyWidgetKey}
+                      variant="outline"
+                      size="sm"
+                      disabled={!widgetKey}
+                      className="h-7 px-2"
+                    >
+                      {widgetKeyCopied ? (
+                        <>
+                          <Check className="w-3 h-3 mr-1" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3 mr-1" />
+                          Copy
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">
+                    {widgetKey || '—'}
+                  </p>
+                </div>
+              </div>
               <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 relative">
                 <Button
                   type="button"

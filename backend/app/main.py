@@ -50,6 +50,11 @@ configured_workers = detect_configured_worker_count(os.environ)
 if configured_workers is not None:
     logger.info("worker_config", configured_workers=configured_workers)
     if configured_workers > 1 and not realtime_bus.enabled:
+        if settings.is_production():
+            raise RuntimeError(
+                "REDIS_URL must be set in production when running multiple workers. "
+                "WebSocket delivery requires Redis Pub/Sub for cross-worker fanout."
+            )
         logger.warning(
             "multi_worker_without_realtime_bus",
             configured_workers=configured_workers,
