@@ -197,7 +197,7 @@ def get_resolved_conversations(
                 "browser_info": conv.browser_info,
                 "visit_count": int(conv.visit_count or 0) if hasattr(conv, "visit_count") else None,
                 "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
-                "status": conv.status,
+                "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
                 "message_count": int(message_count or 0),
                 "unread_count": 0,

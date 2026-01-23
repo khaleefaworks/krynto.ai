@@ -483,30 +483,40 @@ export default function ConversationsView() {
         setLastProcessedChatEventsVersion,
     ])
 
+    const getChatById = useCallback((chatId: number) => {
+        const fromActive = activeChats.find((c) => c.id === chatId)
+        if (fromActive) return fromActive
+        const fromResolved = resolvedChats.find((c: any) => c.id === chatId)
+        return fromResolved || null
+    }, [activeChats, resolvedChats])
+
+    const isResolvedSelected = Boolean(conversation && (conversation as any).status === 'resolved')
+
     // Ensure conversation details populate once chats load (handles refresh on deep links)
     useEffect(() => {
-        if (selectedChat && activeChats.length) {
-            const chatData = activeChats.find(c => c.id === selectedChat)
+        if (selectedChat) {
+            const chatData = getChatById(selectedChat)
             if (chatData) {
                 setConversation(chatData as any)
             }
         }
-    }, [selectedChat, activeChats])
+    }, [selectedChat, getChatById])
 
     // Handle conversation selection from URL
     useEffect(() => {
         if (!sessionId) return
 
         const matched = activeChats.find((c) => c.session_id === sessionId)
+            || resolvedChats.find((c: any) => c.session_id === sessionId)
         if (matched && matched.id !== selectedChat) {
             openChat(matched.id)
         }
-    }, [sessionId, activeChats, selectedChat, openChat])
+    }, [sessionId, activeChats, resolvedChats, selectedChat, openChat])
 
     // Load chat when selected
     useEffect(() => {
         if (selectedChat) {
-            const chatData = activeChats.find((c) => c.id === selectedChat)
+            const chatData = getChatById(selectedChat)
             const selectedSessionId = chatData?.session_id
             if (selectedSessionId && selectedSessionId !== sessionId) {
                 navigate(`/dashboard/chats/${selectedSessionId}`)
@@ -816,7 +826,7 @@ export default function ConversationsView() {
 
             // Do NOT auto-join on selection.
             // Joining happens only when the agent actually starts responding (send action).
-            const chatData = activeChats.find(c => c.id === chatId)
+            const chatData = getChatById(chatId)
             joinedRef.current = chatData?.assigned_agent_id === user?.id
         } catch (error) {
             console.error("Failed to load chat:", error)
@@ -932,13 +942,14 @@ export default function ConversationsView() {
 
     const handleSendMessage = async () => {
         if (!input.trim() || !selectedChat) return
+        if (isResolvedSelected) return
 
         const messageContent = input.trim()
         setInput('')
         stopAgentTyping(selectedChat)
 
         try {
-            const chatData = activeChats.find(c => c.id === selectedChat)
+            const chatData = getChatById(selectedChat)
             const alreadyJoinedByMe = chatData?.assigned_agent_id === user?.id
 
             if (!joinedRef.current && !alreadyJoinedByMe) {
@@ -985,6 +996,7 @@ export default function ConversationsView() {
         }
 
         if (!selectedChat || !content) return
+        if (isResolvedSelected) return
 
         try {
             const takeoverResult: any = await takeoverConversation(selectedChat)
@@ -1429,16 +1441,18 @@ export default function ConversationsView() {
 
                             {/* Header Actions */}
                             <div className="flex items-center gap-2 flex-shrink-0">
-                                <Button
-                                    variant="default"
-                                    size="sm"
-                                    onClick={handleResolve}
-                                    disabled={resolving}
-                                    className="bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                    <Check className="h-4 w-4 mr-1" />
-                                    {resolving ? "Resolving..." : "Resolve"}
-                                </Button>
+                                {!isResolvedSelected && (
+                                    <Button
+                                        variant="default"
+                                        size="sm"
+                                        onClick={handleResolve}
+                                        disabled={resolving}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        <Check className="h-4 w-4 mr-1" />
+                                        {resolving ? "Resolving..." : "Resolve"}
+                                    </Button>
+                                )}
                             </div>
                         </div>
 
@@ -1845,16 +1859,22 @@ export default function ConversationsView() {
                                 }}
                                 placeholder="Reply to live chat"
                                 className="flex-1 dark:bg-gray-700 dark:border-gray-600 min-h-[44px]"
+                                disabled={isResolvedSelected}
                             />
 
                             <Button
                                 onClick={handleSendMessage}
-                                disabled={!input.trim()}
+                                disabled={!input.trim() || isResolvedSelected}
                                 className="bg-blue-600 hover:bg-blue-700"
                             >
                                 <Send className="h-4 w-4" />
                             </Button>
                         </div>
+                        {isResolvedSelected && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                This conversation is resolved and read-only.
+                            </p>
+                        )}
                     </div>
                 </div>
             ) : (
