@@ -61,6 +61,36 @@ def message_presentation(
     return sender_type, event_type, sender_name, sender_avatar_url
 
 
+def resolve_actor_kind(
+    *, sender_type: Optional[str], sender: Optional[str], event_type: Optional[str]
+) -> Tuple[str, str]:
+    """Derive actor/kind with backward compatibility.
+
+    actor: visitor | agent | bot | ai | system
+    kind: chat | event
+    """
+
+    normalized_sender_type = (sender_type or "").lower().strip()
+    normalized_sender = (sender or "").lower().strip()
+    normalized_event = (event_type or "").lower().strip()
+
+    if normalized_sender_type == "visitor":
+        return "visitor", "chat"
+
+    if normalized_sender_type == "agent":
+        return "agent", "chat"
+
+    if normalized_sender_type == "system":
+        # Bot-like system messages are treated as chat messages authored by bot.
+        if normalized_sender == "bot" or normalized_event == "bot" or normalized_event.startswith("automation"):
+            return "bot", "chat"
+        # Default system events are timeline items.
+        return "system", "event"
+
+    # Fallback: treat as system event
+    return "system", "event"
+
+
 def serialize_message(db, msg: Any) -> Dict[str, Any]:
     """Canonical message DTO shared by REST + WS.
 
@@ -70,6 +100,12 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
 
     sender_type, event_type, sender_name, sender_avatar_url = message_presentation(
         db, msg
+    )
+
+    actor, kind = resolve_actor_kind(
+        sender_type=sender_type,
+        sender=getattr(msg, "sender", None),
+        event_type=event_type,
     )
 
     created_at = getattr(msg, "created_at", None)
@@ -89,6 +125,8 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         "sender": getattr(msg, "sender", None),
         "sender_type": sender_type,
         "event_type": event_type,
+        "actor": actor,
+        "kind": kind,
         "sender_name": sender_name,
         "sender_avatar_url": sender_avatar_url,
         "content": getattr(msg, "content", None),

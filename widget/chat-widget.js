@@ -316,18 +316,25 @@
       if (!container) return;
       container.innerHTML = '';
       data.messages.forEach(m => {
-        const sender = m.sender_type || m.sender || 'system';
+        const senderType = m.sender_type || m.sender || 'system';
+        const actor = m.actor || senderType;
+        const kind = m.kind || (actor === 'system' ? 'event' : 'chat');
         const eventType = m.event_type || null;
-        if (sender === 'visitor') appendMessage('visitor', m.content, m.created_at, null, m.id);
-        else if (sender === 'agent') {
+
+        if (actor === 'visitor') {
+          appendMessage('visitor', m.content, m.created_at, null, m.id);
+        } else if (actor === 'agent') {
           if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
           if (m.sender_name) updateAgentName(m.sender_name);
           appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
-        } else if (sender === 'system') {
+        } else if (actor === 'bot' || (actor === 'system' && kind === 'chat') || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))) {
+          appendMessage('ai', m.content, m.created_at, null, m.id);
+        } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
-          else if (eventType && (eventType.startsWith('automation') || eventType === 'bot')) appendMessage('ai', m.content, m.created_at, null, m.id);
           else showSystemMessage(m.content);
-        } else appendMessage('ai', m.content, m.created_at, null, m.id);
+        } else {
+          appendMessage('ai', m.content, m.created_at, null, m.id);
+        }
       });
       smartScroll();
       return;

@@ -1559,11 +1559,15 @@ export default function ConversationsView() {
                                     .sort(compareMessagesChronologically)
                                     .map((msg, index, sortedMessages) => {
                                         const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
+                                        const actor = (msg as any).actor || senderType
+                                        const kind = (msg as any).kind || (actor === 'system' ? 'event' : 'chat')
                                         const eventType = (msg as any).event_type || null
-                                        const isSystem = senderType === 'system'
-                                        const isJoin = isSystem && eventType === 'agent_join'
-                                        const isBot = isSystem && !isJoin
-                                        const isAgent = senderType === 'agent'
+                                        const isSystemEvent = actor === 'system' && kind === 'event'
+                                        const isJoin = isSystemEvent && eventType === 'agent_join'
+                                        const isBot = actor === 'bot'
+                                            || (actor === 'system' && kind === 'chat')
+                                            || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))
+                                        const isAgent = actor === 'agent' || senderType === 'agent'
                                         const msgTimestamp = (msg as any).timestamp || msg.created_at
                                         const showTimestamp = index === 0 ||
                                             (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
@@ -1599,8 +1603,8 @@ export default function ConversationsView() {
                                                     </div>
                                                 )}
 
-                                                {/* Agent Joined */}
-                                                {isJoin ? (
+                                                {/* System Events */}
+                                                {isSystemEvent ? (
                                                     <div className="flex justify-center">
                                                         <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
                                                             {msg.content}

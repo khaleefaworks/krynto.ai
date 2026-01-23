@@ -9,6 +9,8 @@ interface Message {
   id?: number
   sender?: string
   sender_type?: "visitor" | "agent" | "system"
+  actor?: "visitor" | "agent" | "bot" | "ai" | "system"
+  kind?: "chat" | "event"
   event_type?: string | null
   content: string
   created_at?: string
@@ -77,13 +79,18 @@ export default function ClosedChatView() {
             
             {messages.map((m, i) => (
               (() => {
-                const senderType = (m as any).sender_type || m.sender
+                const senderType = (m as any).sender_type || m.sender || "system"
+                const actor = (m as any).actor || senderType
+                const kind = (m as any).kind || (actor === "system" ? "event" : "chat")
                 const eventType = (m as any).event_type || null
-                const isJoin = senderType === "system" && eventType === "agent_join"
-                const isBot = senderType === "system" && !isJoin
-                const isAgent = senderType === "agent"
+                const isSystemEvent = actor === "system" && kind === "event"
+                const isJoin = isSystemEvent && eventType === "agent_join"
+                const isBot = actor === "bot"
+                  || (actor === "system" && kind === "chat")
+                  || (senderType === "system" && (eventType === "bot" || (eventType && eventType.startsWith("automation"))))
+                const isAgent = actor === "agent" || senderType === "agent"
 
-                if (isJoin) {
+                if (isSystemEvent) {
                   return (
                     <div key={i} className="flex justify-center">
                       <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">

@@ -171,7 +171,7 @@ class ConversationService:
     
 
     
-    def close_conversation(self, conversation_id: int) -> bool:
+    def close_conversation(self, conversation_id: int) -> Optional[Message]:
         """
         Resolve a conversation (OPEN → RESOLVED).
         
@@ -179,36 +179,50 @@ class ConversationService:
             conversation_id: Conversation to resolve
             
         Returns:
-            True if transition successful, False otherwise
+            Resolved system message if successful, None otherwise
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         
         if not conversation:
             logger.error("resolve_failed_conversation_not_found", conversation_id=conversation_id)
-            return False
+            return None
         
         if conversation.status == ConversationStatus.RESOLVED:
             logger.warning("conversation_already_resolved", conversation_id=conversation_id)
-            return True  # Already resolved is success
+            try:
+                from app.repos import messages as messages_repo
+
+                existing = messages_repo.get_last_event_message(
+                    self.db, conversation_id, "conversation_resolved"
+                )
+                if existing:
+                    return existing
+            except Exception:
+                pass
+
+            return self.add_system_message(
+                conversation_id,
+                "This conversation has been resolved.",
+                event_type="conversation_resolved",
+            )
         
         # Update status
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
         self.db.commit()
         
-        # Add system message
-        self.add_system_message(
-            conversation_id,
-            "This conversation has been resolved."
-        )
-        
         logger.info(
             "conversation_resolved",
             conversation_id=conversation_id,
             previous_status=old_status.value
         )
-        
-        return True
+
+        # Add system message
+        return self.add_system_message(
+            conversation_id,
+            "This conversation has been resolved.",
+            event_type="conversation_resolved",
+        )
     
     def claim_conversation(
         self,

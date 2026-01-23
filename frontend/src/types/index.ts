@@ -32,6 +32,10 @@ export interface Message {
   sender?: "visitor" | "ai" | "agent" | string
   // Canonical sender type from backend.
   sender_type?: "visitor" | "agent" | "system"
+  // Actor taxonomy (new)
+  actor?: "visitor" | "agent" | "bot" | "ai" | "system"
+  // Kind taxonomy (new)
+  kind?: "chat" | "event"
   // Subtype for system messages (e.g. automation_welcome, agent_join)
   event_type?: string | null
   sender_name?: string | null

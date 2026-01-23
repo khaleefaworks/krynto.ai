@@ -520,17 +520,54 @@ class ConversationOrchestrator:
 
     async def close_conversation(self, *, conversation_id: int) -> dict:
         """Close a conversation and emit final system message."""
-        success = self.conversation_service.close_conversation(conversation_id)
-        if not success:
+        saved = self.conversation_service.close_conversation(conversation_id)
+        if not saved:
             return {"error": "Conversation not found"}
 
         await ChatService.send_to_visitor(
             conversation_id,
             {
                 "type": "system",
-                "message": "This conversation has been closed.",
+                "message": saved.content,
+                "message_obj": serialize_message(self.db, saved),
             }
         )
+
+        # Optional: send configurable closing bot message (per website).
+        try:
+            from app.repos import messages as messages_repo
+            from app.models.website import Website
+
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+            website_id = int(conversation.website_id) if conversation else None
+            if website_id:
+                website = self.db.query(Website).filter_by(id=website_id).first()
+                widget_cfg = website.widget_config if website and isinstance(website.widget_config, dict) else {}
+                automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
+
+                closing_enabled = automations_cfg.get("closing_enabled")
+                closing_message = automations_cfg.get("closing_message")
+
+                if closing_enabled and isinstance(closing_message, str) and closing_message.strip():
+                    existing = messages_repo.get_last_event_message(
+                        self.db, conversation_id, "bot_closing"
+                    )
+                    if not existing:
+                        saved_bot = self.conversation_service.add_bot_message(
+                            conversation_id,
+                            closing_message.strip(),
+                            event_type="bot_closing",
+                        )
+                        await ChatService.send_to_visitor(
+                            conversation_id,
+                            {
+                                "type": "ai",
+                                "message": closing_message.strip(),
+                                "message_obj": serialize_message(self.db, saved_bot),
+                            }
+                        )
+        except Exception:
+            pass
 
         # Notify dashboards to remove/refresh the closed conversation.
         try:

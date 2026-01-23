@@ -196,6 +196,11 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
         welcome_cooldown_hours = int(welcome_cooldown_hours) if welcome_cooldown_hours is not None else 24
     except Exception:
         welcome_cooldown_hours = 24
+
+    closing_enabled = automations.get("closing_enabled")
+    if closing_enabled is None:
+        closing_enabled = False
+    closing_message = automations.get("closing_message") or "Thanks! This conversation is now closed."
     
     return {
         "theme": config.get("theme", "dark"),
@@ -214,6 +219,8 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
             "welcome_enabled": bool(welcome_enabled),
             "welcome_message": str(welcome_message) if welcome_message is not None else "",
             "welcome_cooldown_hours": welcome_cooldown_hours,
+            "closing_enabled": bool(closing_enabled),
+            "closing_message": str(closing_message) if closing_message is not None else "",
         },
     }
 
