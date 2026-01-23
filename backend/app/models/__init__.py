@@ -14,6 +14,7 @@ from app.models.message_shortcut import MessageShortcut
 from app.models.conversation_read import ConversationRead
 from app.models.push_subscription import PushSubscription
 from app.models.tag import Tag
+from app.models.automation import Automation
 
 __all__ = [
     "Website",
@@ -33,4 +34,5 @@ __all__ = [
     "ConversationRead",
     "PushSubscription",
     "Tag",
+    "Automation",
 ]

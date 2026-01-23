@@ -27,6 +27,7 @@ from app.api.push import router as push_router
 from app.api.metrics import router as metrics_router
 from app.api.tags import router as tags_router
 from app.api.attachments import router as attachments_router
+from app.api.automations import router as automations_router
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
@@ -149,6 +150,7 @@ app.include_router(push_router)
 app.include_router(metrics_router)
 app.include_router(tags_router)
 app.include_router(attachments_router)
+app.include_router(automations_router)
 
 # Serve widget files statically
 project_root = Path(__file__).resolve().parents[2]

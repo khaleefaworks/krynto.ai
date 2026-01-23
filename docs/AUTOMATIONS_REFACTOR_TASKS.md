@@ -220,16 +220,19 @@ Acceptance:
 ### Phase 3 — Automations Engine (MVP)
 Why: move hardcoded bot messages into per-website rules.
 
-- [ ] Add tables for automations (per website): triggers, conditions, actions.
+- [x] Add tables for automations (per website): triggers, conditions, actions.
 - [ ] Implement MVP triggers:
   - visitor_connected
-  - no_agent_assigned_for(duration)
-  - website_offline_first_message
-  - conversation_resolved
+  - no_agent_assigned_for(duration) (wired)
+  - website_offline_first_message (wired)
+  - conversation_resolved (wired)
 - [ ] Implement MVP actions:
   - send_bot_chat_message
   - emit_system_event
 - [ ] Add caps/cooldowns to prevent spam.
+
+- [x] Add minimal Automations API (list/create/update/delete).
+- [x] Seed default automations for existing websites (waiting/offline/closing disabled).
 
 Acceptance:
 - Existing welcome/wait/offline flows are reproduced via rules.

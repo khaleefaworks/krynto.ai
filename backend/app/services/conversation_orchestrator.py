@@ -16,6 +16,7 @@ import asyncio
 from sqlalchemy.orm import Session
 
 from app.services.conversation_service import ConversationService
+from app.services.automation_service import AutomationService
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.models.user import User
@@ -32,13 +33,13 @@ logger = get_logger(__name__)
 _waiting_bot_message_scheduled: set[int] = set()
 
 
-async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int) -> None:
+async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
     """After 60s, if still unassigned, send a single bot message to the visitor."""
     try:
         from app.core.database import SessionLocal
         from app.models.conversation import Conversation
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(max(1, int(delay_seconds or 60)))
 
         db = SessionLocal()
         try:
@@ -52,21 +53,45 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             # Only send if visitor is connected.
             # Persist as a bot message so both widget + agent dashboard show it.
             from app.services.conversation_service import ConversationService
+            from app.services.automation_service import AutomationService
+            from app.repos import messages as messages_repo
 
-            saved = ConversationService(db).add_bot_message(
-                conversation_id,
-                "Thanks! An agent will be with you shortly.",
-                event_type="bot",
+            automation_service = AutomationService(db)
+            actions = automation_service.get_bot_message_actions(
+                website_id=website_id,
+                trigger="no_agent_assigned_for",
             )
 
-            await ChatService.send_to_visitor(
-                conversation_id,
-                {
-                    "type": "ai",
-                    "message": "Thanks! An agent will be with you shortly.",
-                    "message_obj": serialize_message(db, saved),
-                },
-            )
+            if not actions:
+                actions = [
+                    {
+                        "message": "Thanks! An agent will be with you shortly.",
+                        "event_type": "bot_waiting",
+                    }
+                ]
+
+            for action in actions:
+                event_type = action.get("event_type") or "bot_waiting"
+                existing = messages_repo.get_last_event_message(
+                    db, conversation_id, event_type
+                )
+                if existing:
+                    continue
+
+                saved = ConversationService(db).add_bot_message(
+                    conversation_id,
+                    action["message"],
+                    event_type=event_type,
+                )
+
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {
+                        "type": "ai",
+                        "message": action["message"],
+                        "message_obj": serialize_message(db, saved),
+                    },
+                )
         finally:
             db.close()
     except Exception as e:
@@ -251,20 +276,43 @@ class ConversationOrchestrator:
         # Send a single bot prompt (no repeats).
         if not is_website_online(website_id):
             if prior_message_count == 0:
-                # Persist the offline prompt as a bot message so it appears in thread history.
-                saved = self.conversation_service.add_bot_message(
-                    conversation.id,
-                    "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                    event_type="bot",
+                automation_service = AutomationService(self.db)
+                from app.repos import messages as messages_repo
+
+                actions = automation_service.get_bot_message_actions(
+                    website_id=website_id,
+                    trigger="website_offline_first_message",
                 )
-                await ChatService.send_to_visitor(
-                    conversation.id,
-                    {
-                        "type": "ai",
-                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                        "message_obj": serialize_message(self.db, saved),
-                    },
-                )
+
+                if not actions:
+                    actions = [
+                        {
+                            "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                            "event_type": "bot_offline",
+                        }
+                    ]
+
+                for action in actions:
+                    event_type = action.get("event_type") or "bot_offline"
+                    existing = messages_repo.get_last_event_message(
+                        self.db, conversation.id, event_type
+                    )
+                    if existing:
+                        continue
+
+                    saved = self.conversation_service.add_bot_message(
+                        conversation.id,
+                        action["message"],
+                        event_type=event_type,
+                    )
+                    await ChatService.send_to_visitor(
+                        conversation.id,
+                        {
+                            "type": "ai",
+                            "message": action["message"],
+                            "message_obj": serialize_message(self.db, saved),
+                        },
+                    )
             return None
 
         # Someone is online.
@@ -275,10 +323,17 @@ class ConversationOrchestrator:
         # Schedule a single waiting bot message after 60s if still unassigned.
         if conversation.id not in _waiting_bot_message_scheduled:
             _waiting_bot_message_scheduled.add(conversation.id)
+            automation_service = AutomationService(self.db)
+            delay_seconds = automation_service.get_delay_seconds(
+                website_id=website_id,
+                trigger="no_agent_assigned_for",
+                default_seconds=60,
+            )
             asyncio.create_task(
                 _send_delayed_waiting_message_if_unassigned(
                     conversation_id=conversation.id,
                     website_id=website_id,
+                    delay_seconds=delay_seconds,
                 )
             )
 
@@ -545,27 +600,45 @@ class ConversationOrchestrator:
                 widget_cfg = website.widget_config if website and isinstance(website.widget_config, dict) else {}
                 automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
 
-                closing_enabled = automations_cfg.get("closing_enabled")
-                closing_message = automations_cfg.get("closing_message")
+                automation_service = AutomationService(self.db)
+                actions = automation_service.get_bot_message_actions(
+                    website_id=website_id,
+                    trigger="conversation_resolved",
+                )
 
-                if closing_enabled and isinstance(closing_message, str) and closing_message.strip():
-                    existing = messages_repo.get_last_event_message(
-                        self.db, conversation_id, "bot_closing"
-                    )
-                    if not existing:
-                        saved_bot = self.conversation_service.add_bot_message(
-                            conversation_id,
-                            closing_message.strip(),
-                            event_type="bot_closing",
-                        )
-                        await ChatService.send_to_visitor(
-                            conversation_id,
+                if not actions:
+                    # Backwards-compat: fall back to widget_config automation settings.
+                    closing_enabled = automations_cfg.get("closing_enabled")
+                    closing_message = automations_cfg.get("closing_message")
+                    if closing_enabled and isinstance(closing_message, str) and closing_message.strip():
+                        actions = [
                             {
-                                "type": "ai",
                                 "message": closing_message.strip(),
-                                "message_obj": serialize_message(self.db, saved_bot),
+                                "event_type": "bot_closing",
                             }
-                        )
+                        ]
+
+                for action in actions:
+                    event_type = action.get("event_type") or "bot_closing"
+                    existing = messages_repo.get_last_event_message(
+                        self.db, conversation_id, event_type
+                    )
+                    if existing:
+                        continue
+
+                    saved_bot = self.conversation_service.add_bot_message(
+                        conversation_id,
+                        action["message"],
+                        event_type=event_type,
+                    )
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "ai",
+                            "message": action["message"],
+                            "message_obj": serialize_message(self.db, saved_bot),
+                        }
+                    )
         except Exception:
             pass
 

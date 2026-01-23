@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
+import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 
 interface Website {
   id: number
@@ -36,7 +37,7 @@ interface Website {
   created_at: string
 }
 
-type TabType = 'installation' | 'settings' | 'widget'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations'
 
 export default function WebsiteDetail() {
   const { id } = useParams<{ id: string }>()
@@ -53,6 +54,10 @@ export default function WebsiteDetail() {
   const [widgetKeyCopied, setWidgetKeyCopied] = useState(false)
   const [widgetSnippet, setWidgetSnippet] = useState('')
   const [widgetKey, setWidgetKey] = useState<string | null>(null)
+  const [automations, setAutomations] = useState<Automation[]>([])
+  const [automationsLoading, setAutomationsLoading] = useState(false)
+  const [automationsError, setAutomationsError] = useState<string | null>(null)
+  const [savingAutomationId, setSavingAutomationId] = useState<number | null>(null)
 
   // Form data
   const [formData, setFormData] = useState({
@@ -84,6 +89,67 @@ export default function WebsiteDetail() {
       loadSnippet()
     }
   }, [id, isNew])
+
+  useEffect(() => {
+    if (!websiteId) return
+    if (activeTab !== 'automations') return
+    loadAutomations()
+  }, [activeTab, websiteId])
+
+  const loadAutomations = async () => {
+    if (!websiteId) return
+    try {
+      setAutomationsLoading(true)
+      setAutomationsError(null)
+      const data = await automationsApi.list(websiteId)
+      setAutomations(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to load automations')
+    } finally {
+      setAutomationsLoading(false)
+    }
+  }
+
+  const updateAutomationLocal = (id: number, updates: Partial<Automation>) => {
+    setAutomations((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)))
+  }
+
+  const extractPrimaryAction = (automation: Automation): AutomationAction | null => {
+    const actions = automation.actions
+    if (Array.isArray(actions)) {
+      return (actions.find((a) => a?.type === 'send_bot_message') || null) as AutomationAction | null
+    }
+    if (actions && typeof actions === 'object' && (actions as any).type === 'send_bot_message') {
+      return actions as AutomationAction
+    }
+    return null
+  }
+
+  const updateAutomationAction = (automation: Automation, nextAction: AutomationAction) => {
+    const actions = automation.actions
+    if (Array.isArray(actions)) {
+      const next = actions.map((a) => (a?.type === 'send_bot_message' ? nextAction : a))
+      return next
+    }
+    return nextAction
+  }
+
+  const saveAutomation = async (automation: Automation) => {
+    try {
+      setSavingAutomationId(automation.id)
+      await automationsApi.update(automation.id, {
+        name: automation.name,
+        trigger: automation.trigger,
+        enabled: automation.enabled,
+        conditions: automation.conditions || {},
+        actions: automation.actions || {},
+      })
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to save automation')
+    } finally {
+      setSavingAutomationId(null)
+    }
+  }
 
 
 
@@ -325,6 +391,16 @@ export default function WebsiteDetail() {
               <Palette className="w-4 h-4 inline-block mr-2 mb-1" />
               Widget Customization
             </button>
+            <button
+              onClick={() => setActiveTab('automations')}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'automations'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+            >
+              <Bot className="w-4 h-4 inline-block mr-2 mb-1" />
+              Automations
+            </button>
           </nav>
         </div>
       )}
@@ -408,6 +484,107 @@ export default function WebsiteDetail() {
                   <li>Make sure at least one agent is assigned to this website</li>
                 </ol>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Automations Tab */}
+        {!isNew && activeTab === 'automations' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="w-5 h-5" />
+                Automations
+              </CardTitle>
+              <CardDescription>Configure per-website auto messages and triggers</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {automationsError && (
+                <div className="p-3 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">
+                  {automationsError}
+                </div>
+              )}
+
+              {automationsLoading ? (
+                <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
+              ) : automations.length === 0 ? (
+                <div className="text-sm text-gray-500 dark:text-gray-400">No automations found for this website.</div>
+              ) : (
+                <div className="space-y-4">
+                  {automations.map((automation) => {
+                    const action = extractPrimaryAction(automation)
+                    const delay = Number(automation.conditions?.delay_seconds ?? 60)
+                    const canEditDelay = automation.trigger === 'no_agent_assigned_for'
+
+                    return (
+                      <div key={automation.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Switch
+                              checked={automation.enabled}
+                              onCheckedChange={(checked) => updateAutomationLocal(automation.id, { enabled: checked })}
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => saveAutomation(automation)}
+                              disabled={savingAutomationId === automation.id}
+                            >
+                              {savingAutomationId === automation.id ? 'Saving…' : 'Save'}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {canEditDelay && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Wait time (seconds)
+                              </label>
+                              <Input
+                                type="number"
+                                min={1}
+                                value={String(Number.isFinite(delay) ? delay : 60)}
+                                onChange={(e) => {
+                                  const nextDelay = Math.max(1, parseInt(e.target.value || '60', 10) || 60)
+                                  updateAutomationLocal(automation.id, {
+                                    conditions: { ...(automation.conditions || {}), delay_seconds: nextDelay },
+                                  })
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Bot message
+                          </label>
+                          <Input
+                            value={action?.message || ''}
+                            onChange={(e) => {
+                              const nextAction: AutomationAction = {
+                                type: 'send_bot_message',
+                                message: e.target.value,
+                                event_type: action?.event_type,
+                              }
+                              updateAutomationLocal(automation.id, {
+                                actions: updateAutomationAction(automation, nextAction),
+                              })
+                            }}
+                            placeholder="Enter message..."
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
