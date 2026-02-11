@@ -57,14 +57,6 @@ export const websitesApi = {
     });
   },
 
-  getWidgetConfig: async (id: number): Promise<WidgetConfig> => {
-    return apiRequest(`/websites/${id}/widget-config`);
-  },
-
-  updateWidgetConfig: async (id: number, config: Partial<WidgetConfig>): Promise<{ success: boolean; config: WidgetConfig }> => {
-    return apiRequest(`/websites/${id}/widget-config`, {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    });
-  },
+  // NOTE: widget-config is a public, origin-locked endpoint meant for the embedded widget.
+  // Admin UIs should use authenticated `get`/`update` and edit `website.widget_config`.
 };
