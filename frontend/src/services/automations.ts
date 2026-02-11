@@ -5,10 +5,12 @@ export type AutomationTrigger =
   | 'no_agent_assigned_for'
   | 'website_offline_first_message'
   | 'conversation_resolved'
+  | 'conversation_reopened'
 
 export interface AutomationAction {
-  type: 'send_bot_message'
-  message: string
+  type: 'send_bot_message' | 'emit_system_event'
+  message?: string
+  content?: string
   event_type?: string
 }
 

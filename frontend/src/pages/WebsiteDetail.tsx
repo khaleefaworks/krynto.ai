@@ -46,10 +46,14 @@ type AutomationDraft = {
   name: string
   trigger: string
   enabled: boolean
+  action_type: 'send_bot_message' | 'emit_system_event'
+  action_index?: number
   message: string
   event_type?: string
   delay_seconds?: number
   cooldown_hours?: number
+  repeat?: 'once' | 'cooldown' | 'always'
+  repeat_cooldown_seconds?: number
 }
 
 export default function WebsiteDetail() {
@@ -71,6 +75,7 @@ export default function WebsiteDetail() {
   const [automationsLoading, setAutomationsLoading] = useState(false)
   const [automationsError, setAutomationsError] = useState<string | null>(null)
   const [savingAutomationId, setSavingAutomationId] = useState<number | null>(null)
+  const [deletingAutomationId, setDeletingAutomationId] = useState<number | null>(null)
   const [automationsSubTab, setAutomationsSubTab] = useState<AutomationsSubTab>('templates')
   const [builderOpen, setBuilderOpen] = useState(false)
   const [builderStep, setBuilderStep] = useState<BuilderStep>('pick_type')
@@ -137,43 +142,211 @@ export default function WebsiteDetail() {
   const extractPrimaryAction = (automation: Automation): AutomationAction | null => {
     const actions = automation.actions
     if (Array.isArray(actions)) {
-      return (actions.find((a) => a?.type === 'send_bot_message') || null) as AutomationAction | null
+      const normalized = actions.filter((a) => a && typeof a === 'object') as AutomationAction[]
+      return (
+        normalized.find((a) => a?.type === 'send_bot_message') ||
+        normalized.find((a) => a?.type === 'emit_system_event') ||
+        null
+      )
     }
-    if (actions && typeof actions === 'object' && (actions as any).type === 'send_bot_message') {
-      return actions as AutomationAction
+    if (actions && typeof actions === 'object') {
+      const t = String((actions as any).type || '')
+      if (t === 'send_bot_message' || t === 'emit_system_event') return actions as AutomationAction
     }
     return null
+  }
+
+  const normalizeAutomationActions = (automation: Automation): AutomationAction[] => {
+    const raw = automation.actions
+    if (Array.isArray(raw)) {
+      return raw.filter((a) => a && typeof a === 'object') as AutomationAction[]
+    }
+    if (raw && typeof raw === 'object') {
+      const t = String((raw as any).type || '')
+      if (t === 'send_bot_message' || t === 'emit_system_event') return [raw as AutomationAction]
+    }
+    return []
+  }
+
+  const extractActionText = (action: AutomationAction | null | undefined): string => {
+    if (!action) return ''
+    const text = action.type === 'emit_system_event' ? (action.content ?? action.message) : action.message
+    return typeof text === 'string' ? text : ''
   }
 
   const updateAutomationAction = (automation: Automation, nextAction: AutomationAction) => {
     const actions = automation.actions
     if (Array.isArray(actions)) {
-      const next = actions.map((a) => (a?.type === 'send_bot_message' ? nextAction : a))
+      const next = actions.map((a) => (a?.type === nextAction.type ? nextAction : a))
       return next
     }
     return nextAction
   }
 
-  const getAutomationByTrigger = (trigger: string) => {
-    return automations.find((a) => a.trigger === trigger) || null
+  const getEffectiveEventType = (trigger: string, action: AutomationAction | null | undefined): string | null => {
+    if (!action) return null
+    const t = String(trigger || '')
+
+    if (action.type === 'emit_system_event') {
+      const raw = (action.event_type ?? '').toString().trim()
+      return raw || t || null
+    }
+
+    if (action.type === 'send_bot_message') {
+      if (t === 'visitor_connected') return 'automation_welcome'
+      const raw = (action.event_type ?? '').toString().trim()
+      if (raw) return raw
+
+      // Match backend defaults so the warning reflects real idempotency behavior.
+      if (t === 'no_agent_assigned_for') return 'bot_waiting'
+      if (t === 'website_offline_first_message') return 'bot_offline'
+      if (t === 'conversation_resolved') return 'bot_closing'
+      if (t === 'conversation_reopened') return 'bot_reopened'
+      return null
+    }
+
+    return null
   }
 
-  const draftFromAutomation = (automation: Automation): AutomationDraft => {
-    const action = extractPrimaryAction(automation)
+  const getEffectiveEventTypeForDraft = (draft: AutomationDraft | null): string | null => {
+    if (!draft) return null
+    const trigger = String(draft.trigger || '')
+    if (draft.action_type === 'emit_system_event') {
+      const raw = String(draft.event_type || '').trim()
+      return raw || trigger || null
+    }
+
+    // Bot message
+    if (trigger === 'visitor_connected') return 'automation_welcome'
+    const raw = String(draft.event_type || '').trim()
+    if (raw) return raw
+    if (trigger === 'no_agent_assigned_for') return 'bot_waiting'
+    if (trigger === 'website_offline_first_message') return 'bot_offline'
+    if (trigger === 'conversation_resolved') return 'bot_closing'
+    if (trigger === 'conversation_reopened') return 'bot_reopened'
+    return null
+  }
+
+  const enabledEventTypeCollisions = (() => {
+    type Ref = {
+      automationId: number
+      automationName: string
+      trigger: string
+      idx: number
+      actionType: string
+      effectiveEventType: string
+    }
+
+    const map = new Map<string, Ref[]>()
+    for (const automation of automations) {
+      if (!automation?.enabled) continue
+      const trigger = String(automation.trigger || '')
+      const actions = normalizeAutomationActions(automation)
+      for (let idx = 0; idx < actions.length; idx++) {
+        const action = actions[idx]
+        const effectiveEventType = getEffectiveEventType(trigger, action)
+        if (!effectiveEventType) continue
+        const key = `${trigger}::${effectiveEventType}`
+        const arr = map.get(key) || []
+        arr.push({
+          automationId: automation.id,
+          automationName: automation.name,
+          trigger,
+          idx,
+          actionType: action?.type || '',
+          effectiveEventType,
+        })
+        map.set(key, arr)
+      }
+    }
+    return map
+  })()
+
+  const getAutomationByTemplate = (template: {
+    trigger: string
+    action_type: 'send_bot_message' | 'emit_system_event'
+    event_type?: string
+    name?: string
+  }) => {
+    const matchesTrigger = automations.filter((a) => a.trigger === template.trigger)
+    if (matchesTrigger.length === 0) return null
+
+    const byTypeAndEventType = matchesTrigger.find((a) => {
+      const raw = a.actions
+      const normalized: AutomationAction[] = Array.isArray(raw)
+        ? (raw.filter((x) => x && typeof x === 'object') as AutomationAction[])
+        : raw && typeof raw === 'object'
+          ? ([raw] as AutomationAction[])
+          : ([] as AutomationAction[])
+
+      return normalized.some((action) => {
+        if (!action || action.type !== template.action_type) return false
+        if (template.event_type) return String(action.event_type || '') === template.event_type
+        return true
+      })
+    })
+    if (byTypeAndEventType) return byTypeAndEventType
+
+    if (template.name) {
+      const byName = matchesTrigger.find((a) => a.name === template.name)
+      if (byName) return byName
+    }
+
+    // Important: do not fall back to “any automation with same trigger”.
+    // Otherwise Templates will show “Edit” for a different action type
+    // (e.g. Closing message exists, so Resolved event incorrectly appears “used”).
+    return null
+  }
+
+  const draftFromAutomationAction = (
+    automation: Automation,
+    action: AutomationAction | null,
+    actionIndex: number | undefined,
+  ): AutomationDraft => {
     const delay = Number(automation.conditions?.delay_seconds ?? 60)
     const cooldownHours = Number(automation.conditions?.cooldown_hours ?? 24)
+    const repeat = String(automation.conditions?.repeat || '').trim()
+    const repeatCooldownSeconds = Number(
+      automation.conditions?.repeat_cooldown_seconds ??
+      automation.conditions?.cooldown_seconds ??
+      0,
+    )
+
+    const repeatMode: AutomationDraft['repeat'] =
+      repeat === 'always' || repeat === 'cooldown' || repeat === 'once' ? (repeat as any) : undefined
+
     return {
       id: automation.id,
       name: automation.name,
       trigger: String(automation.trigger || ''),
       enabled: !!automation.enabled,
-      message: action?.message || '',
+      action_type: action?.type === 'emit_system_event' ? 'emit_system_event' : 'send_bot_message',
+      action_index: typeof actionIndex === 'number' ? actionIndex : undefined,
+      message: extractActionText(action),
       event_type: action?.event_type,
       delay_seconds:
         automation.trigger === 'no_agent_assigned_for' && Number.isFinite(delay) ? Math.max(1, delay) : undefined,
       cooldown_hours:
         automation.trigger === 'visitor_connected' && Number.isFinite(cooldownHours) ? Math.max(1, cooldownHours) : undefined,
+      repeat:
+        automation.trigger !== 'no_agent_assigned_for' && automation.trigger !== 'visitor_connected'
+          ? (repeatMode || 'once')
+          : undefined,
+      repeat_cooldown_seconds:
+        automation.trigger !== 'no_agent_assigned_for' &&
+          automation.trigger !== 'visitor_connected' &&
+          repeatMode === 'cooldown' &&
+          Number.isFinite(repeatCooldownSeconds)
+          ? Math.max(1, repeatCooldownSeconds)
+          : undefined,
     }
+  }
+
+  const draftFromAutomation = (automation: Automation): AutomationDraft => {
+    const action = extractPrimaryAction(automation)
+    const actions = normalizeAutomationActions(automation)
+    const idx = action ? actions.findIndex((a) => a === action) : -1
+    return draftFromAutomationAction(automation, action, idx >= 0 ? idx : undefined)
   }
 
   const openBuilderPickType = () => {
@@ -185,10 +358,13 @@ export default function WebsiteDetail() {
       name: 'New auto message',
       trigger: 'no_agent_assigned_for',
       enabled: true,
+      action_type: 'send_bot_message',
       message: '',
       event_type: undefined,
       delay_seconds: 60,
       cooldown_hours: 24,
+      repeat: 'once',
+      repeat_cooldown_seconds: 3600,
     })
   }
 
@@ -198,6 +374,14 @@ export default function WebsiteDetail() {
     setBuilderStep('edit_auto_message')
     setBuilderCreateType('auto_message')
     setBuilderDraft(draftFromAutomation(automation))
+  }
+
+  const openBuilderForAutomationAction = (automation: Automation, action: AutomationAction | null, actionIndex: number) => {
+    setAutomationsError(null)
+    setBuilderOpen(true)
+    setBuilderStep('edit_auto_message')
+    setBuilderCreateType('auto_message')
+    setBuilderDraft(draftFromAutomationAction(automation, action, actionIndex))
   }
 
   const closeBuilder = () => {
@@ -215,8 +399,43 @@ export default function WebsiteDetail() {
       return
     }
 
+    if (builderDraft.action_type === 'emit_system_event') {
+      const et = (builderDraft.event_type || '').trim() || builderDraft.trigger
+      if (!et) {
+        setAutomationsError('Event type is required for system events')
+        return
+      }
+    }
+
     const isWaiting = builderDraft.trigger === 'no_agent_assigned_for'
     const isWelcome = builderDraft.trigger === 'visitor_connected'
+    const canConfigureRepeat = !isWaiting && !isWelcome
+
+    const nextAction: AutomationAction =
+      builderDraft.action_type === 'emit_system_event'
+        ? {
+          type: 'emit_system_event',
+          content: builderDraft.message.trim(),
+          event_type: (builderDraft.event_type || '').trim() || builderDraft.trigger,
+        }
+        : {
+          type: 'send_bot_message',
+          message: builderDraft.message.trim(),
+          // Keep stable server-side idempotency for welcome.
+          event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
+        }
+
+    let nextActions: any = [nextAction]
+    if (builderDraft.id) {
+      const existing = automations.find((a) => a.id === builderDraft.id) || null
+      if (existing && String(existing.trigger || '') === builderDraft.trigger) {
+        const existingActions = normalizeAutomationActions(existing)
+        const actionIndex = typeof builderDraft.action_index === 'number' ? builderDraft.action_index : -1
+        if (actionIndex >= 0 && actionIndex < existingActions.length) {
+          nextActions = existingActions.map((a, idx) => (idx === actionIndex ? nextAction : a))
+        }
+      }
+    }
 
     const payload = {
       name: builderDraft.name.trim() || 'Auto message',
@@ -227,15 +446,20 @@ export default function WebsiteDetail() {
           ? { delay_seconds: Math.max(1, Number(builderDraft.delay_seconds ?? 60) || 60) }
           : isWelcome
             ? { cooldown_hours: Math.max(1, Number(builderDraft.cooldown_hours ?? 24) || 24) }
-            : {},
-      actions: [
-        {
-          type: 'send_bot_message',
-          message: builderDraft.message.trim(),
-          // Keep stable server-side idempotency for welcome.
-          event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
-        },
-      ],
+            : canConfigureRepeat
+              ? {
+                repeat: builderDraft.repeat || 'once',
+                ...(builderDraft.repeat === 'cooldown'
+                  ? {
+                    repeat_cooldown_seconds: Math.max(
+                      1,
+                      Number(builderDraft.repeat_cooldown_seconds ?? 3600) || 3600,
+                    ),
+                  }
+                  : {}),
+              }
+              : {},
+      actions: nextActions,
     }
 
     try {
@@ -274,10 +498,25 @@ export default function WebsiteDetail() {
     }
   }
 
+  const deleteAutomation = async (automation: Automation) => {
+    if (!confirm(`Delete automation "${automation.name}"? This cannot be undone.`)) return
+    try {
+      setDeletingAutomationId(automation.id)
+      await automationsApi.remove(automation.id)
+      setAutomations((prev) => prev.filter((a) => a.id !== automation.id))
+      if (builderDraft?.id === automation.id) closeBuilder()
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to delete automation')
+    } finally {
+      setDeletingAutomationId(null)
+    }
+  }
+
   const createTemplateIfMissing = async (template: {
     name: string
     trigger: string
     enabled: boolean
+    action_type?: 'send_bot_message' | 'emit_system_event'
     message: string
     event_type?: string
     delay_seconds?: number
@@ -286,11 +525,18 @@ export default function WebsiteDetail() {
     if (!websiteId) return
     try {
       setAutomationsError(null)
-      const existing = getAutomationByTrigger(template.trigger)
+      const existing = getAutomationByTemplate({
+        trigger: template.trigger,
+        action_type: template.action_type || 'send_bot_message',
+        event_type: template.event_type,
+        name: template.name,
+      })
       if (existing) {
         openBuilderForAutomation(existing)
         return
       }
+
+      const nextActionType = template.action_type || 'send_bot_message'
       const created = await automationsApi.create({
         website_id: websiteId,
         name: template.name,
@@ -302,13 +548,22 @@ export default function WebsiteDetail() {
             : template.trigger === 'visitor_connected'
               ? { cooldown_hours: Math.max(1, Number(template.cooldown_hours ?? 24) || 24) }
               : {},
-        actions: [
-          {
-            type: 'send_bot_message',
-            message: template.message,
-            event_type: template.trigger === 'visitor_connected' ? 'automation_welcome' : template.event_type,
-          },
-        ],
+        actions:
+          nextActionType === 'emit_system_event'
+            ? [
+              {
+                type: 'emit_system_event',
+                content: template.message,
+                event_type: template.event_type || template.trigger,
+              },
+            ]
+            : [
+              {
+                type: 'send_bot_message',
+                message: template.message,
+                event_type: template.trigger === 'visitor_connected' ? 'automation_welcome' : template.event_type,
+              },
+            ],
       })
       await loadAutomations()
       if (created) openBuilderForAutomation(created)
@@ -709,12 +964,13 @@ export default function WebsiteDetail() {
                         name: 'Welcome message',
                         trigger: 'visitor_connected',
                         enabled: true,
+                        action_type: 'send_bot_message',
                         cooldown_hours: 24,
                         message: 'Hi! How can we help you today?',
                         event_type: 'automation_welcome',
                         description: 'Sends when a visitor opens the widget, with a cooldown.',
                       } as const
-                      const existing = getAutomationByTrigger(t.trigger)
+                      const existing = getAutomationByTemplate(t)
                       return (
                         <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
                           <div className="flex items-center justify-between gap-3">
@@ -746,6 +1002,7 @@ export default function WebsiteDetail() {
                           name: 'Waiting message',
                           trigger: 'no_agent_assigned_for',
                           enabled: true,
+                          action_type: 'send_bot_message',
                           delay_seconds: 60,
                           message: 'Thanks! An agent will be with you shortly.',
                           event_type: 'bot_waiting',
@@ -755,6 +1012,7 @@ export default function WebsiteDetail() {
                           name: 'Offline prompt',
                           trigger: 'website_offline_first_message',
                           enabled: true,
+                          action_type: 'send_bot_message',
                           message:
                             "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
                           event_type: 'bot_offline',
@@ -764,15 +1022,37 @@ export default function WebsiteDetail() {
                           name: 'Closing message',
                           trigger: 'conversation_resolved',
                           enabled: false,
+                          action_type: 'send_bot_message',
                           message: 'Thanks! This conversation is now closed.',
                           event_type: 'bot_closing',
                           description: 'Optional message sent after a conversation is resolved.',
                         },
+                        {
+                          name: 'Resolved event',
+                          trigger: 'conversation_resolved',
+                          enabled: false,
+                          action_type: 'emit_system_event',
+                          message: 'This conversation has been resolved.',
+                          event_type: 'conversation_resolved',
+                          description: 'Optional system event shown in the timeline when a conversation is resolved.',
+                        },
+                        {
+                          name: 'Reopened event',
+                          trigger: 'conversation_reopened',
+                          enabled: false,
+                          action_type: 'emit_system_event',
+                          message: 'This conversation has been reopened.',
+                          event_type: 'conversation_reopened',
+                          description: 'Optional system event shown in the timeline when a resolved conversation is reopened.',
+                        },
                       ] as const
                     ).map((t) => {
-                      const existing = getAutomationByTrigger(t.trigger)
+                      const existing = getAutomationByTemplate(t)
                       return (
-                        <div key={t.trigger} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                        <div
+                          key={`${t.trigger}:${t.action_type}:${t.event_type || ''}`}
+                          className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                        >
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
@@ -804,45 +1084,101 @@ export default function WebsiteDetail() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {automations.map((automation) => {
-                      const action = extractPrimaryAction(automation)
-                      const delay = Number(automation.conditions?.delay_seconds ?? 60)
-                      const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
-                      return (
-                        <div key={automation.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
-                              {automation.trigger === 'no_agent_assigned_for' && (
-                                <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
-                              )}
-                              {automation.trigger === 'visitor_connected' && (
-                                <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
-                                </div>
-                              )}
-                              {action?.message && (
-                                <div className="text-xs text-gray-600 dark:text-gray-400">{action.message}</div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <Switch
-                                checked={automation.enabled}
-                                onCheckedChange={(checked) => {
-                                  const next = { ...automation, enabled: checked }
-                                  updateAutomationLocal(automation.id, { enabled: checked })
-                                  saveAutomation(next)
-                                }}
-                              />
-                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(automation)}>
-                                Edit
-                              </Button>
+                    {(() => {
+                      const rows = automations.flatMap((automation) => {
+                        const actions = normalizeAutomationActions(automation)
+                        if (actions.length === 0) {
+                          return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
+                        }
+                        return actions.map((action, idx) => ({
+                          automation,
+                          action,
+                          idx,
+                          showControls: idx === 0,
+                        }))
+                      })
+
+                      return rows.map(({ automation, action, idx, showControls }) => {
+                        const delay = Number(automation.conditions?.delay_seconds ?? 60)
+                        const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
+                        const actionTypeLabel = action?.type === 'emit_system_event' ? 'System event' : 'Bot message'
+                        const text = extractActionText(action)
+                        const eventType = action?.event_type ? String(action.event_type) : ''
+                        const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
+                        const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
+                        const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
+                        const hasCollision = collisions.length > 1
+
+                        return (
+                          <div
+                            key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
+                            className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">Action: {actionTypeLabel}{eventType ? ` • event_type: ${eventType}` : ''}</div>
+                                {hasCollision && (
+                                  <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
+                                    <span className="font-medium">Warning:</span> Duplicate event_type for this trigger. Only one message/event may fire per conversation due to idempotency.
+                                  </div>
+                                )}
+                                {automation.trigger === 'no_agent_assigned_for' && (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
+                                )}
+                                {automation.trigger === 'visitor_connected' && (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                                    Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
+                                  </div>
+                                )}
+                                {text && <div className="text-xs text-gray-600 dark:text-gray-400">{text}</div>}
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                {showControls ? (
+                                  <Switch
+                                    checked={automation.enabled}
+                                    onCheckedChange={(checked) => {
+                                      const next = { ...automation, enabled: checked }
+                                      updateAutomationLocal(automation.id, { enabled: checked })
+                                      saveAutomation(next)
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-10" />
+                                )}
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openBuilderForAutomationAction(automation, action, idx)}
+                                >
+                                  Edit
+                                </Button>
+
+                                {showControls ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => deleteAutomation(automation)}
+                                    disabled={deletingAutomationId === automation.id}
+                                    className="gap-2"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                    {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
+                                  </Button>
+                                ) : (
+                                  <div className="w-[92px]" />
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })
+                    })()}
                   </div>
                 )
               ) : (
@@ -928,6 +1264,31 @@ export default function WebsiteDetail() {
 
                   {builderStep === 'edit_auto_message' && builderDraft && (
                     <div className="space-y-4">
+                      {(() => {
+                        const effective = getEffectiveEventTypeForDraft(builderDraft)
+                        if (!effective) return null
+
+                        const key = `${String(builderDraft.trigger || '')}::${effective}`
+                        const refs = enabledEventTypeCollisions.get(key) || []
+                        const others = refs.filter((r) => {
+                          if (!builderDraft.id) return true
+                          if (typeof builderDraft.action_index === 'number') {
+                            return !(r.automationId === builderDraft.id && r.idx === builderDraft.action_index)
+                          }
+                          return r.automationId !== builderDraft.id
+                        })
+
+                        if (others.length === 0) return null
+
+                        const names = Array.from(new Set(others.map((r) => r.automationName))).slice(0, 3)
+                        const suffix = others.length > names.length ? '…' : ''
+                        return (
+                          <div className="text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-3">
+                            <span className="font-medium">Warning:</span> Another enabled automation uses event_type “{effective}” for this trigger ({names.join(', ')}{suffix}). Due to idempotency, only one may run per conversation.
+                          </div>
+                        )
+                      })()}
+
                       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
                         <div className="text-xs font-medium text-gray-500 dark:text-gray-400">When</div>
                         <div className="grid grid-cols-1 gap-3">
@@ -945,11 +1306,20 @@ export default function WebsiteDetail() {
                               value={builderDraft.trigger}
                               onChange={(e) => {
                                 const nextTrigger = e.target.value
+                                const isNextWaiting = nextTrigger === 'no_agent_assigned_for'
+                                const isNextWelcome = nextTrigger === 'visitor_connected'
+                                const nextCanRepeat = !isNextWaiting && !isNextWelcome
                                 setBuilderDraft({
                                   ...builderDraft,
                                   trigger: nextTrigger,
                                   delay_seconds: nextTrigger === 'no_agent_assigned_for' ? (builderDraft.delay_seconds ?? 60) : undefined,
                                   cooldown_hours: nextTrigger === 'visitor_connected' ? (builderDraft.cooldown_hours ?? 24) : undefined,
+                                  repeat: nextCanRepeat ? (builderDraft.repeat || 'once') : undefined,
+                                  repeat_cooldown_seconds: nextCanRepeat
+                                    ? builderDraft.repeat === 'cooldown'
+                                      ? (builderDraft.repeat_cooldown_seconds ?? 3600)
+                                      : builderDraft.repeat_cooldown_seconds
+                                    : undefined,
                                 })
                               }}
                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
@@ -958,6 +1328,7 @@ export default function WebsiteDetail() {
                               <option value="no_agent_assigned_for">No agent assigned for</option>
                               <option value="website_offline_first_message">Website offline: first message</option>
                               <option value="conversation_resolved">Conversation resolved</option>
+                              <option value="conversation_reopened">Conversation reopened</option>
                             </select>
                           </div>
                         </div>
@@ -1006,7 +1377,59 @@ export default function WebsiteDetail() {
                             />
                           </div>
                         ) : (
-                          <div className="text-xs text-gray-600 dark:text-gray-400">No scheduling options for this trigger.</div>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Repeat</label>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {(['once', 'cooldown', 'always'] as const).map((mode) => {
+                                  const active = (builderDraft.repeat || 'once') === mode
+                                  const label = mode === 'once' ? 'Once' : mode === 'cooldown' ? 'Cooldown' : 'Always'
+                                  return (
+                                    <Button
+                                      key={mode}
+                                      type="button"
+                                      size="sm"
+                                      variant={active ? 'secondary' : 'outline'}
+                                      onClick={() =>
+                                        setBuilderDraft({
+                                          ...builderDraft,
+                                          repeat: mode,
+                                          repeat_cooldown_seconds:
+                                            mode === 'cooldown'
+                                              ? Math.max(1, Number(builderDraft.repeat_cooldown_seconds ?? 3600) || 3600)
+                                              : undefined,
+                                        })
+                                      }
+                                    >
+                                      {label}
+                                    </Button>
+                                  )
+                                })}
+                              </div>
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                Controls whether this automation can run again for the same conversation.
+                              </div>
+                            </div>
+
+                            {(builderDraft.repeat || 'once') === 'cooldown' ? (
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Cooldown (seconds)
+                                </label>
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  value={String(builderDraft.repeat_cooldown_seconds ?? 3600)}
+                                  onChange={(e) =>
+                                    setBuilderDraft({
+                                      ...builderDraft,
+                                      repeat_cooldown_seconds: Math.max(1, parseInt(e.target.value || '3600', 10) || 3600),
+                                    })
+                                  }
+                                />
+                              </div>
+                            ) : null}
+                          </div>
                         )}
                       </div>
 
@@ -1024,7 +1447,31 @@ export default function WebsiteDetail() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Message</label>
+                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Action type</label>
+                          <select
+                            value={builderDraft.action_type}
+                            onChange={(e) => {
+                              const nextType = e.target.value === 'emit_system_event' ? 'emit_system_event' : 'send_bot_message'
+                              setBuilderDraft({
+                                ...builderDraft,
+                                action_type: nextType,
+                                event_type:
+                                  nextType === 'emit_system_event'
+                                    ? builderDraft.event_type || builderDraft.trigger
+                                    : builderDraft.event_type,
+                              })
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          >
+                            <option value="send_bot_message">Bot message</option>
+                            <option value="emit_system_event">System event</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            {builderDraft.action_type === 'emit_system_event' ? 'Content' : 'Message'}
+                          </label>
                           <Textarea
                             value={builderDraft.message}
                             onChange={(e) => setBuilderDraft({ ...builderDraft, message: e.target.value })}
@@ -1033,7 +1480,16 @@ export default function WebsiteDetail() {
                         </div>
 
                         <div>
-                          {builderDraft.trigger !== 'visitor_connected' && (
+                          {builderDraft.action_type === 'emit_system_event' ? (
+                            <>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type</label>
+                              <Input
+                                value={builderDraft.event_type || ''}
+                                onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
+                                placeholder={builderDraft.trigger || 'conversation_resolved'}
+                              />
+                            </>
+                          ) : builderDraft.trigger !== 'visitor_connected' && (
                             <>
                               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type (optional)</label>
                               <Input
@@ -1050,9 +1506,32 @@ export default function WebsiteDetail() {
                 </div>
 
                 <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
-                  <Button type="button" variant="outline" onClick={closeBuilder}>
-                    Cancel
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" onClick={closeBuilder}>
+                      Cancel
+                    </Button>
+
+                    {builderStep === 'edit_auto_message' && builderDraft?.id ? (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        onClick={() => {
+                          if (!builderDraft?.id) return
+                          const automation = automations.find((a) => a.id === builderDraft.id)
+                          if (!automation) {
+                            setAutomationsError('Automation not found')
+                            return
+                          }
+                          deleteAutomation(automation)
+                        }}
+                        disabled={deletingAutomationId === builderDraft.id}
+                        className="gap-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {deletingAutomationId === builderDraft.id ? 'Deleting…' : 'Delete'}
+                      </Button>
+                    ) : null}
+                  </div>
 
                   {builderStep === 'edit_auto_message' ? (
                     <Button type="button" onClick={saveBuilderDraft} disabled={builderSaving} className="gap-2">
