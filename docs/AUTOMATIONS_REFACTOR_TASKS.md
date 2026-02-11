@@ -254,9 +254,9 @@ Acceptance:
 ### Phase 5 — Migration & Cleanup
 Why: reduce long-term complexity.
 
-- [ ] Map existing widget_config.automations into new Automation rows.
-- [ ] Deprecate transport name `type:"ai"` for non-AI; introduce neutral names or include actor/kind.
-- [ ] Remove hardcoded bot messages from orchestrator/WS layer (after parity is confirmed).
+- [x] Map existing widget_config.automations into new Automation rows.
+- [x] Deprecate transport name `type:"ai"` for non-AI; introduce neutral names or include actor/kind.
+- [x] Remove hardcoded bot messages from orchestrator/WS layer (after parity is confirmed).
 
 ---
 

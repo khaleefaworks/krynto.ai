@@ -340,7 +340,7 @@
       return;
     }
 
-    if (data.type === 'ai') {
+    if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       smartScroll();

@@ -63,12 +63,7 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             )
 
             if not actions:
-                actions = [
-                    {
-                        "message": "Thanks! An agent will be with you shortly.",
-                        "event_type": "bot_waiting",
-                    }
-                ]
+                return
 
             for action in actions:
                 event_type = action.get("event_type") or "bot_waiting"
@@ -87,7 +82,7 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
                 await ChatService.send_to_visitor(
                     conversation_id,
                     {
-                        "type": "ai",
+                        "type": "bot",
                         "message": action["message"],
                         "message_obj": serialize_message(db, saved),
                     },
@@ -285,12 +280,7 @@ class ConversationOrchestrator:
                 )
 
                 if not actions:
-                    actions = [
-                        {
-                            "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                            "event_type": "bot_offline",
-                        }
-                    ]
+                    return None
 
                 for action in actions:
                     event_type = action.get("event_type") or "bot_offline"
@@ -308,7 +298,7 @@ class ConversationOrchestrator:
                     await ChatService.send_to_visitor(
                         conversation.id,
                         {
-                            "type": "ai",
+                            "type": "bot",
                             "message": action["message"],
                             "message_obj": serialize_message(self.db, saved),
                         },
@@ -591,15 +581,10 @@ class ConversationOrchestrator:
         # Optional: send configurable closing bot message (per website).
         try:
             from app.repos import messages as messages_repo
-            from app.models.website import Website
 
             conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
             website_id = int(conversation.website_id) if conversation else None
             if website_id:
-                website = self.db.query(Website).filter_by(id=website_id).first()
-                widget_cfg = website.widget_config if website and isinstance(website.widget_config, dict) else {}
-                automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
-
                 automation_service = AutomationService(self.db)
                 actions = automation_service.get_bot_message_actions(
                     website_id=website_id,
@@ -607,16 +592,7 @@ class ConversationOrchestrator:
                 )
 
                 if not actions:
-                    # Backwards-compat: fall back to widget_config automation settings.
-                    closing_enabled = automations_cfg.get("closing_enabled")
-                    closing_message = automations_cfg.get("closing_message")
-                    if closing_enabled and isinstance(closing_message, str) and closing_message.strip():
-                        actions = [
-                            {
-                                "message": closing_message.strip(),
-                                "event_type": "bot_closing",
-                            }
-                        ]
+                    actions = []
 
                 for action in actions:
                     event_type = action.get("event_type") or "bot_closing"
@@ -634,7 +610,7 @@ class ConversationOrchestrator:
                     await ChatService.send_to_visitor(
                         conversation_id,
                         {
-                            "type": "ai",
+                            "type": "bot",
                             "message": action["message"],
                             "message_obj": serialize_message(self.db, saved_bot),
                         }

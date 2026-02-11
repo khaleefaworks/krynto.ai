@@ -230,7 +230,7 @@ async def chat_ws(
                 saved = service.add_bot_message(conversation.id, str(welcome_message).strip(), event_type="automation_welcome")
                 await websocket.send_json(
                     {
-                        "type": "ai",
+                        "type": "bot",
                         "message": str(welcome_message).strip(),
                         "message_obj": serialize_message(db, saved),
                     }
