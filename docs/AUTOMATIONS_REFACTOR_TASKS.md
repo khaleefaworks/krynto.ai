@@ -208,7 +208,7 @@ Acceptance:
 Why: consistent behavior across DB + WS.
 
 - [x] Replace WS-only “closed” message with a persisted + broadcasted system event.
-- [ ] Standardize event types:
+- [x] Standardize event types:
   - `conversation_resolved`
   - `conversation_reopened` (if/when we show it)
   - `agent_join` (existing)
