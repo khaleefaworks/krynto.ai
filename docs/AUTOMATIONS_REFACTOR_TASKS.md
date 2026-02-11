@@ -91,30 +91,31 @@ Bot messages are stored as `sender_type=system` but marked by:
 
 ### Transport payload mismatch
 The widget receives WS events where `type` might be:
-- `ai` (used today for bot/automation messages)
+- `ai` (previously used for bot/automation messages; now neutralized to `bot`)
 - `agent`
 - `agent_joined`
 - `system`
 
 This means transport naming is currently misleading (AI vs bot).
 
-### Where messages are created today (single source of truth does not exist)
+### Where messages were created before this refactor (single source of truth did not exist)
 
 1) Welcome automation (semi-configurable)
 - Location: backend/app/api/ws_chat.py
-- Config: website.widget_config["automations"]
+- Config (legacy): website.widget_config["automations"]
+- Config (current): DB automations (trigger `visitor_connected`)
 - Persisted as system message: event_type=automation_welcome, sender=bot
-- Sent to widget as WS: type=ai
+- Sent to widget as WS: type=bot
 
 2) Waiting message after 60s if still unassigned (hardcoded)
 - Location: backend/app/services/conversation_orchestrator.py
 - Persisted as system message: event_type=bot, sender=bot
-- Sent to widget as WS: type=ai
+- Sent to widget as WS: type=bot
 
 3) Offline prompt (hardcoded)
 - Location: backend/app/services/conversation_orchestrator.py
 - Persisted as system message: event_type=bot, sender=bot
-- Sent to widget as WS: type=ai
+- Sent to widget as WS: type=bot
 
 4) Resolve/close
 - Persisted resolve message text: backend/app/services/conversation_service.py
