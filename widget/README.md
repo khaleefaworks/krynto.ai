@@ -4,7 +4,7 @@ Embeddable Vanilla JavaScript chat widget for website visitors. Zero dependencie
 
 ## Overview
 
-The chat widget provides a complete chat interface that connects directly to the AI ChatAssist backend via WebSocket. It handles AI responses and seamless handoff to human agents.
+The chat widget provides a complete chat interface that connects directly to the AI ChatAssist backend via WebSocket. It handles bot automations and seamless handoff to human agents.
 
 ## ⚠️ Important: Setup Requirements
 
@@ -27,9 +27,9 @@ The chat widget provides a complete chat interface that connects directly to the
 - ✅ **Real-time WebSocket messaging** - Instant bidirectional communication
 - ✅ **Session persistence** - localStorage-based session management
 - ✅ **Auto-reconnect** - Automatic reconnection on disconnect
-- ✅ **AI and agent support** - Handles both automated and human responses
+- ✅ **Bot and agent support** - Handles both automated and human responses
 - ✅ **Agent handoff indicator** - Visual notification when agent joins
-- ✅ **Dynamic configuration** - Fetches styling from backend per website
+- ✅ **Dynamic configuration** - Embedded via `loader.js` per website
 - ✅ **Website validation** - Verifies website exists before loading
 - ✅ **Responsive design** - Works on desktop and mobile
 - ✅ **No dependencies** - Pure Vanilla JS + CSS (3KB gzipped)

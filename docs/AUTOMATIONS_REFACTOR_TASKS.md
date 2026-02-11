@@ -42,7 +42,7 @@ There is no single place to control automation behavior per website (timings, te
 We plan to add AI later. AI is not the same thing as “bot automation messages”.
 
 If we don’t fix terminology now, adding AI will multiply confusion:
-- transport `type: "ai"` is currently used for non-AI bot messages
+- transport `type: "ai"` was previously used for non-AI bot messages (now neutralized to `type: "bot"`)
 - DB schema has no “bot” or “ai” sender type today
 
 ### 4) Product scalability
