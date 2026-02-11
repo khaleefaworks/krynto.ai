@@ -181,20 +181,59 @@ class AutomationService:
                     }
                 ],
             },
+            {
+                "name": "Resolved event",
+                "trigger": "conversation_resolved",
+                "enabled": False,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "emit_system_event",
+                        "content": "This conversation has been resolved.",
+                        "event_type": "conversation_resolved",
+                    }
+                ],
+            },
+            {
+                "name": "Reopened event",
+                "trigger": "conversation_reopened",
+                "enabled": False,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "emit_system_event",
+                        "content": "This conversation has been reopened.",
+                        "event_type": "conversation_reopened",
+                    }
+                ],
+            },
         ]
+
+        try:
+            existing_pairs = {
+                (str(t or ""), str(n or ""))
+                for (t, n) in (
+                    self.db.query(Automation.trigger, Automation.name)
+                    .filter(Automation.website_id == website_id)
+                    .all()
+                )
+            }
+        except Exception:
+            existing_pairs = set()
 
         created_any = False
         for payload in defaults:
             trigger = payload.get("trigger")
-            if not trigger:
+            name = payload.get("name")
+            if not trigger or not name:
                 continue
-            if self.has_any_for_trigger(website_id=website_id, trigger=str(trigger)):
+            if (str(trigger), str(name)) in existing_pairs:
                 continue
 
             try:
                 automation = Automation(
                     website_id=website_id,
-                    name=payload.get("name") or str(trigger),
+                    name=str(name),
                     trigger=str(trigger),
                     enabled=bool(payload.get("enabled", True)),
                     conditions=payload.get("conditions") or {},
@@ -218,6 +257,45 @@ class AutomationService:
         actions: List[dict] = []
         automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
 
+        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
+            # repeat: once | cooldown | always
+            try:
+                if isinstance(conditions, str):
+                    conditions_obj = json.loads(conditions)
+                else:
+                    conditions_obj = conditions
+            except Exception:
+                conditions_obj = {}
+            if not isinstance(conditions_obj, dict):
+                conditions_obj = {}
+
+            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
+            if repeat not in {"once", "cooldown", "always"}:
+                # Backward-compatible defaults.
+                repeat = "cooldown" if trigger == "visitor_connected" else "once"
+
+            cooldown_seconds: int | None = None
+            if repeat == "cooldown":
+                raw = (
+                    conditions_obj.get("repeat_cooldown_seconds")
+                    if conditions_obj.get("repeat_cooldown_seconds") is not None
+                    else conditions_obj.get("cooldown_seconds")
+                )
+                if raw is None:
+                    raw = conditions_obj.get("cooldown_hours")
+                    if raw is not None:
+                        try:
+                            raw = int(raw) * 3600
+                        except Exception:
+                            raw = None
+                if raw is not None:
+                    try:
+                        cooldown_seconds = max(1, int(raw))
+                    except Exception:
+                        cooldown_seconds = None
+
+            return repeat, cooldown_seconds
+
         for automation in automations:
             raw_actions = automation.actions or {}
             if isinstance(raw_actions, str):
@@ -236,13 +314,27 @@ class AutomationService:
             for action in normalized:
                 if str(action.get("type") or "").lower() != "send_bot_message":
                     continue
+
+                # Backward-compatibility: older UI versions stored some system events
+                # as `send_bot_message` with event_type == trigger (e.g. conversation_resolved).
+                # Those should be treated as system events, not bot messages.
+                if trigger in {"conversation_resolved", "conversation_reopened"}:
+                    event_type = action.get("event_type")
+                    if isinstance(event_type, str) and event_type.strip() == trigger:
+                        continue
+
                 message = action.get("message")
                 if not isinstance(message, str) or not message.strip():
                     continue
+
+                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
                 actions.append(
                     {
                         "message": message.strip(),
                         "event_type": action.get("event_type") or None,
+                        "repeat": repeat,
+                        "repeat_cooldown_seconds": cooldown_seconds,
+                        "automation_id": getattr(automation, "id", None),
                     }
                 )
 
@@ -262,6 +354,43 @@ class AutomationService:
         actions: List[dict] = []
         automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
 
+        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
+            try:
+                if isinstance(conditions, str):
+                    conditions_obj = json.loads(conditions)
+                else:
+                    conditions_obj = conditions
+            except Exception:
+                conditions_obj = {}
+            if not isinstance(conditions_obj, dict):
+                conditions_obj = {}
+
+            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
+            if repeat not in {"once", "cooldown", "always"}:
+                repeat = "cooldown" if trigger == "visitor_connected" else "once"
+
+            cooldown_seconds: int | None = None
+            if repeat == "cooldown":
+                raw = (
+                    conditions_obj.get("repeat_cooldown_seconds")
+                    if conditions_obj.get("repeat_cooldown_seconds") is not None
+                    else conditions_obj.get("cooldown_seconds")
+                )
+                if raw is None:
+                    raw = conditions_obj.get("cooldown_hours")
+                    if raw is not None:
+                        try:
+                            raw = int(raw) * 3600
+                        except Exception:
+                            raw = None
+                if raw is not None:
+                    try:
+                        cooldown_seconds = max(1, int(raw))
+                    except Exception:
+                        cooldown_seconds = None
+
+            return repeat, cooldown_seconds
+
         for automation in automations:
             raw_actions = automation.actions or {}
             if isinstance(raw_actions, str):
@@ -279,7 +408,18 @@ class AutomationService:
                 normalized = []
 
             for action in normalized:
-                if str(action.get("type") or "").lower() != "emit_system_event":
+                action_type = str(action.get("type") or "").lower()
+
+                # Primary supported action type.
+                if action_type == "emit_system_event":
+                    pass
+                # Backward-compatibility: treat `send_bot_message` where event_type == trigger
+                # as a system event (this matches how older templates were saved).
+                elif action_type == "send_bot_message" and trigger in {"conversation_resolved", "conversation_reopened"}:
+                    event_type = action.get("event_type")
+                    if not (isinstance(event_type, str) and event_type.strip() == trigger):
+                        continue
+                else:
                     continue
 
                 content = action.get("content")
@@ -292,10 +432,15 @@ class AutomationService:
                 if event_type is not None and not isinstance(event_type, str):
                     event_type = str(event_type)
 
+                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
+
                 actions.append(
                     {
                         "content": content.strip(),
                         "event_type": event_type.strip() if isinstance(event_type, str) and event_type.strip() else None,
+                        "repeat": repeat,
+                        "repeat_cooldown_seconds": cooldown_seconds,
+                        "automation_id": getattr(automation, "id", None),
                     }
                 )
 

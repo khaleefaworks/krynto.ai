@@ -171,7 +171,7 @@ class ConversationService:
     
 
     
-    def close_conversation(self, conversation_id: int) -> Optional[Message]:
+    def close_conversation(self, conversation_id: int) -> Optional[Conversation]:
         """
         Resolve a conversation (OPEN → RESOLVED).
         
@@ -179,7 +179,7 @@ class ConversationService:
             conversation_id: Conversation to resolve
             
         Returns:
-            Resolved system message if successful, None otherwise
+            Conversation if successful, None otherwise
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         
@@ -189,27 +189,16 @@ class ConversationService:
         
         if conversation.status == ConversationStatus.RESOLVED:
             logger.warning("conversation_already_resolved", conversation_id=conversation_id)
-            try:
-                from app.repos import messages as messages_repo
-
-                existing = messages_repo.get_last_event_message(
-                    self.db, conversation_id, "conversation_resolved"
-                )
-                if existing:
-                    return existing
-            except Exception:
-                pass
-
-            return self.add_system_message(
-                conversation_id,
-                "This conversation has been resolved.",
-                event_type="conversation_resolved",
-            )
+            return conversation
         
         # Update status
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
         self.db.commit()
+        try:
+            self.db.refresh(conversation)
+        except Exception:
+            pass
         
         logger.info(
             "conversation_resolved",
@@ -217,12 +206,7 @@ class ConversationService:
             previous_status=old_status.value
         )
 
-        # Add system message
-        return self.add_system_message(
-            conversation_id,
-            "This conversation has been resolved.",
-            event_type="conversation_resolved",
-        )
+        return conversation
     
     def claim_conversation(
         self,
