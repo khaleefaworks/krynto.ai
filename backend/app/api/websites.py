@@ -19,6 +19,7 @@ router = APIRouter(prefix="/websites", tags=["websites"])
 class WebsiteCreate(BaseModel):
     name: str
     domain: str
+    widget_config: Optional[dict] = None
 
 
 class WebsiteUpdate(BaseModel):
@@ -89,11 +90,23 @@ def create_website(
     website = Website(
         name=website_data.name,
         domain=website_data.domain,
-        widget_config={}  # Initialize with empty config
+        widget_config=website_data.widget_config or {},
     )
     db.add(website)
     db.commit()
     db.refresh(website)
+
+    # Seed default DB-backed automations for this website.
+    try:
+        from app.services.automation_service import AutomationService
+
+        AutomationService(db).ensure_default_automations_for_website(website_id=website.id)
+    except Exception:
+        # Non-fatal: website creation should still succeed.
+        try:
+            db.rollback()
+        except Exception:
+            pass
     return website
 
 
@@ -167,7 +180,7 @@ def delete_website(
     return {"success": True, "message": "Website deleted"}
 
 
-@router.get("/{website_id}/widget-config")
+@router.get("/{website_id}/widget-config", response_model=WidgetConfigResponse)
 def get_widget_config(request: Request, website_id: int, db: Session = Depends(get_db)):
     """
     Get widget configuration for a website (public endpoint for widget).
@@ -184,28 +197,11 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
     
     # Get widget config or use defaults
     config = website.widget_config or {}
-    automations = config.get("automations") if isinstance(config.get("automations"), dict) else {}
-
-    welcome_enabled = automations.get("welcome_enabled")
-    if welcome_enabled is None:
-        welcome_enabled = True
-
-    welcome_message = automations.get("welcome_message") or config.get("welcome_message", "Hi! How can we help you today?")
-    welcome_cooldown_hours = automations.get("welcome_cooldown_hours")
-    try:
-        welcome_cooldown_hours = int(welcome_cooldown_hours) if welcome_cooldown_hours is not None else 24
-    except Exception:
-        welcome_cooldown_hours = 24
-
-    closing_enabled = automations.get("closing_enabled")
-    if closing_enabled is None:
-        closing_enabled = False
-    closing_message = automations.get("closing_message") or "Thanks! This conversation is now closed."
     
     return {
         "theme": config.get("theme", "dark"),
         "position": config.get("position", "bottom-right"),
-        # Legacy field (widget no longer auto-renders this text by default)
+        # UI copy only. Welcome sending is handled by DB-backed automations.
         "welcome_message": config.get("welcome_message", "Hi! How can we help you today?"),
         "primary_color": config.get("primary_color", "#000000"),
         "header_title": config.get("header_title", "How can we help?"),
@@ -215,13 +211,6 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
         "show_attachments": config.get("show_attachments", False),
         "branding_text": config.get("branding_text"),
         "header_icon_url": config.get("header_icon_url"),
-        "automations": {
-            "welcome_enabled": bool(welcome_enabled),
-            "welcome_message": str(welcome_message) if welcome_message is not None else "",
-            "welcome_cooldown_hours": welcome_cooldown_hours,
-            "closing_enabled": bool(closing_enabled),
-            "closing_message": str(closing_message) if closing_message is not None else "",
-        },
     }
 
 
@@ -288,7 +277,15 @@ def update_widget_config(
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     
-    website.widget_config = config
+    existing = website.widget_config or {}
+    if not isinstance(existing, dict):
+        existing = {}
+    if not isinstance(config, dict):
+        raise HTTPException(status_code=400, detail="Invalid widget config")
+
+    # Merge partial updates into the existing widget_config.
+    existing.update(config)
+    website.widget_config = existing
     db.commit()
     db.refresh(website)
     

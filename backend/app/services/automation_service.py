@@ -29,6 +29,33 @@ class AutomationService:
             .all()
         )
 
+    def list_for_trigger(self, *, website_id: int, trigger: str) -> List[Automation]:
+        """Return all automations for a trigger (enabled or disabled)."""
+        return (
+            self.db.query(Automation)
+            .filter(
+                Automation.website_id == website_id,
+                Automation.trigger == trigger,
+            )
+            .order_by(Automation.id.asc())
+            .all()
+        )
+
+    def has_any_for_trigger(self, *, website_id: int, trigger: str) -> bool:
+        try:
+            return (
+                self.db.query(Automation.id)
+                .filter(
+                    Automation.website_id == website_id,
+                    Automation.trigger == trigger,
+                )
+                .limit(1)
+                .first()
+                is not None
+            )
+        except Exception:
+            return False
+
     def get_delay_seconds(self, *, website_id: int, trigger: str, default_seconds: int) -> int:
         """Return the first configured delay_seconds for a trigger, or default."""
         try:
@@ -50,6 +77,132 @@ class AutomationService:
         except Exception:
             pass
         return default_seconds
+
+    def get_cooldown_seconds(self, *, website_id: int, trigger: str, default_seconds: int) -> int:
+        """Return cooldown seconds for a trigger, or default.
+
+        Supported condition keys:
+        - cooldown_seconds
+        - cooldown_hours (preferred)
+        - welcome_cooldown_hours (legacy naming)
+        """
+        try:
+            automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
+            for automation in automations:
+                conditions = automation.conditions or {}
+                if isinstance(conditions, str):
+                    try:
+                        conditions = json.loads(conditions)
+                    except Exception:
+                        conditions = {}
+
+                cooldown_seconds = conditions.get("cooldown_seconds")
+                if cooldown_seconds is not None:
+                    try:
+                        return max(1, int(cooldown_seconds))
+                    except Exception:
+                        pass
+
+                cooldown_hours = conditions.get("cooldown_hours")
+                if cooldown_hours is None:
+                    cooldown_hours = conditions.get("welcome_cooldown_hours")
+                if cooldown_hours is not None:
+                    try:
+                        return max(1, int(cooldown_hours)) * 3600
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return default_seconds
+
+    def get_first_bot_message_action(self, *, website_id: int, trigger: str) -> dict | None:
+        actions = self.get_bot_message_actions(website_id=website_id, trigger=trigger)
+        return actions[0] if actions else None
+
+    def ensure_default_automations_for_website(self, *, website_id: int) -> None:
+        """Create default automations for a website if missing.
+
+        Safe to call multiple times; only inserts missing triggers.
+        """
+        defaults = [
+            {
+                "name": "Welcome message",
+                "trigger": "visitor_connected",
+                "enabled": True,
+                "conditions": {"cooldown_hours": 24},
+                "actions": [
+                    {
+                        "type": "send_bot_message",
+                        "message": "Hi! How can we help you today?",
+                        "event_type": "automation_welcome",
+                    }
+                ],
+            },
+            {
+                "name": "Waiting message",
+                "trigger": "no_agent_assigned_for",
+                "enabled": True,
+                "conditions": {"delay_seconds": 60},
+                "actions": [
+                    {
+                        "type": "send_bot_message",
+                        "message": "Thanks! An agent will be with you shortly.",
+                        "event_type": "bot_waiting",
+                    }
+                ],
+            },
+            {
+                "name": "Offline prompt",
+                "trigger": "website_offline_first_message",
+                "enabled": True,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "send_bot_message",
+                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                        "event_type": "bot_offline",
+                    }
+                ],
+            },
+            {
+                "name": "Closing message",
+                "trigger": "conversation_resolved",
+                "enabled": False,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "send_bot_message",
+                        "message": "Thanks! This conversation is now closed.",
+                        "event_type": "bot_closing",
+                    }
+                ],
+            },
+        ]
+
+        created_any = False
+        for payload in defaults:
+            trigger = payload.get("trigger")
+            if not trigger:
+                continue
+            if self.has_any_for_trigger(website_id=website_id, trigger=str(trigger)):
+                continue
+
+            try:
+                automation = Automation(
+                    website_id=website_id,
+                    name=payload.get("name") or str(trigger),
+                    trigger=str(trigger),
+                    enabled=bool(payload.get("enabled", True)),
+                    conditions=payload.get("conditions") or {},
+                    actions=payload.get("actions") or {},
+                )
+                self.db.add(automation)
+                created_any = True
+            except Exception:
+                continue
+
+        if created_any:
+            self.db.commit()
 
     def get_bot_message_actions(self, *, website_id: int, trigger: str) -> List[dict]:
         """Return bot message actions for a trigger.

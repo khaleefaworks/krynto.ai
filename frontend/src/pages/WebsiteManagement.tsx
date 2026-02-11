@@ -32,6 +32,8 @@ export default function WebsiteManagement() {
     primary_color: '#000000',
   });
 
+  const [widgetConfigBase, setWidgetConfigBase] = useState<Record<string, any>>({});
+
   useEffect(() => {
     loadWebsites();
   }, []);
@@ -165,8 +167,16 @@ export default function WebsiteManagement() {
   const startEditWidgetConfig = async (websiteId: number) => {
     try {
       setError(null);
-      const config = await websitesApi.getWidgetConfig(websiteId);
-      setWidgetConfigData(config);
+      // Use the authenticated website endpoint (avoids public origin-locked widget-config route).
+      const website = await websitesApi.get(websiteId);
+      const base = (website.widget_config && typeof website.widget_config === 'object') ? website.widget_config : {};
+      setWidgetConfigBase(base);
+      setWidgetConfigData({
+        theme: String((base as any).theme || 'dark'),
+        position: String((base as any).position || 'bottom-right'),
+        welcome_message: String((base as any).welcome_message || 'Hi! How can we help you today?'),
+        primary_color: String((base as any).primary_color || '#000000'),
+      });
       setEditingWidgetConfig(websiteId);
       setShowCreateForm(false);
       setEditingWebsite(null);
@@ -181,7 +191,12 @@ export default function WebsiteManagement() {
 
     try {
       setError(null);
-      await websitesApi.updateWidgetConfig(editingWidgetConfig, widgetConfigData);
+      await websitesApi.update(editingWidgetConfig, {
+        widget_config: {
+          ...widgetConfigBase,
+          ...widgetConfigData,
+        },
+      });
       setEditingWidgetConfig(null);
       // Reset widget config data to defaults
       setWidgetConfigData({
@@ -190,6 +205,7 @@ export default function WebsiteManagement() {
         welcome_message: 'Hi! How can we help you today?',
         primary_color: '#000000',
       });
+      setWidgetConfigBase({});
       await loadWebsites();
     } catch (err: any) {
       setError(err.message || 'Failed to update widget configuration');
@@ -283,7 +299,7 @@ export default function WebsiteManagement() {
           <div className="mb-4">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Widget Configuration</h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Editing: <span className="font-semibold">{websites.find(w => w.id === editingWidgetConfig)?.name}</span> 
+              Editing: <span className="font-semibold">{websites.find(w => w.id === editingWidgetConfig)?.name}</span>
               {' '}({websites.find(w => w.id === editingWidgetConfig)?.domain})
             </p>
           </div>
@@ -377,7 +393,7 @@ export default function WebsiteManagement() {
                 <div className="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
                   Widget Preview Area
                 </div>
-                
+
                 {/* Mock Widget Preview */}
                 <div
                   className="absolute"

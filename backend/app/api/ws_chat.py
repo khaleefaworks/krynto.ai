@@ -166,42 +166,27 @@ async def chat_ws(
             pass
 
         # Welcome automation: send on first visit or if returning after cooldown.
-        # This replaces the widget's always-on placeholder greeting.
+        # DB-backed automation only (no legacy widget_config.automations fallback).
         try:
             from app.services.conversation_service import ConversationService
-            from app.models.message import Message
+            from app.services.automation_service import AutomationService
 
-            default_welcome_message = "Hi! How can we help you today?"
+            automation_service = AutomationService(db)
+            action = automation_service.get_first_bot_message_action(website_id=website_id, trigger="visitor_connected")
+            welcome_message = action.get("message").strip() if (action and isinstance(action.get("message"), str)) else None
 
-            widget_cfg = website.widget_config or {}
-            automations_cfg = widget_cfg.get("automations") if isinstance(widget_cfg.get("automations"), dict) else {}
-
-            welcome_enabled = automations_cfg.get("welcome_enabled")
-            if welcome_enabled is None:
-                welcome_enabled = True
-
-            welcome_message = automations_cfg.get("welcome_message")
-            if not (isinstance(welcome_message, str) and welcome_message.strip()):
-                # Backwards-compat: fall back to legacy widget_config.welcome_message.
-                # If neither is set, use a stable default so first-open works out of the box.
-                legacy_welcome = widget_cfg.get("welcome_message")
-                if isinstance(legacy_welcome, str) and legacy_welcome.strip():
-                    welcome_message = legacy_welcome
-                else:
-                    welcome_message = default_welcome_message
-
-            cooldown_hours = automations_cfg.get("welcome_cooldown_hours")
-            try:
-                cooldown_hours = int(cooldown_hours) if cooldown_hours is not None else 24
-            except Exception:
-                cooldown_hours = 24
-            cooldown = timedelta(hours=max(1, cooldown_hours))
+            cooldown_seconds = automation_service.get_cooldown_seconds(
+                website_id=website_id,
+                trigger="visitor_connected",
+                default_seconds=24 * 3600,
+            )
+            cooldown = timedelta(seconds=max(1, int(cooldown_seconds)))
 
             now = datetime.utcnow()
 
             prev_seen_at = None
 
-            should_send = bool(welcome_enabled and isinstance(welcome_message, str) and welcome_message.strip())
+            should_send = bool(isinstance(welcome_message, str) and welcome_message.strip())
 
             # Update last_seen_at for existing conversations on every connect.
             if conversation:
@@ -241,11 +226,8 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) or 1
                     db.commit()
 
-                saved = service.add_bot_message(
-                    conversation.id,
-                    str(welcome_message).strip(),
-                    event_type="automation_welcome",
-                )
+                # Keep event_type stable for idempotency and history queries.
+                saved = service.add_bot_message(conversation.id, str(welcome_message).strip(), event_type="automation_welcome")
                 await websocket.send_json(
                     {
                         "type": "ai",

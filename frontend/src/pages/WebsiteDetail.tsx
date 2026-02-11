@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 
@@ -20,11 +21,6 @@ interface Website {
     theme?: string
     position?: string
     welcome_message?: string
-    automations?: {
-      welcome_enabled?: boolean
-      welcome_message?: string
-      welcome_cooldown_hours?: number
-    }
     primary_color?: string
     header_title?: string
     online_status_text?: string
@@ -38,6 +34,23 @@ interface Website {
 }
 
 type TabType = 'installation' | 'settings' | 'widget' | 'automations'
+
+type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
+
+type BuilderStep = 'pick_type' | 'edit_auto_message'
+
+type BuilderCreateType = 'auto_message' | 'chatbot' | 'ai_assistant'
+
+type AutomationDraft = {
+  id?: number
+  name: string
+  trigger: string
+  enabled: boolean
+  message: string
+  event_type?: string
+  delay_seconds?: number
+  cooldown_hours?: number
+}
 
 export default function WebsiteDetail() {
   const { id } = useParams<{ id: string }>()
@@ -58,6 +71,12 @@ export default function WebsiteDetail() {
   const [automationsLoading, setAutomationsLoading] = useState(false)
   const [automationsError, setAutomationsError] = useState<string | null>(null)
   const [savingAutomationId, setSavingAutomationId] = useState<number | null>(null)
+  const [automationsSubTab, setAutomationsSubTab] = useState<AutomationsSubTab>('templates')
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [builderStep, setBuilderStep] = useState<BuilderStep>('pick_type')
+  const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
+  const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
+  const [builderSaving, setBuilderSaving] = useState(false)
 
   // Form data
   const [formData, setFormData] = useState({
@@ -67,11 +86,6 @@ export default function WebsiteDetail() {
       theme: 'dark',
       position: 'bottom-right',
       welcome_message: 'Hi! How can we help you today?',
-      automations: {
-        welcome_enabled: true,
-        welcome_message: 'Hi! How can we help you today?',
-        welcome_cooldown_hours: 24,
-      },
       primary_color: '#000000',
       header_title: 'How can we help?',
       online_status_text: 'We reply immediately',
@@ -95,6 +109,12 @@ export default function WebsiteDetail() {
     if (activeTab !== 'automations') return
     loadAutomations()
   }, [activeTab, websiteId])
+
+  useEffect(() => {
+    if (activeTab !== 'automations') return
+    // Keep the last sub-tab selection, but default to Templates.
+    if (!automationsSubTab) setAutomationsSubTab('templates')
+  }, [activeTab])
 
   const loadAutomations = async () => {
     if (!websiteId) return
@@ -134,6 +154,109 @@ export default function WebsiteDetail() {
     return nextAction
   }
 
+  const getAutomationByTrigger = (trigger: string) => {
+    return automations.find((a) => a.trigger === trigger) || null
+  }
+
+  const draftFromAutomation = (automation: Automation): AutomationDraft => {
+    const action = extractPrimaryAction(automation)
+    const delay = Number(automation.conditions?.delay_seconds ?? 60)
+    const cooldownHours = Number(automation.conditions?.cooldown_hours ?? 24)
+    return {
+      id: automation.id,
+      name: automation.name,
+      trigger: String(automation.trigger || ''),
+      enabled: !!automation.enabled,
+      message: action?.message || '',
+      event_type: action?.event_type,
+      delay_seconds:
+        automation.trigger === 'no_agent_assigned_for' && Number.isFinite(delay) ? Math.max(1, delay) : undefined,
+      cooldown_hours:
+        automation.trigger === 'visitor_connected' && Number.isFinite(cooldownHours) ? Math.max(1, cooldownHours) : undefined,
+    }
+  }
+
+  const openBuilderPickType = () => {
+    setAutomationsError(null)
+    setBuilderOpen(true)
+    setBuilderStep('pick_type')
+    setBuilderCreateType('auto_message')
+    setBuilderDraft({
+      name: 'New auto message',
+      trigger: 'no_agent_assigned_for',
+      enabled: true,
+      message: '',
+      event_type: undefined,
+      delay_seconds: 60,
+      cooldown_hours: 24,
+    })
+  }
+
+  const openBuilderForAutomation = (automation: Automation) => {
+    setAutomationsError(null)
+    setBuilderOpen(true)
+    setBuilderStep('edit_auto_message')
+    setBuilderCreateType('auto_message')
+    setBuilderDraft(draftFromAutomation(automation))
+  }
+
+  const closeBuilder = () => {
+    setBuilderOpen(false)
+    setBuilderSaving(false)
+    setBuilderDraft(null)
+    setBuilderStep('pick_type')
+  }
+
+  const saveBuilderDraft = async () => {
+    if (!websiteId) return
+    if (!builderDraft) return
+    if (!builderDraft.message.trim()) {
+      setAutomationsError('Message cannot be empty')
+      return
+    }
+
+    const isWaiting = builderDraft.trigger === 'no_agent_assigned_for'
+    const isWelcome = builderDraft.trigger === 'visitor_connected'
+
+    const payload = {
+      name: builderDraft.name.trim() || 'Auto message',
+      trigger: builderDraft.trigger,
+      enabled: !!builderDraft.enabled,
+      conditions:
+        isWaiting
+          ? { delay_seconds: Math.max(1, Number(builderDraft.delay_seconds ?? 60) || 60) }
+          : isWelcome
+            ? { cooldown_hours: Math.max(1, Number(builderDraft.cooldown_hours ?? 24) || 24) }
+            : {},
+      actions: [
+        {
+          type: 'send_bot_message',
+          message: builderDraft.message.trim(),
+          // Keep stable server-side idempotency for welcome.
+          event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
+        },
+      ],
+    }
+
+    try {
+      setBuilderSaving(true)
+      if (builderDraft.id) {
+        await automationsApi.update(builderDraft.id, payload)
+      } else {
+        await automationsApi.create({
+          website_id: websiteId,
+          ...payload,
+        })
+      }
+      await loadAutomations()
+      closeBuilder()
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to save automation')
+    } finally {
+      setBuilderSaving(false)
+    }
+  }
+
   const saveAutomation = async (automation: Automation) => {
     try {
       setSavingAutomationId(automation.id)
@@ -148,6 +271,49 @@ export default function WebsiteDetail() {
       setAutomationsError(err?.message || 'Failed to save automation')
     } finally {
       setSavingAutomationId(null)
+    }
+  }
+
+  const createTemplateIfMissing = async (template: {
+    name: string
+    trigger: string
+    enabled: boolean
+    message: string
+    event_type?: string
+    delay_seconds?: number
+    cooldown_hours?: number
+  }) => {
+    if (!websiteId) return
+    try {
+      setAutomationsError(null)
+      const existing = getAutomationByTrigger(template.trigger)
+      if (existing) {
+        openBuilderForAutomation(existing)
+        return
+      }
+      const created = await automationsApi.create({
+        website_id: websiteId,
+        name: template.name,
+        trigger: template.trigger,
+        enabled: template.enabled,
+        conditions:
+          template.trigger === 'no_agent_assigned_for'
+            ? { delay_seconds: Math.max(1, Number(template.delay_seconds ?? 60) || 60) }
+            : template.trigger === 'visitor_connected'
+              ? { cooldown_hours: Math.max(1, Number(template.cooldown_hours ?? 24) || 24) }
+              : {},
+        actions: [
+          {
+            type: 'send_bot_message',
+            message: template.message,
+            event_type: template.trigger === 'visitor_connected' ? 'automation_welcome' : template.event_type,
+          },
+        ],
+      })
+      await loadAutomations()
+      if (created) openBuilderForAutomation(created)
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to create template')
     }
   }
 
@@ -169,7 +335,6 @@ export default function WebsiteDetail() {
       setError(null)
       const data = await apiRequest<Website>(`/websites/${id}`)
       setWidgetKey(data.widget_key || null)
-      const automations = data.widget_config?.automations || {}
       const defaultWelcome = data.widget_config?.welcome_message || 'Hi! How can we help you today?'
       setFormData({
         name: data.name,
@@ -178,11 +343,6 @@ export default function WebsiteDetail() {
           theme: data.widget_config?.theme || 'dark',
           position: data.widget_config?.position || 'bottom-right',
           welcome_message: defaultWelcome,
-          automations: {
-            welcome_enabled: automations.welcome_enabled !== undefined ? !!automations.welcome_enabled : true,
-            welcome_message: (automations.welcome_message || defaultWelcome) as string,
-            welcome_cooldown_hours: typeof automations.welcome_cooldown_hours === 'number' ? automations.welcome_cooldown_hours : 24,
-          },
           primary_color: data.widget_config?.primary_color || '#000000',
           header_title: data.widget_config?.header_title || 'How can we help?',
           online_status_text: data.widget_config?.online_status_text || 'We reply immediately',
@@ -499,6 +659,40 @@ export default function WebsiteDetail() {
               <CardDescription>Configure per-website auto messages and triggers</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={automationsSubTab === 'templates' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setAutomationsSubTab('templates')}
+                  >
+                    Templates
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={automationsSubTab === 'auto_messages' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setAutomationsSubTab('auto_messages')}
+                  >
+                    Auto messages
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={automationsSubTab === 'chatbots' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setAutomationsSubTab('chatbots')}
+                  >
+                    Chatbots
+                  </Button>
+                </div>
+
+                <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  Build from scratch
+                </Button>
+              </div>
+
               {automationsError && (
                 <div className="p-3 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">
                   {automationsError}
@@ -507,86 +701,371 @@ export default function WebsiteDetail() {
 
               {automationsLoading ? (
                 <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
-              ) : automations.length === 0 ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400">No automations found for this website.</div>
-              ) : (
+              ) : automationsSubTab === 'templates' ? (
                 <div className="space-y-4">
-                  {automations.map((automation) => {
-                    const action = extractPrimaryAction(automation)
-                    const delay = Number(automation.conditions?.delay_seconds ?? 60)
-                    const canEditDelay = automation.trigger === 'no_agent_assigned_for'
-
-                    return (
-                      <div key={automation.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {(() => {
+                      const t = {
+                        name: 'Welcome message',
+                        trigger: 'visitor_connected',
+                        enabled: true,
+                        cooldown_hours: 24,
+                        message: 'Hi! How can we help you today?',
+                        event_type: 'automation_welcome',
+                        description: 'Sends when a visitor opens the widget, with a cooldown.',
+                      } as const
+                      const existing = getAutomationByTrigger(t.trigger)
+                      return (
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                            </div>
+                            {existing ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
+                                Edit
+                              </Button>
+                            ) : (
+                              <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
+                                Use template
+                              </Button>
+                            )}
                           </div>
-                          <div className="flex items-center gap-3">
-                            <Switch
-                              checked={automation.enabled}
-                              onCheckedChange={(checked) => updateAutomationLocal(automation.id, { enabled: checked })}
-                            />
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => saveAutomation(automation)}
-                              disabled={savingAutomationId === automation.id}
-                            >
-                              {savingAutomationId === automation.id ? 'Saving…' : 'Save'}
-                            </Button>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-500">
+                            Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
                           </div>
                         </div>
+                      )
+                    })()}
 
-                        {canEditDelay && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {(
+                      [
+                        {
+                          name: 'Waiting message',
+                          trigger: 'no_agent_assigned_for',
+                          enabled: true,
+                          delay_seconds: 60,
+                          message: 'Thanks! An agent will be with you shortly.',
+                          event_type: 'bot_waiting',
+                          description: 'Sends after the visitor waits without an assigned agent.',
+                        },
+                        {
+                          name: 'Offline prompt',
+                          trigger: 'website_offline_first_message',
+                          enabled: true,
+                          message:
+                            "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                          event_type: 'bot_offline',
+                          description: 'Sends when the website is offline and the visitor sends the first message.',
+                        },
+                        {
+                          name: 'Closing message',
+                          trigger: 'conversation_resolved',
+                          enabled: false,
+                          message: 'Thanks! This conversation is now closed.',
+                          event_type: 'bot_closing',
+                          description: 'Optional message sent after a conversation is resolved.',
+                        },
+                      ] as const
+                    ).map((t) => {
+                      const existing = getAutomationByTrigger(t.trigger)
+                      return (
+                        <div key={t.trigger} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
                             <div>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Wait time (seconds)
-                              </label>
-                              <Input
-                                type="number"
-                                min={1}
-                                value={String(Number.isFinite(delay) ? delay : 60)}
-                                onChange={(e) => {
-                                  const nextDelay = Math.max(1, parseInt(e.target.value || '60', 10) || 60)
-                                  updateAutomationLocal(automation.id, {
-                                    conditions: { ...(automation.conditions || {}), delay_seconds: nextDelay },
-                                  })
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                            </div>
+                            {existing ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
+                                Edit
+                              </Button>
+                            ) : (
+                              <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
+                                Use template
+                              </Button>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-500">
+                            Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : automationsSubTab === 'auto_messages' ? (
+                automations.length === 0 ? (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    No DB-backed auto messages found. Use Templates or Build from scratch.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {automations.map((automation) => {
+                      const action = extractPrimaryAction(automation)
+                      const delay = Number(automation.conditions?.delay_seconds ?? 60)
+                      const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
+                      return (
+                        <div key={automation.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                              {automation.trigger === 'no_agent_assigned_for' && (
+                                <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
+                              )}
+                              {automation.trigger === 'visitor_connected' && (
+                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                  Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
+                                </div>
+                              )}
+                              {action?.message && (
+                                <div className="text-xs text-gray-600 dark:text-gray-400">{action.message}</div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <Switch
+                                checked={automation.enabled}
+                                onCheckedChange={(checked) => {
+                                  const next = { ...automation, enabled: checked }
+                                  updateAutomationLocal(automation.id, { enabled: checked })
+                                  saveAutomation(next)
                                 }}
                               />
+                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(automation)}>
+                                Edit
+                              </Button>
                             </div>
                           </div>
-                        )}
-
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Bot message
-                          </label>
-                          <Input
-                            value={action?.message || ''}
-                            onChange={(e) => {
-                              const nextAction: AutomationAction = {
-                                type: 'send_bot_message',
-                                message: e.target.value,
-                                event_type: action?.event_type,
-                              }
-                              updateAutomationLocal(automation.id, {
-                                actions: updateAutomationAction(automation, nextAction),
-                              })
-                            }}
-                            placeholder="Enter message..."
-                          />
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
+                )
+              ) : (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
+                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbots</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Chatbot builder will be added later. For now, use Auto messages.
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
+        )}
+
+        {builderOpen && (
+          <div className="!mt-0 fixed inset-0 z-50">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={closeBuilder}
+              role="button"
+              tabIndex={0}
+              aria-label="Close automation builder"
+            />
+            <div className="absolute inset-y-0 right-0 w-full max-w-xl bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-md">
+              <div className="h-full flex flex-col">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {builderDraft?.id
+                        ? 'Edit auto message'
+                        : 'Build from scratch'}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Structured editor (MVP)
+                    </div>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={closeBuilder}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                  {builderStep === 'pick_type' && (
+                    <div className="space-y-4">
+                      <div className="text-sm text-gray-700 dark:text-gray-300">
+                        Choose what you want to build.
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBuilderCreateType('auto_message')
+                            setBuilderStep('edit_auto_message')
+                          }}
+                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 hover:bg-gray-50 dark:hover:bg-gray-900"
+                        >
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Auto message</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Trigger-based bot message (waiting/offline/closing).
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled
+                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
+                        >
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbot</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled
+                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
+                        >
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI assistant</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {builderStep === 'edit_auto_message' && builderDraft && (
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">When</div>
+                        <div className="grid grid-cols-1 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                            <Input
+                              value={builderDraft.name}
+                              onChange={(e) => setBuilderDraft({ ...builderDraft, name: e.target.value })}
+                              placeholder="Automation name"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Trigger</label>
+                            <select
+                              value={builderDraft.trigger}
+                              onChange={(e) => {
+                                const nextTrigger = e.target.value
+                                setBuilderDraft({
+                                  ...builderDraft,
+                                  trigger: nextTrigger,
+                                  delay_seconds: nextTrigger === 'no_agent_assigned_for' ? (builderDraft.delay_seconds ?? 60) : undefined,
+                                  cooldown_hours: nextTrigger === 'visitor_connected' ? (builderDraft.cooldown_hours ?? 24) : undefined,
+                                })
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                            >
+                              <option value="visitor_connected">Visitor connected</option>
+                              <option value="no_agent_assigned_for">No agent assigned for</option>
+                              <option value="website_offline_first_message">Website offline: first message</option>
+                              <option value="conversation_resolved">Conversation resolved</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Where</div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Audience</div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Scheduling</div>
+                        {builderDraft.trigger === 'no_agent_assigned_for' ? (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={String(builderDraft.delay_seconds ?? 60)}
+                              onChange={(e) =>
+                                setBuilderDraft({
+                                  ...builderDraft,
+                                  delay_seconds: Math.max(1, parseInt(e.target.value || '60', 10) || 60),
+                                })
+                              }
+                            />
+                          </div>
+                        ) : builderDraft.trigger === 'visitor_connected' ? (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cooldown (hours)</label>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={String(builderDraft.cooldown_hours ?? 24)}
+                              onChange={(e) =>
+                                setBuilderDraft({
+                                  ...builderDraft,
+                                  cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
+                                })
+                              }
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-600 dark:text-gray-400">No scheduling options for this trigger.</div>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Behavior</div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Enabled</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">Turn this automation on/off.</div>
+                          </div>
+                          <Switch
+                            checked={builderDraft.enabled}
+                            onCheckedChange={(checked) => setBuilderDraft({ ...builderDraft, enabled: checked })}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Message</label>
+                          <Textarea
+                            value={builderDraft.message}
+                            onChange={(e) => setBuilderDraft({ ...builderDraft, message: e.target.value })}
+                            placeholder="Enter bot message..."
+                          />
+                        </div>
+
+                        <div>
+                          {builderDraft.trigger !== 'visitor_connected' && (
+                            <>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type (optional)</label>
+                              <Input
+                                value={builderDraft.event_type || ''}
+                                onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
+                                placeholder="bot_waiting"
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                  <Button type="button" variant="outline" onClick={closeBuilder}>
+                    Cancel
+                  </Button>
+
+                  {builderStep === 'edit_auto_message' ? (
+                    <Button type="button" onClick={saveBuilderDraft} disabled={builderSaving} className="gap-2">
+                      <Save className="w-4 h-4" />
+                      {builderSaving ? 'Saving…' : 'Save automation'}
+                    </Button>
+                  ) : (
+                    <Button type="button" onClick={closeBuilder}>Done</Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Basic Settings Tab */}
@@ -753,74 +1232,9 @@ export default function WebsiteDetail() {
               </div>
 
               <div>
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Welcome Automation
-                    </label>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Sends a bot welcome message for new visitors, or when they return after the cooldown.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={formData.widget_config.automations?.welcome_enabled ?? true}
-                    onCheckedChange={(checked) => setFormData({
-                      ...formData,
-                      widget_config: {
-                        ...formData.widget_config,
-                        automations: {
-                          ...(formData.widget_config.automations || {}),
-                          welcome_enabled: checked,
-                          welcome_message: (formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string,
-                          welcome_cooldown_hours: (formData.widget_config.automations?.welcome_cooldown_hours ?? 24) as number,
-                        }
-                      }
-                    })}
-                  />
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Welcome Message
-                    </label>
-                    <Input
-                      value={(formData.widget_config.automations?.welcome_message || formData.widget_config.welcome_message) as string}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        widget_config: {
-                          ...formData.widget_config,
-                          welcome_message: e.target.value,
-                          automations: {
-                            ...(formData.widget_config.automations || {}),
-                            welcome_message: e.target.value,
-                          }
-                        }
-                      })}
-                      placeholder="Hi! How can we help you today?"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Cooldown (hours)
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={String(formData.widget_config.automations?.welcome_cooldown_hours ?? 24)}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        widget_config: {
-                          ...formData.widget_config,
-                          automations: {
-                            ...(formData.widget_config.automations || {}),
-                            welcome_cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
-                          }
-                        }
-                      })}
-                    />
-                  </div>
-                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Welcome automation is managed in the Automations tab.
+                </p>
               </div>
 
               <div>

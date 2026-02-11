@@ -90,7 +90,7 @@ def test_websocket_agent_visitor_basic_flow(client_and_seeded_db, monkeypatch):
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid 60s background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -174,7 +174,7 @@ def test_websocket_visitor_reconnect_gets_history(client_and_seeded_db, monkeypa
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid 60s background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -347,7 +347,7 @@ def test_page_view_is_broadcast_to_agent_only_when_conversation_exists(client_an
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -395,7 +395,7 @@ def test_chat_rate_limit_fallback_in_memory_when_no_redis(client_and_seeded_db, 
     # Disable background sleeper tasks.
     from app.services import conversation_orchestrator as orchestrator_module
 
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -431,7 +431,7 @@ def test_chat_rate_limit_redis_path_is_invoked_when_configured(client_and_seeded
     # Disable background sleeper tasks.
     from app.services import conversation_orchestrator as orchestrator_module
 
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
