@@ -226,7 +226,7 @@ Why: move hardcoded bot messages into per-website rules.
   - no_agent_assigned_for(duration) (wired)
   - website_offline_first_message (wired)
   - conversation_resolved (wired)
-- [ ] Implement MVP actions:
+- [x] Implement MVP actions:
   - send_bot_chat_message
   - emit_system_event
 - [x] Add caps/cooldowns to prevent spam.

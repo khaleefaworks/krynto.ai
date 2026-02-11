@@ -119,6 +119,10 @@ class AutomationService:
         actions = self.get_bot_message_actions(website_id=website_id, trigger=trigger)
         return actions[0] if actions else None
 
+    def get_first_system_event_action(self, *, website_id: int, trigger: str) -> dict | None:
+        actions = self.get_system_event_actions(website_id=website_id, trigger=trigger)
+        return actions[0] if actions else None
+
     def ensure_default_automations_for_website(self, *, website_id: int) -> None:
         """Create default automations for a website if missing.
 
@@ -239,6 +243,59 @@ class AutomationService:
                     {
                         "message": message.strip(),
                         "event_type": action.get("event_type") or None,
+                    }
+                )
+
+        return actions
+
+    def get_system_event_actions(self, *, website_id: int, trigger: str) -> List[dict]:
+        """Return system event actions for a trigger.
+
+        Supported actions schema:
+        - actions: [{"type": "emit_system_event", "content": "...", "event_type": "..."}]
+        - actions: {"type": "emit_system_event", "content": "...", "event_type": "..."}
+
+        Notes:
+        - This does not persist anything by itself; callers decide whether/how to apply these.
+        - `content` may also be provided as `message` for convenience.
+        """
+        actions: List[dict] = []
+        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
+
+        for automation in automations:
+            raw_actions = automation.actions or {}
+            if isinstance(raw_actions, str):
+                try:
+                    raw_actions = json.loads(raw_actions)
+                except Exception:
+                    raw_actions = {}
+
+            normalized: Iterable[dict]
+            if isinstance(raw_actions, list):
+                normalized = [a for a in raw_actions if isinstance(a, dict)]
+            elif isinstance(raw_actions, dict):
+                normalized = [raw_actions]
+            else:
+                normalized = []
+
+            for action in normalized:
+                if str(action.get("type") or "").lower() != "emit_system_event":
+                    continue
+
+                content = action.get("content")
+                if content is None:
+                    content = action.get("message")
+                if not isinstance(content, str) or not content.strip():
+                    continue
+
+                event_type = action.get("event_type")
+                if event_type is not None and not isinstance(event_type, str):
+                    event_type = str(event_type)
+
+                actions.append(
+                    {
+                        "content": content.strip(),
+                        "event_type": event_type.strip() if isinstance(event_type, str) and event_type.strip() else None,
                     }
                 )
 
