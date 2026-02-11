@@ -340,6 +340,29 @@
       return;
     }
 
+    // Canonical system events (e.g. conversation_resolved) are delivered as
+    // `type: "system"` frames with an optional `message_obj` DTO.
+    // Without this handler, the generic fallback path misclassifies them as AI.
+    if (data.type === 'system') {
+      const dto = (data && typeof data.message_obj === 'object') ? data.message_obj : null;
+      const createdAt = data.created_at || (dto && dto.created_at) || null;
+
+      const senderType = (dto && (dto.sender_type || dto.sender)) || 'system';
+      const actor = (dto && (dto.actor || senderType)) || 'system';
+      const kind = (dto && (dto.kind || (actor === 'system' ? 'event' : 'chat'))) || 'event';
+      const eventType = (dto && dto.event_type) || null;
+
+      if (actor === 'system' && kind === 'event') {
+        if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
+        else showSystemMessage(data.message);
+      } else {
+        // Bot/system chat message delivered as a system frame.
+        appendMessage('ai', data.message, createdAt, null, dto && dto.id);
+      }
+      smartScroll();
+      return;
+    }
+
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
