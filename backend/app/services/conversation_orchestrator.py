@@ -162,6 +162,14 @@ class ConversationOrchestrator:
         self.conversation_service = ConversationService(db)
         self.agent_service = AgentService(db)
 
+    def _ensure_agent_available(self, user: User) -> bool:
+        """Best-effort: flip availability to True when the agent actively works."""
+
+        if user.is_available is False:
+            user.is_available = True
+            return True
+        return False
+
     async def handle_visitor_message(
         self,
         *,
@@ -545,8 +553,7 @@ class ConversationOrchestrator:
 
         # Practical behavior: if an agent starts handling a chat, treat them as available.
         # This avoids confusing states where an agent is "unavailable" but actively joins chats.
-        if user.is_available is False:
-            user.is_available = True
+        availability_changed = self._ensure_agent_available(user)
 
         # Enforce single owner
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
@@ -595,6 +602,8 @@ class ConversationOrchestrator:
             "success": True,
             "message_id": getattr(saved, "id", None),
             "message_obj": serialize_message(self.db, saved),
+            "agent_is_available": bool(getattr(user, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def handle_agent_takeover(self, *, conversation_id: int, agent_id: int) -> dict:
@@ -610,8 +619,7 @@ class ConversationOrchestrator:
         if not user or not user.is_active:
             return {"error": "User not found or inactive"}
 
-        if user.is_available is False:
-            user.is_available = True
+        availability_changed = self._ensure_agent_available(user)
 
         previous_agent_id = conversation.assigned_agent_id
 
@@ -655,6 +663,8 @@ class ConversationOrchestrator:
             "success": True,
             "message_id": getattr(saved, "id", None),
             "message_obj": serialize_message(self.db, saved),
+            "agent_is_available": bool(getattr(user, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def handle_agent_message(
@@ -671,6 +681,12 @@ class ConversationOrchestrator:
         if conversation.assigned_agent_id != agent_id:
             return {"error": "Conversation is assigned to another agent"}
 
+        agent = self.db.query(User).filter(User.id == agent_id).first()
+        if not agent or not agent.is_active:
+            return {"error": "User not found or inactive"}
+
+        availability_changed = self._ensure_agent_available(agent)
+
         saved = self.conversation_service.add_agent_message(
             conversation_id=conversation_id,
             agent_id=agent_id,
@@ -682,7 +698,6 @@ class ConversationOrchestrator:
 
         logger.info("agent_message_saved", conversation_id=conversation_id, agent_id=agent_id, content_length=len(content))
 
-        agent = self.db.query(User).filter(User.id == agent_id).first()
         agent_name = (agent.name if agent and agent.name else "Support Agent")
 
         # Canonical DTO for clients that want consistent schemas.
@@ -703,6 +718,8 @@ class ConversationOrchestrator:
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),
+            "agent_is_available": bool(getattr(agent, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def close_conversation(self, *, conversation_id: int) -> dict:

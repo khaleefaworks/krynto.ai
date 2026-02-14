@@ -168,7 +168,7 @@ type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 export default function ConversationsView() {
     const { sessionId } = useParams<{ sessionId?: string }>()
     const navigate = useNavigate()
-    const { user } = useAppStore()
+    const { user, setUser } = useAppStore()
     const { activeChats, setActiveChats } = useAppStore()
     const {
         chatEventsVersion,
@@ -640,6 +640,17 @@ export default function ConversationsView() {
                 scheduleUnreadRefresh()
             } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
                 stopAgentTyping(selectedChat)
+
+                // If the backend auto-enabled availability, reflect it immediately in UI.
+                const availabilityChanged = Boolean((data as any)?.availability_changed)
+                const agentIsAvailable = (data as any)?.agent_is_available
+                if (availabilityChanged && agentIsAvailable === true) {
+                    const current = useAppStore.getState().user
+                    if (current && current.is_available === false) {
+                        setUser({ ...current, is_available: true })
+                    }
+                }
+
                 // Our message was confirmed - add to UI
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
@@ -987,6 +998,13 @@ export default function ConversationsView() {
                     const joinResult: any = await joinChat(selectedChat.toString())
                     joinedRef.current = true
 
+                    if (joinResult?.availability_changed && joinResult?.agent_is_available === true) {
+                        const current = useAppStore.getState().user
+                        if (current && current.is_available === false) {
+                            setUser({ ...current, is_available: true })
+                        }
+                    }
+
                     // Prefer server-truth join message (stable timestamp/id).
                     if (joinResult?.message_obj) {
                         addMessage(joinResult.message_obj)
@@ -1031,6 +1049,13 @@ export default function ConversationsView() {
         try {
             const takeoverResult: any = await takeoverConversation(selectedChat)
             joinedRef.current = true
+
+            if (takeoverResult?.availability_changed && takeoverResult?.agent_is_available === true) {
+                const current = useAppStore.getState().user
+                if (current && current.is_available === false) {
+                    setUser({ ...current, is_available: true })
+                }
+            }
 
             if (takeoverResult?.message_obj) {
                 addMessage(takeoverResult.message_obj)

@@ -112,6 +112,8 @@ async def takeover_conversation(
         "conversation_id": conversation_id,
         "message_obj": result.get("message_obj"),
         "message_id": result.get("message_id"),
+        "agent_is_available": result.get("agent_is_available"),
+        "availability_changed": result.get("availability_changed"),
     }
 
 

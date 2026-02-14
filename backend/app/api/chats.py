@@ -91,6 +91,8 @@ async def join_chat(
         "message": "Chat successfully assigned to agent",
         "message_obj": result.get("message_obj"),
         "message_id": result.get("message_id"),
+        "agent_is_available": result.get("agent_is_available"),
+        "availability_changed": result.get("availability_changed"),
     }
 
 

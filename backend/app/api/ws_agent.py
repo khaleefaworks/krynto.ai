@@ -284,6 +284,8 @@ async def agent_ws(
                     "conversation_id": conversation_id,
                     "content": content,
                     "message_obj": message_obj,
+                    "agent_is_available": result.get("agent_is_available"),
+                    "availability_changed": result.get("availability_changed"),
                     "success": True
                 })
 
