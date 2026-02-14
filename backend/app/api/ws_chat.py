@@ -9,6 +9,7 @@ import json
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+import asyncio
 
 from app.core.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
@@ -22,6 +23,37 @@ import uuid
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+VISITOR_LEFT_DELAY_SECONDS = 2
+_visitor_left_scheduled: set[int] = set()
+
+
+async def _send_delayed_visitor_left_event(*, conversation_id: int, delay_seconds: int) -> None:
+    """Emit a visitor_left_website event after a short delay if still disconnected."""
+    try:
+        await asyncio.sleep(max(0, int(delay_seconds or 0)))
+
+        # If they reconnected, do not emit.
+        if conversation_id in ChatService.active_visitors:
+            return
+
+        from app.core.database import SessionLocal
+
+        db2 = SessionLocal()
+        try:
+            orchestrator2 = ConversationOrchestrator(db2)
+            await orchestrator2.visitor_left_website(conversation_id=int(conversation_id))
+        finally:
+            db2.close()
+    except Exception:
+        # Best-effort
+        pass
+    finally:
+        try:
+            _visitor_left_scheduled.discard(int(conversation_id))
+        except Exception:
+            pass
 
 
 def _ws_close_reason(reason: str | None) -> str:
@@ -127,8 +159,24 @@ async def chat_ws(
             conversation = None
 
         if conversation:
+            # Track whether this conversation already had an active visitor socket.
+            # This is best-effort and helps reduce noisy presence events.
+            try:
+                _was_active = int(conversation.id) in ChatService.active_visitors
+            except Exception:
+                _was_active = False
+
             ChatService.register_visitor(conversation.id, websocket)
             registered_conversation_id = conversation.id
+
+            # Smartsupp-like: visitor reconnected/connected (internal timeline event).
+            try:
+                # If a delayed "left" is scheduled, treat this as a transient reconnect and
+                # avoid persisting a redundant "connected" event (page refresh / quick reconnect).
+                if (not _was_active) and (int(conversation.id) not in _visitor_left_scheduled):
+                    await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
+            except Exception:
+                pass
 
             try:
                 messages = messages_repo.list_messages_for_conversation(db, conversation.id)
@@ -613,8 +661,26 @@ async def chat_ws(
             pass
 
         try:
+            # IMPORTANT: do not unregister by conversation_id here.
+            # Another visitor socket may already be registered for the same conversation
+            # (e.g. fast reconnect / reload). `unregister_visitor_socket` above is the safe cleanup.
+            pass
+        except Exception:
+            pass
+
+        # Best-effort: if the visitor truly left (tab closed), emit a timeline event.
+        # Delay slightly to avoid false positives on transient disconnects.
+        try:
             if registered_conversation_id is not None:
-                ChatService.unregister_visitor(registered_conversation_id)
+                cid = int(registered_conversation_id)
+                if cid not in _visitor_left_scheduled:
+                    _visitor_left_scheduled.add(cid)
+                    asyncio.create_task(
+                        _send_delayed_visitor_left_event(
+                            conversation_id=cid,
+                            delay_seconds=VISITOR_LEFT_DELAY_SECONDS,
+                        )
+                    )
         except Exception:
             pass
 

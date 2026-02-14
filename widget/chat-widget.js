@@ -369,6 +369,11 @@
         const kind = m.kind || (actor === 'system' ? 'event' : 'chat');
         const eventType = m.event_type || null;
 
+        // Internal timeline events: don't show to the visitor.
+        if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
+          return;
+        }
+
         if (actor === 'visitor') {
           appendMessage('visitor', m.content, m.created_at, null, m.id);
         } else if (actor === 'agent') {
@@ -399,6 +404,11 @@
       const actor = (dto && (dto.actor || senderType)) || 'system';
       const kind = (dto && (dto.kind || (actor === 'system' ? 'event' : 'chat'))) || 'event';
       const eventType = (dto && dto.event_type) || null;
+
+      // Internal timeline events: don't show to the visitor.
+      if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
+        return;
+      }
 
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);

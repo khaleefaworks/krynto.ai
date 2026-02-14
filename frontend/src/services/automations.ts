@@ -2,9 +2,11 @@ import { apiRequest } from '@/services/api'
 
 export type AutomationTrigger =
   | 'visitor_connected'
+  | 'visitor_socket_connected'
   | 'no_agent_assigned_for'
   | 'website_offline_first_message'
   | 'visitor_closed_chat'
+  | 'visitor_left_website'
   | 'conversation_resolved'
   | 'conversation_reopened'
 

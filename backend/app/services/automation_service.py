@@ -143,6 +143,19 @@ class AutomationService:
                 ],
             },
             {
+                "name": "Visitor connected event",
+                "trigger": "visitor_socket_connected",
+                "enabled": False,
+                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
+                "actions": [
+                    {
+                        "type": "emit_system_event",
+                        "content": "Visitor has just connected.",
+                        "event_type": "visitor_socket_connected",
+                    }
+                ],
+            },
+            {
                 "name": "Waiting message",
                 "trigger": "no_agent_assigned_for",
                 "enabled": True,
@@ -230,6 +243,19 @@ class AutomationService:
                         "type": "send_bot_message",
                         "message": "Thanks! If you need anything else, just send another message.",
                         "event_type": "bot_visitor_closed",
+                    }
+                ],
+            },
+            {
+                "name": "Visitor left website event",
+                "trigger": "visitor_left_website",
+                "enabled": True,
+                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
+                "actions": [
+                    {
+                        "type": "emit_system_event",
+                        "content": "Visitor left website.",
+                        "event_type": "visitor_left_website",
                     }
                 ],
             },

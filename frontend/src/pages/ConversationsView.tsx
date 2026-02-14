@@ -688,6 +688,16 @@ export default function ConversationsView() {
                 if (selectedChat && dataConversationId === selectedChat) {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'visitor_left_website' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat && dataConversationId === selectedChat) {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+            } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat && dataConversationId === selectedChat) {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
             } else if (data.type === 'conversation_assigned') {
                 // Another agent (or us) claimed a conversation.
                 fetchActiveChats({ showSpinner: false })

@@ -264,7 +264,9 @@ function App() {
         data.type === 'conversation_assigned' ||
         data.type === 'conversation_closed' ||
         data.type === 'visitor_message' ||
-        data.type === 'visitor_closed_chat'
+        data.type === 'visitor_closed_chat' ||
+        data.type === 'visitor_left_website' ||
+        data.type === 'visitor_socket_connected'
       ) {
         bumpChatEventsVersion({
           type: data.type,

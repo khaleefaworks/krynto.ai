@@ -586,6 +586,8 @@ export default function WebsiteDetail() {
     event_type?: string
     delay_seconds?: number
     cooldown_hours?: number
+    repeat?: 'once' | 'cooldown' | 'always'
+    repeat_cooldown_seconds?: number
   }) => {
     if (!websiteId) return
     try {
@@ -602,17 +604,31 @@ export default function WebsiteDetail() {
       }
 
       const nextActionType = template.action_type || 'send_bot_message'
+
+      const baseConditions =
+        template.trigger === 'no_agent_assigned_for'
+          ? { delay_seconds: Math.max(1, Number(template.delay_seconds ?? 60) || 60) }
+          : template.trigger === 'visitor_connected'
+            ? { cooldown_hours: Math.max(1, Number(template.cooldown_hours ?? 24) || 24) }
+            : {}
+
+      const nextConditions =
+        template.trigger !== 'no_agent_assigned_for' && template.trigger !== 'visitor_connected'
+          ? {
+            ...baseConditions,
+            ...(template.repeat ? { repeat: template.repeat } : {}),
+            ...(typeof template.repeat_cooldown_seconds === 'number' && Number.isFinite(template.repeat_cooldown_seconds)
+              ? { repeat_cooldown_seconds: Math.max(1, Math.floor(template.repeat_cooldown_seconds)) }
+              : {}),
+          }
+          : baseConditions
+
       const created = await automationsApi.create({
         website_id: websiteId,
         name: template.name,
         trigger: template.trigger,
         enabled: template.enabled,
-        conditions:
-          template.trigger === 'no_agent_assigned_for'
-            ? { delay_seconds: Math.max(1, Number(template.delay_seconds ?? 60) || 60) }
-            : template.trigger === 'visitor_connected'
-              ? { cooldown_hours: Math.max(1, Number(template.cooldown_hours ?? 24) || 24) }
-              : {},
+        conditions: nextConditions,
         actions:
           nextActionType === 'emit_system_event'
             ? [
@@ -1104,6 +1120,28 @@ export default function WebsiteDetail() {
                           description: 'System event shown in the timeline when a visitor ends the chat UI (conversation remains open).',
                         },
                         {
+                          name: 'Visitor connected event',
+                          trigger: 'visitor_socket_connected',
+                          enabled: false,
+                          action_type: 'emit_system_event',
+                          message: 'Visitor has just connected.',
+                          event_type: 'visitor_socket_connected',
+                          description: 'Internal timeline event when the visitor opens/reconnects (not shown to the visitor).',
+                          repeat: 'cooldown',
+                          repeat_cooldown_seconds: 10,
+                        },
+                        {
+                          name: 'Visitor left website event',
+                          trigger: 'visitor_left_website',
+                          enabled: true,
+                          action_type: 'emit_system_event',
+                          message: 'Visitor left website.',
+                          event_type: 'visitor_left_website',
+                          description: 'Internal timeline event when the visitor closes the tab or navigates away (best-effort).',
+                          repeat: 'cooldown',
+                          repeat_cooldown_seconds: 10,
+                        },
+                        {
                           name: 'Closing message',
                           trigger: 'conversation_resolved',
                           enabled: false,
@@ -1410,9 +1448,11 @@ export default function WebsiteDetail() {
                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                             >
                               <option value="visitor_connected">Visitor connected</option>
+                              <option value="visitor_socket_connected">Visitor (re)connected</option>
                               <option value="no_agent_assigned_for">No agent assigned for</option>
                               <option value="website_offline_first_message">Website offline: first message</option>
                               <option value="visitor_closed_chat">Visitor closed chat</option>
+                              <option value="visitor_left_website">Visitor left website</option>
                               <option value="conversation_resolved">Conversation resolved</option>
                               <option value="conversation_reopened">Conversation reopened</option>
                             </select>

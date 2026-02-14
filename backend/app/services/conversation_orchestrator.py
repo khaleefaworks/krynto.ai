@@ -806,6 +806,87 @@ class ConversationOrchestrator:
 
         return {"success": True}
 
+    async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
+        """Visitor websocket connected for an existing conversation.
+
+        This is used for Smartsupp-like timeline events (e.g. visitor connected/left).
+        These are dashboard/internal events and should not be pushed into the visitor UI.
+        """
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_socket_connected",
+            default_system_event_type="visitor_socket_connected",
+            default_bot_event_type=None,
+            log_key="visitor_socket_connected_automation_failed",
+            send_system_events_to_visitor=False,
+            send_bot_messages_to_visitor=False,
+        )
+
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_socket_connected",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def visitor_left_website(self, *, conversation_id: int) -> dict:
+        """Visitor websocket appears to have disconnected (left the website/tab)."""
+
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_left_website",
+            default_system_event_type="visitor_left_website",
+            default_bot_event_type=None,
+            log_key="visitor_left_website_automation_failed",
+            send_system_events_to_visitor=False,
+            send_bot_messages_to_visitor=False,
+        )
+
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_left_website",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
     async def _run_automation_trigger(
         self,
         *,
@@ -815,6 +896,8 @@ class ConversationOrchestrator:
         default_system_event_type: str | None,
         default_bot_event_type: str | None,
         log_key: str,
+        send_system_events_to_visitor: bool = True,
+        send_bot_messages_to_visitor: bool = True,
     ) -> None:
         if not website_id:
             return
@@ -846,14 +929,15 @@ class ConversationOrchestrator:
                     str(content),
                     event_type=str(event_type),
                 )
-                await ChatService.send_to_visitor(
-                    conversation_id,
-                    {
-                        "type": "system",
-                        "message": saved_evt.content,
-                        "message_obj": serialize_message(self.db, saved_evt),
-                    },
-                )
+                if send_system_events_to_visitor:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "system",
+                            "message": saved_evt.content,
+                            "message_obj": serialize_message(self.db, saved_evt),
+                        },
+                    )
 
             bot_actions = automation_service.get_bot_message_actions(
                 website_id=int(website_id),
@@ -878,14 +962,15 @@ class ConversationOrchestrator:
                     action["message"],
                     event_type=str(event_type),
                 )
-                await ChatService.send_to_visitor(
-                    conversation_id,
-                    {
-                        "type": "bot",
-                        "message": action["message"],
-                        "message_obj": serialize_message(self.db, saved_bot),
-                    },
-                )
+                if send_bot_messages_to_visitor:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "bot",
+                            "message": action["message"],
+                            "message_obj": serialize_message(self.db, saved_bot),
+                        },
+                    )
         except Exception as e:
             logger.error(
                 str(log_key),
