@@ -39,7 +39,7 @@ class User(Base):
     )
 
     # Presence & availability
-    is_available = Column(Boolean, default=True, nullable=False)  # Can receive chats
+    is_available = Column(Boolean, default=False, nullable=False)  # Can receive chats
     is_active = Column(Boolean, default=True, nullable=False)      # Account enabled
 
     # Timestamps

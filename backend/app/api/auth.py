@@ -231,7 +231,7 @@ async def register(
         password_hash=get_password_hash(register_request.password),
         role=register_request.role,
         is_active=True,
-        is_available=True
+        is_available=False
     )
     
     db.add(user)
