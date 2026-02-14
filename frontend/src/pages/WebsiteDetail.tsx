@@ -263,6 +263,7 @@ export default function WebsiteDetail() {
       // Match backend defaults so the warning reflects real idempotency behavior.
       if (t === 'no_agent_assigned_for') return 'bot_waiting'
       if (t === 'website_offline_first_message') return 'bot_offline'
+      if (t === 'visitor_closed_chat') return 'bot_visitor_closed'
       if (t === 'conversation_resolved') return 'bot_closing'
       if (t === 'conversation_reopened') return 'bot_reopened'
       return null
@@ -285,6 +286,7 @@ export default function WebsiteDetail() {
     if (raw) return raw
     if (trigger === 'no_agent_assigned_for') return 'bot_waiting'
     if (trigger === 'website_offline_first_message') return 'bot_offline'
+    if (trigger === 'visitor_closed_chat') return 'bot_visitor_closed'
     if (trigger === 'conversation_resolved') return 'bot_closing'
     if (trigger === 'conversation_reopened') return 'bot_reopened'
     return null
@@ -1084,6 +1086,24 @@ export default function WebsiteDetail() {
                           description: 'Sends when the website is offline and the visitor sends the first message.',
                         },
                         {
+                          name: 'Visitor closed message',
+                          trigger: 'visitor_closed_chat',
+                          enabled: false,
+                          action_type: 'send_bot_message',
+                          message: 'Thanks! If you need anything else, just send another message.',
+                          event_type: 'bot_visitor_closed',
+                          description: 'Optional message when a visitor ends the chat UI (does not resolve the conversation).',
+                        },
+                        {
+                          name: 'Visitor closed event',
+                          trigger: 'visitor_closed_chat',
+                          enabled: true,
+                          action_type: 'emit_system_event',
+                          message: 'Visitor closed chat.',
+                          event_type: 'visitor_closed_chat',
+                          description: 'System event shown in the timeline when a visitor ends the chat UI (conversation remains open).',
+                        },
+                        {
                           name: 'Closing message',
                           trigger: 'conversation_resolved',
                           enabled: false,
@@ -1392,6 +1412,7 @@ export default function WebsiteDetail() {
                               <option value="visitor_connected">Visitor connected</option>
                               <option value="no_agent_assigned_for">No agent assigned for</option>
                               <option value="website_offline_first_message">Website offline: first message</option>
+                              <option value="visitor_closed_chat">Visitor closed chat</option>
                               <option value="conversation_resolved">Conversation resolved</option>
                               <option value="conversation_reopened">Conversation reopened</option>
                             </select>

@@ -263,7 +263,8 @@ function App() {
         data.type === 'conversation_unread' ||
         data.type === 'conversation_assigned' ||
         data.type === 'conversation_closed' ||
-        data.type === 'visitor_message'
+        data.type === 'visitor_message' ||
+        data.type === 'visitor_closed_chat'
       ) {
         bumpChatEventsVersion({
           type: data.type,

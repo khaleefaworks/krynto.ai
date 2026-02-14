@@ -210,6 +210,12 @@
   font-size: 16px;
 }
 
+.chatassist-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .chatassist-header-content {
   display: flex;
   align-items: center;
@@ -309,11 +315,10 @@
   }
 }
 
-#chatassist-close {
+.chatassist-header-btn {
   background: none;
   border: none;
   color: #fff;
-  font-size: 28px;
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -325,8 +330,84 @@
   transition: background 0.2s;
 }
 
-#chatassist-close:hover {
+.chatassist-header-btn:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+#chatassist-end {
+  font-size: 28px;
+  line-height: 1;
+}
+
+/* End chat confirmation overlay (bottom sheet) */
+.chatassist-end-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 60;
+}
+
+.chatassist-end-overlay-visible {
+  display: flex;
+}
+
+.chatassist-end-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.chatassist-end-overlay-panel {
+  position: relative;
+  width: calc(100% - 24px);
+  margin: 12px;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  padding: 14px;
+  transform: translateY(110%);
+  transition: transform 220ms ease;
+}
+
+.chatassist-end-overlay-visible .chatassist-end-overlay-panel {
+  transform: translateY(0);
+}
+
+.chatassist-end-overlay-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: #111827;
+}
+
+.chatassist-end-overlay-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+
+.chatassist-end-overlay-cancel {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #111827;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chatassist-end-overlay-confirm {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: #000;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 /* Messages container */

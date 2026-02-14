@@ -4,6 +4,7 @@ export type AutomationTrigger =
   | 'visitor_connected'
   | 'no_agent_assigned_for'
   | 'website_offline_first_message'
+  | 'visitor_closed_chat'
   | 'conversation_resolved'
   | 'conversation_reopened'
 

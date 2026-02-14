@@ -182,7 +182,7 @@ export default function ConversationsView() {
         lastProcessedChatEventsVersion,
         setLastProcessedChatEventsVersion,
     } = useAppStore()
-    const { messages, addMessage, addMessages, reset } = useMessageStore()
+    const { messages, addMessage, addMessages, reconcileOptimisticMessage, reset } = useMessageStore()
 
     const activeChatsRef = useRef(activeChats)
     useEffect(() => {
@@ -456,6 +456,7 @@ export default function ConversationsView() {
             eventType === 'new_chat' ||
             eventType === 'conversation_assigned' ||
             eventType === 'conversation_closed' ||
+            eventType === 'visitor_closed_chat' ||
             (eventType === 'visitor_message' && conversationIsInList)
         ) {
             fetchActiveChats({ showSpinner: false })
@@ -463,6 +464,10 @@ export default function ConversationsView() {
 
         if (eventType === 'visitor_message' && selectedChat && eventConversationId === selectedChat) {
             console.log('🔄 Global visitor_message: refreshing messages from server...')
+            loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+        }
+
+        if (eventType === 'visitor_closed_chat' && selectedChat && eventConversationId === selectedChat) {
             loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
         }
 
@@ -655,7 +660,12 @@ export default function ConversationsView() {
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
                     console.log('✅ Agent message confirmed (DTO)')
-                    addMessage(dto)
+                    const clientId = String((data as any)?.client_message_id || '').trim()
+                    if (clientId) {
+                        reconcileOptimisticMessage(`tmp:${clientId}`, dto)
+                    } else {
+                        addMessage(dto)
+                    }
 
                     // Keep list preview + timestamp in sync.
                     const content = String((dto as any)?.content ?? '').trim()
@@ -671,6 +681,11 @@ export default function ConversationsView() {
                     }
                 } else {
                     console.warn('✅ Missing agent message DTO; refreshing thread')
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+            } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat && dataConversationId === selectedChat) {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
             } else if (data.type === 'conversation_assigned') {
@@ -1024,8 +1039,35 @@ export default function ConversationsView() {
                 }
             }
 
-            sendAgentMessage(messageContent, selectedChat.toString())
-            // Message will appear via WebSocket callback - don't add optimistically
+            const clientId = sendAgentMessage(messageContent, selectedChat.toString())
+
+            // Optimistic UI: show agent bubble immediately, then reconcile when
+            // message_sent arrives with canonical id/timestamp.
+            const optimisticCreatedAt = new Date().toISOString()
+            addMessage({
+                id: `tmp:${clientId}`,
+                conversation_id: selectedChat,
+                sender_type: 'agent',
+                actor: 'agent',
+                kind: 'chat',
+                content: messageContent,
+                created_at: optimisticCreatedAt,
+                sender_name: user?.name || undefined,
+                sender_avatar_url: (user as any)?.avatar_url || undefined,
+            } as any)
+
+            // Best-effort: update preview immediately.
+            try {
+                const latest = activeChatsRef.current
+                const idx = latest.findIndex(c => c.id === selectedChat)
+                if (idx >= 0) {
+                    const next = [...latest]
+                    next[idx] = { ...next[idx], last_message: messageContent, last_message_at: optimisticCreatedAt }
+                    setActiveChats(next)
+                }
+            } catch {
+                // ignore
+            }
         } catch (error) {
             console.error("Failed to send message:", error)
             // Restore input on error

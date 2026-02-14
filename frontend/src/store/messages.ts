@@ -33,6 +33,7 @@ type MessageState = {
   messages: Message[]
   addMessages: (m: Message[]) => void
   addMessage: (m: Message) => void
+  reconcileOptimisticMessage: (tempId: string, confirmed: Message) => void
   setMessages: (messages: Message[]) => void
   reset: () => void
 }
@@ -64,6 +65,28 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return { messages: sortMessages(next) }
       }
       return { messages: sortMessages([...existing, m]) }
+    }),
+
+  reconcileOptimisticMessage: (tempId, confirmed) =>
+    set((state) => {
+      const confirmedId = (confirmed as any)?.id
+      if (confirmedId === 0 || confirmedId) {
+        const exists = state.messages.some((m: any) => String((m as any)?.id) === String(confirmedId))
+        if (exists) {
+          // Thread already has the canonical message (e.g. after refresh).
+          // Remove any temp placeholder if present.
+          const withoutTemp = state.messages.filter((m: any) => String((m as any)?.id) !== String(tempId))
+          return { messages: sortMessages(withoutTemp) }
+        }
+      }
+
+      const idx = state.messages.findIndex((m: any) => String((m as any)?.id) === String(tempId))
+      if (idx >= 0) {
+        const next = [...state.messages]
+        next[idx] = confirmed
+        return { messages: sortMessages(next) }
+      }
+      return { messages: sortMessages([...state.messages, confirmed]) }
     }),
 
   setMessages: (messages) => set({ messages: sortMessages(messages) }),

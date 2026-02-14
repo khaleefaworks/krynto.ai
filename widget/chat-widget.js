@@ -89,6 +89,39 @@
   let lastTrackedUrl = null;
   let pendingPageView = null;
 
+  // After a visitor ends the chat UI, hide the End (X) button until they send
+  // another message. This prevents repeated end_chat triggers from reopen/close.
+  let endChatDisabled = false;
+
+  function _endChatStorageKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_end_chat_disabled_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function setEndChatDisabled(disabled) {
+    endChatDisabled = Boolean(disabled);
+    const endBtn = document.getElementById('chatassist-end');
+    if (endBtn) {
+      endBtn.style.display = endChatDisabled ? 'none' : '';
+    }
+    if (endChatDisabled) {
+      try { hideEndOverlay(); } catch (e) { }
+    }
+    try {
+      const key = _endChatStorageKey();
+      if (key) sessionStorage.setItem(key, endChatDisabled ? '1' : '0');
+    } catch (e) { }
+  }
+
+  function hydrateEndChatDisabled() {
+    try {
+      const key = _endChatStorageKey();
+      if (!key) return;
+      const v = sessionStorage.getItem(key);
+      if (v === '1') setEndChatDisabled(true);
+    } catch (e) { }
+  }
+
   // --- Core Logic ---
 
   if (!CONFIG.websiteId || !CONFIG.widgetKey) {
@@ -156,6 +189,16 @@
     try {
       ws.send(JSON.stringify({ type: 'typing', is_typing: Boolean(isTyping) }));
     } catch (e) { }
+  }
+
+  function sendEndChat() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify({ type: 'end_chat' }));
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // --- Audio ---
@@ -303,6 +346,11 @@
       if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
     }
     ws.send(JSON.stringify(payload));
+
+    // Visitor has resumed the conversation; allow ending again.
+    if (endChatDisabled) {
+      setEndChatDisabled(false);
+    }
     return true;
   }
 
@@ -663,6 +711,22 @@
     }
   }
 
+  function showEndOverlay() {
+    const el = document.getElementById('chatassist-end-overlay');
+    if (el) {
+      el.style.display = 'flex';
+      el.classList.add('chatassist-end-overlay-visible');
+    }
+  }
+
+  function hideEndOverlay() {
+    const el = document.getElementById('chatassist-end-overlay');
+    if (el) {
+      el.classList.remove('chatassist-end-overlay-visible');
+      el.style.display = 'none';
+    }
+  }
+
   function submitContactAndSendPending() {
     const email = document.getElementById('chatassist-contact-email')?.value.trim();
     const name = document.getElementById('chatassist-contact-name')?.value.trim();
@@ -717,6 +781,16 @@
             </div>
           </div>
         </div>
+        <div id="chatassist-end-overlay" class="chatassist-end-overlay" style="display:none;">
+          <div class="chatassist-end-overlay-backdrop"></div>
+          <div class="chatassist-end-overlay-panel">
+            <div class="chatassist-end-overlay-title">End this chat?</div>
+            <div class="chatassist-end-overlay-actions">
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Cancel</button>
+              <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
+            </div>
+          </div>
+        </div>
         <div id="chatassist-header">
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
@@ -728,7 +802,12 @@
               <div class="chatassist-online-status"><span class="chatassist-online-text">${CONFIG.onlineStatusText}</span></div>
             </div>
           </div>
-          <button id="chatassist-close">&times;</button>
+          <div class="chatassist-header-actions">
+            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <button id="chatassist-end" class="chatassist-header-btn" aria-label="End chat">&times;</button>
+          </div>
         </div>
         <div id="chatassist-messages"></div>
         <div id="chatassist-footer">
@@ -763,9 +842,31 @@
       input.focus();
       isAtBottom = true;
       smartScroll();
+      // Ensure End button state is applied on reopen.
+      if (endChatDisabled) setEndChatDisabled(true);
     });
 
-    document.getElementById('chatassist-close').addEventListener('click', () => {
+    document.getElementById('chatassist-minimize').addEventListener('click', () => {
+      win.style.display = 'none';
+      bubble.style.display = 'flex';
+      hideContactOverlay(true);
+      hideEndOverlay();
+    });
+
+    document.getElementById('chatassist-end').addEventListener('click', () => {
+      showEndOverlay();
+    });
+
+    document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
+      hideEndOverlay();
+    });
+
+    document.getElementById('chatassist-end-confirm').addEventListener('click', () => {
+      hideEndOverlay();
+      try {
+        const ok = sendEndChat();
+        if (ok) setEndChatDisabled(true);
+      } catch (e) { }
       win.style.display = 'none';
       bubble.style.display = 'flex';
       hideContactOverlay(true);
@@ -965,6 +1066,9 @@
     CONFIG.sessionId = getSessionId();
     try {
       createWidget();
+
+      // Restore end-chat disabled state (per session) before wiring events.
+      hydrateEndChatDisabled();
 
       // Apply config styles immediately to avoid flicker/jump on reload.
       try {

@@ -27,7 +27,7 @@ export interface Conversation {
 }
 
 export interface Message {
-  id?: number
+  id?: number | string
   conversation_id?: number
   // Backwards-compatible sender label used in older UI paths.
   sender?: "visitor" | "ai" | "agent" | string

@@ -211,6 +211,90 @@ def test_websocket_visitor_reconnect_gets_history(client_and_seeded_db, monkeypa
             assert any(m.get("content") == "first" for m in msgs)
 
 
+def test_websocket_visitor_end_chat_persists_event_and_does_not_resolve(client_and_seeded_db, monkeypatch):
+    from app.core.security import create_access_token
+    from app.services import conversation_orchestrator as orchestrator_module
+    from app.core.database import SessionLocal
+    from app.models.conversation import Conversation, ConversationStatus
+    from app.models.message import Message
+    from app.models.automation import Automation
+
+    # Avoid 60s background sleeper tasks in tests.
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    session_id = "sess-end-chat"
+
+    # Seed automation for visitor_closed_chat so the handler can persist a timeline event.
+    db = SessionLocal()
+    try:
+        if not db.query(Automation).filter_by(website_id=1, trigger="visitor_closed_chat", name="Visitor closed event").first():
+            db.add(
+                Automation(
+                    website_id=1,
+                    name="Visitor closed event",
+                    trigger="visitor_closed_chat",
+                    enabled=True,
+                    conditions={},
+                    actions=[
+                        {
+                            "type": "emit_system_event",
+                            "content": "Visitor closed chat.",
+                            "event_type": "visitor_closed_chat",
+                        }
+                    ],
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws:
+            _recv_until(visitor_ws, want_type="history")
+
+            # Create conversation first
+            visitor_ws.send_text(json.dumps({"message": "hello"}))
+            visitor_msg = _recv_until(agent_ws, want_type="visitor_message")
+            conversation_id = int(visitor_msg["conversation_id"])
+
+            # Visitor ends chat
+            visitor_ws.send_text(json.dumps({"type": "end_chat"}))
+
+            # Best-effort realtime notice to agents/dashboards.
+            notice = _recv_until(agent_ws, want_type="visitor_closed_chat")
+            assert int(notice.get("conversation_id")) == conversation_id
+
+    # DB assertions: conversation resolved and system event exists.
+    db = SessionLocal()
+    try:
+        conv = db.query(Conversation).filter_by(id=conversation_id).first()
+        assert conv is not None
+        assert conv.status == ConversationStatus.OPEN
+
+        evt = (
+            db.query(Message)
+            .filter_by(conversation_id=conversation_id, event_type="visitor_closed_chat")
+            .order_by(Message.id.desc())
+            .first()
+        )
+        assert evt is not None
+        assert evt.content == "Visitor closed chat."
+    finally:
+        db.close()
+
+
 def test_reopen_emits_conversation_reopened_system_event(client_and_seeded_db, monkeypatch):
     from app.core.security import create_access_token
     from app.services import conversation_orchestrator as orchestrator_module

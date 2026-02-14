@@ -283,6 +283,7 @@ async def agent_ws(
                     "type": "message_sent",
                     "conversation_id": conversation_id,
                     "content": content,
+                    "client_message_id": message_id,
                     "message_obj": message_obj,
                     "agent_is_available": result.get("agent_is_available"),
                     "availability_changed": result.get("availability_changed"),

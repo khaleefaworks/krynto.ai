@@ -406,6 +406,46 @@ async def chat_ws(
 
                 continue
 
+            # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
+            # IMPORTANT: this should NOT mark the conversation as resolved.
+            # The agent is the only one who should resolve conversations.
+            if message_type == "end_chat":
+                conversation = None
+                try:
+                    conversation = conversations_repo.get_conversation_by_session(
+                        db,
+                        website_id=website_id,
+                        session_id=session_id,
+                    )
+                except Exception:
+                    conversation = None
+
+                if not conversation:
+                    # Nothing to close.
+                    continue
+
+                # Trigger automation-driven bot/system messages for this event.
+                # This does not change conversation.status.
+                try:
+                    await orchestrator.visitor_closed_chat(conversation_id=int(conversation.id))
+                except Exception:
+                    # Best-effort: still allow the socket to continue.
+                    pass
+
+                # Optional ack for the widget.
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "end_chat_ok",
+                            "conversation_id": int(conversation.id),
+                            "website_id": website_id,
+                        }
+                    )
+                except Exception:
+                    pass
+
+                continue
+
             if message_type == "typing":
                 is_typing = bool(payload.get("is_typing"))
 

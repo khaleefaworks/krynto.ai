@@ -738,79 +738,14 @@ class ConversationOrchestrator:
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
         # Optional: automation-driven system event + bot closing message.
-        try:
-            if website_id:
-                automation_service = AutomationService(self.db)
-
-                system_actions = automation_service.get_system_event_actions(
-                    website_id=website_id,
-                    trigger="conversation_resolved",
-                )
-                for action in system_actions:
-                    event_type = action.get("event_type") or "conversation_resolved"
-                    content = action.get("content")
-                    if not content:
-                        continue
-
-                    if _should_skip_due_to_repeat(
-                        db=self.db,
-                        conversation_id=conversation_id,
-                        event_type=str(event_type),
-                        repeat=action.get("repeat"),
-                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                    ):
-                        continue
-
-                    saved_evt = self.conversation_service.add_system_message(
-                        conversation_id,
-                        str(content),
-                        event_type=str(event_type),
-                    )
-                    await ChatService.send_to_visitor(
-                        conversation_id,
-                        {
-                            "type": "system",
-                            "message": saved_evt.content,
-                            "message_obj": serialize_message(self.db, saved_evt),
-                        },
-                    )
-
-                actions = automation_service.get_bot_message_actions(
-                    website_id=website_id,
-                    trigger="conversation_resolved",
-                )
-                for action in actions or []:
-                    event_type = action.get("event_type") or "bot_closing"
-
-                    if _should_skip_due_to_repeat(
-                        db=self.db,
-                        conversation_id=conversation_id,
-                        event_type=str(event_type),
-                        repeat=action.get("repeat"),
-                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                    ):
-                        continue
-
-                    saved_bot = self.conversation_service.add_bot_message(
-                        conversation_id,
-                        action["message"],
-                        event_type=str(event_type),
-                    )
-                    await ChatService.send_to_visitor(
-                        conversation_id,
-                        {
-                            "type": "bot",
-                            "message": action["message"],
-                            "message_obj": serialize_message(self.db, saved_bot),
-                        },
-                    )
-        except Exception as e:
-            logger.error(
-                "conversation_resolve_automation_failed",
-                conversation_id=conversation_id,
-                error=str(e),
-                exc_info=True,
-            )
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="conversation_resolved",
+            default_system_event_type="conversation_resolved",
+            default_bot_event_type="bot_closing",
+            log_key="conversation_resolve_automation_failed",
+        )
 
         # Notify dashboards to remove/refresh the closed conversation.
         try:
@@ -830,6 +765,136 @@ class ConversationOrchestrator:
         )
 
         return {"success": True}
+
+    async def visitor_closed_chat(self, *, conversation_id: int) -> dict:
+        """Visitor explicitly ended the chat UI.
+
+        This MUST NOT resolve the conversation; only agents decide that.
+        """
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_closed_chat",
+            default_system_event_type="visitor_closed_chat",
+            default_bot_event_type="bot_visitor_closed",
+            log_key="visitor_closed_chat_automation_failed",
+        )
+
+        # Best-effort realtime notice to dashboards.
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_closed_chat",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def _run_automation_trigger(
+        self,
+        *,
+        conversation_id: int,
+        website_id: int | None,
+        trigger: str,
+        default_system_event_type: str | None,
+        default_bot_event_type: str | None,
+        log_key: str,
+    ) -> None:
+        if not website_id:
+            return
+
+        try:
+            automation_service = AutomationService(self.db)
+
+            system_actions = automation_service.get_system_event_actions(
+                website_id=int(website_id),
+                trigger=str(trigger),
+            )
+            for action in system_actions:
+                event_type = action.get("event_type") or default_system_event_type or str(trigger)
+                content = action.get("content")
+                if not content:
+                    continue
+
+                if _should_skip_due_to_repeat(
+                    db=self.db,
+                    conversation_id=conversation_id,
+                    event_type=str(event_type),
+                    repeat=action.get("repeat"),
+                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                ):
+                    continue
+
+                saved_evt = self.conversation_service.add_system_message(
+                    conversation_id,
+                    str(content),
+                    event_type=str(event_type),
+                )
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {
+                        "type": "system",
+                        "message": saved_evt.content,
+                        "message_obj": serialize_message(self.db, saved_evt),
+                    },
+                )
+
+            bot_actions = automation_service.get_bot_message_actions(
+                website_id=int(website_id),
+                trigger=str(trigger),
+            )
+            for action in bot_actions or []:
+                event_type = action.get("event_type") or default_bot_event_type
+                if not event_type:
+                    continue
+
+                if _should_skip_due_to_repeat(
+                    db=self.db,
+                    conversation_id=conversation_id,
+                    event_type=str(event_type),
+                    repeat=action.get("repeat"),
+                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                ):
+                    continue
+
+                saved_bot = self.conversation_service.add_bot_message(
+                    conversation_id,
+                    action["message"],
+                    event_type=str(event_type),
+                )
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {
+                        "type": "bot",
+                        "message": action["message"],
+                        "message_obj": serialize_message(self.db, saved_bot),
+                    },
+                )
+        except Exception as e:
+            logger.error(
+                str(log_key),
+                conversation_id=conversation_id,
+                website_id=website_id,
+                trigger=str(trigger),
+                error=str(e),
+                exc_info=True,
+            )
 
     async def handle_reconnect(
         self,

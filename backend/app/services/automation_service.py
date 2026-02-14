@@ -207,6 +207,32 @@ class AutomationService:
                     }
                 ],
             },
+            {
+                "name": "Visitor closed event",
+                "trigger": "visitor_closed_chat",
+                "enabled": True,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "emit_system_event",
+                        "content": "Visitor closed chat.",
+                        "event_type": "visitor_closed_chat",
+                    }
+                ],
+            },
+            {
+                "name": "Visitor closed message",
+                "trigger": "visitor_closed_chat",
+                "enabled": False,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "send_bot_message",
+                        "message": "Thanks! If you need anything else, just send another message.",
+                        "event_type": "bot_visitor_closed",
+                    }
+                ],
+            },
         ]
 
         try:
