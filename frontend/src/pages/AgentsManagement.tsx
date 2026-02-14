@@ -42,7 +42,7 @@ export default function AgentsManagement() {
       setLoading(true)
       setError(null)
       // Fetch all users except administrators
-      const data = await apiRequest<Agent[]>("/auth/users")
+      const data = await apiRequest<Agent[]>("/users")
       // Filter out system managers (system_manager role)
       setAgents(data.filter(user => user.role !== 'system_manager'))
     } catch (err: any) {

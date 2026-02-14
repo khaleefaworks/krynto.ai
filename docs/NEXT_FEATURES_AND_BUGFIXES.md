@@ -1,47 +1,49 @@
-# Next Features & Bug Fixes (Post-Automations Refactor)
+# Next Features & Bug Fixes (Task Sheet)
 
-This document tracks the next wave of changes after the Automations & Message Taxonomy work.
+Single source of truth for the current post-refactor work. Keep this file updated as tasks move.
 
-## Scope / Requirements
+Legend: **Done** = shipped, **In Progress** = active work, **Todo** = not started.
 
-### 1) Agent availability should not block joining a conversation
-**Problem**: An agent can currently join a conversation even if they are marked “not available”, and/or availability doesn’t automatically become available when the agent starts their first chat.
+## Tasks
 
-**Expected behavior**:
-- An agent marked as **not available** should **not** be able to join a conversation.
-- If an agent has not explicitly enabled availability yet, once they start their **first chat** (join/claim), availability should flip to **available = true**.
+### Availability / Chat Flow
 
-**Acceptance**:
-- Joining is rejected or blocked when agent availability is off.
-- First successful join/claim sets availability to true.
+- [x] **Done** — Agent availability auto-enables when agent actively handles a chat
+	- Behavior: when an agent joins/takes over/sends their first message, backend flips `is_available=true` (best-effort) and UI reflects instantly.
+	- Notes: availability does **not** block join/send; it self-corrects to avoid confusing states.
 
-### 2) Chat page panels default collapsed
-**Problem**: Filter column and right meta panel are collapsible and persist state in local storage, but the initial/default should be collapsed.
+### Chat Page UX
 
-**Expected behavior**:
-- On first load (no local storage value), both panels start collapsed.
-- Existing local storage values still win.
+- [x] **Done** — Chat page panels default collapsed
+	- Acceptance: fresh browser profile loads with left filter + right meta panel collapsed; stored localStorage values still win.
 
-**Acceptance**:
-- Fresh browser profile loads chat page with both panels collapsed.
+- [x] **Done** — Conversation list time reflects last message time
+	- Acceptance: new agent/visitor messages update list preview timestamp.
 
-### 3) Conversation list time should reflect last message time
-**Problem**: Conversation list shows a relative time (e.g. 32m, 1h, 10d) but should reflect the time of the **last message**, like WhatsApp.
+### Dashboard / Settings
 
-**Expected behavior**:
-- The timestamp uses the latest message timestamp (visitor or agent), not conversation created time.
+- [ ] **Todo** — Desktop sidebar: move Settings icon to bottom
+	- Desktop only: settings icon between theme toggle and profile.
+	- Mobile unchanged.
 
-**Acceptance**:
-- New agent/visitor messages update the list time.
+- [x] **Done** — Settings URL + naming uses **Users** everywhere
+	- Refactor: `/dashboard/settings/agents` → `/dashboard/settings/users`.
+	- Backwards-compatible redirect kept for old URLs.
 
-### 4) Desktop sidebar: move Settings icon to bottom
-**Problem**: Global left sidebar has the logo at top and icons; settings icon should move to the bottom area between theme icon and profile.
+- [x] **Done** — Settings → Users table shows profile icon (avatar) when set
+	- If avatar exists: show image; else show initials.
 
-**Expected behavior**:
-- Desktop only: Settings icon appears between theme toggle icon and profile icon.
+- [x] **Done** — Settings → Users table has **Status** toggle (enable/disable)
+	- Status maps to `is_active` (admin-controlled).
+	- **Administrator (system_manager) is always enabled** (toggle disabled).
 
-**Acceptance**:
-- Desktop layout updated; mobile is unchanged for now.
+- [x] **Done** — Email can be edited for existing users
+	- Applies to Administrator too.
 
-## Notes
-- Mobile sidebar optimizations are explicitly out of scope for this iteration.
+- [x] **Done** — Username can only be set once
+	- Name is editable only if currently empty; otherwise read-only.
+
+### Data / Backend
+
+- [x] **Done** — Store each visitor IPv4 in the DB
+	- Stored as `conversations.visitor_ip` (string). No UI yet.

@@ -35,7 +35,8 @@ class ConversationService:
     def get_or_create_conversation(
         self,
         website_id: int,
-        session_id: str
+        session_id: str,
+        visitor_ip: str | None = None,
     ) -> Conversation:
         """
         Get existing conversation or create new one.
@@ -59,6 +60,19 @@ class ConversationService:
                 conversation_id=conversation.id,
                 status=conversation.status.value
             )
+
+            # Best-effort: backfill visitor IP if newly observed.
+            try:
+                ip = str(visitor_ip or "").strip() or None
+                if ip and not getattr(conversation, "visitor_ip", None):
+                    conversation.visitor_ip = ip
+                    self.db.commit()
+                    self.db.refresh(conversation)
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
             return conversation
         
         # Get website to validate it exists
@@ -77,7 +91,8 @@ class ConversationService:
             session_id=session_id,
             status=ConversationStatus.OPEN,
             is_handoff=False,
-            assigned_agent_id=None
+            assigned_agent_id=None,
+            visitor_ip=(str(visitor_ip).strip() if visitor_ip else None),
         )
         
         self.db.add(conversation)

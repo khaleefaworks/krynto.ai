@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 import os
 import uuid
@@ -15,6 +15,95 @@ from app.services.presence_service import PresenceService
 
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("")
+def list_users(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """List all users (admin only)."""
+
+    users = db.query(User).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "role": u.role.value if hasattr(u.role, "value") else u.role,
+            "is_available": bool(getattr(u, "is_available", False)),
+            "is_active": bool(getattr(u, "is_active", False)),
+            "avatar_url": getattr(u, "avatar_url", None),
+        }
+        for u in users
+    ]
+
+
+class UserUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+
+@router.patch("/{user_id}")
+def update_user(
+    user_id: int,
+    payload: UserUpdateRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Update user fields (admin only).
+
+    Rules:
+    - Email can be updated anytime (must remain unique)
+    - Name can only be set once: allowed only if currently empty
+    """
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    changed = False
+
+    if payload.email is not None:
+        email = str(payload.email).strip().lower()
+        if not email:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email cannot be empty")
+
+        existing = db.query(User).filter(User.email == email, User.id != user_id).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+        if user.email != email:
+            user.email = email
+            changed = True
+
+    if payload.name is not None:
+        name = str(payload.name).strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty")
+
+        current_name = str(getattr(user, "name", "") or "").strip()
+        if current_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be changed after creation")
+
+        user.name = name
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(user)
+
+    return {
+        "message": "User updated successfully",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, "value") else user.role,
+            "is_active": user.is_active,
+            "avatar_url": user.avatar_url,
+        },
+    }
 
 
 class AvailabilityRequest(BaseModel):
@@ -251,6 +340,13 @@ def update_user_status(
             detail="User not found"
         )
     
+    # Administrator / system manager must always stay enabled.
+    if user.role == UserRole.SYSTEM_MANAGER and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Administrator account cannot be disabled",
+        )
+
     user.is_active = payload.is_active
     db.commit()
     db.refresh(user)
@@ -381,17 +477,12 @@ def delete_user(
             detail="Only administrators can delete administrator accounts"
         )
     
-    # Prevent deleting the last administrator
+    # Administrator / system manager must always stay enabled.
     if user.role == UserRole.SYSTEM_MANAGER:
-        admin_count = db.query(User).filter(
-            User.role == user.role,
-            User.is_active == True
-        ).count()
-        if admin_count <= 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete the last administrator account"
-            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Administrator account cannot be disabled",
+        )
     
     # Soft delete
     user.is_active = False

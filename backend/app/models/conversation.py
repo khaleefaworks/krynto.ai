@@ -31,6 +31,7 @@ class Conversation(Base, TimestampMixin):
     last_visitor_message_at = Column(DateTime, nullable=True)
     
     # Visitor metadata
+    visitor_ip = Column(String(45), nullable=True)  # IPv4/IPv6 string
     visitor_name = Column(String(255), nullable=True)
     visitor_email = Column(String(255), nullable=True)
     visitor_phone = Column(String(50), nullable=True)

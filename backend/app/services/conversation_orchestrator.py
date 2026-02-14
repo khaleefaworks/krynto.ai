@@ -178,6 +178,7 @@ class ConversationOrchestrator:
         message: str,
         visitor_ws: Any | None = None,
         client_message_id: str | None = None,
+        visitor_ip: str | None = None,
     ) -> Optional[str]:
         """Process a visitor message and route appropriately.
 
@@ -186,6 +187,7 @@ class ConversationOrchestrator:
         conversation = self.conversation_service.get_or_create_conversation(
             website_id=website_id,
             session_id=session_id,
+            visitor_ip=visitor_ip,
         )
 
         # Track the live visitor socket for downstream forwarding

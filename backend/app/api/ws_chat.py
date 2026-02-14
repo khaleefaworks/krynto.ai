@@ -504,6 +504,7 @@ async def chat_ws(
                 message=user_message,
                 visitor_ws=websocket,
                 client_message_id=str(client_message_id) if client_message_id else None,
+                visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
             )
 
             # Conversation may have been created on first message; register for cleanup.

@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
-import { Plus, User, Mail, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, User, CheckCircle, XCircle } from 'lucide-react'
 import { Badge } from '../components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { API_BASE } from '@/config/endpoints'
 
 interface Agent {
   id: number
@@ -12,6 +14,7 @@ interface Agent {
   role: string
   is_active: boolean
   is_available: boolean
+  avatar_url?: string | null
 }
 
 export default function AgentsList() {
@@ -28,7 +31,7 @@ export default function AgentsList() {
     try {
       setLoading(true)
       setError(null)
-      const data = await apiRequest<Agent[]>('/auth/users')
+      const data = await apiRequest<Agent[]>('/users')
       // Show all users (don't filter by role)
       setAgents(data)
     } catch (err: any) {
@@ -39,7 +42,28 @@ export default function AgentsList() {
   }
 
   const handleRowClick = (agentId: number) => {
-    navigate(`/dashboard/settings/agents/${agentId}`)
+    navigate(`/dashboard/settings/users/${agentId}`)
+  }
+
+  const getFullAvatarUrl = (url: string | null | undefined): string | null => {
+    const raw = String(url || '').trim()
+    if (!raw) return null
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
+    return `${API_BASE}${raw}`
+  }
+
+  const toggleActive = async (agentId: number, isActive: boolean) => {
+    setAgents(prev => prev.map(a => (a.id === agentId ? { ...a, is_active: isActive } : a)))
+    try {
+      await apiRequest(`/users/${agentId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: isActive }),
+      })
+    } catch (err) {
+      // revert on error
+      setAgents(prev => prev.map(a => (a.id === agentId ? { ...a, is_active: !isActive } : a)))
+      throw err
+    }
   }
 
   if (loading) {
@@ -71,7 +95,7 @@ export default function AgentsList() {
             Manage user accounts and roles
           </p>
         </div>
-        <Button onClick={() => navigate('/dashboard/settings/agents/new')} className="gap-2">
+        <Button onClick={() => navigate('/dashboard/settings/users/new')} className="gap-2">
           <Plus className="w-4 h-4" />
           Add User
         </Button>
@@ -84,7 +108,7 @@ export default function AgentsList() {
           <p className="text-gray-600 dark:text-gray-400 mb-6">
             Create your first user account
           </p>
-          <Button onClick={() => navigate('/dashboard/settings/agents/new')} className="gap-2">
+          <Button onClick={() => navigate('/dashboard/settings/users/new')} className="gap-2">
             <Plus className="w-4 h-4" />
             Add User
           </Button>
@@ -107,6 +131,12 @@ export default function AgentsList() {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {agents.map((agent) => (
+                (() => {
+                  const isAdministrator = String(agent.role || '') === 'system_manager'
+                  const avatar = getFullAvatarUrl(agent.avatar_url)
+                  const initials = String(agent.name || '?').trim().charAt(0).toUpperCase() || '?'
+
+                  return (
                 <tr
                   key={agent.id}
                   onClick={() => handleRowClick(agent.id)}
@@ -114,9 +144,17 @@ export default function AgentsList() {
                 >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
-                        {agent.name.charAt(0).toUpperCase()}
-                      </div>
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={agent.name}
+                          className="w-10 h-10 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
+                          {initials}
+                        </div>
+                      )}
                       <span className="text-sm font-medium text-gray-900 dark:text-white">
                         {agent.name}
                       </span>
@@ -128,21 +166,35 @@ export default function AgentsList() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <Badge variant={agent.is_active ? 'default' : 'destructive'} className="gap-1">
-                      {agent.is_active ? (
-                        <>
-                          <CheckCircle className="w-3 h-3" />
-                          Active
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="w-3 h-3" />
-                          Inactive
-                        </>
-                      )}
-                    </Badge>
+                    <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={isAdministrator ? true : agent.is_active}
+                        disabled={isAdministrator}
+                        onCheckedChange={(checked) => {
+                          // prevent row click navigation
+                          toggleActive(agent.id, checked).catch((e: any) => {
+                            setError(e?.message || 'Failed to update user status')
+                          })
+                        }}
+                      />
+                      <Badge variant={(isAdministrator ? true : agent.is_active) ? 'default' : 'destructive'} className="gap-1">
+                        {(isAdministrator ? true : agent.is_active) ? (
+                          <>
+                            <CheckCircle className="w-3 h-3" />
+                            Active
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3 h-3" />
+                            Inactive
+                          </>
+                        )}
+                      </Badge>
+                    </div>
                   </td>
                 </tr>
+                  )
+                })()
               ))}
             </tbody>
           </table>

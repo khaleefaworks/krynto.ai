@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
@@ -368,13 +368,17 @@ function App() {
 
                 {/* Agents management - Admin only */}
                 <Route
-                  path="agents"
+                  path="users"
                   element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
                 />
                 <Route
-                  path="agents/:id"
+                  path="users/:id"
                   element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
+
+                {/* Legacy settings routes (agents -> users) */}
+                <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
+                <Route path="agents/:id" element={<LegacySettingsAgentsRedirect />} />
 
                 {/* Tags management - Admin only */}
                 <Route
@@ -420,6 +424,12 @@ function App() {
       </Routes>
     </BrowserRouter>
   )
+}
+
+function LegacySettingsAgentsRedirect() {
+  const { id } = useParams<{ id?: string }>()
+  const target = id ? `/dashboard/settings/users/${id}` : '/dashboard/settings/users'
+  return <Navigate to={target} replace />
 }
 
 export default App

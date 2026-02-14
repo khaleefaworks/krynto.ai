@@ -25,8 +25,7 @@ export interface WebsiteAgent {
 
 export const agentAssignmentsApi = {
   listAgents: async (): Promise<Agent[]> => {
-    // Backend only exposes /auth/users; filter client-side if we ever need role-based subsets
-    return apiRequest('/auth/users');
+    return apiRequest('/users');
   },
 
   assignAgentToWebsite: async (agentId: number, websiteId: number): Promise<{ success: boolean; message: string; assignment_id: number }> => {

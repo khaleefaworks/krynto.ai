@@ -42,6 +42,8 @@ export default function AgentDetail() {
 
   const [agent, setAgent] = useState<Agent | null>(null)
 
+  const isAdministratorAccount = Boolean(agent && agent.role === 'system_manager')
+
   const uploadAvatarForUser = async (userId: number, file: File) => {
     try {
       setSaving(true)
@@ -101,7 +103,7 @@ export default function AgentDetail() {
       setLoading(true)
       setError(null)
       // Load all agents and find the one we need
-      const data = await apiRequest<Agent[]>('/auth/users')
+      const data = await apiRequest<Agent[]>('/users')
       const foundAgent = data.find(a => a.id === parseInt(id!))
 
       if (!foundAgent) {
@@ -149,7 +151,7 @@ export default function AgentDetail() {
           }),
         })
         setSuccessMessage('Agent created successfully')
-        setTimeout(() => navigate('/dashboard/settings/agents'), 1500)
+        setTimeout(() => navigate('/dashboard/settings/users'), 1500)
       } else {
         // Update existing user
         // Check if role changed
@@ -169,6 +171,21 @@ export default function AgentDetail() {
             method: 'PATCH',
             body: JSON.stringify({ is_active: formData.is_active }),
           })
+        }
+
+        // Update email and/or name (name is set-once enforced server-side)
+        if (agent) {
+          const emailChanged = (agent.email || '').trim() !== (formData.email || '').trim()
+          const nameChanged = (agent.name || '').trim() !== (formData.name || '').trim()
+          if (emailChanged || nameChanged) {
+            await apiRequest(`/users/${id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                ...(emailChanged ? { email: formData.email } : {}),
+                ...(nameChanged ? { name: formData.name } : {}),
+              }),
+            })
+          }
         }
 
         setSuccessMessage('User updated successfully')
@@ -191,7 +208,7 @@ export default function AgentDetail() {
       await apiRequest(`/users/${id}`, {
         method: 'DELETE',
       })
-      navigate('/dashboard/settings/agents')
+      navigate('/dashboard/settings/users')
     } catch (err: any) {
       setError(err.message || 'Failed to delete agent')
       setSaving(false)
@@ -199,6 +216,10 @@ export default function AgentDetail() {
   }
 
   const toggleStatus = async () => {
+    if (isAdministratorAccount) {
+      setError('Administrator account cannot be disabled')
+      return
+    }
     try {
       setSaving(true)
       setError(null)
@@ -231,7 +252,7 @@ export default function AgentDetail() {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/dashboard/settings/agents')}
+          onClick={() => navigate('/dashboard/settings/users')}
           className="gap-2 mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -252,7 +273,7 @@ export default function AgentDetail() {
               <Button
                 variant={formData.is_active ? 'outline' : 'default'}
                 onClick={toggleStatus}
-                disabled={saving}
+                disabled={saving || isAdministratorAccount}
                 className="gap-2"
               >
                 {formData.is_active ? (
@@ -388,9 +409,9 @@ export default function AgentDetail() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="John Doe"
                 required
-                disabled={!isNew}
+                disabled={!isNew && Boolean(agent?.name && agent.name.trim())}
               />
-              {!isNew && (
+              {!isNew && Boolean(agent?.name && agent.name.trim()) && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Name cannot be changed after creation
                 </p>
@@ -409,13 +430,8 @@ export default function AgentDetail() {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="john@example.com"
                 required
-                disabled={!isNew}
+                disabled={saving}
               />
-              {!isNew && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Email cannot be changed after creation
-                </p>
-              )}
             </div>
 
             {/* Password - Only for new users */}
@@ -482,7 +498,7 @@ export default function AgentDetail() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/dashboard/settings/agents')}
+            onClick={() => navigate('/dashboard/settings/users')}
           >
             Cancel
           </Button>
