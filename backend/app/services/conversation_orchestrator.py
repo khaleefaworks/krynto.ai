@@ -413,7 +413,9 @@ class ConversationOrchestrator:
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
         # Send a single bot prompt (no repeats).
-        if not is_website_online(website_id):
+        if (not is_website_online(website_id)) and not (
+            prior_message_count > 0 and getattr(conversation, "assigned_agent_id", None)
+        ):
             if prior_message_count == 0:
                 automation_service = AutomationService(self.db)
                 from app.repos import messages as messages_repo

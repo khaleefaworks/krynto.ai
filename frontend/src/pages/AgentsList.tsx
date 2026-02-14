@@ -137,62 +137,62 @@ export default function AgentsList() {
                   const initials = String(agent.name || '?').trim().charAt(0).toUpperCase() || '?'
 
                   return (
-                <tr
-                  key={agent.id}
-                  onClick={() => handleRowClick(agent.id)}
-                  className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                >
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
-                      {avatar ? (
-                        <img
-                          src={avatar}
-                          alt={agent.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
-                          {initials}
+                    <tr
+                      key={agent.id}
+                      onClick={() => handleRowClick(agent.id)}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          {avatar ? (
+                            <img
+                              src={avatar}
+                              alt={agent.name}
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
+                              {initials}
+                            </div>
+                          )}
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">
+                            {agent.name}
+                          </span>
                         </div>
-                      )}
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
-                        {agent.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {agent.email}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                      <Switch
-                        checked={isAdministrator ? true : agent.is_active}
-                        disabled={isAdministrator}
-                        onCheckedChange={(checked) => {
-                          // prevent row click navigation
-                          toggleActive(agent.id, checked).catch((e: any) => {
-                            setError(e?.message || 'Failed to update user status')
-                          })
-                        }}
-                      />
-                      <Badge variant={(isAdministrator ? true : agent.is_active) ? 'default' : 'destructive'} className="gap-1">
-                        {(isAdministrator ? true : agent.is_active) ? (
-                          <>
-                            <CheckCircle className="w-3 h-3" />
-                            Active
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="w-3 h-3" />
-                            Inactive
-                          </>
-                        )}
-                      </Badge>
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {agent.email}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={isAdministrator ? true : agent.is_active}
+                            disabled={isAdministrator}
+                            onCheckedChange={(checked) => {
+                              // prevent row click navigation
+                              toggleActive(agent.id, checked).catch((e: any) => {
+                                setError(e?.message || 'Failed to update user status')
+                              })
+                            }}
+                          />
+                          <Badge variant={(isAdministrator ? true : agent.is_active) ? 'default' : 'destructive'} className="gap-1">
+                            {(isAdministrator ? true : agent.is_active) ? (
+                              <>
+                                <CheckCircle className="w-3 h-3" />
+                                Active
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="w-3 h-3" />
+                                Inactive
+                              </>
+                            )}
+                          </Badge>
+                        </div>
+                      </td>
+                    </tr>
                   )
                 })()
               ))}

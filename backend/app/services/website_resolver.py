@@ -11,10 +11,12 @@ CRITICAL: This must be used by:
 """
 
 from app.core.database import SessionLocal
+from app.models.website import Website
 from app.models.user import User, UserRole
 from app.repos import users as users_repo
 from app.services.agent_resolver import is_agent_eligible
 from app.services.agent_service import AgentService
+from app.services.office_hours import is_within_office_hours
 
 
 def is_website_online(website_id: int) -> bool:
@@ -47,6 +49,14 @@ def is_website_online(website_id: int) -> bool:
     db = SessionLocal()
     
     try:
+        website = db.query(Website).filter_by(id=int(website_id)).first()
+        if not website:
+            return False
+
+        # Office hours gate: if enabled and currently outside schedule, force offline.
+        if not is_within_office_hours(getattr(website, "widget_config", None) or {}):
+            return False
+
         # Product decision: agent-website assignment UI removed.
         # Treat any eligible agent as able to serve any website.
         assigned_agents = (

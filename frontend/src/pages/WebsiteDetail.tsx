@@ -29,8 +29,70 @@ interface Website {
     show_attachments?: boolean
     branding_text?: string | null
     header_icon_url?: string | null
+    office_hours?: any
   } | null
   created_at: string
+}
+
+type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+type OfficeHoursInterval = {
+  start: string
+  end: string
+}
+
+type OfficeHoursSchedule = Record<DayKey, OfficeHoursInterval[]>
+
+type OfficeHoursConfig = {
+  enabled: boolean
+  timezone: string
+  schedule: OfficeHoursSchedule
+}
+
+const DEFAULT_OFFICE_HOURS_SCHEDULE: OfficeHoursSchedule = {
+  mon: [{ start: '08:00', end: '17:00' }],
+  tue: [{ start: '08:00', end: '17:00' }],
+  wed: [{ start: '08:00', end: '17:00' }],
+  thu: [{ start: '08:00', end: '17:00' }],
+  fri: [{ start: '08:00', end: '17:00' }],
+  sat: [],
+  sun: [],
+}
+
+const getBrowserTimeZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
+  const base: OfficeHoursConfig = {
+    enabled: false,
+    timezone: getBrowserTimeZone(),
+    schedule: { ...DEFAULT_OFFICE_HOURS_SCHEDULE },
+  }
+
+  if (!raw || typeof raw !== 'object') return base
+
+  const schedule: any = (raw as any).schedule
+  const nextSchedule: OfficeHoursSchedule = { ...DEFAULT_OFFICE_HOURS_SCHEDULE }
+    ; (Object.keys(nextSchedule) as DayKey[]).forEach((k) => {
+      const v = schedule?.[k]
+      nextSchedule[k] = Array.isArray(v)
+        ? v
+          .filter((i: any) => i && typeof i === 'object')
+          .map((i: any) => ({ start: String(i.start || '').slice(0, 5), end: String(i.end || '').slice(0, 5) }))
+          .filter((i: any) => i.start && i.end)
+        : nextSchedule[k]
+    })
+
+  return {
+    enabled: (raw as any).enabled === true,
+    timezone: String((raw as any).timezone || '').trim() || base.timezone,
+    schedule: nextSchedule,
+  }
 }
 
 type TabType = 'installation' | 'settings' | 'widget' | 'automations'
@@ -99,6 +161,7 @@ export default function WebsiteDetail() {
       show_attachments: false,
       branding_text: null as string | null,
       header_icon_url: null as string | null,
+      office_hours: coerceOfficeHours(null),
     }
   })
 
@@ -591,6 +654,7 @@ export default function WebsiteDetail() {
       const data = await apiRequest<Website>(`/websites/${id}`)
       setWidgetKey(data.widget_key || null)
       const defaultWelcome = data.widget_config?.welcome_message || 'Hi! How can we help you today?'
+      const officeHours = coerceOfficeHours((data.widget_config as any)?.office_hours)
       setFormData({
         name: data.name,
         domain: data.domain,
@@ -606,6 +670,7 @@ export default function WebsiteDetail() {
           show_attachments: data.widget_config?.show_attachments || false,
           branding_text: data.widget_config?.branding_text ?? null,
           header_icon_url: data.widget_config?.header_icon_url ?? null,
+          office_hours: officeHours,
         }
       })
     } catch (err: any) {
@@ -1586,6 +1651,217 @@ export default function WebsiteDetail() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   The domain where the chat widget will be embedded
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Office Hours (Smartsupp-like) */}
+        {(isNew || activeTab === 'settings') && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Office Hours</CardTitle>
+              <CardDescription>
+                When enabled, the widget is forced offline outside these hours.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Office Hours</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Agent online status is ignored outside hours</div>
+                </div>
+                <Switch
+                  checked={!!(formData.widget_config as any).office_hours?.enabled}
+                  onCheckedChange={(checked) => {
+                    const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                    setFormData({
+                      ...formData,
+                      widget_config: {
+                        ...formData.widget_config,
+                        office_hours: { ...current, enabled: checked },
+                      },
+                    })
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timezone</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={String((formData.widget_config as any).office_hours?.timezone || '')}
+                    onChange={(e) => {
+                      const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                      setFormData({
+                        ...formData,
+                        widget_config: {
+                          ...formData.widget_config,
+                          office_hours: { ...current, timezone: e.target.value },
+                        },
+                      })
+                    }}
+                    placeholder="e.g. Europe/London"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                      setFormData({
+                        ...formData,
+                        widget_config: {
+                          ...formData.widget_config,
+                          office_hours: { ...current, timezone: getBrowserTimeZone() },
+                        },
+                      })
+                    }}
+                  >
+                    Use browser
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Uses IANA timezone names (must match your account timezone).
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {(
+                  [
+                    { key: 'mon', label: 'Monday' },
+                    { key: 'tue', label: 'Tuesday' },
+                    { key: 'wed', label: 'Wednesday' },
+                    { key: 'thu', label: 'Thursday' },
+                    { key: 'fri', label: 'Friday' },
+                    { key: 'sat', label: 'Saturday' },
+                    { key: 'sun', label: 'Sunday' },
+                  ] as { key: DayKey; label: string }[]
+                ).map((day) => {
+                  const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                  const intervals = current.schedule[day.key] || []
+                  const dayEnabled = intervals.length > 0
+                  const disabled = !current.enabled
+
+                  return (
+                    <div key={day.key} className="p-3 border border-gray-200 dark:border-gray-800 rounded-lg">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</div>
+                        <Switch
+                          checked={dayEnabled}
+                          disabled={disabled}
+                          onCheckedChange={(checked) => {
+                            const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                            const nextSchedule = { ...next.schedule }
+                            nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
+                            setFormData({
+                              ...formData,
+                              widget_config: {
+                                ...formData.widget_config,
+                                office_hours: { ...next, schedule: nextSchedule },
+                              },
+                            })
+                          }}
+                        />
+                      </div>
+
+                      {dayEnabled ? (
+                        <div className="mt-3 space-y-2">
+                          {intervals.map((interval, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <input
+                                type="time"
+                                value={interval.start}
+                                disabled={disabled}
+                                onChange={(e) => {
+                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                  const nextSchedule = { ...next.schedule }
+                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                  nextIntervals[idx] = { ...nextIntervals[idx], start: e.target.value }
+                                  nextSchedule[day.key] = nextIntervals
+                                  setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      office_hours: { ...next, schedule: nextSchedule },
+                                    },
+                                  })
+                                }}
+                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                              />
+                              <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
+                              <input
+                                type="time"
+                                value={interval.end}
+                                disabled={disabled}
+                                onChange={(e) => {
+                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                  const nextSchedule = { ...next.schedule }
+                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                  nextIntervals[idx] = { ...nextIntervals[idx], end: e.target.value }
+                                  nextSchedule[day.key] = nextIntervals
+                                  setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      office_hours: { ...next, schedule: nextSchedule },
+                                    },
+                                  })
+                                }}
+                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={disabled}
+                                onClick={() => {
+                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                  const nextSchedule = { ...next.schedule }
+                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                  nextIntervals.splice(idx, 1)
+                                  nextSchedule[day.key] = nextIntervals
+                                  setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      office_hours: { ...next, schedule: nextSchedule },
+                                    },
+                                  })
+                                }}
+                                className="px-2"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          ))}
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={disabled}
+                            onClick={() => {
+                              const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                              const nextSchedule = { ...next.schedule }
+                              const nextIntervals = [...(nextSchedule[day.key] || [])]
+                              nextIntervals.push({ start: '08:00', end: '17:00' })
+                              nextSchedule[day.key] = nextIntervals
+                              setFormData({
+                                ...formData,
+                                widget_config: {
+                                  ...formData.widget_config,
+                                  office_hours: { ...next, schedule: nextSchedule },
+                                },
+                              })
+                            }}
+                            className="gap-2"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Add interval
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             </CardContent>
           </Card>

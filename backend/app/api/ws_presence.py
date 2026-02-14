@@ -18,6 +18,17 @@ def _compute_presence(db: Session, website_id: int) -> dict:
     return PresenceService.compute_presence(db, website_id)
 
 
+def _compute_presence_fresh(website_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        return PresenceService.compute_presence(db, website_id)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
 @router.websocket("/ws/presence/{website_id}")
 async def presence_ws(websocket: WebSocket, website_id: int):
     """Public presence socket for the visitor widget.
@@ -42,15 +53,20 @@ async def presence_ws(websocket: WebSocket, website_id: int):
     except Exception:
         pass
     logger.info("presence_ws_connected", website_id=website_id)
-
-    db = SessionLocal()
     try:
         await PresenceService.register(website_id, websocket)
 
         # Validate website exists and enforce domain lock.
         from app.models.website import Website
 
-        website = db.query(Website).filter_by(id=website_id).first()
+        db = SessionLocal()
+        try:
+            website = db.query(Website).filter_by(id=website_id).first()
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
         if not website:
             await websocket.close(code=1008, reason="Website not found")
             return
@@ -73,7 +89,7 @@ async def presence_ws(websocket: WebSocket, website_id: int):
             return
 
         # Send initial snapshot immediately.
-        await websocket.send_json(_compute_presence(db, website_id))
+        await websocket.send_json(_compute_presence_fresh(website_id))
 
         while True:
             # We don't require a specific message format; any message triggers a refresh.
@@ -82,7 +98,7 @@ async def presence_ws(websocket: WebSocket, website_id: int):
                 ws_message(kind="presence", direction="in", message_type="text")
             except Exception:
                 pass
-            await websocket.send_json(_compute_presence(db, website_id))
+            await websocket.send_json(_compute_presence_fresh(website_id))
 
     except WebSocketDisconnect:
         logger.info("presence_ws_disconnected", website_id=website_id)
@@ -105,8 +121,6 @@ async def presence_ws(websocket: WebSocket, website_id: int):
             ws_disconnect(kind="presence")
         except Exception:
             pass
-        db.close()
-
         try:
             structlog.contextvars.clear_contextvars()
         except Exception:
