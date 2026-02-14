@@ -12,12 +12,12 @@ def seed_database():
     
     try:
         # Check if system manager already exists
-        existing_admin = db.query(User).filter_by(email="admin@chatassist.local").first()
+        existing_admin = db.query(User).filter_by(email="ragul.k@noveloffice.in").first()
         if not existing_admin:
             admin = User(
                 name="Administrator",
-                email="admin@chatassist.local",
-                password_hash=get_password_hash("admin123"),
+                email="ragul.k@noveloffice.in",
+                password_hash=get_password_hash("$0ft%963$"),
                 role=UserRole.SYSTEM_MANAGER,
                 is_active=True,
                 is_available=True

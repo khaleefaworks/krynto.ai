@@ -7,6 +7,7 @@ export type ActiveChat = {
   website_name?: string
   session_id: string
   last_message?: string
+  last_message_at?: string
   status: string
   is_handoff: boolean
   assigned_agent_id: number | null

@@ -110,7 +110,7 @@ def get_active_chats(
     )
 
     result = []
-    for conv, website_name, message_count, last_message in rows:
+    for conv, website_name, message_count, last_message, last_message_at in rows:
         website_name_val = website_name or f"Website {conv.website_id}"
         last_message_val = last_message if last_message is not None else "No messages yet"
         result.append(
@@ -132,6 +132,7 @@ def get_active_chats(
                 "message_count": int(message_count or 0),
                 "unread_count": int(unread_counts.get(int(conv.id), 0)),
                 "last_message": last_message_val,
+                "last_message_at": last_message_at.isoformat() if last_message_at else None,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "tags": _safe_serialize_conversation_tags(conv),
             }
@@ -181,7 +182,7 @@ def get_resolved_conversations(
     )
 
     result = []
-    for conv, website_name, message_count, last_message in rows:
+    for conv, website_name, message_count, last_message, last_message_at in rows:
         website_name_val = website_name or f"Website {conv.website_id}"
         last_message_val = last_message if last_message is not None else "No messages"
         result.append(
@@ -202,6 +203,7 @@ def get_resolved_conversations(
                 "message_count": int(message_count or 0),
                 "unread_count": 0,
                 "last_message": last_message_val,
+                "last_message_at": last_message_at.isoformat() if last_message_at else None,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "closed_at": conv.updated_at.isoformat() if conv.updated_at else None,
                 "tags": _safe_serialize_conversation_tags(conv),

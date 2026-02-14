@@ -21,6 +21,7 @@ export interface Conversation {
   current_agent_id?: number | null
   message_count: number
   last_message?: string
+  last_message_at?: string
   created_at?: string
   closed_at?: string
 }

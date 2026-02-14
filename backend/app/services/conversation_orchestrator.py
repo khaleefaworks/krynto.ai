@@ -537,11 +537,16 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
-        # Simplified: Any active user can join any chat
+        # Any active user can join any chat.
         user = self.db.query(User).filter(User.id == agent_id).first()
 
         if not user or not user.is_active:
             return {"error": "User not found or inactive"}
+
+        # Practical behavior: if an agent starts handling a chat, treat them as available.
+        # This avoids confusing states where an agent is "unavailable" but actively joins chats.
+        if user.is_available is False:
+            user.is_available = True
 
         # Enforce single owner
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
@@ -604,6 +609,9 @@ class ConversationOrchestrator:
         user = self.db.query(User).filter(User.id == agent_id).first()
         if not user or not user.is_active:
             return {"error": "User not found or inactive"}
+
+        if user.is_available is False:
+            user.is_available = True
 
         previous_agent_id = conversation.assigned_agent_id
 

@@ -259,6 +259,14 @@ Why: reduce long-term complexity.
 - [x] Deprecate transport name `type:"ai"` for non-AI; introduce neutral names or include actor/kind.
 - [x] Remove hardcoded bot messages from orchestrator/WS layer (after parity is confirmed).
 
+### Phase 6 — Repeat Behavior (Follow-up)
+Why: some triggers (especially resolve/reopen) can happen many times per day.
+
+- [x] Add repeat policy for automations: `once` | `cooldown` | `always`.
+- [x] Apply repeat policy in backend suppression logic so actions can run multiple times when configured.
+- [x] Expose repeat behavior controls in the Automations editor UI.
+- [x] Add tests proving `repeat="always"` emits multiple times across resolve/reopen cycles.
+
 ---
 
 ## Non-Goals (Explicit)

@@ -159,6 +159,7 @@ interface ConversationDetails {
     visit_count?: number
     last_seen_at?: string
     created_at?: string
+    last_message_at?: string
     status?: string
 }
 
@@ -207,7 +208,7 @@ export default function ConversationsView() {
     const [activeFilter, setActiveFilter] = useState<FilterCategory>('all')
     const [leftFilterCollapsed, setLeftFilterCollapsed] = useState(() => {
         const saved = localStorage.getItem('chat_left_filter_collapsed')
-        return saved ? saved === 'true' : false
+        return saved ? saved === 'true' : true
     })
 
     // List state
@@ -254,7 +255,7 @@ export default function ConversationsView() {
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
         const saved = localStorage.getItem('chat_right_sidebar_collapsed')
-        return saved ? saved === 'true' : false
+        return saved ? saved === 'true' : true
     })
 
     // Persist collapse preferences
@@ -572,6 +573,19 @@ export default function ConversationsView() {
                 if (dto && typeof dto === 'object') {
                     console.log('👤 Adding visitor message DTO to UI')
                     addMessage(dto)
+
+                    // Keep list preview + timestamp in sync (WhatsApp-like).
+                    const content = String((dto as any)?.content ?? '').trim()
+                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
+                    if (content) {
+                        const latest = activeChatsRef.current
+                        const idx = latest.findIndex(c => c.id === dataConversationId)
+                        if (idx >= 0) {
+                            const next = [...latest]
+                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                            setActiveChats(next)
+                        }
+                    }
                 } else {
                     console.warn('👤 Missing visitor message DTO; refreshing thread')
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -593,6 +607,9 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_message' && dataConversationId && dataConversationId !== selectedChat) {
                 const dto = (data as any)?.message_obj
                 const content = (dto && typeof dto === 'object' ? (dto as any)?.content : null) ?? (data as any)?.message
+                const ts = (dto && typeof dto === 'object'
+                    ? ((dto as any)?.timestamp || (dto as any)?.created_at)
+                    : null) || new Date().toISOString()
 
                 // Best-effort: update preview without a full refresh.
                 if (typeof content === 'string' && content.trim()) {
@@ -600,7 +617,7 @@ export default function ConversationsView() {
                     const idx = latest.findIndex(c => c.id === dataConversationId)
                     if (idx >= 0) {
                         const next = [...latest]
-                        next[idx] = { ...next[idx], last_message: content }
+                        next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
                         setActiveChats(next)
                     }
                 }
@@ -628,6 +645,19 @@ export default function ConversationsView() {
                 if (dto && typeof dto === 'object') {
                     console.log('✅ Agent message confirmed (DTO)')
                     addMessage(dto)
+
+                    // Keep list preview + timestamp in sync.
+                    const content = String((dto as any)?.content ?? '').trim()
+                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
+                    if (content) {
+                        const latest = activeChatsRef.current
+                        const idx = latest.findIndex(c => c.id === dataConversationId)
+                        if (idx >= 0) {
+                            const next = [...latest]
+                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                            setActiveChats(next)
+                        }
+                    }
                 } else {
                     console.warn('✅ Missing agent message DTO; refreshing thread')
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -1389,7 +1419,9 @@ export default function ConversationsView() {
                                                     {(chat as any).visitor_name || shortSessionId(chat.session_id)}
                                                 </span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-                                                    {(chat as any).created_at ? formatShortAge((chat as any).created_at) : ''}
+                                                    {((chat as any).last_message_at || (chat as any).created_at)
+                                                        ? formatShortAge((chat as any).last_message_at || (chat as any).created_at)
+                                                        : ''}
                                                 </span>
                                             </div>
 
