@@ -170,6 +170,37 @@ class ConversationOrchestrator:
             return True
         return False
 
+    def _should_record_presence_event(self, *, conversation: Conversation) -> bool:
+        """Presence timeline events should only be recorded for meaningful scenarios.
+
+        Current rule (simple + practical): only record presence events when the
+        last *human* message is from the agent (i.e. the visitor likely left after
+        receiving an agent reply).
+        """
+
+        try:
+            if conversation.status != ConversationStatus.OPEN:
+                return False
+        except Exception:
+            return False
+
+        # Require that the agent has actually participated.
+        try:
+            if not getattr(conversation, "last_agent_message_at", None):
+                return False
+        except Exception:
+            return False
+
+        try:
+            from app.repos import messages as messages_repo
+
+            last = messages_repo.get_last_human_message(self.db, int(conversation.id))
+            if not last:
+                return False
+            return str(getattr(last, "sender_type", "")) == "agent"
+        except Exception:
+            return False
+
     async def handle_visitor_message(
         self,
         *,
@@ -820,6 +851,9 @@ class ConversationOrchestrator:
         if not conversation:
             return {"error": "Conversation not found"}
 
+        if not self._should_record_presence_event(conversation=conversation):
+            return {"success": True}
+
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
         await self._run_automation_trigger(
@@ -858,6 +892,9 @@ class ConversationOrchestrator:
 
         if not conversation:
             return {"error": "Conversation not found"}
+
+        if not self._should_record_presence_event(conversation=conversation):
+            return {"success": True}
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
