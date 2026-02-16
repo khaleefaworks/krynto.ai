@@ -193,11 +193,21 @@ class ConversationOrchestrator:
 
         try:
             from app.repos import messages as messages_repo
+            from app.models.message import MessageSenderType
 
             last = messages_repo.get_last_human_message(self.db, int(conversation.id))
             if not last:
                 return False
-            return str(getattr(last, "sender_type", "")) == "agent"
+
+            sender_type = getattr(last, "sender_type", None)
+            # sender_type is usually a MessageSenderType enum value.
+            if sender_type == MessageSenderType.AGENT:
+                return True
+            # Defensive: if DB/model ever returns a raw string.
+            try:
+                return str(getattr(sender_type, "value", sender_type) or "").strip().lower() == "agent"
+            except Exception:
+                return False
         except Exception:
             return False
 
