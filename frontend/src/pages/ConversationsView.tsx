@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useLayoutEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
@@ -20,6 +20,7 @@ import {
 } from '@/services/conversationMetadata'
 import { apiRequest } from '@/services/api'
 import { updateConversationMetadata } from '@/services/conversationMetadata'
+import { fetchChatSummary } from '@/services/chats'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -166,8 +167,9 @@ interface ConversationDetails {
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
 export default function ConversationsView() {
-    const { sessionId } = useParams<{ sessionId?: string }>()
+    const { sessionId, conversationId } = useParams<{ sessionId?: string; conversationId?: string }>()
     const navigate = useNavigate()
+    const location = useLocation()
     const { user, setUser } = useAppStore()
     const { activeChats, setActiveChats } = useAppStore()
     const {
@@ -498,6 +500,14 @@ export default function ConversationsView() {
 
     const isResolvedSelected = Boolean(conversation && (conversation as any).status === 'resolved')
 
+    const getPreferredConversationId = useCallback((): number | null => {
+        const fromState = Number((location as any)?.state?.conversationId)
+        if (Number.isFinite(fromState) && fromState > 0) return fromState
+        const fromParam = Number(conversationId)
+        if (Number.isFinite(fromParam) && fromParam > 0) return fromParam
+        return null
+    }, [location, conversationId])
+
     // Ensure conversation details populate once chats load (handles refresh on deep links)
     useEffect(() => {
         if (selectedChat) {
@@ -508,8 +518,18 @@ export default function ConversationsView() {
         }
     }, [selectedChat, getChatById])
 
-    // Handle conversation selection from URL
+    // Handle conversation selection from URL.
+    // Canonical URL is /dashboard/chats/:sessionId.
+    // We still accept a conversationId via navigation state for exact selection.
     useEffect(() => {
+        const preferredId = getPreferredConversationId()
+        if (preferredId) {
+            if (preferredId !== selectedChat) {
+                openChat(preferredId)
+            }
+            return
+        }
+
         if (!sessionId) return
 
         const matched = activeChats.find((c) => c.session_id === sessionId)
@@ -517,7 +537,34 @@ export default function ConversationsView() {
         if (matched && matched.id !== selectedChat) {
             openChat(matched.id)
         }
-    }, [sessionId, activeChats, resolvedChats, selectedChat, openChat])
+    }, [getPreferredConversationId, sessionId, activeChats, resolvedChats, selectedChat, openChat])
+
+    // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to sessionId URL.
+    useEffect(() => {
+        const cid = Number(conversationId)
+        if (!Number.isFinite(cid) || cid <= 0) return
+
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const summary = await fetchChatSummary(cid)
+                    const sid = String((summary as any)?.session_id || '').trim()
+                    if (!sid) return
+                    if (!cancelled) {
+                        navigate(`/dashboard/chats/${encodeURIComponent(sid)}`, {
+                            replace: true,
+                            state: { conversationId: cid },
+                        })
+                    }
+                } catch {
+                    // ignore
+                }
+            })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [conversationId, navigate])
 
     // Load chat when selected
     useEffect(() => {
@@ -525,7 +572,7 @@ export default function ConversationsView() {
             const chatData = getChatById(selectedChat)
             const selectedSessionId = chatData?.session_id
             if (selectedSessionId && selectedSessionId !== sessionId) {
-                navigate(`/dashboard/chats/${selectedSessionId}`)
+                navigate(`/dashboard/chats/${encodeURIComponent(String(selectedSessionId))}`)
             }
         }
 
@@ -548,6 +595,28 @@ export default function ConversationsView() {
                 clearTimeout(autoMarkReadTimerRef.current)
                 autoMarkReadTimerRef.current = null
             }
+        }
+    }, [selectedChat])
+
+    // Ensure resolved conversations open in the resolved filter.
+    useEffect(() => {
+        if (!selectedChat) return
+
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const summary = await fetchChatSummary(selectedChat)
+                    if (cancelled) return
+                    if (String((summary as any)?.status || '') === 'resolved') {
+                        setActiveFilter('resolved')
+                    }
+                } catch {
+                    // ignore
+                }
+            })()
+
+        return () => {
+            cancelled = true
         }
     }, [selectedChat])
 
@@ -938,6 +1007,26 @@ export default function ConversationsView() {
                         setAvailableTags([])
                     }
                 })
+            } else {
+                try {
+                    const summary = await fetchChatSummary(chatId)
+                    if (loadDetailsTokenRef.current === token) {
+                        setConversation(summary as any)
+                        setConversationTags(((summary as any).tags || []) as any)
+                    }
+
+                    apiRequest<any[]>(`/tags`).then(tags => {
+                        if (loadDetailsTokenRef.current === token) {
+                            setAvailableTags(Array.isArray(tags) ? tags : [])
+                        }
+                    }).catch(() => {
+                        if (loadDetailsTokenRef.current === token) {
+                            setAvailableTags([])
+                        }
+                    })
+                } catch {
+                    // ignore
+                }
             }
 
             const fetchedNotes = await getNotes(chatId)

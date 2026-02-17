@@ -8,7 +8,7 @@ from app.core.config import settings
 import json
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 
 from app.core.message_presenter import serialize_message
@@ -25,8 +25,72 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _to_naive_utc(dt: datetime | None) -> datetime | None:
+    """Normalize a datetime to naive UTC for safe arithmetic.
+
+    The codebase uses a mix of timezone-aware and naive datetimes depending on
+    the SQLAlchemy column definitions. For comparisons/subtraction, we treat
+    naive values as UTC and strip tzinfo from aware values.
+    """
+
+    if dt is None:
+        return None
+    try:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except Exception:
+        return dt
+
+
 VISITOR_LEFT_DELAY_SECONDS = 2
 _visitor_left_scheduled: set[int] = set()
+
+
+async def _send_delayed_session_presence_event(
+    *,
+    website_id: int,
+    session_id: str,
+    delay_seconds: int,
+) -> None:
+    """Broadcast an offline session presence event after a short delay if still offline."""
+    try:
+        await asyncio.sleep(max(0, int(delay_seconds or 0)))
+
+        if ChatService.is_session_online(website_id=int(website_id), session_id=str(session_id)):
+            return
+
+        last_disconnected_at = None
+        try:
+            snap = ChatService.session_presence_snapshot(
+                website_id=int(website_id),
+                recently_left_within_seconds=86400,
+            )
+            for r in snap:
+                if int(r.get("website_id")) == int(website_id) and str(r.get("session_id")) == str(session_id):
+                    last_disconnected_at = r.get("last_disconnected_at")
+                    break
+        except Exception:
+            last_disconnected_at = None
+
+        db2 = SessionLocal()
+        try:
+            agent_service2 = AgentService(db2)
+            await agent_service2.broadcast_to_active_agents(
+                website_id=int(website_id),
+                message_data={
+                    "type": "visitor_session_presence",
+                    "website_id": int(website_id),
+                    "session_id": str(session_id),
+                    "is_online": False,
+                    "last_disconnected_at": last_disconnected_at.isoformat() if getattr(last_disconnected_at, "isoformat", None) else None,
+                },
+                include_global=True,
+            )
+        finally:
+            db2.close()
+    except Exception:
+        pass
 
 
 async def _send_delayed_visitor_left_event(*, conversation_id: int, delay_seconds: int) -> None:
@@ -145,6 +209,38 @@ async def chat_ws(
             db.close()
             return
 
+        # Track session-level presence (used by Customers -> Visitors).
+        try:
+            ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+        except Exception:
+            pass
+
+        # Realtime: notify agents about session-level presence (even before a conversation exists).
+        try:
+            snap = ChatService.session_presence_snapshot(
+                website_id=int(website_id),
+                recently_left_within_seconds=86400,
+            )
+            connected_at = None
+            for r in snap:
+                if int(r.get("website_id")) == int(website_id) and str(r.get("session_id")) == str(session_id):
+                    connected_at = r.get("connected_at")
+                    break
+
+            await agent_service.broadcast_to_active_agents(
+                website_id=int(website_id),
+                message_data={
+                    "type": "visitor_session_presence",
+                    "website_id": int(website_id),
+                    "session_id": str(session_id),
+                    "is_online": True,
+                    "connected_at": connected_at.isoformat() if getattr(connected_at, "isoformat", None) else None,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
         # Load history if a conversation already exists for this session.
         # IMPORTANT: Do NOT create a new conversation just because the widget connected.
         # We only create the conversation on the first visitor message.
@@ -238,7 +334,7 @@ async def chat_ws(
 
             # Update last_seen_at for existing conversations on every connect.
             if conversation:
-                prev_seen_at = conversation.last_seen_at
+                prev_seen_at = _to_naive_utc(conversation.last_seen_at)
                 conversation.last_seen_at = now
                 if prev_seen_at and (now - prev_seen_at) > cooldown:
                     conversation.visit_count = int(conversation.visit_count or 0) + 1
@@ -248,7 +344,8 @@ async def chat_ws(
                 last_welcome = messages_repo.get_last_welcome_message(db, conversation.id)
 
                 if last_welcome and last_welcome.created_at:
-                    should_send = (now - last_welcome.created_at) > cooldown
+                    last_welcome_at = _to_naive_utc(last_welcome.created_at)
+                    should_send = bool(last_welcome_at and (now - last_welcome_at) > cooldown)
                 else:
                     # If we've never tracked last_seen_at before, use other activity timestamps.
                     last_activity = (
@@ -259,7 +356,8 @@ async def chat_ws(
                         or conversation.created_at
                     )
                     if last_activity:
-                        should_send = (now - last_activity) > cooldown
+                        last_activity_at = _to_naive_utc(last_activity)
+                        should_send = bool(last_activity_at and (now - last_activity_at) > cooldown)
 
             if should_send:
                 service = ConversationService(db)
@@ -657,6 +755,23 @@ async def chat_ws(
         # Always clean up visitor mapping + rate limit tracking.
         try:
             ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+
+        try:
+            ChatService.unregister_session_socket(websocket)
+        except Exception:
+            pass
+
+        # Realtime: broadcast offline after a short delay to avoid refresh flicker.
+        try:
+            asyncio.create_task(
+                _send_delayed_session_presence_event(
+                    website_id=int(website_id),
+                    session_id=str(session_id),
+                    delay_seconds=VISITOR_LEFT_DELAY_SECONDS,
+                )
+            )
         except Exception:
             pass
 

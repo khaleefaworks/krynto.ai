@@ -16,6 +16,9 @@ import AgentDetail from './pages/AgentDetail'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
+import Customers from './pages/Customers'
+import CustomersVisitors from './pages/CustomersVisitors'
+import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import TagsSettings from './pages/TagsSettings'
@@ -210,7 +213,7 @@ function App() {
           const body = lastMessage ? lastMessage.slice(0, 120) : undefined
 
           const sessionId = String((data as any)?.session_id || '').trim()
-          const url = sessionId ? `/dashboard/chats?sessionId=${encodeURIComponent(sessionId)}` : '/dashboard/chats'
+          const url = sessionId ? `/dashboard/chats/${encodeURIComponent(sessionId)}` : '/dashboard/chats'
 
           maybeBrowserNotify({
             title: websiteName ? `New chat — ${websiteName}` : 'New chat',
@@ -353,9 +356,17 @@ function App() {
             <Route path="/dashboard" element={<DashboardLayout />}>
               {/* Chats - Unified 3-column view */}
               <Route path="chats" element={<ConversationsView />} />
+              <Route path="chats/conversation/:conversationId" element={<ConversationsView />} />
               <Route path="chats/:sessionId" element={<ConversationsView />} />
               <Route path="history" element={<ConversationHistory />} />
               <Route path="history/:conversationId" element={<ClosedChatView />} />
+
+              {/* Customers */}
+              <Route path="customers" element={<Customers />}>
+                <Route path="visitors" element={<CustomersVisitors />} />
+                <Route path="contacts" element={<CustomersContacts />} />
+                <Route index element={<Navigate to="/dashboard/customers/visitors" replace />} />
+              </Route>
 
               {/* Settings - All users */}
               <Route path="settings" element={<Settings />}>

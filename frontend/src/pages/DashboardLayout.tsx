@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw } from 'lucide-react'
+import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -96,6 +96,17 @@ export default function DashboardLayout() {
             {unreadChatsCount}
           </span>
         )}
+      </Link>
+
+      <Link
+        to="/dashboard/customers/visitors"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/customers')
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+      >
+        <Users className="h-5 w-5" />
+        <span className="md:hidden lg:block">Customers</span>
       </Link>
 
       <Link
@@ -272,6 +283,23 @@ export default function DashboardLayout() {
               </TooltipTrigger>
               <TooltipContent side="right">
                 <p>Chats</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/customers/visitors"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/customers')
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                >
+                  <Users className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Customers</p>
               </TooltipContent>
             </Tooltip>
 

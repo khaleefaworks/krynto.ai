@@ -12,6 +12,13 @@ except Exception:  # pragma: no cover
 
 _DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
+# Backward-compatible timezone aliases.
+# Some browsers (and older configs) emit deprecated IANA names that may not be
+# present in the server's tzdata/zoneinfo build.
+_TZ_ALIASES: dict[str, str] = {
+    "Asia/Calcutta": "Asia/Kolkata",
+}
+
 
 @dataclass(frozen=True)
 class OfficeHoursInterval:
@@ -100,6 +107,7 @@ def is_within_office_hours(widget_config: dict | None, *, now_utc: datetime | No
     schedule = office_hours.get("schedule")
 
     tz_name = str(office_hours.get("timezone") or "").strip() or "UTC"
+    tz_name = _TZ_ALIASES.get(tz_name, tz_name)
 
     now_utc = now_utc or datetime.now(timezone.utc)
     if now_utc.tzinfo is None:

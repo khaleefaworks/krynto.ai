@@ -61,7 +61,10 @@ const DEFAULT_OFFICE_HOURS_SCHEDULE: OfficeHoursSchedule = {
 
 const getBrowserTimeZone = () => {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    // Some environments return deprecated aliases not present in server tzdata.
+    if (tz === 'Asia/Calcutta') return 'Asia/Kolkata'
+    return tz
   } catch {
     return 'UTC'
   }

@@ -14,6 +14,7 @@ from app.core.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
 from app.repos import conversation_reads as conversation_reads_repo
 from app.models.message import Message, MessageSenderType
+from app.models.website import Website
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -141,6 +142,50 @@ def get_active_chats(
         )
 
     return result
+
+
+@router.get("/{chat_id}")
+def get_chat_summary(
+    chat_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_authenticated_user),
+):
+    """Get a single conversation summary by id.
+
+    This is used for deep-linking from Customers pages, even when the conversation
+    is hidden from the active inbox list (e.g. welcome-only/system-only cases).
+    """
+
+    conv = conversations_repo.get_conversation_by_id(db, chat_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    website = db.query(Website).filter_by(id=conv.website_id).first()
+    website_name = (website.name if website else None) or f"Website {conv.website_id}"
+
+    return {
+        "id": int(conv.id),
+        "website_id": int(conv.website_id),
+        "website_name": website_name,
+        "session_id": str(conv.session_id),
+        "visitor_name": getattr(conv, "visitor_name", None),
+        "visitor_email": getattr(conv, "visitor_email", None),
+        "visitor_phone": getattr(conv, "visitor_phone", None),
+        "device_info": getattr(conv, "device_info", None),
+        "browser_info": getattr(conv, "browser_info", None),
+        "visit_count": int(getattr(conv, "visit_count", 0) or 0) if hasattr(conv, "visit_count") else None,
+        "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
+        "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
+        "is_handoff": bool(getattr(conv, "is_handoff", False)),
+        "assigned_agent_id": getattr(conv, "assigned_agent_id", None),
+        "message_count": 0,
+        "unread_count": 0,
+        "last_message": None,
+        "last_message_at": None,
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "closed_at": conv.updated_at.isoformat() if getattr(conv, "updated_at", None) else None,
+        "tags": _safe_serialize_conversation_tags(conv),
+    }
 
 
 @router.get("/{chat_id}/messages")

@@ -67,8 +67,13 @@ def active_conversations_with_counts_and_last_message(db: Session, *, website_id
         .filter(Conversation.status == ConversationStatus.OPEN)
         # Do not show "empty" conversations (e.g. welcome-only) in the agent inbox.
         # A conversation is considered "active" for pickup only after the visitor has
-        # sent at least one message.
-        .filter(Conversation.last_visitor_message_at.isnot(None))
+        # sent at least one message OR the agent initiated the conversation.
+        .filter(
+            sa.or_(
+                Conversation.last_visitor_message_at.isnot(None),
+                Conversation.last_agent_message_at.isnot(None),
+            )
+        )
     )
 
     if website_id:

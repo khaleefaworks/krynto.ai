@@ -110,3 +110,18 @@ export async function fetchClosedConversations(websiteId?: number, agentId?: num
     },
   })
 }
+
+export async function fetchChatSummary(chatId: number): Promise<ActiveChat> {
+  const token = useAppStore.getState().token
+
+  const chat = await apiRequest<ActiveChat>(`/chats/${chatId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  return {
+    ...chat,
+    current_agent_id: (chat as any).assigned_agent_id,
+  }
+}
