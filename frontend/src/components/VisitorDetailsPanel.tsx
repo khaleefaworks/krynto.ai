@@ -127,8 +127,8 @@ export default function VisitorDetailsPanel({
           <UserAvatar
             seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
             bgColor={conversation.visitor_avatar_color}
-            className="w-20 h-20 shadow-lg mb-3"
-            iconClassName="w-10 h-10"
+            className="w-16 h-16 shadow-lg mb-3"
+            iconClassName="w-16 h-16"
             title={conversation.visitor_name || shortSessionId(conversation.session_id)}
           />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">

@@ -178,7 +178,18 @@ export default function CustomersContacts() {
                                     className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900 dark:text-white">{r.name || '-'}</div>
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <UserAvatar
+                                                seed={String(r.contact_key || r.email || r.phone || r.name || 'contact')}
+                                                bgColor={r.visitor_avatar_color}
+                                                className="w-8 h-8 flex-shrink-0"
+                                                iconClassName="w-8 h-8"
+                                                title={r.name || r.contact_key}
+                                            />
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.name || '-'}</div>
+                                            </div>
+                                        </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="text-sm text-gray-700 dark:text-gray-300">{r.email || '-'}</div>
@@ -216,8 +227,9 @@ export default function CustomersContacts() {
                             <div className="flex items-center gap-3 min-w-0">
                                 <UserAvatar
                                     seed={String(details?.contact_key || details?.email || details?.phone || details?.name || 'contact')}
+                                    bgColor={details?.visitor_avatar_color}
                                     className="w-10 h-10 flex-shrink-0"
-                                    iconClassName="w-5 h-5"
+                                    iconClassName="w-10 h-10"
                                     title={details?.name || 'Contact'}
                                 />
                                 <div className="min-w-0">

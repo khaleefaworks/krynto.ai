@@ -259,6 +259,9 @@ def list_active_visitors(
             Conversation.id.label("conversation_id"),
             Conversation.assigned_agent_id.label("assigned_agent_id"),
             Conversation.visitor_avatar_color.label("visitor_avatar_color"),
+            Conversation.visitor_name.label("visitor_name"),
+            Conversation.visitor_email.label("visitor_email"),
+            Conversation.visitor_phone.label("visitor_phone"),
             latest_conv_rank,
         )
         .filter(tuple_(Conversation.website_id, Conversation.session_id).in_(key_tuples))
@@ -274,6 +277,9 @@ def list_active_visitors(
             "conversation_id": int(r.conversation_id) if r.conversation_id is not None else None,
             "assigned_agent_id": assigned_id,
             "visitor_avatar_color": getattr(r, "visitor_avatar_color", None),
+            "visitor_name": getattr(r, "visitor_name", None),
+            "visitor_email": getattr(r, "visitor_email", None),
+            "visitor_phone": getattr(r, "visitor_phone", None),
         }
         if assigned_id is not None:
             assigned_agent_ids.add(int(assigned_id))
@@ -362,6 +368,9 @@ def list_active_visitors(
                 "visitor_initiated_chat": bool(visitor_initiated_map.get((wid, sid), False)),
                 "agent_joined": bool(assigned_id is not None),
                 "assigned_agent": assigned_agent,
+                "visitor_name": latest_conv.get("visitor_name"),
+                "visitor_email": latest_conv.get("visitor_email"),
+                "visitor_phone": latest_conv.get("visitor_phone"),
                 "visitor_avatar_color": visitor_avatar_color,
                 "current_page": {
                     "title": latest_info.get("title"),
@@ -455,6 +464,10 @@ def get_visitor_details(
     if not visitor_avatar_color:
         visitor_avatar_color = pick_avatar_color(session_id_str)
 
+    visitor_name = getattr(conversations[0], "visitor_name", None) if conversations else None
+    visitor_email = getattr(conversations[0], "visitor_email", None) if conversations else None
+    visitor_phone = getattr(conversations[0], "visitor_phone", None) if conversations else None
+
     visitor_initiated_chat = any(getattr(c, "last_visitor_message_at", None) is not None for c in conversations)
 
     latest_assigned_agent = None
@@ -509,6 +522,9 @@ def get_visitor_details(
         "session_id": session_id_str,
         "is_online": is_online,
         "online_seconds": online_seconds,
+        "visitor_name": visitor_name,
+        "visitor_email": visitor_email,
+        "visitor_phone": visitor_phone,
         "visitor_avatar_color": visitor_avatar_color,
         "visitor_initiated_chat": bool(visitor_initiated_chat),
         "agent_joined": bool(latest_assigned_agent is not None),
@@ -623,6 +639,7 @@ def get_contact_details(
         "name": latest.visitor_name,
         "email": latest.visitor_email,
         "phone": latest.visitor_phone,
+        "visitor_avatar_color": getattr(latest, "visitor_avatar_color", None),
         "visits": int(visits_sum),
         "chats": int(len(conversations)),
         "conversations": conv_rows,
@@ -655,6 +672,7 @@ def list_contacts(
             Conversation.visitor_name.label("visitor_name"),
             Conversation.visitor_email.label("visitor_email"),
             Conversation.visitor_phone.label("visitor_phone"),
+            Conversation.visitor_avatar_color.label("visitor_avatar_color"),
             last_update.label("last_update"),
             rn,
         )
@@ -704,6 +722,7 @@ def list_contacts(
                 "name": r.visitor_name,
                 "email": r.visitor_email,
                 "phone": r.visitor_phone,
+                "visitor_avatar_color": getattr(r, "visitor_avatar_color", None),
                 "last_update": last_up.isoformat() if last_up is not None else None,
                 "tags": tags_map.get(int(r.conversation_id), []),
             }

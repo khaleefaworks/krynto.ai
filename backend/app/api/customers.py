@@ -31,6 +31,9 @@ class VisitorResponse(BaseModel):
     visitor_initiated_chat: bool = False
     agent_joined: bool = False
     assigned_agent: Dict[str, Any] | None = None
+    visitor_name: str | None = None
+    visitor_email: str | None = None
+    visitor_phone: str | None = None
     visitor_avatar_color: str | None = None
     current_page: CurrentPage
     came_from: str | None = None
@@ -44,6 +47,9 @@ class VisitorDetailsResponse(BaseModel):
     session_id: str
     is_online: bool
     online_seconds: int | None = None
+    visitor_name: str | None = None
+    visitor_email: str | None = None
+    visitor_phone: str | None = None
     visitor_avatar_color: str | None = None
     visitor_initiated_chat: bool = False
     agent_joined: bool = False
@@ -70,6 +76,7 @@ class ContactResponse(BaseModel):
     name: str | None = None
     email: str | None = None
     phone: str | None = None
+    visitor_avatar_color: str | None = None
     tags: List[ContactTagResponse] = []
     last_update: str | None = None
 
@@ -80,6 +87,7 @@ class ContactDetailsResponse(BaseModel):
     name: str | None = None
     email: str | None = None
     phone: str | None = None
+    visitor_avatar_color: str | None = None
     tags: List[ContactTagResponse] = []
     last_update: str | None = None
     visits: int

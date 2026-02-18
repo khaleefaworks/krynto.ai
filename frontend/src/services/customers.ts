@@ -9,6 +9,9 @@ export interface CustomerVisitor {
     visitor_initiated_chat: boolean
     agent_joined: boolean
     assigned_agent: { id: number; name: string | null; avatar_url: string | null } | null
+    visitor_name?: string | null
+    visitor_email?: string | null
+    visitor_phone?: string | null
     visitor_avatar_color?: string | null
     current_page: {
         title: string | null
@@ -31,6 +34,7 @@ export interface CustomerContact {
     name: string | null
     email: string | null
     phone: string | null
+    visitor_avatar_color?: string | null
     tags: CustomerContactTag[]
     last_update: string | null
 }
@@ -40,6 +44,9 @@ export interface CustomerVisitorDetails {
     session_id: string
     is_online: boolean
     online_seconds: number | null
+    visitor_name?: string | null
+    visitor_email?: string | null
+    visitor_phone?: string | null
     visitor_avatar_color?: string | null
     visitor_initiated_chat: boolean
     agent_joined: boolean
@@ -86,6 +93,7 @@ export interface CustomerContactDetails {
     name: string | null
     email: string | null
     phone: string | null
+    visitor_avatar_color?: string | null
     tags: CustomerContactTag[]
     last_update: string | null
     visits: number

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MessageSquare, Search, X } from 'lucide-react'
+import { MessageCircle, Search, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import type { CustomerVisitor, CustomerVisitorDetails } from '@/services/customers'
@@ -9,6 +9,7 @@ import { isAdmin } from '@/lib/roles'
 import { websitesApi } from '@/services/websites'
 import { agentAssignmentsApi } from '@/services/agentAssignments'
 import UserAvatar from '@/components/UserAvatar'
+import { API_BASE } from '@/config/endpoints'
 
 function formatOnlineSeconds(seconds: number | null): string {
     if (seconds == null) return '-'
@@ -44,6 +45,19 @@ function getInitials(name: string | null | undefined, fallback: string): string 
     const first = parts[0]?.[0] || ''
     const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
     return (first + second).toUpperCase() || fallback
+}
+
+function toFullAvatarUrl(raw: string | null | undefined): string | null {
+    const v = String(raw || '').trim()
+    if (!v) return null
+    if (v.startsWith('http://') || v.startsWith('https://')) return v
+    return `${API_BASE}${v}`
+}
+
+function getVisitorDisplayName(row: CustomerVisitor | null | undefined): string {
+    const name = String((row as any)?.visitor_name || '').trim()
+    if (name) return name
+    return shortSessionId((row as any)?.session_id)
 }
 
 export default function CustomersVisitors() {
@@ -249,6 +263,7 @@ export default function CustomersVisitors() {
             const cameFrom = r.came_from || ''
             return (
                 r.session_id.toLowerCase().includes(q) ||
+                String((r as any).visitor_name || '').toLowerCase().includes(q) ||
                 (r.current_page?.title || '').toLowerCase().includes(q) ||
                 (pageHost || '').toLowerCase().includes(q) ||
                 cameFrom.toLowerCase().includes(q)
@@ -330,11 +345,8 @@ export default function CustomersVisitors() {
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center gap-2">
                                                     {r.visitor_initiated_chat ? (
-                                                        <span
-                                                            className="w-7 h-7 rounded-full bg-green-600 flex items-center justify-center"
-                                                            title="Visitor initiated chat"
-                                                        >
-                                                            <MessageSquare className="w-4 h-4 text-white" />
+                                                        <span className="w-7 h-7 flex items-center justify-center" title="Visitor initiated chat">
+                                                            <MessageCircle className="w-5 h-5 text-green-600 fill-green-200" />
                                                         </span>
                                                     ) : (
                                                         <span className="w-7 h-7" />
@@ -345,7 +357,7 @@ export default function CustomersVisitors() {
                                                             seed={String(r.session_id || 'visitor')}
                                                             bgColor={r.visitor_avatar_color}
                                                             className="w-10 h-10"
-                                                            iconClassName="w-5 h-5"
+                                                            iconClassName="w-10 h-10"
                                                             title={shortSessionId(r.session_id)}
                                                         />
 
@@ -354,9 +366,23 @@ export default function CustomersVisitors() {
                                                         ) : null}
 
                                                         {r.agent_joined && r.assigned_agent ? (
-                                                            <span className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-semibold text-gray-700 dark:text-gray-200 border-2 border-white dark:border-gray-800">
-                                                                {getInitials(r.assigned_agent.name, 'A')}
-                                                            </span>
+                                                            (() => {
+                                                                const avatarUrl = toFullAvatarUrl(r.assigned_agent.avatar_url)
+                                                                if (avatarUrl) {
+                                                                    return (
+                                                                        <img
+                                                                            src={avatarUrl}
+                                                                            alt={r.assigned_agent.name || 'Agent'}
+                                                                            className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full object-cover border-2 border-white dark:border-gray-800"
+                                                                        />
+                                                                    )
+                                                                }
+                                                                return (
+                                                                    <span className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-semibold text-gray-700 dark:text-gray-200 border-2 border-white dark:border-gray-800">
+                                                                        {getInitials(r.assigned_agent.name, 'A')}
+                                                                    </span>
+                                                                )
+                                                            })()
                                                         ) : null}
                                                     </div>
                                                 </div>
@@ -366,7 +392,7 @@ export default function CustomersVisitors() {
                                                         className="text-sm font-medium text-gray-900 dark:text-white truncate"
                                                         title={r.session_id}
                                                     >
-                                                        {shortSessionId(r.session_id)}
+                                                        {getVisitorDisplayName(r)}
                                                     </div>
                                                 </div>
                                             </div>
@@ -412,13 +438,19 @@ export default function CustomersVisitors() {
                     <div className="absolute inset-0 bg-black/30" onClick={closeDrawer} />
                     <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl flex flex-col">
                         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <div className="min-w-0">
-                                <div className="text-sm text-gray-500 dark:text-gray-400">Visitor</div>
-                                <div
-                                    className="text-lg font-semibold text-gray-900 dark:text-white truncate"
+                            <div className="flex items-center gap-3 min-w-0">
+                                <UserAvatar
+                                    seed={String(selected.sessionId || 'visitor')}
+                                    bgColor={details?.visitor_avatar_color || rows.find((r) => r.website_id === selected.websiteId && r.session_id === selected.sessionId)?.visitor_avatar_color}
+                                    className="w-10 h-10 flex-shrink-0"
+                                    iconClassName="w-10 h-10"
                                     title={selected.sessionId}
-                                >
-                                    {shortSessionId(selected.sessionId)}
+                                />
+                                <div className="min-w-0">
+                                    <div className="text-sm text-gray-500 dark:text-gray-400">Visitor</div>
+                                    <div className="text-lg font-semibold text-gray-900 dark:text-white truncate" title={selected.sessionId}>
+                                        {details?.visitor_name || shortSessionId(selected.sessionId)}
+                                    </div>
                                 </div>
                             </div>
                             <button

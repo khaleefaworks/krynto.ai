@@ -45,7 +45,7 @@ export default function UserAvatar({
     return (
         <div
             className={cn(
-                'rounded-full flex items-center justify-center ring-1 ring-black/5 dark:ring-white/10',
+                'rounded-full overflow-auto flex items-center justify-center ring-1 ring-black/5 dark:ring-white/10',
                 useInlineColor ? 'text-black' : palette,
                 className
             )}
@@ -56,7 +56,7 @@ export default function UserAvatar({
             <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="-20 -60 300 310"
-                className={cn('w-5 h-5 opacity-20', iconClassName)}
+                className={cn('w-5 h-5 opacity-40', iconClassName)}
                 fill="currentColor"
                 aria-hidden="true"
             >
