@@ -394,22 +394,22 @@ export default function ConversationsView() {
         if (!selectedWebsiteId) return
 
         const token = ++websiteShortcutsTokenRef.current
-        ;(async () => {
-            try {
-                const data = await apiRequest<WebsiteShortcut[]>(`/websites/${selectedWebsiteId}/shortcuts?active_only=true`)
-                if (token !== websiteShortcutsTokenRef.current) return
-                setWebsiteShortcutsByWebsiteId((prev) => ({
-                    ...prev,
-                    [selectedWebsiteId]: Array.isArray(data) ? data : [],
-                }))
-            } catch {
-                if (token !== websiteShortcutsTokenRef.current) return
-                setWebsiteShortcutsByWebsiteId((prev) => ({
-                    ...prev,
-                    [selectedWebsiteId]: [],
-                }))
-            }
-        })()
+            ; (async () => {
+                try {
+                    const data = await apiRequest<WebsiteShortcut[]>(`/websites/${selectedWebsiteId}/shortcuts?active_only=true`)
+                    if (token !== websiteShortcutsTokenRef.current) return
+                    setWebsiteShortcutsByWebsiteId((prev) => ({
+                        ...prev,
+                        [selectedWebsiteId]: Array.isArray(data) ? data : [],
+                    }))
+                } catch {
+                    if (token !== websiteShortcutsTokenRef.current) return
+                    setWebsiteShortcutsByWebsiteId((prev) => ({
+                        ...prev,
+                        [selectedWebsiteId]: [],
+                    }))
+                }
+            })()
     }, [selectedWebsiteId])
 
     const clearUnreadForChat = useCallback((chatId: number) => {
@@ -549,13 +549,37 @@ export default function ConversationsView() {
 
     const isResolvedSelected = Boolean(conversation && (conversation as any).status === 'resolved')
 
+    const isChatsListRoute = (() => {
+        const p = String(location?.pathname || '')
+        return p === '/dashboard/chats' || p === '/dashboard/chats/'
+    })()
+
     const getPreferredConversationId = useCallback((): number | null => {
+        // If we're on the list route (/dashboard/chats), never auto-select a chat
+        // from location.state; the user explicitly navigated back to the list.
+        if (isChatsListRoute) return null
         const fromState = Number((location as any)?.state?.conversationId)
         if (Number.isFinite(fromState) && fromState > 0) return fromState
         const fromParam = Number(conversationId)
         if (Number.isFinite(fromParam) && fromParam > 0) return fromParam
         return null
-    }, [location, conversationId])
+    }, [isChatsListRoute, location, conversationId])
+
+    // When navigating back to the chats list (/dashboard/chats), clear any previously
+    // selected chat so the empty-state screen renders (instead of persisting the thread view).
+    useEffect(() => {
+        if (!isChatsListRoute) return
+        if (selectedChat === null) return
+        setSelectedChat(null)
+        setConversation(null)
+        setInput('')
+        setVisitorTyping(false)
+        setFirstUnreadMessageId(null)
+        setShowTakeoverConfirm(false)
+        setPendingSendMessage(null)
+        reset()
+        stopAgentTyping(null)
+    }, [isChatsListRoute, selectedChat, reset, stopAgentTyping])
 
     // Ensure conversation details populate once chats load (handles refresh on deep links)
     useEffect(() => {
