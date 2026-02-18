@@ -563,6 +563,192 @@
     return `${h % 12 || 12}:${m < 10 ? '0' + m : m} ${ampm}`;
   }
 
+  function isSafeHref(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const v = raw.trim();
+    if (!v) return null;
+    try {
+      const url = new URL(v, window.location.href);
+      const protocol = (url.protocol || '').toLowerCase();
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:' || protocol === 'tel:') {
+        return url.href;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function renderInlineMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    const s = String(text || '');
+
+    const patterns = [
+      { type: 'image', re: /!\[([^\]]*)\]\(([^)]+)\)/g },
+      { type: 'link', re: /\[([^\]]+)\]\(([^)]+)\)/g },
+      { type: 'bold', re: /\*\*([^*]+)\*\*/g },
+      { type: 'italic', re: /\*([^*\n]+)\*/g },
+      { type: 'url', re: /https?:\/\/[^\s<]+/g },
+    ];
+
+    let i = 0;
+    while (i < s.length) {
+      let best = null;
+
+      for (const p of patterns) {
+        p.re.lastIndex = i;
+        const m = p.re.exec(s);
+        if (!m) continue;
+        if (!best || m.index < best.index) best = { type: p.type, match: m, index: m.index };
+      }
+
+      if (!best) {
+        frag.appendChild(document.createTextNode(s.slice(i)));
+        break;
+      }
+
+      if (best.index > i) {
+        frag.appendChild(document.createTextNode(s.slice(i, best.index)));
+      }
+
+      const m = best.match;
+      const full = m[0] || '';
+
+      if (best.type === 'image') {
+        const alt = String(m[1] || '');
+        const srcRaw = String(m[2] || '');
+        const src = isSafeHref(srcRaw);
+        if (src) {
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = alt;
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.className = 'chatassist-md-img';
+          frag.appendChild(img);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'link') {
+        const label = String(m[1] || '');
+        const hrefRaw = String(m[2] || '');
+        const href = isSafeHref(hrefRaw);
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = label || href;
+          frag.appendChild(a);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bold') {
+        const strong = document.createElement('strong');
+        strong.textContent = String(m[1] || '');
+        frag.appendChild(strong);
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'italic') {
+        const em = document.createElement('em');
+        em.textContent = String(m[1] || '');
+        frag.appendChild(em);
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'url') {
+        const href = isSafeHref(full);
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = full;
+          frag.appendChild(a);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      frag.appendChild(document.createTextNode(full));
+      i = best.index + full.length;
+    }
+
+    return frag;
+  }
+
+  function renderMarkdownInto(el, content) {
+    if (!el) return;
+    el.textContent = '';
+
+    const lines = String(content || '').split('\n');
+    let idx = 0;
+
+    while (idx < lines.length) {
+      const line = lines[idx];
+      const isOrdered = /^\s*\d+\.\s+/.test(line);
+      const isUnordered = /^\s*[-*+]\s+/.test(line);
+
+      if (isUnordered) {
+        const ul = document.createElement('ul');
+        ul.className = 'chatassist-md-ul';
+        while (idx < lines.length && /^\s*[-*+]\s+/.test(lines[idx])) {
+          const li = document.createElement('li');
+          const itemText = String(lines[idx]).replace(/^\s*[-*+]\s+/, '');
+          li.appendChild(renderInlineMarkdown(itemText));
+          ul.appendChild(li);
+          idx += 1;
+        }
+        el.appendChild(ul);
+        continue;
+      }
+
+      if (isOrdered) {
+        const ol = document.createElement('ol');
+        ol.className = 'chatassist-md-ol';
+        while (idx < lines.length && /^\s*\d+\.\s+/.test(lines[idx])) {
+          const li = document.createElement('li');
+          const itemText = String(lines[idx]).replace(/^\s*\d+\.\s+/, '');
+          li.appendChild(renderInlineMarkdown(itemText));
+          ol.appendChild(li);
+          idx += 1;
+        }
+        el.appendChild(ol);
+        continue;
+      }
+
+      const p = document.createElement('div');
+      p.className = 'chatassist-md-paragraph';
+
+      // Gather lines until an ordered list starts.
+      const chunk = [];
+      while (idx < lines.length && !/^\s*\d+\.\s+/.test(lines[idx])) {
+        chunk.push(lines[idx]);
+        idx += 1;
+      }
+
+      for (let i = 0; i < chunk.length; i += 1) {
+        p.appendChild(renderInlineMarkdown(chunk[i]));
+        if (i < chunk.length - 1) p.appendChild(document.createElement('br'));
+      }
+
+      el.appendChild(p);
+    }
+  }
+
   function appendMessage(sender, content, createdAtIso, meta, messageId) {
     const container = document.getElementById('chatassist-messages');
     if (!container) return;
@@ -586,7 +772,7 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    bubble.textContent = content;
+    renderMarkdownInto(bubble, content);
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';

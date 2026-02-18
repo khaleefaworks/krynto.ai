@@ -152,6 +152,15 @@ async def agent_ws(
             logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
 
+            # The agent WebSocket uses a long-lived DB session. Other HTTP requests
+            # (e.g. /chats/{id}/join) may update rows in separate sessions.
+            # Expire the identity map so we don't make decisions on stale ORM state
+            # (e.g. assigned_agent_id still None right after join).
+            try:
+                db.expire_all()
+            except Exception:
+                pass
+
             # Any inbound message counts as activity for presence.
             try:
                 AgentService.mark_heartbeat(agent_id)
@@ -296,13 +305,6 @@ async def agent_ws(
                         await websocket.send_json({"type": "error", "message": "Chat not available"})
                         continue
 
-                # Send acknowledgment immediately
-                if message_id:
-                    await websocket.send_json({
-                        "type": "ack",
-                        "message_id": message_id
-                    })
-
                 logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content), message_id=message_id)
 
                 result = await orchestrator.handle_agent_message(
@@ -314,6 +316,14 @@ async def agent_ws(
                 if result.get("error"):
                     await websocket.send_json({"type": "error", "message": result["error"]})
                     continue
+
+                # ACK only after successful processing so the client won't drop
+                # messages that failed validation/persistence.
+                if message_id:
+                    await websocket.send_json({
+                        "type": "ack",
+                        "message_id": message_id,
+                    })
 
                 message_obj = None
                 try:

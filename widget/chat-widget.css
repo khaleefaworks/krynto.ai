@@ -526,6 +526,38 @@
   word-break: break-word;
 }
 
+.chatassist-message-bubble a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chatassist-message-bubble .chatassist-md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-top: 6px;
+}
+
+.chatassist-message-bubble .chatassist-md-ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.chatassist-message-bubble .chatassist-md-ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.chatassist-message-bubble .chatassist-md-ol li {
+  margin: 2px 0;
+}
+
+.chatassist-message-bubble .chatassist-md-ul li {
+  margin: 2px 0;
+}
+
 .chatassist-message-timestamp {
   font-size: 11px;
   color: #9ca3af;

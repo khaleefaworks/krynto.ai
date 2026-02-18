@@ -175,8 +175,15 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
       heartbeatInterval = null
     }
 
-    // Only auto-reconnect if not intentional and connection params exist
-    if (!isIntentionalClose && event.code !== 1000 && currentWebsiteId && currentAgentId) {
+    // Only auto-reconnect if not intentional and connection params exist.
+    // NOTE: `currentWebsiteId` can be 0 in single-socket mode and must not
+    // be treated as falsy.
+    if (
+      !isIntentionalClose &&
+      event.code !== 1000 &&
+      currentWebsiteId !== null &&
+      currentAgentId !== null
+    ) {
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.error("❌ Max reconnection attempts reached. Giving up.")
         // TODO: Show user notification that connection failed
@@ -191,7 +198,7 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
       if (reconnectTimeout) clearTimeout(reconnectTimeout)
       reconnectTimeout = setTimeout(() => {
         console.log(`🔄 Reconnecting (attempt ${reconnectAttempts})...`)
-        connectAgentSocket(currentWebsiteId!, currentAgentId!)
+        connectAgentSocket(currentWebsiteId, currentAgentId)
       }, delay)
     }
   }
