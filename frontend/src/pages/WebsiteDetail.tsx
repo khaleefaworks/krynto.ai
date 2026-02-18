@@ -1281,178 +1281,180 @@ export default function WebsiteDetail() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="font-medium text-gray-900 dark:text-gray-100">
-                        Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">Website assignment</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            loadWebsiteAgents()
+                            loadAllAgents()
+                          }}
+                        >
+                          Refresh
+                        </Button>
                       </div>
-                      {membersLoading && <div className="text-xs text-gray-500">Loading...</div>}
-                    </div>
+                      <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        Assign agents to this website (website-wide access). Team membership is managed below.
+                      </div>
 
-                    {!selectedTeamId ? (
-                      <div className="text-sm text-gray-600 dark:text-gray-400">Select a team to manage members.</div>
-                    ) : (
-                      <>
-                        <div className="mb-4 p-3 rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Website assignment</div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                loadWebsiteAgents()
-                                loadAllAgents()
-                              }}
-                            >
-                              Refresh
-                            </Button>
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            Assign agents to this website (website-wide access). Team membership is set below using checkboxes.
-                          </div>
+                      {allAgentsError && (
+                        <div className="mt-2 text-sm text-red-700 dark:text-red-300">{allAgentsError}</div>
+                      )}
 
-                          {allAgentsError && (
-                            <div className="mt-2 text-sm text-red-700 dark:text-red-300">{allAgentsError}</div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div>
+                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Assigned ({websiteAgents.length})
+                          </div>
+                          {agentsError && (
+                            <div className="mb-2 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
                           )}
+                          {agentsLoading ? (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
+                          ) : websiteAgents.length === 0 ? (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">No agents assigned yet.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {websiteAgents.map((a) => (
+                                <div key={a.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                                  <div className="min-w-0">
+                                    <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.email}</div>
+                                    {a.role && <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={unassigningAgentId === a.id}
+                                    onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                  >
+                                    {unassigningAgentId === a.id ? 'Unassigning…' : 'Unassign'}
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <div>
-                              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Assigned ({websiteAgents.length})
-                              </div>
-                              {agentsError && (
-                                <div className="mb-2 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
-                              )}
-                              {agentsLoading ? (
-                                <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
-                              ) : websiteAgents.length === 0 ? (
-                                <div className="text-sm text-gray-600 dark:text-gray-400">No agents assigned yet.</div>
-                              ) : (
+                        <div>
+                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Available</div>
+                          {allAgentsLoading ? (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
+                          ) : (
+                            (() => {
+                              const assignedIds = new Set(websiteAgents.map((x) => x.id))
+                              const candidates = allAgents
+                                .filter((u) => !assignedIds.has(u.id))
+                                .filter((u) => {
+                                  const role = String((u as any).role || '').toLowerCase()
+                                  return !role || role.includes('agent')
+                                })
+
+                              if (candidates.length === 0) {
+                                return <div className="text-sm text-gray-600 dark:text-gray-400">No available agents.</div>
+                              }
+
+                              return (
                                 <div className="space-y-2">
-                                  {websiteAgents.map((a) => (
-                                    <div key={a.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                                  {candidates.map((u) => (
+                                    <div key={u.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
                                       <div className="min-w-0">
-                                        <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.email}</div>
-                                        {a.role && <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>}
+                                        <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</div>
+                                        {(u as any).role && <div className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</div>}
                                       </div>
                                       <Button
                                         type="button"
-                                        variant="outline"
                                         size="sm"
-                                        disabled={unassigningAgentId === a.id}
-                                        onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                        disabled={assigningAgentId === u.id}
+                                        onClick={() => handleAssignWebsiteAgent(u.id)}
                                       >
-                                        {unassigningAgentId === a.id ? 'Unassigning…' : 'Unassign'}
+                                        {assigningAgentId === u.id ? 'Assigning…' : 'Assign'}
                                       </Button>
                                     </div>
                                   ))}
                                 </div>
-                              )}
-                            </div>
+                              )
+                            })()
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-                            <div>
-                              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Available</div>
-                              {allAgentsLoading ? (
-                                <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
+                    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                          Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
+                        </div>
+                        {membersLoading && <div className="text-xs text-gray-500">Loading...</div>}
+                      </div>
+
+                      {!selectedTeamId ? (
+                        <div className="text-sm text-gray-600 dark:text-gray-400">Select a team to manage members.</div>
+                      ) : (
+                        <>
+                          {agentsError && (
+                            <div className="mb-3 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
+                          )}
+                          {agentsLoading ? (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading assigned agents...</div>
+                          ) : (
+                            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+                              {websiteAgents.length === 0 ? (
+                                <div className="text-sm text-gray-600 dark:text-gray-400">Assign agents above to enable member selection.</div>
                               ) : (
-                                (() => {
-                                  const assignedIds = new Set(websiteAgents.map((x) => x.id))
-                                  const candidates = allAgents
-                                    .filter((u) => !assignedIds.has(u.id))
-                                    .filter((u) => {
-                                      const role = String((u as any).role || '').toLowerCase()
-                                      return !role || role.includes('agent')
-                                    })
-
-                                  if (candidates.length === 0) {
-                                    return <div className="text-sm text-gray-600 dark:text-gray-400">No available agents.</div>
-                                  }
-
-                                  return (
-                                    <div className="space-y-2">
-                                      {candidates.map((u) => (
-                                        <div key={u.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
-                                          <div className="min-w-0">
-                                            <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</div>
-                                            {(u as any).role && <div className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</div>}
-                                          </div>
-                                          <Button
-                                            type="button"
-                                            size="sm"
-                                            disabled={assigningAgentId === u.id}
-                                            onClick={() => handleAssignWebsiteAgent(u.id)}
-                                          >
-                                            {assigningAgentId === u.id ? 'Assigning…' : 'Assign'}
-                                          </Button>
+                                <>
+                                  <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                                    <div>Team membership (check agents who belong to this team)</div>
+                                    <div>Selected: {selectedTeamMemberIds.length}</div>
+                                  </div>
+                                  {websiteAgents.map((a) => {
+                                    const checked = selectedTeamMemberIds.includes(a.id)
+                                    const label = a.name ? `${a.name} (${a.email})` : a.email
+                                    return (
+                                      <label key={a.id} className="flex items-center gap-3 p-2 rounded border border-gray-200 dark:border-gray-800">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          disabled={membersLoading || membersSaving}
+                                          onChange={(e) => {
+                                            const next = e.target.checked
+                                              ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
+                                              : selectedTeamMemberIds.filter((id) => id !== a.id)
+                                            setSelectedTeamMemberIds(next)
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <div className="text-sm text-gray-900 dark:text-gray-100">{label}</div>
+                                          {a.role && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>
+                                          )}
                                         </div>
-                                      ))}
-                                    </div>
-                                  )
-                                })()
+                                      </label>
+                                    )
+                                  })}
+                                </>
                               )}
                             </div>
-                          </div>
-                        </div>
+                          )}
 
-                        {agentsError && (
-                          <div className="mb-3 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
-                        )}
-                        {agentsLoading ? (
-                          <div className="text-sm text-gray-600 dark:text-gray-400">Loading assigned agents...</div>
-                        ) : (
-                          <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-                            {websiteAgents.length === 0 ? (
-                              <div className="text-sm text-gray-600 dark:text-gray-400">Assign agents above to enable member selection.</div>
-                            ) : (
-                              <>
-                                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                                  <div>Team membership (check agents who belong to this team)</div>
-                                  <div>Selected: {selectedTeamMemberIds.length}</div>
-                                </div>
-                                {websiteAgents.map((a) => {
-                                  const checked = selectedTeamMemberIds.includes(a.id)
-                                  const label = a.name ? `${a.name} (${a.email})` : a.email
-                                  return (
-                                    <label key={a.id} className="flex items-center gap-3 p-2 rounded border border-gray-200 dark:border-gray-800">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={membersLoading || membersSaving}
-                                        onChange={(e) => {
-                                          const next = e.target.checked
-                                            ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
-                                            : selectedTeamMemberIds.filter((id) => id !== a.id)
-                                          setSelectedTeamMemberIds(next)
-                                        }}
-                                      />
-                                      <div className="flex-1">
-                                        <div className="text-sm text-gray-900 dark:text-gray-100">{label}</div>
-                                        {a.role && (
-                                          <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>
-                                        )}
-                                      </div>
-                                    </label>
-                                  )
-                                })}
-                              </>
-                            )}
+                          <div className="mt-4 flex justify-end">
+                            <Button
+                              type="button"
+                              onClick={handleSaveMembers}
+                              disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
+                              className="gap-2"
+                            >
+                              <Save className="w-4 h-4" />
+                              {membersSaving ? 'Saving...' : 'Save Members'}
+                            </Button>
                           </div>
-                        )}
-
-                        <div className="mt-4 flex justify-end">
-                          <Button
-                            type="button"
-                            onClick={handleSaveMembers}
-                            disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
-                            className="gap-2"
-                          >
-                            <Save className="w-4 h-4" />
-                            {membersSaving ? 'Saving...' : 'Save Members'}
-                          </Button>
-                        </div>
-                      </>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
