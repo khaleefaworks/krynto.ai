@@ -5,6 +5,9 @@ import { useAppStore } from '@/store/appStore'
 import type { CustomerVisitor, CustomerVisitorDetails } from '@/services/customers'
 import { fetchVisitorDetails, fetchVisitors } from '@/services/customers'
 import { addMessageHandler, connectAgentSocket } from '@/services/agentSocket'
+import { isAdmin } from '@/lib/roles'
+import { websitesApi } from '@/services/websites'
+import { agentAssignmentsApi } from '@/services/agentAssignments'
 
 function formatOnlineSeconds(seconds: number | null): string {
     if (seconds == null) return '-'
@@ -49,6 +52,8 @@ export default function CustomersVisitors() {
     const [error, setError] = useState<string | null>(null)
     const [rows, setRows] = useState<CustomerVisitor[]>([])
     const [query, setQuery] = useState('')
+
+    const [websiteLabels, setWebsiteLabels] = useState<Record<number, string>>({})
 
     const [selected, setSelected] = useState<{ websiteId: number; sessionId: string } | null>(null)
     const [detailsLoading, setDetailsLoading] = useState(false)
@@ -113,6 +118,48 @@ export default function CustomersVisitors() {
             cancelled = true
         }
     }, [])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const run = async () => {
+            if (!user?.id) return
+            try {
+                if (isAdmin(user)) {
+                    const sites = await websitesApi.list()
+                    if (cancelled) return
+                    const next: Record<number, string> = {}
+                    for (const s of (Array.isArray(sites) ? sites : [])) {
+                        const id = Number((s as any).id)
+                        if (!Number.isFinite(id)) continue
+                        const domain = String((s as any).domain || '').trim()
+                        const name = String((s as any).name || '').trim()
+                        next[id] = domain || name || `#${id}`
+                    }
+                    setWebsiteLabels(next)
+                } else {
+                    const sites = await agentAssignmentsApi.getAgentWebsites(user.id)
+                    if (cancelled) return
+                    const next: Record<number, string> = {}
+                    for (const s of (Array.isArray(sites) ? sites : [])) {
+                        const id = Number((s as any).id)
+                        if (!Number.isFinite(id)) continue
+                        const domain = String((s as any).domain || '').trim()
+                        const name = String((s as any).name || '').trim()
+                        next[id] = domain || name || `#${id}`
+                    }
+                    setWebsiteLabels(next)
+                }
+            } catch {
+                // ignore - fallback will render website_id
+            }
+        }
+
+        run()
+        return () => {
+            cancelled = true
+        }
+    }, [user?.id, user?.role])
 
     // Realtime refresh: update visitor rows on connect/disconnect and first-message events.
     useEffect(() => {
@@ -264,6 +311,7 @@ export default function CustomersVisitors() {
                         <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visitor</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Website</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Online</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current page</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Came from</th>
@@ -283,30 +331,32 @@ export default function CustomersVisitors() {
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center gap-2">
-                                                    <div className="w-8 flex justify-center">
-                                                        {r.visitor_initiated_chat ? (
-                                                            <span className="w-7 h-7 rounded-full bg-green-600 flex items-center justify-center">
-                                                                <MessageSquare className="w-4 h-4 text-white" />
-                                                            </span>
-                                                        ) : (
-                                                            <span className="w-7 h-7" />
-                                                        )}
-                                                    </div>
+                                                    {r.visitor_initiated_chat ? (
+                                                        <span
+                                                            className="w-7 h-7 rounded-full bg-green-600 flex items-center justify-center"
+                                                            title="Visitor initiated chat"
+                                                        >
+                                                            <MessageSquare className="w-4 h-4 text-white" />
+                                                        </span>
+                                                    ) : (
+                                                        <span className="w-7 h-7" />
+                                                    )}
 
-                                                    <div className="relative flex items-center">
-                                                        <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                                    <div className="relative">
+                                                        <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-gray-200">
                                                             {getInitials(null, (shortSessionId(r.session_id).charAt(0) || '?').toUpperCase())}
                                                         </div>
+
                                                         {r.is_online ? (
-                                                            <span className="absolute -right-0.5 -top-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-800" />
+                                                            <span className="absolute -left-0.5 -top-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-800" />
+                                                        ) : null}
+
+                                                        {r.agent_joined && r.assigned_agent ? (
+                                                            <span className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-semibold text-gray-700 dark:text-gray-200 border-2 border-white dark:border-gray-800">
+                                                                {getInitials(r.assigned_agent.name, 'A')}
+                                                            </span>
                                                         ) : null}
                                                     </div>
-
-                                                    {r.agent_joined && r.assigned_agent ? (
-                                                        <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-semibold text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600">
-                                                            {getInitials(r.assigned_agent.name, 'A')}
-                                                        </div>
-                                                    ) : null}
                                                 </div>
 
                                                 <div className="min-w-0">
@@ -318,6 +368,11 @@ export default function CustomersVisitors() {
                                                     </div>
                                                 </div>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                                                {websiteLabels[r.website_id] || `#${r.website_id}`}
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className="text-sm text-gray-700 dark:text-gray-300">{formatOnlineSeconds(r.online_seconds)}</span>

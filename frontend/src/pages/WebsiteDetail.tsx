@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
@@ -8,9 +8,10 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
+import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
 
 interface Website {
   id: number
@@ -98,7 +99,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams'
 
 type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
 
@@ -148,6 +149,33 @@ export default function WebsiteDetail() {
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
 
+  // Teams tab (admin-only)
+  type WebsiteTeam = { id: number; website_id: number; name: string; description?: string | null; member_count: number }
+  type WebsiteAgent = { id: number; email: string; name?: string | null; role?: string; is_active?: boolean; assigned_at?: string | null }
+  type TeamMembersResponse = { team_id: number; user_ids: number[] }
+
+  const [teams, setTeams] = useState<WebsiteTeam[]>([])
+  const [teamsLoading, setTeamsLoading] = useState(false)
+  const [teamsError, setTeamsError] = useState<string | null>(null)
+  const [creatingTeam, setCreatingTeam] = useState(false)
+  const [newTeamName, setNewTeamName] = useState('')
+  const [newTeamDescription, setNewTeamDescription] = useState('')
+  const [websiteAgents, setWebsiteAgents] = useState<WebsiteAgent[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsError, setAgentsError] = useState<string | null>(null)
+  const [allAgents, setAllAgents] = useState<Agent[]>([])
+  const [allAgentsLoading, setAllAgentsLoading] = useState(false)
+  const [allAgentsError, setAllAgentsError] = useState<string | null>(null)
+  const [assigningAgentId, setAssigningAgentId] = useState<number | null>(null)
+  const [unassigningAgentId, setUnassigningAgentId] = useState<number | null>(null)
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null)
+  const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState<number[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
+  const [membersSaving, setMembersSaving] = useState(false)
+  const teamMembersLoadSeq = useRef(0)
+
+  const selectedTeam = selectedTeamId ? teams.find((t) => t.id === selectedTeamId) : undefined
+
   // Form data
   const [formData, setFormData] = useState({
     name: '',
@@ -180,6 +208,169 @@ export default function WebsiteDetail() {
     if (activeTab !== 'automations') return
     loadAutomations()
   }, [activeTab, websiteId])
+
+  useEffect(() => {
+    if (!websiteId) return
+    if (activeTab !== 'teams') return
+    if (!isAdmin(user)) return
+    loadTeams()
+    loadWebsiteAgents()
+    loadAllAgents()
+  }, [activeTab, websiteId, user])
+
+  const loadTeams = async () => {
+    if (!websiteId) return
+    try {
+      setTeamsLoading(true)
+      setTeamsError(null)
+      const data = await apiRequest<WebsiteTeam[]>(`/websites/${websiteId}/teams`)
+      setTeams(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setTeamsError(err?.message || 'Failed to load teams')
+    } finally {
+      setTeamsLoading(false)
+    }
+  }
+
+  const loadWebsiteAgents = async () => {
+    if (!websiteId) return
+    try {
+      setAgentsLoading(true)
+      setAgentsError(null)
+      const data = await apiRequest<WebsiteAgent[]>(`/agent-assignments/website/${websiteId}/agents`)
+      setWebsiteAgents(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setAgentsError(err?.message || 'Failed to load assigned agents')
+    } finally {
+      setAgentsLoading(false)
+    }
+  }
+
+  const loadAllAgents = async () => {
+    try {
+      setAllAgentsLoading(true)
+      setAllAgentsError(null)
+      const data = await agentAssignmentsApi.listAgents()
+      setAllAgents(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setAllAgentsError(err?.message || 'Failed to load agents')
+    } finally {
+      setAllAgentsLoading(false)
+    }
+  }
+
+  const handleAssignWebsiteAgent = async (agentId: number) => {
+    if (!websiteId) return
+    try {
+      setAssigningAgentId(agentId)
+      setAllAgentsError(null)
+      await agentAssignmentsApi.assignAgentToWebsite(agentId, websiteId)
+      await loadWebsiteAgents()
+    } catch (err: any) {
+      setAllAgentsError(err?.message || 'Failed to assign agent')
+    } finally {
+      setAssigningAgentId(null)
+    }
+  }
+
+  const handleUnassignWebsiteAgent = async (agentId: number) => {
+    if (!websiteId) return
+    try {
+      setUnassigningAgentId(agentId)
+      setAllAgentsError(null)
+      await agentAssignmentsApi.unassignAgentFromWebsite(agentId, websiteId)
+      await loadWebsiteAgents()
+
+      // Keep the team membership selection consistent with the currently assigned website agents.
+      setSelectedTeamMemberIds((prev) => prev.filter((id) => id !== agentId))
+    } catch (err: any) {
+      setAllAgentsError(err?.message || 'Failed to unassign agent')
+    } finally {
+      setUnassigningAgentId(null)
+    }
+  }
+
+  const loadTeamMembers = async (teamId: number) => {
+    if (!websiteId) return
+    const seq = ++teamMembersLoadSeq.current
+    try {
+      setMembersLoading(true)
+      const data = await apiRequest<TeamMembersResponse>(`/websites/${websiteId}/teams/${teamId}/members`)
+      const ids = Array.isArray(data?.user_ids) ? data.user_ids.map((x) => Number(x)).filter((x) => Number.isFinite(x)) : []
+
+      // Ignore out-of-order responses when switching teams quickly.
+      if (seq !== teamMembersLoadSeq.current) return
+      setSelectedTeamMemberIds(ids)
+    } catch (err: any) {
+      setTeamsError(err?.message || 'Failed to load team members')
+    } finally {
+      if (seq === teamMembersLoadSeq.current) setMembersLoading(false)
+    }
+  }
+
+  const handleCreateTeam = async () => {
+    if (!websiteId) return
+    const name = newTeamName.trim()
+    if (!name) {
+      setTeamsError('Team name is required')
+      return
+    }
+    try {
+      setCreatingTeam(true)
+      setTeamsError(null)
+      await apiRequest(`/websites/${websiteId}/teams`, {
+        method: 'POST',
+        body: JSON.stringify({ name, description: newTeamDescription.trim() || null }),
+      })
+      setNewTeamName('')
+      setNewTeamDescription('')
+      await loadTeams()
+    } catch (err: any) {
+      setTeamsError(err?.message || 'Failed to create team')
+    } finally {
+      setCreatingTeam(false)
+    }
+  }
+
+  const handleDeleteTeam = async (teamId: number) => {
+    if (!websiteId) return
+    if (!confirm('Delete this team?')) return
+    try {
+      setTeamsError(null)
+      await apiRequest(`/websites/${websiteId}/teams/${teamId}`, { method: 'DELETE' })
+      if (selectedTeamId === teamId) {
+        setSelectedTeamId(null)
+        setSelectedTeamMemberIds([])
+      }
+      await loadTeams()
+    } catch (err: any) {
+      setTeamsError(err?.message || 'Failed to delete team')
+    }
+  }
+
+  const handleSaveMembers = async () => {
+    if (!websiteId || !selectedTeamId) return
+    try {
+      setMembersSaving(true)
+      setTeamsError(null)
+      await apiRequest(`/websites/${websiteId}/teams/${selectedTeamId}/members`, {
+        method: 'PUT',
+        body: JSON.stringify({ user_ids: selectedTeamMemberIds }),
+      })
+
+      // Optimistically reflect the count immediately.
+      setTeams((prev) => prev.map((t) => (t.id === selectedTeamId ? { ...t, member_count: selectedTeamMemberIds.length } : t)))
+      await loadTeams()
+      await loadTeamMembers(selectedTeamId)
+
+      setSuccessMessage('Team members saved')
+      setTimeout(() => setSuccessMessage(null), 2000)
+    } catch (err: any) {
+      setTeamsError(err?.message || 'Failed to save members')
+    } finally {
+      setMembersSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== 'automations') return
@@ -902,6 +1093,19 @@ export default function WebsiteDetail() {
               <Bot className="w-4 h-4 inline-block mr-2 mb-1" />
               Automations
             </button>
+
+            {isAdmin(user) && (
+              <button
+                onClick={() => setActiveTab('teams')}
+                className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'teams'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
+              >
+                <Users className="w-4 h-4 inline-block mr-2 mb-1" />
+                Teams
+              </button>
+            )}
           </nav>
         </div>
       )}
@@ -984,6 +1188,273 @@ export default function WebsiteDetail() {
                   <li>The chat widget will automatically appear on your website</li>
                   <li>Make sure at least one agent is assigned to this website</li>
                 </ol>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Teams Tab (admin-only) */}
+        {!isNew && activeTab === 'teams' && isAdmin(user) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Teams
+              </CardTitle>
+              <CardDescription>Create website-specific teams and assign members.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {teamsError && (
+                <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 text-sm">
+                  {teamsError}
+                </div>
+              )}
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="md:col-span-1 space-y-3">
+                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 mb-2">New Team</div>
+                    <div className="space-y-2">
+                      <Input
+                        value={newTeamName}
+                        onChange={(e) => setNewTeamName(e.target.value)}
+                        placeholder="Team name"
+                      />
+                      <Textarea
+                        value={newTeamDescription}
+                        onChange={(e) => setNewTeamDescription(e.target.value)}
+                        placeholder="Description (optional)"
+                        rows={3}
+                      />
+                      <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} className="w-full gap-2">
+                        <Plus className="w-4 h-4" />
+                        {creatingTeam ? 'Creating...' : 'Create Team'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">Teams</div>
+                      {teamsLoading && <div className="text-xs text-gray-500">Loading...</div>}
+                    </div>
+                    {teams.length === 0 && !teamsLoading ? (
+                      <div className="text-sm text-gray-600 dark:text-gray-400">No teams yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {teams.map((t) => (
+                          <div
+                            key={t.id}
+                            className={`p-2 rounded border transition-colors cursor-pointer ${selectedTeamId === t.id
+                              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900'
+                              }`}
+                            onClick={() => {
+                              setTeamsError(null)
+                              setSelectedTeamId(t.id)
+                              setSelectedTeamMemberIds([])
+                              loadTeamMembers(t.id)
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.name}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteTeam(t.id)
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
+                      </div>
+                      {membersLoading && <div className="text-xs text-gray-500">Loading...</div>}
+                    </div>
+
+                    {!selectedTeamId ? (
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Select a team to manage members.</div>
+                    ) : (
+                      <>
+                        <div className="mb-4 p-3 rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Website assignment</div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                loadWebsiteAgents()
+                                loadAllAgents()
+                              }}
+                            >
+                              Refresh
+                            </Button>
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            Assign agents to this website (website-wide access). Team membership is set below using checkboxes.
+                          </div>
+
+                          {allAgentsError && (
+                            <div className="mt-2 text-sm text-red-700 dark:text-red-300">{allAgentsError}</div>
+                          )}
+
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Assigned ({websiteAgents.length})
+                              </div>
+                              {agentsError && (
+                                <div className="mb-2 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
+                              )}
+                              {agentsLoading ? (
+                                <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
+                              ) : websiteAgents.length === 0 ? (
+                                <div className="text-sm text-gray-600 dark:text-gray-400">No agents assigned yet.</div>
+                              ) : (
+                                <div className="space-y-2">
+                                  {websiteAgents.map((a) => (
+                                    <div key={a.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                                      <div className="min-w-0">
+                                        <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.email}</div>
+                                        {a.role && <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>}
+                                      </div>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={unassigningAgentId === a.id}
+                                        onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                      >
+                                        {unassigningAgentId === a.id ? 'Unassigning…' : 'Unassign'}
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Available</div>
+                              {allAgentsLoading ? (
+                                <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
+                              ) : (
+                                (() => {
+                                  const assignedIds = new Set(websiteAgents.map((x) => x.id))
+                                  const candidates = allAgents
+                                    .filter((u) => !assignedIds.has(u.id))
+                                    .filter((u) => {
+                                      const role = String((u as any).role || '').toLowerCase()
+                                      return !role || role.includes('agent')
+                                    })
+
+                                  if (candidates.length === 0) {
+                                    return <div className="text-sm text-gray-600 dark:text-gray-400">No available agents.</div>
+                                  }
+
+                                  return (
+                                    <div className="space-y-2">
+                                      {candidates.map((u) => (
+                                        <div key={u.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                                          <div className="min-w-0">
+                                            <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</div>
+                                            {(u as any).role && <div className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</div>}
+                                          </div>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            disabled={assigningAgentId === u.id}
+                                            onClick={() => handleAssignWebsiteAgent(u.id)}
+                                          >
+                                            {assigningAgentId === u.id ? 'Assigning…' : 'Assign'}
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )
+                                })()
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {agentsError && (
+                          <div className="mb-3 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
+                        )}
+                        {agentsLoading ? (
+                          <div className="text-sm text-gray-600 dark:text-gray-400">Loading assigned agents...</div>
+                        ) : (
+                          <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+                            {websiteAgents.length === 0 ? (
+                              <div className="text-sm text-gray-600 dark:text-gray-400">Assign agents above to enable member selection.</div>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                                  <div>Team membership (check agents who belong to this team)</div>
+                                  <div>Selected: {selectedTeamMemberIds.length}</div>
+                                </div>
+                                {websiteAgents.map((a) => {
+                                  const checked = selectedTeamMemberIds.includes(a.id)
+                                  const label = a.name ? `${a.name} (${a.email})` : a.email
+                                  return (
+                                    <label key={a.id} className="flex items-center gap-3 p-2 rounded border border-gray-200 dark:border-gray-800">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={membersLoading || membersSaving}
+                                        onChange={(e) => {
+                                          const next = e.target.checked
+                                            ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
+                                            : selectedTeamMemberIds.filter((id) => id !== a.id)
+                                          setSelectedTeamMemberIds(next)
+                                        }}
+                                      />
+                                      <div className="flex-1">
+                                        <div className="text-sm text-gray-900 dark:text-gray-100">{label}</div>
+                                        {a.role && (
+                                          <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>
+                                        )}
+                                      </div>
+                                    </label>
+                                  )
+                                })}
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex justify-end">
+                          <Button
+                            type="button"
+                            onClick={handleSaveMembers}
+                            disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
+                            className="gap-2"
+                          >
+                            <Save className="w-4 h-4" />
+                            {membersSaving ? 'Saving...' : 'Save Members'}
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
