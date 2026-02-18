@@ -196,9 +196,12 @@ export function connectAgentSocket(websiteId: number, agentId: number) {
 
       console.log(`🔄 Will attempt reconnect #${reconnectAttempts} in ${delay}ms...`)
       if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      const wid = currentWebsiteId
+      const aid = currentAgentId
       reconnectTimeout = setTimeout(() => {
         console.log(`🔄 Reconnecting (attempt ${reconnectAttempts})...`)
-        connectAgentSocket(currentWebsiteId, currentAgentId)
+        if (wid === null || aid === null) return
+        connectAgentSocket(wid, aid)
       }, delay)
     }
   }

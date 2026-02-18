@@ -10,7 +10,7 @@ import type { JSONContent } from '@tiptap/core'
 import { API_BASE } from '@/config/endpoints'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Paperclip, Send, Bold, Italic, ListOrdered, Smile, Sparkles } from 'lucide-react'
+import { Paperclip, Send, Bold, Italic, ListOrdered, Smile, Sparkles, Loader2, X } from 'lucide-react'
 import EmojiPicker, { Theme, type EmojiClickData } from 'emoji-picker-react'
 
 export type ComposerShortcut = {
@@ -44,6 +44,13 @@ type ShortcutContext = {
     query: string
     start: number
     end: number
+}
+
+type UploadedAttachment = {
+    id: string
+    name: string
+    url: string
+    kind: 'image' | 'file'
 }
 
 function isDarkMode(): boolean {
@@ -97,6 +104,11 @@ function getFullAttachmentUrl(url: string): string {
 function escapeMarkdownText(value: string): string {
     // Keep this conservative; we only need to avoid accidentally creating markdown syntax.
     return value.replace(/[\\`*_\[\]]/g, (m) => `\\${m}`)
+}
+
+function escapeMarkdownLinkText(value: string): string {
+    // Link labels also need to escape parentheses.
+    return String(value || '').replace(/[\\`*_\[\]()/]/g, (m) => `\\${m}`)
 }
 
 function wrapInline(text: string, marks: { bold?: boolean; italic?: boolean; linkHref?: string | null }): string {
@@ -220,11 +232,14 @@ export default function ChatComposer({
 }: Props) {
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    const [uploadingAttachment, setUploadingAttachment] = useState(false)
+    const [uploadingCount, setUploadingCount] = useState(0)
     const [shortcutMenuIndex, setShortcutMenuIndex] = useState(0)
     const [selectionVersion, setSelectionVersion] = useState(0)
 
     const [plainValue, setPlainValue] = useState('')
+    const [attachments, setAttachments] = useState<UploadedAttachment[]>([])
+
+    const uploadingAttachment = uploadingCount > 0
 
     const editor = useEditor({
         extensions: [
@@ -392,26 +407,45 @@ export default function ChatComposer({
         [editor, shortcutCtx.end, shortcutCtx.start]
     )
 
+    const removeAttachment = useCallback((id: string) => {
+        setAttachments((prev) => prev.filter((a) => a.id !== id))
+    }, [])
+
+    const buildAttachmentsMarkdown = useCallback((): string => {
+        const parts = attachments
+            .map((a) => {
+                if (!a?.url) return ''
+                if (a.kind === 'image') return `![](${a.url})`
+                const label = escapeMarkdownLinkText(a.name || 'Attachment')
+                return `[${label}](${a.url})`
+            })
+            .filter(Boolean)
+        return parts.join('\n')
+    }, [attachments])
+
     const sendNow = useCallback(() => {
         if (!editor) return
         if (disabled) return
 
-        const md = getMarkdown()
-        if (!md.trim() || !conversationId) return
+        const md = String(getMarkdown() || '').trim()
+        const attachmentsMd = buildAttachmentsMarkdown().trim()
+        const combined = [md, attachmentsMd].filter(Boolean).join('\n\n').trim()
+        if (!combined || !conversationId) return
 
-        onSend(md)
+        onSend(combined)
         editor.commands.clearContent(true)
         setPlainValue('')
+        setAttachments([])
         onTyping?.('')
         setShortcutMenuIndex(0)
-    }, [conversationId, disabled, editor, getMarkdown, onSend, onTyping])
+    }, [buildAttachmentsMarkdown, conversationId, disabled, editor, getMarkdown, onSend, onTyping])
 
     const uploadAndInsertFile = useCallback(
         async (file: File, opts?: { asPaste?: boolean; preferImageNode?: boolean }) => {
             if (!conversationId) return
             if (!editor) return
 
-            setUploadingAttachment(true)
+            setUploadingCount((c) => c + 1)
             try {
                 const form = new FormData()
                 form.append('file', file)
@@ -432,32 +466,23 @@ export default function ChatComposer({
                 const fullUrl = getFullAttachmentUrl(String(data?.url || ''))
                 if (!fullUrl) return
 
-                if (file.type.startsWith('image/')) {
-                    if (opts?.preferImageNode) {
-                        editor.chain().focus().setImage({ src: fullUrl }).run()
-                    } else {
-                        editor.chain().focus().insertContent(`![](${fullUrl})`).run()
-                    }
-                } else {
-                    const name = file.name ? file.name.replace(/\[/g, '(').replace(/\]/g, ')') : 'Attachment'
-                    // Insert as a link with filename.
-                    editor
-                        .chain()
-                        .focus()
-                        .insertContent(name)
-                        .setTextSelection({ from: editor.state.selection.from - name.length, to: editor.state.selection.from })
-                        .setLink({ href: fullUrl })
-                        .run()
-                }
+                const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+                const safeName = file.name ? String(file.name).trim() : 'Attachment'
+                const kind: UploadedAttachment['kind'] = file.type && file.type.startsWith('image/') ? 'image' : 'file'
+                setAttachments((prev) => [...prev, { id, name: safeName, url: fullUrl, kind }])
 
+                // Best-effort: keep focus for smooth typing.
                 if (opts?.asPaste) {
-                    // Add a trailing space to keep typing smooth after paste.
-                    editor.chain().focus().insertContent(' ').run()
+                    try {
+                        editor.chain().focus().run()
+                    } catch {
+                        // ignore
+                    }
                 }
             } catch (e) {
                 console.error('Attachment upload failed:', e)
             } finally {
-                setUploadingAttachment(false)
+                setUploadingCount((c) => Math.max(0, c - 1))
             }
         },
         [conversationId, editor]
@@ -478,6 +503,30 @@ export default function ChatComposer({
         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-3 py-2 flex-shrink-0">
             {statusText ? (
                 <div className="text-[11px] text-gray-500 dark:text-gray-400 px-0.5 mb-1">{statusText}</div>
+            ) : null}
+
+            {attachments.length ? (
+                <div className="flex flex-wrap gap-2 mb-2">
+                    {attachments.map((a) => (
+                        <div
+                            key={a.id}
+                            className="flex items-center gap-2 max-w-full px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                        >
+                            <span className="text-xs text-gray-700 dark:text-gray-200 truncate max-w-[240px]">
+                                {a.name}
+                            </span>
+                            <button
+                                type="button"
+                                className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                                title="Remove"
+                                onClick={() => removeAttachment(a.id)}
+                                disabled={disabled}
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
             ) : null}
 
             <div className="relative">
@@ -540,7 +589,6 @@ export default function ChatComposer({
                                     if (!files.length || !conversationId) return
                                     for (const file of files) {
                                         await uploadAndInsertFile(file, { preferImageNode: true })
-                                        editor?.chain().focus().insertContent(' ').run()
                                     }
                                     if (fileInputRef.current) fileInputRef.current.value = ''
                                 }}
@@ -555,7 +603,11 @@ export default function ChatComposer({
                                 disabled={!conversationId || uploadingAttachment || disabled || !editor}
                                 onClick={() => fileInputRef.current?.click()}
                             >
-                                <Paperclip className="h-4 w-4" />
+                                {uploadingAttachment ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Paperclip className="h-4 w-4" />
+                                )}
                             </Button>
 
                             <Popover>
@@ -617,7 +669,7 @@ export default function ChatComposer({
                         <Button
                             type="button"
                             onClick={sendNow}
-                            disabled={isEmpty || disabled || !conversationId || !editor}
+                            disabled={(isEmpty && attachments.length === 0) || disabled || !conversationId || !editor || uploadingAttachment}
                             className="bg-blue-600 hover:bg-blue-700 rounded-full h-9 px-4"
                             title="Send"
                         >
