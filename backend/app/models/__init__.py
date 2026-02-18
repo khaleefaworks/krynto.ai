@@ -11,6 +11,7 @@ from app.models.conversation_note import ConversationNote
 from app.models.conversation_page_view import ConversationPageView
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.website_team import WebsiteTeam, WebsiteTeamMember
+from app.models.website_message_shortcut import WebsiteMessageShortcut
 from app.models.message_shortcut import MessageShortcut
 from app.models.conversation_read import ConversationRead
 from app.models.push_subscription import PushSubscription
@@ -33,6 +34,7 @@ __all__ = [
     "AgentWebsiteAssignment",
     "WebsiteTeam",
     "WebsiteTeamMember",
+    "WebsiteMessageShortcut",
     "MessageShortcut",
     "ConversationRead",
     "PushSubscription",

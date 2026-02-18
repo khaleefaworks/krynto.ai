@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users, Zap } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
@@ -99,7 +99,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts'
 
 type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
 
@@ -148,6 +148,25 @@ export default function WebsiteDetail() {
   const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
+
+  // Website shortcuts tab (admin-only)
+  type WebsiteShortcut = {
+    id: number
+    website_id: number
+    shortcut: string
+    message: string
+    is_active: boolean
+    created_at: string
+    updated_at: string | null
+  }
+
+  const [websiteShortcuts, setWebsiteShortcuts] = useState<WebsiteShortcut[]>([])
+  const [websiteShortcutsLoading, setWebsiteShortcutsLoading] = useState(false)
+  const [websiteShortcutsSaving, setWebsiteShortcutsSaving] = useState(false)
+  const [websiteShortcutsError, setWebsiteShortcutsError] = useState<string | null>(null)
+  const [newWebsiteShortcut, setNewWebsiteShortcut] = useState('')
+  const [newWebsiteShortcutMessage, setNewWebsiteShortcutMessage] = useState('')
+  const [newWebsiteShortcutActive, setNewWebsiteShortcutActive] = useState(true)
 
   // Teams tab (admin-only)
   type WebsiteTeam = { id: number; website_id: number; name: string; description?: string | null; member_count: number }
@@ -217,6 +236,82 @@ export default function WebsiteDetail() {
     loadWebsiteAgents()
     loadAllAgents()
   }, [activeTab, websiteId, user])
+
+  useEffect(() => {
+    if (!websiteId) return
+    if (activeTab !== 'shortcuts') return
+    if (!isAdmin(user)) return
+    loadWebsiteShortcuts()
+  }, [activeTab, websiteId, user])
+
+  const loadWebsiteShortcuts = async () => {
+    if (!websiteId) return
+    try {
+      setWebsiteShortcutsLoading(true)
+      setWebsiteShortcutsError(null)
+      const data = await apiRequest<WebsiteShortcut[]>(`/websites/${websiteId}/shortcuts`)
+      setWebsiteShortcuts(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setWebsiteShortcutsError(err?.message || 'Failed to load website shortcuts')
+    } finally {
+      setWebsiteShortcutsLoading(false)
+    }
+  }
+
+  const handleCreateWebsiteShortcut = async () => {
+    if (!websiteId) return
+    const shortcut = newWebsiteShortcut.trim()
+    const message = newWebsiteShortcutMessage.trim()
+    if (!shortcut || !message) {
+      setWebsiteShortcutsError('Shortcut and message are required')
+      return
+    }
+    try {
+      setWebsiteShortcutsSaving(true)
+      setWebsiteShortcutsError(null)
+      const created = await apiRequest<WebsiteShortcut>(`/websites/${websiteId}/shortcuts`, {
+        method: 'POST',
+        body: JSON.stringify({ shortcut, message, is_active: newWebsiteShortcutActive }),
+      })
+      setWebsiteShortcuts((prev) => [...prev, created])
+      setNewWebsiteShortcut('')
+      setNewWebsiteShortcutMessage('')
+      setNewWebsiteShortcutActive(true)
+    } catch (err: any) {
+      setWebsiteShortcutsError(err?.message || 'Failed to create shortcut')
+    } finally {
+      setWebsiteShortcutsSaving(false)
+    }
+  }
+
+  const handleToggleWebsiteShortcutActive = async (item: WebsiteShortcut, nextActive: boolean) => {
+    if (!websiteId) return
+    setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? { ...s, is_active: nextActive } : s)))
+    try {
+      const updated = await apiRequest<WebsiteShortcut>(`/websites/${websiteId}/shortcuts/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: nextActive }),
+      })
+      setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? updated : s)))
+    } catch (err: any) {
+      setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? { ...s, is_active: item.is_active } : s)))
+      setWebsiteShortcutsError(err?.message || 'Failed to update shortcut')
+    }
+  }
+
+  const handleDeleteWebsiteShortcut = async (item: WebsiteShortcut) => {
+    if (!websiteId) return
+    if (!confirm(`Delete shortcut '${item.shortcut}'?`)) return
+    setWebsiteShortcutsError(null)
+    const prev = websiteShortcuts
+    setWebsiteShortcuts((s) => s.filter((x) => x.id !== item.id))
+    try {
+      await apiRequest<void>(`/websites/${websiteId}/shortcuts/${item.id}`, { method: 'DELETE' })
+    } catch (err: any) {
+      setWebsiteShortcuts(prev)
+      setWebsiteShortcutsError(err?.message || 'Failed to delete shortcut')
+    }
+  }
 
   const loadTeams = async () => {
     if (!websiteId) return
@@ -1095,16 +1190,28 @@ export default function WebsiteDetail() {
             </button>
 
             {isAdmin(user) && (
-              <button
-                onClick={() => setActiveTab('teams')}
-                className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'teams'
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                  }`}
-              >
-                <Users className="w-4 h-4 inline-block mr-2 mb-1" />
-                Teams
-              </button>
+              <>
+                <button
+                  onClick={() => setActiveTab('teams')}
+                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'teams'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                    }`}
+                >
+                  <Users className="w-4 h-4 inline-block mr-2 mb-1" />
+                  Teams
+                </button>
+                <button
+                  onClick={() => setActiveTab('shortcuts')}
+                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'shortcuts'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                    }`}
+                >
+                  <Zap className="w-4 h-4 inline-block mr-2 mb-1" />
+                  Shortcuts
+                </button>
+              </>
             )}
           </nav>
         </div>
@@ -1457,6 +1564,119 @@ export default function WebsiteDetail() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Shortcuts Tab (admin-only) */}
+        {!isNew && activeTab === 'shortcuts' && isAdmin(user) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="w-5 h-5" />
+                Shortcuts
+              </CardTitle>
+              <CardDescription>
+                Create website-global shortcuts. Agents assigned to this website can use them in Chats.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {websiteShortcutsError && (
+                <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 text-sm">
+                  {websiteShortcutsError}
+                </div>
+              )}
+
+              <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="font-medium text-gray-900 dark:text-gray-100">Create shortcut</div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={loadWebsiteShortcuts}
+                    disabled={websiteShortcutsLoading}
+                  >
+                    {websiteShortcutsLoading ? 'Refreshing…' : 'Refresh'}
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Shortcut</label>
+                    <Input
+                      value={newWebsiteShortcut}
+                      onChange={(e) => setNewWebsiteShortcut(e.target.value)}
+                      placeholder="hello"
+                    />
+                  </div>
+                  <div className="flex items-end gap-3">
+                    <div className="flex items-center gap-2">
+                      <Switch checked={newWebsiteShortcutActive} onCheckedChange={setNewWebsiteShortcutActive} />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Message</label>
+                  <Textarea
+                    value={newWebsiteShortcutMessage}
+                    onChange={(e) => setNewWebsiteShortcutMessage(e.target.value)}
+                    placeholder="Hello! How can I help you today?"
+                  />
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button type="button" onClick={handleCreateWebsiteShortcut} disabled={websiteShortcutsSaving}>
+                    {websiteShortcutsSaving ? 'Saving…' : 'Create'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="font-medium text-gray-900 dark:text-gray-100">Website shortcuts</div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">
+                    {websiteShortcutsLoading ? 'Loading…' : `${websiteShortcuts.length} total`}
+                  </div>
+                </div>
+
+                {websiteShortcutsLoading ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Loading shortcuts…</div>
+                ) : websiteShortcuts.length === 0 ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-400">No shortcuts yet.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {[...websiteShortcuts]
+                      .sort((a, b) => String(a.shortcut || '').localeCompare(String(b.shortcut || '')))
+                      .map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-start justify-between gap-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-3">
+                              <div className="font-mono text-sm text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
+                              <div className="flex items-center gap-2">
+                                <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleWebsiteShortcutActive(s, v)} />
+                                <span className="text-xs text-gray-600 dark:text-gray-400">Active</span>
+                              </div>
+                            </div>
+                            <div className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+                              {s.message}
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0">
+                            <Button variant="ghost" size="sm" type="button" onClick={() => handleDeleteWebsiteShortcut(s)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

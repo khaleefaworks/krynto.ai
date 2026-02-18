@@ -116,6 +116,21 @@ type PersonalShortcut = {
     is_active: boolean
 }
 
+type WebsiteShortcut = {
+    id: number
+    website_id: number
+    shortcut: string
+    message: string
+    is_active: boolean
+}
+
+type ShortcutMatch = {
+    scope: 'personal' | 'website'
+    id: number
+    shortcut: string
+    message: string
+}
+
 function getVisitorAvatarText(visitorName: string | null | undefined, sessionId: string | null | undefined): string {
     const name = String(visitorName || '').trim()
     if (name) {
@@ -236,6 +251,8 @@ export default function ConversationsView() {
     const composerRef = useRef<HTMLTextAreaElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [personalShortcuts, setPersonalShortcuts] = useState<PersonalShortcut[]>([])
+    const [websiteShortcutsByWebsiteId, setWebsiteShortcutsByWebsiteId] = useState<Record<number, WebsiteShortcut[]>>({})
+    const websiteShortcutsTokenRef = useRef(0)
     const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false)
     const [shortcutMenuIndex, setShortcutMenuIndex] = useState(0)
     const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -329,19 +346,29 @@ export default function ConversationsView() {
         })
     }
 
-    const getShortcutMatches = (value: string) => {
+    const getShortcutMatches = (value: string, websiteId: number | null) => {
         const v = value.trimStart()
         const m = v.match(/^[/.]([^\s]*)$/)
-        if (!m) return { open: false, query: '', matches: [] as PersonalShortcut[] }
+        if (!m) return { open: false, query: '', matches: [] as ShortcutMatch[] }
 
         const query = (m[1] || '').toLowerCase()
-        const matches = personalShortcuts
+        const personalMatches: ShortcutMatch[] = personalShortcuts
             .filter((s) => s.is_active)
             .filter((s) => {
                 const name = String(s.shortcut || '').toLowerCase()
                 return query ? name.startsWith(query) : true
             })
-            .slice(0, 8)
+            .map((s) => ({ scope: 'personal', id: s.id, shortcut: s.shortcut, message: s.message }))
+
+        const websiteMatches: ShortcutMatch[] = (websiteId ? websiteShortcutsByWebsiteId[websiteId] : [])
+            ?.filter((s) => s.is_active)
+            .filter((s) => {
+                const name = String(s.shortcut || '').toLowerCase()
+                return query ? name.startsWith(query) : true
+            })
+            .map((s) => ({ scope: 'website', id: s.id, shortcut: s.shortcut, message: s.message }))
+
+        const matches = [...personalMatches, ...websiteMatches].slice(0, 8)
 
         return { open: true, query, matches }
     }
@@ -362,6 +389,28 @@ export default function ConversationsView() {
     const selectedWebsiteId = selectedChat
         ? ((conversation as any)?.website_id ?? activeChats.find((c) => c.id === selectedChat)?.website_id ?? null)
         : null
+
+    useEffect(() => {
+        if (!selectedWebsiteId) return
+
+        const token = ++websiteShortcutsTokenRef.current
+        ;(async () => {
+            try {
+                const data = await apiRequest<WebsiteShortcut[]>(`/websites/${selectedWebsiteId}/shortcuts?active_only=true`)
+                if (token !== websiteShortcutsTokenRef.current) return
+                setWebsiteShortcutsByWebsiteId((prev) => ({
+                    ...prev,
+                    [selectedWebsiteId]: Array.isArray(data) ? data : [],
+                }))
+            } catch {
+                if (token !== websiteShortcutsTokenRef.current) return
+                setWebsiteShortcutsByWebsiteId((prev) => ({
+                    ...prev,
+                    [selectedWebsiteId]: [],
+                }))
+            }
+        })()
+    }, [selectedWebsiteId])
 
     const clearUnreadForChat = useCallback((chatId: number) => {
         clearUnreadForConversation(chatId)
@@ -1984,7 +2033,7 @@ export default function ConversationsView() {
 
                         <div className="relative flex gap-2">
                             {(() => {
-                                const { open, matches } = getShortcutMatches(input)
+                                const { open, matches } = getShortcutMatches(input, selectedWebsiteId)
                                 if (!open || matches.length === 0) return null
 
                                 return (
@@ -1993,7 +2042,7 @@ export default function ConversationsView() {
                                         <div className="max-h-64 overflow-auto">
                                             {matches.map((s, idx) => (
                                                 <button
-                                                    key={s.id}
+                                                    key={`${s.scope}-${s.id}`}
                                                     type="button"
                                                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${idx === shortcutMenuIndex ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                                                     onMouseEnter={() => setShortcutMenuIndex(idx)}
@@ -2004,7 +2053,12 @@ export default function ConversationsView() {
                                                         requestAnimationFrame(() => composerRef.current?.focus())
                                                     }}
                                                 >
-                                                    <div className="font-mono text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="font-mono text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
+                                                        <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                                                            {s.scope === 'website' ? 'Website' : 'Personal'}
+                                                        </div>
+                                                    </div>
                                                     <div className="text-gray-600 dark:text-gray-400 truncate">{s.message}</div>
                                                 </button>
                                             ))}
@@ -2019,13 +2073,13 @@ export default function ConversationsView() {
                                 onChange={(e) => {
                                     const v = e.target.value
                                     setInput(v)
-                                    const { open, matches } = getShortcutMatches(v)
+                                    const { open, matches } = getShortcutMatches(v, selectedWebsiteId)
                                     setShortcutMenuOpen(open && matches.length > 0)
                                     setShortcutMenuIndex(0)
                                     scheduleAgentTyping(v)
                                 }}
                                 onKeyDown={(e) => {
-                                    const { open, matches } = getShortcutMatches(input)
+                                    const { open, matches } = getShortcutMatches(input, selectedWebsiteId)
                                     if (open && matches.length > 0) {
                                         if (e.key === 'ArrowDown') {
                                             e.preventDefault()
