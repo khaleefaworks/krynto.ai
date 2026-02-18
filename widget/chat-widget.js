@@ -35,6 +35,7 @@
     websiteId: globalConfig.websiteId || (scriptElement ? scriptElement.getAttribute('data-website-id') : null) || null,
     widgetKey: globalConfig.widgetKey || null,
     sessionId: null,
+    conversationId: 0,
     wsUrl: globalConfig.wsUrl || (scriptElement ? scriptElement.getAttribute('data-ws-url') : null) || derivedWsBase || '',
     apiUrl: globalConfig.apiUrl || (scriptElement ? scriptElement.getAttribute('data-api-url') : null) || derivedApiBase || '',
     theme: globalConfig.theme || 'dark',
@@ -76,6 +77,10 @@
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
   let pendingOfflineMessage = null;
+  let pendingOfflineAttachments = [];
+
+  let uploadingAttachmentsCount = 0;
+  let draftAttachments = [];
 
   let agentTypingActive = false;
   let agentTypingTimer = null;
@@ -258,6 +263,7 @@
       const response = await fetch(`${CONFIG.apiUrl}/widget/read-state?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`);
       if (response.ok) {
         const data = await response.json();
+        if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || 0;
         firstUnreadMessageId = data.first_unread_message_id;
         if (typeof data.unread_count === 'number') setUnreadCount(data.unread_count);
       }
@@ -579,6 +585,115 @@
     }
   }
 
+  function isProbablyImageFile(file) {
+    if (!file) return false;
+    try {
+      if (file.type && String(file.type).startsWith('image/')) return true;
+      const name = String(file.name || '').toLowerCase();
+      return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.webp');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function attachmentToMarkdown(att) {
+    if (!att || !att.url) return '';
+    const url = String(att.url);
+    const safeUrl = isSafeHref(url);
+    if (!safeUrl) return '';
+
+    if (att.kind === 'image') {
+      return `![](${safeUrl})`;
+    }
+    const label = String(att.name || 'attachment');
+    return `[${label}](${safeUrl})`;
+  }
+
+  function serializeMessageWithAttachments(text, attachments) {
+    const rawText = String(text || '').trim();
+    const md = Array.isArray(attachments)
+      ? attachments.map(attachmentToMarkdown).filter(Boolean)
+      : [];
+
+    if (rawText && md.length) return `${rawText}\n\n${md.join('\n')}`;
+    if (rawText) return rawText;
+    if (md.length) return md.join('\n');
+    return '';
+  }
+
+  function setUploadingAttachmentsCount(next) {
+    uploadingAttachmentsCount = Math.max(0, Number(next) || 0);
+    const attachBtn = document.getElementById('chatassist-attach');
+    const sendBtn = document.getElementById('chatassist-send');
+    if (attachBtn) {
+      attachBtn.classList.toggle('chatassist-attach-uploading', uploadingAttachmentsCount > 0);
+      attachBtn.setAttribute('aria-busy', uploadingAttachmentsCount > 0 ? 'true' : 'false');
+    }
+    if (sendBtn) {
+      sendBtn.disabled = uploadingAttachmentsCount > 0;
+    }
+  }
+
+  function renderAttachmentChips() {
+    const wrap = document.getElementById('chatassist-attachments');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    if (!draftAttachments.length) {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = 'flex';
+    draftAttachments.forEach((att) => {
+      const chip = document.createElement('div');
+      chip.className = 'chatassist-attachment-chip';
+
+      const name = document.createElement('span');
+      name.className = 'chatassist-attachment-name';
+      name.textContent = String(att.name || 'attachment');
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'chatassist-attachment-remove';
+      remove.setAttribute('aria-label', 'Remove attachment');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        draftAttachments = draftAttachments.filter((a) => a.id !== att.id);
+        renderAttachmentChips();
+      });
+
+      chip.appendChild(name);
+      chip.appendChild(remove);
+      wrap.appendChild(chip);
+    });
+  }
+
+  async function uploadWidgetAttachment(file) {
+    if (!file) return null;
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${CONFIG.apiUrl}/widget/attachments/upload?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`, {
+      method: 'POST',
+      body: form,
+    });
+
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const data = await res.json();
+        detail = data && (data.detail || data.message) ? String(data.detail || data.message) : '';
+      } catch (e) { }
+      throw new Error(detail || `Upload failed (${res.status})`);
+    }
+    const data = await res.json();
+    if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || CONFIG.conversationId || 0;
+    return {
+      id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `att-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: data.filename || file.name || 'attachment',
+      url: data.url,
+      kind: isProbablyImageFile(file) ? 'image' : 'file',
+    };
+  }
+
   function renderInlineMarkdown(text) {
     const frag = document.createDocumentFragment();
     const s = String(text || '');
@@ -699,6 +814,10 @@
 
     while (idx < lines.length) {
       const line = lines[idx];
+      if (String(line || '').trim() === '') {
+        idx += 1;
+        continue;
+      }
       const isOrdered = /^\s*\d+\.\s+/.test(line);
       const isUnordered = /^\s*[-*+]\s+/.test(line);
 
@@ -733,17 +852,29 @@
       const p = document.createElement('div');
       p.className = 'chatassist-md-paragraph';
 
-      // Gather lines until an ordered list starts.
+      // Gather lines until a list starts or a blank line is encountered.
       const chunk = [];
-      while (idx < lines.length && !/^\s*\d+\.\s+/.test(lines[idx])) {
+      while (idx < lines.length) {
+        const cur = String(lines[idx] || '');
+        if (cur.trim() === '') break;
+        if (/^\s*\d+\.\s+/.test(cur) || /^\s*[-*+]\s+/.test(cur)) break;
+        chunk.push(cur);
+        idx += 1;
+      }
+
+      // Skip blank line if present.
+      while (idx < lines.length && String(lines[idx] || '').trim() === '') {
         chunk.push(lines[idx]);
         idx += 1;
       }
 
-      for (let i = 0; i < chunk.length; i += 1) {
-        p.appendChild(renderInlineMarkdown(chunk[i]));
-        if (i < chunk.length - 1) p.appendChild(document.createElement('br'));
+      const rendered = chunk.filter((l) => String(l || '').trim() !== '');
+      for (let i = 0; i < rendered.length; i += 1) {
+        p.appendChild(renderInlineMarkdown(rendered[i]));
+        if (i < rendered.length - 1) p.appendChild(document.createElement('br'));
       }
+
+      if (!rendered.length) continue;
 
       el.appendChild(p);
     }
@@ -838,7 +969,11 @@
     const input = document.getElementById('chatassist-input');
     if (!input) return;
     const message = input.value.trim();
-    if (!message) return;
+    if (uploadingAttachmentsCount > 0) {
+      showToast('Please wait for uploads to finish...');
+      return;
+    }
+    if (!message && !draftAttachments.length) return;
 
     if (visitorTypingTimer) {
       clearTimeout(visitorTypingTimer);
@@ -856,9 +991,12 @@
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', message, new Date().toISOString(), meta, null);
+      const outgoing = serializeMessageWithAttachments(message, draftAttachments);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
-      sendMessage(message, meta);
+      draftAttachments = [];
+      renderAttachmentChips();
+      sendMessage(outgoing, meta);
       smartScroll();
       return;
     }
@@ -874,14 +1012,20 @@
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', message, new Date().toISOString(), meta, null);
+      const outgoing = serializeMessageWithAttachments(message, draftAttachments);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
-      sendMessage(message, meta);
+      draftAttachments = [];
+      renderAttachmentChips();
+      sendMessage(outgoing, meta);
       smartScroll();
       return;
     }
 
     pendingOfflineMessage = message;
+    pendingOfflineAttachments = draftAttachments.slice();
+    draftAttachments = [];
+    renderAttachmentChips();
     input.value = '';
     showContactOverlay();
   }
@@ -900,9 +1044,13 @@
     if (el) {
       el.classList.remove('chatassist-contact-overlay-visible');
       el.style.display = 'none';
-      if (restore && pendingOfflineMessage) {
+      if (restore && pendingOfflineMessage != null) {
         const input = document.getElementById('chatassist-input');
         if (input) input.value = pendingOfflineMessage;
+      }
+      if (restore && pendingOfflineAttachments && pendingOfflineAttachments.length) {
+        draftAttachments = pendingOfflineAttachments.slice();
+        renderAttachmentChips();
       }
     }
   }
@@ -931,19 +1079,22 @@
       return;
     }
     const msg = pendingOfflineMessage;
+    const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
+    pendingOfflineAttachments = [];
     hideContactOverlay(false);
     if (name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
     localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
-    if (msg) {
+    if (msg || (atts && atts.length)) {
       const meta = { visitor_name: name, visitor_email: email };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', msg, new Date().toISOString(), meta, null);
-      sendMessage(msg, meta);
+      const outgoing = serializeMessageWithAttachments(msg, atts);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
+      sendMessage(outgoing, meta);
       smartScroll();
     }
   }
@@ -1013,7 +1164,19 @@
               <span></span><span></span><span></span>
             </span>
           </div>
+          <div id="chatassist-attachments" style="display:none;"></div>
           <div id="chatassist-input-container">
+            ${CONFIG.showAttachments ? `
+              <input id="chatassist-file" type="file" style="display:none;" multiple />
+              <button id="chatassist-attach" class="chatassist-attach" type="button" aria-label="Attach files">
+                <span class="chatassist-attach-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a2 2 0 0 1-2.83-2.83l8.49-8.49"/>
+                  </svg>
+                </span>
+                <span class="chatassist-attach-spinner" aria-hidden="true"></span>
+              </button>
+            ` : ``}
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
           </div>
@@ -1072,8 +1235,39 @@
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
 
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    if (CONFIG.showAttachments) {
+      const fileInput = document.getElementById('chatassist-file');
+      const attachBtn = document.getElementById('chatassist-attach');
+
+      if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', () => {
+          try { fileInput.click(); } catch (e) { }
+        });
+
+        fileInput.addEventListener('change', async () => {
+          const files = Array.from(fileInput.files || []);
+          fileInput.value = '';
+          if (!files.length) return;
+
+          setUploadingAttachmentsCount(uploadingAttachmentsCount + files.length);
+
+          const results = await Promise.allSettled(files.map(async (f) => uploadWidgetAttachment(f)));
+          results.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value) {
+              draftAttachments.push(r.value);
+            } else if (r.status === 'rejected') {
+              showToast(r.reason && r.reason.message ? r.reason.message : 'Upload failed');
+            }
+          });
+          renderAttachmentChips();
+          setUploadingAttachmentsCount(uploadingAttachmentsCount - files.length);
+        });
+      }
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
         enableNotificationSound();
         handleUserMessage();
       }
@@ -1125,6 +1319,7 @@
     } catch (e) { }
 
     refreshHeaderIcon();
+    renderAttachmentChips();
   }
 
   function setupPageViewTracking() {

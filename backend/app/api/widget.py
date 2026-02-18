@@ -7,7 +7,7 @@ They must be fast, reliable, and not require authentication.
 
 from typing import Optional
 import json
-from fastapi import APIRouter, Query, HTTPException, Depends, Request, Response as FastAPIResponse
+from fastapi import APIRouter, Query, HTTPException, Depends, Request, Response as FastAPIResponse, File, UploadFile
 from fastapi.responses import Response as RawResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -22,6 +22,9 @@ from app.api.deps import require_authenticated_user
 
 from app.models.message import Message, MessageSenderType
 from datetime import datetime, timezone
+from uuid import uuid4
+
+from app.core.uploads import get_uploads_root, validate_attachment_upload
 
 router = APIRouter(prefix="/widget", tags=["widget"])
 
@@ -49,6 +52,13 @@ class WidgetReadStateResponse(BaseModel):
     last_read_at: Optional[datetime]
     first_unread_message_id: Optional[int]
     unread_count: int = 0
+
+
+class WidgetAttachmentUploadResponse(BaseModel):
+    url: str
+    filename: str
+    content_type: str
+    conversation_id: int
 
 
 @router.post("/read")
@@ -165,6 +175,87 @@ async def get_widget_read_state(
 
 @router.options("/read-state")
 async def get_widget_read_state_options(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(None),
+    db: Session = Depends(get_db),
+):
+    if website_id is not None:
+        website = db.query(Website).filter(Website.id == website_id).first()
+        if website:
+            try:
+                enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+            except HTTPException:
+                return RawResponse(status_code=204)
+    _set_widget_cors_headers(response=response, request=request)
+    return RawResponse(status_code=204)
+
+
+@router.post("/attachments/upload", response_model=WidgetAttachmentUploadResponse)
+async def widget_upload_attachment(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(...),
+    session_id: str = Query(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload an attachment from the public widget.
+
+    This does not create a message record; the client should embed the returned
+    public URL into the outgoing message content.
+    """
+    from app.models.conversation import Conversation
+
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    _set_widget_cors_headers(response=response, request=request)
+
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.website_id == website_id, Conversation.session_id == session_id)
+        .first()
+    )
+    if not conv:
+        conv = Conversation(
+            website_id=website_id,
+            session_id=session_id,
+            visitor_ip=(request.client.host if request.client else None),
+        )
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+
+    ext = validate_attachment_upload(file)
+
+    upload_dir = get_uploads_root() / "attachments" / str(conv.id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    unique_filename = f"{uuid4().hex}.{ext}"
+    file_path = upload_dir / unique_filename
+
+    with file_path.open("wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+
+    public_url = f"/uploads/attachments/{conv.id}/{unique_filename}"
+
+    return WidgetAttachmentUploadResponse(
+        url=public_url,
+        filename=file.filename or unique_filename,
+        content_type=file.content_type or "application/octet-stream",
+        conversation_id=int(conv.id),
+    )
+
+
+@router.options("/attachments/upload")
+async def widget_upload_attachment_options(
     request: Request,
     response: FastAPIResponse,
     website_id: int = Query(None),

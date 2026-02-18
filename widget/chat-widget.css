@@ -748,6 +748,96 @@
   width: 100%;
 }
 
+/* Attachments chips */
+#chatassist-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px 0 16px;
+}
+
+.chatassist-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9999px;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chatassist-attachment-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatassist-attachment-remove {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #111827;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatassist-attachment-remove:hover {
+  background: #f3f4f6;
+}
+
+/* Attach button */
+.chatassist-attach {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatassist-attach:hover {
+  background: #f9fafb;
+}
+
+.chatassist-attach-spinner {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 2px solid rgba(17, 24, 39, 0.25);
+  border-top-color: rgba(17, 24, 39, 0.9);
+  animation: chatassist-spin 0.8s linear infinite;
+}
+
+.chatassist-attach-uploading .chatassist-attach-icon {
+  display: none;
+}
+
+.chatassist-attach-uploading .chatassist-attach-spinner {
+  display: inline-block;
+}
+
+@keyframes chatassist-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Branding */
 #chatassist-branding {
   text-align: center;
@@ -783,6 +873,11 @@
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
+}
+
+#chatassist-send:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 #chatassist-send:hover {
