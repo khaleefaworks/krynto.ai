@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
+import UserAvatar from '@/components/UserAvatar'
 import { formatDistanceToNow } from 'date-fns'
 import { API_BASE } from '@/config/endpoints'
 
@@ -131,14 +132,11 @@ type ShortcutMatch = {
     message: string
 }
 
-function getVisitorAvatarText(visitorName: string | null | undefined, sessionId: string | null | undefined): string {
+function getVisitorAvatarSeed(visitorName: string | null | undefined, sessionId: string | null | undefined): string {
+    const sid = String(sessionId || '').trim()
+    if (sid) return sid
     const name = String(visitorName || '').trim()
-    if (name) {
-        return getInitials(name, '??')
-    }
-    const displayId = shortSessionId(sessionId)
-    const ch = String(displayId || '').trim().charAt(0)
-    return (ch || '?').toUpperCase()
+    return name || 'visitor'
 }
 
 function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
@@ -1649,9 +1647,12 @@ export default function ConversationsView() {
                                         }`}
                                 >
                                     <div className="flex items-start gap-3">
-                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0 relative">
-                                            {getVisitorAvatarText((chat as any).visitor_name, chat.session_id)}
-                                        </div>
+                                        <UserAvatar
+                                            seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
+                                            className="w-12 h-12 flex-shrink-0"
+                                            iconClassName="w-6 h-6"
+                                            title={(chat as any).visitor_name || shortSessionId(chat.session_id)}
+                                        />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between">
                                                 <span className="font-semibold text-gray-900 dark:text-white truncate">
@@ -1695,9 +1696,12 @@ export default function ConversationsView() {
                     <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0">
-                                    {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
-                                </div>
+                                <UserAvatar
+                                    seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                    className="w-10 h-10 flex-shrink-0"
+                                    iconClassName="w-5 h-5"
+                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                />
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
                                         {conversation?.visitor_name || shortSessionId(conversation?.session_id)}
@@ -1900,9 +1904,12 @@ export default function ConversationsView() {
                                                     <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                                                         <div className="flex items-end gap-2 max-w-[70%]">
                                                             {!isAgent && (
-                                                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                                    {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
-                                                                </div>
+                                                                <UserAvatar
+                                                                    seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                                                    className="w-8 h-8 flex-shrink-0"
+                                                                    iconClassName="w-4 h-4"
+                                                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                                                />
                                                             )}
                                                             <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
                                                                 <p className="break-words whitespace-pre-wrap">{msg.content}</p>
@@ -2218,9 +2225,12 @@ export default function ConversationsView() {
                             >
                                 <PanelRightOpen className="h-4 w-4" />
                             </Button>
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 text-white flex items-center justify-center text-sm font-semibold">
-                                {getVisitorAvatarText(conversation?.visitor_name, conversation?.session_id)}
-                            </div>
+                            <UserAvatar
+                                seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                className="w-10 h-10"
+                                iconClassName="w-5 h-5"
+                                title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                            />
                         </div>
                     ) : (
                         <div className="flex h-full flex-col w-full">

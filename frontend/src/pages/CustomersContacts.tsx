@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { useNavigate } from 'react-router-dom'
 import type { CustomerContact, CustomerContactDetails } from '@/services/customers'
 import { fetchContactDetails, fetchContacts } from '@/services/customers'
+import UserAvatar from '@/components/UserAvatar'
 
 function formatDate(value: string | null): string {
     if (!value) return '-'
@@ -213,9 +214,12 @@ export default function CustomersContacts() {
                     <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl flex flex-col">
                         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
                             <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-sm font-semibold text-gray-700 dark:text-gray-200">
-                                    {initials(details?.name || null, details?.email || null, details?.phone || null)}
-                                </div>
+                                <UserAvatar
+                                    seed={String(details?.contact_key || details?.email || details?.phone || details?.name || 'contact')}
+                                    className="w-10 h-10 flex-shrink-0"
+                                    iconClassName="w-5 h-5"
+                                    title={details?.name || 'Contact'}
+                                />
                                 <div className="min-w-0">
                                     <div className="text-lg font-semibold text-gray-900 dark:text-white truncate">{details?.name || 'Contact'}</div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400">

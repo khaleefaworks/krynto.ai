@@ -8,6 +8,7 @@ import { addMessageHandler, connectAgentSocket } from '@/services/agentSocket'
 import { isAdmin } from '@/lib/roles'
 import { websitesApi } from '@/services/websites'
 import { agentAssignmentsApi } from '@/services/agentAssignments'
+import UserAvatar from '@/components/UserAvatar'
 
 function formatOnlineSeconds(seconds: number | null): string {
     if (seconds == null) return '-'
@@ -206,9 +207,6 @@ export default function CustomersVisitors() {
         const run = async () => {
             if (!selected) return
             try {
-                setDetailsLoading(true)
-                setDetailsError(null)
-                setDetails(null)
                 const data = await fetchVisitorDetails({
                     websiteId: selected.websiteId,
                     sessionId: selected.sessionId,
@@ -343,9 +341,12 @@ export default function CustomersVisitors() {
                                                     )}
 
                                                     <div className="relative">
-                                                        <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-gray-200">
-                                                            {getInitials(null, (shortSessionId(r.session_id).charAt(0) || '?').toUpperCase())}
-                                                        </div>
+                                                        <UserAvatar
+                                                            seed={String(r.session_id || 'visitor')}
+                                                            className="w-10 h-10"
+                                                            iconClassName="w-5 h-5"
+                                                            title={shortSessionId(r.session_id)}
+                                                        />
 
                                                         {r.is_online ? (
                                                             <span className="absolute -left-0.5 -top-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-800" />

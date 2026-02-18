@@ -11,6 +11,7 @@ import {
   X
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import UserAvatar from "@/components/UserAvatar"
 
 function shortSessionId(sessionId: string | null | undefined): string {
   const raw = String(sessionId || "").trim()
@@ -110,18 +111,11 @@ export default function VisitorDetailsPanel({
     }
   }
 
-  const getVisitorAvatarText = (name?: string, sessionId?: string) => {
-    const v = String(name || '').trim()
-    if (v) {
-      const parts = v.split(/\s+/).filter(Boolean)
-      const first = parts[0]?.[0] || ''
-      const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
-      return (first + second).toUpperCase() || '??'
-    }
-
-    const displayId = shortSessionId(sessionId)
-    const ch = String(displayId || '').trim().charAt(0)
-    return (ch || '?').toUpperCase()
+  const getVisitorAvatarSeed = (name?: string, sessionId?: string) => {
+    const sid = String(sessionId || '').trim()
+    if (sid) return sid
+    const n = String(name || '').trim()
+    return n || 'visitor'
   }
 
   return (
@@ -129,9 +123,12 @@ export default function VisitorDetailsPanel({
       {/* Visitor Profile */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg mb-3">
-            {getVisitorAvatarText(conversation.visitor_name, conversation.session_id)}
-          </div>
+          <UserAvatar
+            seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
+            className="w-20 h-20 shadow-lg mb-3"
+            iconClassName="w-10 h-10"
+            title={conversation.visitor_name || shortSessionId(conversation.session_id)}
+          />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
             {conversation.visitor_name || shortSessionId(conversation.session_id)}
           </h3>
