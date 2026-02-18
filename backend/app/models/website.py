@@ -23,3 +23,5 @@ class Website(Base, TimestampMixin):
     widget_config = Column(JSON, nullable=True, default={})
 
     conversations = relationship("Conversation", back_populates="website", cascade="all, delete-orphan")
+    automations = relationship("Automation", back_populates="website", cascade="all, delete-orphan")
+    teams = relationship("WebsiteTeam", back_populates="website", cascade="all, delete-orphan")

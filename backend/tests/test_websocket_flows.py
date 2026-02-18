@@ -14,6 +14,7 @@ def client_and_seeded_db():
     from app.models.message import Message
     from app.models.website import Website
     from app.models.user import User, UserRole
+    from app.models.agent_website_assignment import AgentWebsiteAssignment
 
     init_db()
 
@@ -53,6 +54,16 @@ def client_and_seeded_db():
                 pass
 
             db.commit()
+
+        # Ensure agent 1 is assigned to website 1 (required for website-scoped delivery).
+        existing_assignment = (
+            db.query(AgentWebsiteAssignment)
+            .filter(AgentWebsiteAssignment.agent_id == 1, AgentWebsiteAssignment.website_id == 1)
+            .first()
+        )
+        if not existing_assignment:
+            db.add(AgentWebsiteAssignment(agent_id=1, website_id=1))
+            db.commit()
     finally:
         db.close()
 
@@ -90,7 +101,7 @@ def test_websocket_agent_visitor_basic_flow(client_and_seeded_db, monkeypatch):
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid 60s background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -174,7 +185,7 @@ def test_websocket_visitor_reconnect_gets_history(client_and_seeded_db, monkeypa
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid 60s background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -209,6 +220,181 @@ def test_websocket_visitor_reconnect_gets_history(client_and_seeded_db, monkeypa
             msgs = history2.get("messages")
             assert isinstance(msgs, list)
             assert any(m.get("content") == "first" for m in msgs)
+
+
+def test_websocket_visitor_end_chat_persists_event_and_does_not_resolve(client_and_seeded_db, monkeypatch):
+    from app.core.security import create_access_token
+    from app.services import conversation_orchestrator as orchestrator_module
+    from app.core.database import SessionLocal
+    from app.models.conversation import Conversation, ConversationStatus
+    from app.models.message import Message
+    from app.models.automation import Automation
+
+    # Avoid 60s background sleeper tasks in tests.
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    session_id = "sess-end-chat"
+
+    # Seed automation for visitor_closed_chat so the handler can persist a timeline event.
+    db = SessionLocal()
+    try:
+        if not db.query(Automation).filter_by(website_id=1, trigger="visitor_closed_chat", name="Visitor closed event").first():
+            db.add(
+                Automation(
+                    website_id=1,
+                    name="Visitor closed event",
+                    trigger="visitor_closed_chat",
+                    enabled=True,
+                    conditions={},
+                    actions=[
+                        {
+                            "type": "emit_system_event",
+                            "content": "Visitor closed chat.",
+                            "event_type": "visitor_closed_chat",
+                        }
+                    ],
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws:
+            _recv_until(visitor_ws, want_type="history")
+
+            # Create conversation first
+            visitor_ws.send_text(json.dumps({"message": "hello"}))
+            visitor_msg = _recv_until(agent_ws, want_type="visitor_message")
+            conversation_id = int(visitor_msg["conversation_id"])
+
+            # Visitor ends chat
+            visitor_ws.send_text(json.dumps({"type": "end_chat"}))
+
+            # Best-effort realtime notice to agents/dashboards.
+            notice = _recv_until(agent_ws, want_type="visitor_closed_chat")
+            assert int(notice.get("conversation_id")) == conversation_id
+
+    # DB assertions: conversation resolved and system event exists.
+    db = SessionLocal()
+    try:
+        conv = db.query(Conversation).filter_by(id=conversation_id).first()
+        assert conv is not None
+        assert conv.status == ConversationStatus.OPEN
+
+        evt = (
+            db.query(Message)
+            .filter_by(conversation_id=conversation_id, event_type="visitor_closed_chat")
+            .order_by(Message.id.desc())
+            .first()
+        )
+        assert evt is not None
+        assert evt.content == "Visitor closed chat."
+    finally:
+        db.close()
+
+
+def test_reopen_emits_conversation_reopened_system_event(client_and_seeded_db, monkeypatch):
+    from app.core.security import create_access_token
+    from app.services import conversation_orchestrator as orchestrator_module
+    from app.core.database import SessionLocal
+    from app.models.automation import Automation
+
+    # Avoid 60s background sleeper tasks in tests.
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
+        return None
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_send_delayed_waiting_message_if_unassigned",
+        _no_waiting_message,
+    )
+
+    client = client_and_seeded_db
+    token = create_access_token({"user_id": 1})
+
+    session_id = "sess-reopen"
+
+    # Seed automation-driven system events (no hardcoded close/reopen messages).
+    db = SessionLocal()
+    try:
+        if not db.query(Automation).filter_by(website_id=1, trigger="conversation_resolved", name="Resolved event").first():
+            db.add(
+                Automation(
+                    website_id=1,
+                    name="Resolved event",
+                    trigger="conversation_resolved",
+                    enabled=True,
+                    conditions={},
+                    actions=[
+                        {
+                            "type": "emit_system_event",
+                            "content": "This conversation has been resolved.",
+                            "event_type": "conversation_resolved",
+                        }
+                    ],
+                )
+            )
+        if not db.query(Automation).filter_by(website_id=1, trigger="conversation_reopened", name="Reopened event").first():
+            db.add(
+                Automation(
+                    website_id=1,
+                    name="Reopened event",
+                    trigger="conversation_reopened",
+                    enabled=True,
+                    conditions={},
+                    actions=[
+                        {
+                            "type": "emit_system_event",
+                            "content": "This conversation has been reopened.",
+                            "event_type": "conversation_reopened",
+                        }
+                    ],
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    with client.websocket_connect(f"/ws/agent/1?token={token}") as agent_ws:
+        _recv_until(agent_ws, want_type="connected")
+
+        # Create the conversation with the first visitor message.
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws:
+            _recv_until(visitor_ws, want_type="history")
+            visitor_ws.send_text(json.dumps({"message": "hello"}))
+            visitor_msg = _recv_until(agent_ws, want_type="visitor_message")
+            conversation_id = int(visitor_msg["conversation_id"])
+
+        # Resolve the conversation out-of-band (no visitor socket connected).
+        resp = client.post(
+            f"/chats/{conversation_id}/close",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # Reconnect visitor: history should include the resolve event.
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws2:
+            history = _recv_until(visitor_ws2, want_type="history")
+            msgs = history.get("messages") or []
+            assert any((m or {}).get("event_type") == "conversation_resolved" for m in msgs)
+
+            # Next visitor message should reopen the conversation and emit the canonical event.
+            visitor_ws2.send_text(json.dumps({"message": "back again"}))
+            reopened = _recv_until(visitor_ws2, want_type="system")
+            assert reopened.get("message_obj", {}).get("event_type") == "conversation_reopened"
 
 
 def test_presence_socket_offline_when_no_agent_connected(client_and_seeded_db):
@@ -347,7 +533,7 @@ def test_page_view_is_broadcast_to_agent_only_when_conversation_exists(client_an
     from app.services import conversation_orchestrator as orchestrator_module
 
     # Avoid background sleeper tasks in tests.
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -395,7 +581,7 @@ def test_chat_rate_limit_fallback_in_memory_when_no_redis(client_and_seeded_db, 
     # Disable background sleeper tasks.
     from app.services import conversation_orchestrator as orchestrator_module
 
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -431,7 +617,7 @@ def test_chat_rate_limit_redis_path_is_invoked_when_configured(client_and_seeded
     # Disable background sleeper tasks.
     from app.services import conversation_orchestrator as orchestrator_module
 
-    async def _no_waiting_message(*, conversation_id: int, website_id: int) -> None:
+    async def _no_waiting_message(*, conversation_id: int, website_id: int, delay_seconds: int | None = None) -> None:
         return None
 
     monkeypatch.setattr(

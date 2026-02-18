@@ -53,3 +53,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* TipTap placeholder + attachment thumbnail styling */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  height: 0;
+}
+
+.ProseMirror ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.ProseMirror ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+.chatassist-composer-img {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  cursor: zoom-in;
+}

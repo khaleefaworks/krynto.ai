@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.logging import get_logger
+from app.models.website import Website
 from app.models.user import User, UserRole
 from app.repos import users as users_repo
 from app.services.agent_resolver import is_agent_eligible
+from app.services.office_hours import is_within_office_hours
 
 logger = get_logger(__name__)
 
@@ -53,6 +55,26 @@ class PresenceService:
 
     @staticmethod
     def compute_presence(db: Session, website_id: int) -> dict:
+        website = db.query(Website).filter_by(id=int(website_id)).first()
+        if not website:
+            return {
+                "type": "presence",
+                "website_id": int(website_id),
+                "online": False,
+                "available_agents_count": 0,
+                "agents": [],
+            }
+
+        # Office hours gate: force offline outside schedule.
+        if not is_within_office_hours(getattr(website, "widget_config", None) or {}):
+            return {
+                "type": "presence",
+                "website_id": int(website_id),
+                "online": False,
+                "available_agents_count": 0,
+                "agents": [],
+            }
+
         # Presence is heartbeat-based so it can scale beyond a single worker.
         connected_user_ids = users_repo.recently_heartbeat_user_ids(
             db,

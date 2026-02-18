@@ -2,15 +2,16 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { 
+import {
   User,
-  Mail, 
-  Phone, 
+  Mail,
+  Phone,
   Monitor,
   Plus,
   X
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import UserAvatar from "@/components/UserAvatar"
 
 function shortSessionId(sessionId: string | null | undefined): string {
   const raw = String(sessionId || "").trim()
@@ -32,9 +33,10 @@ interface VisitorDetailsPanelProps {
     browser_info?: string
     visit_count?: number
     last_seen_at?: string
+    visitor_avatar_color?: string | null
     created_at?: string
   }
-  notes?: Array<{ 
+  notes?: Array<{
     id: number
     content: string
     created_at: string
@@ -110,18 +112,11 @@ export default function VisitorDetailsPanel({
     }
   }
 
-  const getVisitorAvatarText = (name?: string, sessionId?: string) => {
-    const v = String(name || '').trim()
-    if (v) {
-      const parts = v.split(/\s+/).filter(Boolean)
-      const first = parts[0]?.[0] || ''
-      const second = (parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1]) || ''
-      return (first + second).toUpperCase() || '??'
-    }
-
-    const displayId = shortSessionId(sessionId)
-    const ch = String(displayId || '').trim().charAt(0)
-    return (ch || '?').toUpperCase()
+  const getVisitorAvatarSeed = (name?: string, sessionId?: string) => {
+    const sid = String(sessionId || '').trim()
+    if (sid) return sid
+    const n = String(name || '').trim()
+    return n || 'visitor'
   }
 
   return (
@@ -129,9 +124,13 @@ export default function VisitorDetailsPanel({
       {/* Visitor Profile */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg mb-3">
-            {getVisitorAvatarText(conversation.visitor_name, conversation.session_id)}
-          </div>
+          <UserAvatar
+            seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
+            bgColor={conversation.visitor_avatar_color}
+            className="w-16 h-16 shadow-lg mb-3"
+            iconClassName="w-16 h-16"
+            title={conversation.visitor_name || shortSessionId(conversation.session_id)}
+          />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
             {conversation.visitor_name || shortSessionId(conversation.session_id)}
           </h3>
@@ -269,9 +268,9 @@ export default function VisitorDetailsPanel({
               <Button size="sm" onClick={handleAddNote} className="flex-1">
                 Save
               </Button>
-              <Button 
-                size="sm" 
-                variant="outline" 
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => {
                   setAddingNote(false)
                   setNewNote("")

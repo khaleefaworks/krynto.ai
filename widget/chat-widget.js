@@ -35,6 +35,7 @@
     websiteId: globalConfig.websiteId || (scriptElement ? scriptElement.getAttribute('data-website-id') : null) || null,
     widgetKey: globalConfig.widgetKey || null,
     sessionId: null,
+    conversationId: 0,
     wsUrl: globalConfig.wsUrl || (scriptElement ? scriptElement.getAttribute('data-ws-url') : null) || derivedWsBase || '',
     apiUrl: globalConfig.apiUrl || (scriptElement ? scriptElement.getAttribute('data-api-url') : null) || derivedApiBase || '',
     theme: globalConfig.theme || 'dark',
@@ -76,6 +77,10 @@
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
   let pendingOfflineMessage = null;
+  let pendingOfflineAttachments = [];
+
+  let uploadingAttachmentsCount = 0;
+  let draftAttachments = [];
 
   let agentTypingActive = false;
   let agentTypingTimer = null;
@@ -88,6 +93,39 @@
   let pageViewTrackingInitialized = false;
   let lastTrackedUrl = null;
   let pendingPageView = null;
+
+  // After a visitor ends the chat UI, hide the End (X) button until they send
+  // another message. This prevents repeated end_chat triggers from reopen/close.
+  let endChatDisabled = false;
+
+  function _endChatStorageKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_end_chat_disabled_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function setEndChatDisabled(disabled) {
+    endChatDisabled = Boolean(disabled);
+    const endBtn = document.getElementById('chatassist-end');
+    if (endBtn) {
+      endBtn.style.display = endChatDisabled ? 'none' : '';
+    }
+    if (endChatDisabled) {
+      try { hideEndOverlay(); } catch (e) { }
+    }
+    try {
+      const key = _endChatStorageKey();
+      if (key) sessionStorage.setItem(key, endChatDisabled ? '1' : '0');
+    } catch (e) { }
+  }
+
+  function hydrateEndChatDisabled() {
+    try {
+      const key = _endChatStorageKey();
+      if (!key) return;
+      const v = sessionStorage.getItem(key);
+      if (v === '1') setEndChatDisabled(true);
+    } catch (e) { }
+  }
 
   // --- Core Logic ---
 
@@ -144,7 +182,7 @@
     if (!el) return;
     if (isTyping) {
       const label = el.querySelector('.chatassist-typing-label');
-      if (label) label.textContent = `${name || 'Agent'} is typing`;
+      if (label) label.textContent = 'Agent is typing';
       el.style.display = 'flex';
     } else {
       el.style.display = 'none';
@@ -156,6 +194,16 @@
     try {
       ws.send(JSON.stringify({ type: 'typing', is_typing: Boolean(isTyping) }));
     } catch (e) { }
+  }
+
+  function sendEndChat() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify({ type: 'end_chat' }));
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // --- Audio ---
@@ -215,6 +263,7 @@
       const response = await fetch(`${CONFIG.apiUrl}/widget/read-state?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`);
       if (response.ok) {
         const data = await response.json();
+        if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || 0;
         firstUnreadMessageId = data.first_unread_message_id;
         if (typeof data.unread_count === 'number') setUnreadCount(data.unread_count);
       }
@@ -303,6 +352,11 @@
       if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
     }
     ws.send(JSON.stringify(payload));
+
+    // Visitor has resumed the conversation; allow ending again.
+    if (endChatDisabled) {
+      setEndChatDisabled(false);
+    }
     return true;
   }
 
@@ -316,24 +370,64 @@
       if (!container) return;
       container.innerHTML = '';
       data.messages.forEach(m => {
-        const sender = m.sender_type || m.sender || 'system';
+        const senderType = m.sender_type || m.sender || 'system';
+        const actor = m.actor || senderType;
+        const kind = m.kind || (actor === 'system' ? 'event' : 'chat');
         const eventType = m.event_type || null;
-        if (sender === 'visitor') appendMessage('visitor', m.content, m.created_at, null, m.id);
-        else if (sender === 'agent') {
+
+        // Internal timeline events: don't show to the visitor.
+        if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
+          return;
+        }
+
+        if (actor === 'visitor') {
+          appendMessage('visitor', m.content, m.created_at, null, m.id);
+        } else if (actor === 'agent') {
           if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
           if (m.sender_name) updateAgentName(m.sender_name);
           appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
-        } else if (sender === 'system') {
+        } else if (actor === 'bot' || (actor === 'system' && kind === 'chat') || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))) {
+          appendMessage('ai', m.content, m.created_at, null, m.id);
+        } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
-          else if (eventType && (eventType.startsWith('automation') || eventType === 'bot')) appendMessage('ai', m.content, m.created_at, null, m.id);
           else showSystemMessage(m.content);
-        } else appendMessage('ai', m.content, m.created_at, null, m.id);
+        } else {
+          appendMessage('ai', m.content, m.created_at, null, m.id);
+        }
       });
       smartScroll();
       return;
     }
 
-    if (data.type === 'ai') {
+    // Canonical system events (e.g. conversation_resolved) are delivered as
+    // `type: "system"` frames with an optional `message_obj` DTO.
+    // Without this handler, the generic fallback path misclassifies them as AI.
+    if (data.type === 'system') {
+      const dto = (data && typeof data.message_obj === 'object') ? data.message_obj : null;
+      const createdAt = data.created_at || (dto && dto.created_at) || null;
+
+      const senderType = (dto && (dto.sender_type || dto.sender)) || 'system';
+      const actor = (dto && (dto.actor || senderType)) || 'system';
+      const kind = (dto && (dto.kind || (actor === 'system' ? 'event' : 'chat'))) || 'event';
+      const eventType = (dto && dto.event_type) || null;
+
+      // Internal timeline events: don't show to the visitor.
+      if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
+        return;
+      }
+
+      if (actor === 'system' && kind === 'event') {
+        if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
+        else showSystemMessage(data.message);
+      } else {
+        // Bot/system chat message delivered as a system frame.
+        appendMessage('ai', data.message, createdAt, null, dto && dto.id);
+      }
+      smartScroll();
+      return;
+    }
+
+    if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       smartScroll();
@@ -475,6 +569,387 @@
     return `${h % 12 || 12}:${m < 10 ? '0' + m : m} ${ampm}`;
   }
 
+  function isSafeHref(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const v = raw.trim();
+    if (!v) return null;
+    try {
+      const url = new URL(v, window.location.href);
+      const protocol = (url.protocol || '').toLowerCase();
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:' || protocol === 'tel:') {
+        return url.href;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function normalizeBareDomainUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+
+    // Strip trailing punctuation that commonly follows URLs in sentences.
+    const cleaned = s.replace(/[),.;:!?]+$/g, '');
+    if (!cleaned) return null;
+
+    // If it already has a scheme, keep it.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(cleaned)) return cleaned;
+
+    // Avoid treating emails as bare URLs.
+    if (cleaned.includes('@')) return null;
+
+    return `https://${cleaned}`;
+  }
+
+  function isProbablyImageFile(file) {
+    if (!file) return false;
+    try {
+      if (file.type && String(file.type).startsWith('image/')) return true;
+      const name = String(file.name || '').toLowerCase();
+      return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.webp');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function attachmentToMarkdown(att) {
+    if (!att || !att.url) return '';
+    const rawUrl = String(att.url);
+    const absoluteUrl = getFullAssetUrl(rawUrl) || rawUrl;
+    const safeUrl = isSafeHref(absoluteUrl);
+    if (!safeUrl) return '';
+
+    if (att.kind === 'image') {
+      const alt = String(att.name || 'image').replace(/[\[\]]/g, '').trim();
+      return `![${alt || 'image'}](${safeUrl})`;
+    }
+    const label = String(att.name || 'attachment');
+    return `[${label}](${safeUrl})`;
+  }
+
+  function serializeMessageWithAttachments(text, attachments) {
+    const rawText = String(text || '').trim();
+    const md = Array.isArray(attachments)
+      ? attachments.map(attachmentToMarkdown).filter(Boolean)
+      : [];
+
+    if (rawText && md.length) return `${rawText}\n\n${md.join('\n')}`;
+    if (rawText) return rawText;
+    if (md.length) return md.join('\n');
+    return '';
+  }
+
+  function setUploadingAttachmentsCount(next) {
+    uploadingAttachmentsCount = Math.max(0, Number(next) || 0);
+    const attachBtn = document.getElementById('chatassist-attach');
+    const sendBtn = document.getElementById('chatassist-send');
+    if (attachBtn) {
+      attachBtn.classList.toggle('chatassist-attach-uploading', uploadingAttachmentsCount > 0);
+      attachBtn.setAttribute('aria-busy', uploadingAttachmentsCount > 0 ? 'true' : 'false');
+    }
+    if (sendBtn) {
+      sendBtn.disabled = uploadingAttachmentsCount > 0;
+    }
+  }
+
+  function renderAttachmentChips() {
+    const wrap = document.getElementById('chatassist-attachments');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    if (!draftAttachments.length) {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = 'flex';
+    draftAttachments.forEach((att) => {
+      const tile = document.createElement('div');
+      tile.className = 'chatassist-attachment-tile';
+
+      const thumb = document.createElement('div');
+      thumb.className = 'chatassist-attachment-thumb';
+
+      if (att.kind === 'image' && att.url) {
+        const img = document.createElement('img');
+        img.src = String(getFullAssetUrl(att.url) || att.url);
+        img.alt = String(att.name || 'image');
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        thumb.appendChild(img);
+      } else {
+        thumb.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+
+        const ext = document.createElement('div');
+        ext.className = 'chatassist-attachment-ext';
+        const raw = String(att.name || 'FILE');
+        const m = raw.toUpperCase().match(/\.([A-Z0-9]{1,6})$/);
+        ext.textContent = m ? m[1] : 'FILE';
+        tile.appendChild(ext);
+      }
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'chatassist-attachment-remove';
+      remove.setAttribute('aria-label', 'Remove attachment');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        draftAttachments = draftAttachments.filter((a) => a.id !== att.id);
+        renderAttachmentChips();
+      });
+
+      tile.appendChild(thumb);
+      tile.appendChild(remove);
+      wrap.appendChild(tile);
+    });
+  }
+
+  async function uploadWidgetAttachment(file) {
+    if (!file) return null;
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${CONFIG.apiUrl}/widget/attachments/upload?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`, {
+      method: 'POST',
+      body: form,
+    });
+
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const data = await res.json();
+        detail = data && (data.detail || data.message) ? String(data.detail || data.message) : '';
+      } catch (e) { }
+      throw new Error(detail || `Upload failed (${res.status})`);
+    }
+    const data = await res.json();
+    if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || CONFIG.conversationId || 0;
+    const absoluteUrl = getFullAssetUrl(data.url) || data.url;
+    return {
+      id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `att-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: data.filename || file.name || 'attachment',
+      url: absoluteUrl,
+      kind: isProbablyImageFile(file) ? 'image' : 'file',
+    };
+  }
+
+  function renderInlineMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    const s = String(text || '');
+
+    const patterns = [
+      { type: 'image', re: /!\[([^\]]*)\]\(([^)]+)\)/g },
+      { type: 'link', re: /\[([^\]]+)\]\(([^)]+)\)/g },
+      { type: 'bold', re: /\*\*([^*]+)\*\*/g },
+      { type: 'italic', re: /\*([^*\n]+)\*/g },
+      // Bare domains like abc.com, docs.example.co.uk/path
+      { type: 'bare', re: /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
+      { type: 'url', re: /https?:\/\/[^\s<]+/g },
+    ];
+
+    let i = 0;
+    while (i < s.length) {
+      let best = null;
+
+      for (const p of patterns) {
+        p.re.lastIndex = i;
+        const m = p.re.exec(s);
+        if (!m) continue;
+        if (!best || m.index < best.index) best = { type: p.type, match: m, index: m.index };
+      }
+
+      if (!best) {
+        frag.appendChild(document.createTextNode(s.slice(i)));
+        break;
+      }
+
+      if (best.index > i) {
+        frag.appendChild(document.createTextNode(s.slice(i, best.index)));
+      }
+
+      const m = best.match;
+      const full = m[0] || '';
+
+      if (best.type === 'image') {
+        const alt = String(m[1] || '');
+        const srcRaw = String(m[2] || '');
+        const src = isSafeHref(srcRaw);
+        if (src) {
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = alt;
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.className = 'chatassist-md-img';
+          img.style.cursor = 'zoom-in';
+          img.addEventListener('click', (e) => {
+            try {
+              e.preventDefault();
+              window.open(src, '_blank', 'noopener,noreferrer');
+            } catch (err) { }
+          });
+          frag.appendChild(img);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'link') {
+        const label = String(m[1] || '');
+        const hrefRaw = String(m[2] || '');
+        const href = isSafeHref(hrefRaw);
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = label || href;
+          frag.appendChild(a);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bold') {
+        const strong = document.createElement('strong');
+        strong.textContent = String(m[1] || '');
+        frag.appendChild(strong);
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'italic') {
+        const em = document.createElement('em');
+        em.textContent = String(m[1] || '');
+        frag.appendChild(em);
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'url') {
+        const href = isSafeHref(full);
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = full;
+          frag.appendChild(a);
+        } else {
+          frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bare') {
+        const display = String(full);
+        const normalized = normalizeBareDomainUrl(display);
+        const href = normalized ? isSafeHref(normalized) : null;
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = display.replace(/[),.;:!?]+$/g, '');
+          frag.appendChild(a);
+
+          // If we stripped punctuation, append it back as text.
+          const stripped = display.match(/[),.;:!?]+$/g);
+          if (stripped && stripped[0]) {
+            frag.appendChild(document.createTextNode(stripped[0]));
+          }
+        } else {
+          frag.appendChild(document.createTextNode(display));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      frag.appendChild(document.createTextNode(full));
+      i = best.index + full.length;
+    }
+
+    return frag;
+  }
+
+  function renderMarkdownInto(el, content) {
+    if (!el) return;
+    el.textContent = '';
+
+    const lines = String(content || '').split('\n');
+    let idx = 0;
+
+    while (idx < lines.length) {
+      const line = lines[idx];
+      if (String(line || '').trim() === '') {
+        idx += 1;
+        continue;
+      }
+      const isOrdered = /^\s*\d+\.\s+/.test(line);
+      const isUnordered = /^\s*[-*+]\s+/.test(line);
+
+      if (isUnordered) {
+        const ul = document.createElement('ul');
+        ul.className = 'chatassist-md-ul';
+        while (idx < lines.length && /^\s*[-*+]\s+/.test(lines[idx])) {
+          const li = document.createElement('li');
+          const itemText = String(lines[idx]).replace(/^\s*[-*+]\s+/, '');
+          li.appendChild(renderInlineMarkdown(itemText));
+          ul.appendChild(li);
+          idx += 1;
+        }
+        el.appendChild(ul);
+        continue;
+      }
+
+      if (isOrdered) {
+        const ol = document.createElement('ol');
+        ol.className = 'chatassist-md-ol';
+        while (idx < lines.length && /^\s*\d+\.\s+/.test(lines[idx])) {
+          const li = document.createElement('li');
+          const itemText = String(lines[idx]).replace(/^\s*\d+\.\s+/, '');
+          li.appendChild(renderInlineMarkdown(itemText));
+          ol.appendChild(li);
+          idx += 1;
+        }
+        el.appendChild(ol);
+        continue;
+      }
+
+      const p = document.createElement('div');
+      p.className = 'chatassist-md-paragraph';
+
+      // Gather lines until a list starts or a blank line is encountered.
+      const chunk = [];
+      while (idx < lines.length) {
+        const cur = String(lines[idx] || '');
+        if (cur.trim() === '') break;
+        if (/^\s*\d+\.\s+/.test(cur) || /^\s*[-*+]\s+/.test(cur)) break;
+        chunk.push(cur);
+        idx += 1;
+      }
+
+      // Skip blank line if present.
+      while (idx < lines.length && String(lines[idx] || '').trim() === '') {
+        chunk.push(lines[idx]);
+        idx += 1;
+      }
+
+      const rendered = chunk.filter((l) => String(l || '').trim() !== '');
+      for (let i = 0; i < rendered.length; i += 1) {
+        p.appendChild(renderInlineMarkdown(rendered[i]));
+        if (i < rendered.length - 1) p.appendChild(document.createElement('br'));
+      }
+
+      if (!rendered.length) continue;
+
+      el.appendChild(p);
+    }
+  }
+
   function appendMessage(sender, content, createdAtIso, meta, messageId) {
     const container = document.getElementById('chatassist-messages');
     if (!container) return;
@@ -498,7 +973,7 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    bubble.textContent = content;
+    renderMarkdownInto(bubble, content);
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
@@ -564,7 +1039,11 @@
     const input = document.getElementById('chatassist-input');
     if (!input) return;
     const message = input.value.trim();
-    if (!message) return;
+    if (uploadingAttachmentsCount > 0) {
+      showToast('Please wait for uploads to finish...');
+      return;
+    }
+    if (!message && !draftAttachments.length) return;
 
     if (visitorTypingTimer) {
       clearTimeout(visitorTypingTimer);
@@ -582,9 +1061,12 @@
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', message, new Date().toISOString(), meta, null);
+      const outgoing = serializeMessageWithAttachments(message, draftAttachments);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
-      sendMessage(message, meta);
+      draftAttachments = [];
+      renderAttachmentChips();
+      sendMessage(outgoing, meta);
       smartScroll();
       return;
     }
@@ -600,14 +1082,20 @@
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', message, new Date().toISOString(), meta, null);
+      const outgoing = serializeMessageWithAttachments(message, draftAttachments);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
-      sendMessage(message, meta);
+      draftAttachments = [];
+      renderAttachmentChips();
+      sendMessage(outgoing, meta);
       smartScroll();
       return;
     }
 
     pendingOfflineMessage = message;
+    pendingOfflineAttachments = draftAttachments.slice();
+    draftAttachments = [];
+    renderAttachmentChips();
     input.value = '';
     showContactOverlay();
   }
@@ -626,10 +1114,30 @@
     if (el) {
       el.classList.remove('chatassist-contact-overlay-visible');
       el.style.display = 'none';
-      if (restore && pendingOfflineMessage) {
+      if (restore && pendingOfflineMessage != null) {
         const input = document.getElementById('chatassist-input');
         if (input) input.value = pendingOfflineMessage;
       }
+      if (restore && pendingOfflineAttachments && pendingOfflineAttachments.length) {
+        draftAttachments = pendingOfflineAttachments.slice();
+        renderAttachmentChips();
+      }
+    }
+  }
+
+  function showEndOverlay() {
+    const el = document.getElementById('chatassist-end-overlay');
+    if (el) {
+      el.style.display = 'flex';
+      el.classList.add('chatassist-end-overlay-visible');
+    }
+  }
+
+  function hideEndOverlay() {
+    const el = document.getElementById('chatassist-end-overlay');
+    if (el) {
+      el.classList.remove('chatassist-end-overlay-visible');
+      el.style.display = 'none';
     }
   }
 
@@ -641,19 +1149,22 @@
       return;
     }
     const msg = pendingOfflineMessage;
+    const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
+    pendingOfflineAttachments = [];
     hideContactOverlay(false);
     if (name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
     localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
-    if (msg) {
+    if (msg || (atts && atts.length)) {
       const meta = { visitor_name: name, visitor_email: email };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
           : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       } catch (e) { }
-      appendMessage('visitor', msg, new Date().toISOString(), meta, null);
-      sendMessage(msg, meta);
+      const outgoing = serializeMessageWithAttachments(msg, atts);
+      appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
+      sendMessage(outgoing, meta);
       smartScroll();
     }
   }
@@ -687,6 +1198,16 @@
             </div>
           </div>
         </div>
+        <div id="chatassist-end-overlay" class="chatassist-end-overlay" style="display:none;">
+          <div class="chatassist-end-overlay-backdrop"></div>
+          <div class="chatassist-end-overlay-panel">
+            <div class="chatassist-end-overlay-title">End this chat?</div>
+            <div class="chatassist-end-overlay-actions">
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Cancel</button>
+              <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
+            </div>
+          </div>
+        </div>
         <div id="chatassist-header">
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
@@ -698,7 +1219,12 @@
               <div class="chatassist-online-status"><span class="chatassist-online-text">${CONFIG.onlineStatusText}</span></div>
             </div>
           </div>
-          <button id="chatassist-close">&times;</button>
+          <div class="chatassist-header-actions">
+            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <button id="chatassist-end" class="chatassist-header-btn" aria-label="End chat">&times;</button>
+          </div>
         </div>
         <div id="chatassist-messages"></div>
         <div id="chatassist-footer">
@@ -709,8 +1235,22 @@
             </span>
           </div>
           <div id="chatassist-input-container">
+            <div id="chatassist-attachments" style="display:none;"></div>
+            <div id="chatassist-input-row">
+            ${CONFIG.showAttachments ? `
+              <input id="chatassist-file" type="file" style="display:none;" multiple />
+              <button id="chatassist-attach" class="chatassist-attach" type="button" aria-label="Attach files">
+                <span class="chatassist-attach-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a2 2 0 0 1-2.83-2.83l8.49-8.49"/>
+                  </svg>
+                </span>
+                <span class="chatassist-attach-spinner" aria-hidden="true"></span>
+              </button>
+            ` : ``}
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
+            </div>
           </div>
           <div id="chatassist-branding">${CONFIG.brandingText}</div>
         </div>
@@ -733,9 +1273,31 @@
       input.focus();
       isAtBottom = true;
       smartScroll();
+      // Ensure End button state is applied on reopen.
+      if (endChatDisabled) setEndChatDisabled(true);
     });
 
-    document.getElementById('chatassist-close').addEventListener('click', () => {
+    document.getElementById('chatassist-minimize').addEventListener('click', () => {
+      win.style.display = 'none';
+      bubble.style.display = 'flex';
+      hideContactOverlay(true);
+      hideEndOverlay();
+    });
+
+    document.getElementById('chatassist-end').addEventListener('click', () => {
+      showEndOverlay();
+    });
+
+    document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
+      hideEndOverlay();
+    });
+
+    document.getElementById('chatassist-end-confirm').addEventListener('click', () => {
+      hideEndOverlay();
+      try {
+        const ok = sendEndChat();
+        if (ok) setEndChatDisabled(true);
+      } catch (e) { }
       win.style.display = 'none';
       bubble.style.display = 'flex';
       hideContactOverlay(true);
@@ -745,8 +1307,39 @@
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
 
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    if (CONFIG.showAttachments) {
+      const fileInput = document.getElementById('chatassist-file');
+      const attachBtn = document.getElementById('chatassist-attach');
+
+      if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', () => {
+          try { fileInput.click(); } catch (e) { }
+        });
+
+        fileInput.addEventListener('change', async () => {
+          const files = Array.from(fileInput.files || []);
+          fileInput.value = '';
+          if (!files.length) return;
+
+          setUploadingAttachmentsCount(uploadingAttachmentsCount + files.length);
+
+          const results = await Promise.allSettled(files.map(async (f) => uploadWidgetAttachment(f)));
+          results.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value) {
+              draftAttachments.push(r.value);
+            } else if (r.status === 'rejected') {
+              showToast(r.reason && r.reason.message ? r.reason.message : 'Upload failed');
+            }
+          });
+          renderAttachmentChips();
+          setUploadingAttachmentsCount(uploadingAttachmentsCount - files.length);
+        });
+      }
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
         enableNotificationSound();
         handleUserMessage();
       }
@@ -798,6 +1391,7 @@
     } catch (e) { }
 
     refreshHeaderIcon();
+    renderAttachmentChips();
   }
 
   function setupPageViewTracking() {
@@ -935,6 +1529,9 @@
     CONFIG.sessionId = getSessionId();
     try {
       createWidget();
+
+      // Restore end-chat disabled state (per session) before wiring events.
+      hydrateEndChatDisabled();
 
       // Apply config styles immediately to avoid flicker/jump on reload.
       try {

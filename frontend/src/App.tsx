@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
@@ -16,6 +16,9 @@ import AgentDetail from './pages/AgentDetail'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
+import Customers from './pages/Customers'
+import CustomersVisitors from './pages/CustomersVisitors'
+import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import TagsSettings from './pages/TagsSettings'
@@ -210,7 +213,7 @@ function App() {
           const body = lastMessage ? lastMessage.slice(0, 120) : undefined
 
           const sessionId = String((data as any)?.session_id || '').trim()
-          const url = sessionId ? `/dashboard/chats?sessionId=${encodeURIComponent(sessionId)}` : '/dashboard/chats'
+          const url = sessionId ? `/dashboard/chats/${encodeURIComponent(sessionId)}` : '/dashboard/chats'
 
           maybeBrowserNotify({
             title: websiteName ? `New chat — ${websiteName}` : 'New chat',
@@ -263,7 +266,10 @@ function App() {
         data.type === 'conversation_unread' ||
         data.type === 'conversation_assigned' ||
         data.type === 'conversation_closed' ||
-        data.type === 'visitor_message'
+        data.type === 'visitor_message' ||
+        data.type === 'visitor_closed_chat' ||
+        data.type === 'visitor_left_website' ||
+        data.type === 'visitor_socket_connected'
       ) {
         bumpChatEventsVersion({
           type: data.type,
@@ -350,9 +356,17 @@ function App() {
             <Route path="/dashboard" element={<DashboardLayout />}>
               {/* Chats - Unified 3-column view */}
               <Route path="chats" element={<ConversationsView />} />
+              <Route path="chats/conversation/:conversationId" element={<ConversationsView />} />
               <Route path="chats/:sessionId" element={<ConversationsView />} />
               <Route path="history" element={<ConversationHistory />} />
               <Route path="history/:conversationId" element={<ClosedChatView />} />
+
+              {/* Customers */}
+              <Route path="customers" element={<Customers />}>
+                <Route path="visitors" element={<CustomersVisitors />} />
+                <Route path="contacts" element={<CustomersContacts />} />
+                <Route index element={<Navigate to="/dashboard/customers/visitors" replace />} />
+              </Route>
 
               {/* Settings - All users */}
               <Route path="settings" element={<Settings />}>
@@ -368,13 +382,17 @@ function App() {
 
                 {/* Agents management - Admin only */}
                 <Route
-                  path="agents"
+                  path="users"
                   element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
                 />
                 <Route
-                  path="agents/:id"
+                  path="users/:id"
                   element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
+
+                {/* Legacy settings routes (agents -> users) */}
+                <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
+                <Route path="agents/:id" element={<LegacySettingsAgentsRedirect />} />
 
                 {/* Tags management - Admin only */}
                 <Route
@@ -420,6 +438,12 @@ function App() {
       </Routes>
     </BrowserRouter>
   )
+}
+
+function LegacySettingsAgentsRedirect() {
+  const { id } = useParams<{ id?: string }>()
+  const target = id ? `/dashboard/settings/users/${id}` : '/dashboard/settings/users'
+  return <Navigate to={target} replace />
 }
 
 export default App

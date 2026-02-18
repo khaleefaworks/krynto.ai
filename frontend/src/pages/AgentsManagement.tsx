@@ -42,7 +42,7 @@ export default function AgentsManagement() {
       setLoading(true)
       setError(null)
       // Fetch all users except administrators
-      const data = await apiRequest<Agent[]>("/auth/users")
+      const data = await apiRequest<Agent[]>("/users")
       // Filter out system managers (system_manager role)
       setAgents(data.filter(user => user.role !== 'system_manager'))
     } catch (err: any) {
@@ -339,8 +339,8 @@ export default function AgentsManagement() {
                   </td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs rounded-full ${agent.is_active
-                        ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
-                        : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300"
+                      ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300"
                       }`}>
                       {agent.is_active ? "Active" : "Inactive"}
                     </span>

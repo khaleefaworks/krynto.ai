@@ -19,8 +19,24 @@ from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.repos import page_views as page_views_repo
+from app.services.visibility import compute_visibility_scope
 
 router = APIRouter(prefix="/conversations", tags=["conversation-metadata"])
+
+
+def _ensure_visible(db: Session, *, current_user: User, conversation_id: int) -> Conversation:
+    conversation = db.query(Conversation).filter_by(id=int(conversation_id)).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and int(conversation.website_id) not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Chat not available")
+    if scope.team_ids is not None:
+        tid = getattr(conversation, "team_id", None)
+        if tid is not None and int(tid) not in set(scope.team_ids):
+            raise HTTPException(status_code=403, detail="Chat not available")
+    return conversation
 
 
 # ==================== Request/Response Models ====================
@@ -73,10 +89,7 @@ def add_note(
     current_user: User = Depends(get_current_user)
 ):
     """Add a private note to a conversation"""
-    # Verify conversation exists
-    conversation = db.query(Conversation).filter_by(id=conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     
     # Create new note
     new_note = ConversationNote(
@@ -103,6 +116,8 @@ def get_notes(
 ):
     """Get all notes for a conversation"""
     from app.models.user import User
+
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     
     notes = db.query(ConversationNote).filter_by(conversation_id=conversation_id).all()
     
@@ -126,6 +141,7 @@ def update_note(
     current_user: User = Depends(get_current_user)
 ):
     """Update a note (only by creator)"""
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     note = db.query(ConversationNote).filter_by(
         id=note_id,
         conversation_id=conversation_id
@@ -159,10 +175,7 @@ def get_browsing_history(
     current_user: User = Depends(get_current_user),
 ):
     """Get recent browsing history (page views) for a conversation."""
-    # Verify conversation exists
-    conversation = db.query(Conversation).filter_by(id=conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
 
     try:
         limit_int = int(limit)
@@ -182,6 +195,7 @@ def delete_note(
     current_user: User = Depends(get_current_user)
 ):
     """Delete a note (only by creator)"""
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     note = db.query(ConversationNote).filter_by(
         id=note_id,
         conversation_id=conversation_id
@@ -210,9 +224,7 @@ def update_conversation_metadata(
     current_user: User = Depends(get_current_user)
 ):
     """Update visitor metadata for a conversation"""
-    conversation = db.query(Conversation).filter_by(id=conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conversation = _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     
     # Update fields if provided
     if metadata.visitor_name is not None:

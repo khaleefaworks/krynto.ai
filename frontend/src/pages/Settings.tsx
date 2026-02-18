@@ -40,8 +40,8 @@ export default function Settings() {
                   Websites
                 </Link>
                 <Link
-                  to="/dashboard/settings/agents"
-                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/agents')
+                  to="/dashboard/settings/users"
+                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/users')
                     ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}

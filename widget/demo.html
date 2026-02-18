@@ -84,7 +84,7 @@
       <li>Ensure backend server is running: <code>cd backend && ./start_server.sh</code></li>
       <li>Ensure database has a website and the widget key below matches that website</li>
       <li>Click the chat bubble in the bottom-right corner</li>
-      <li>Send a message to test AI responses</li>
+      <li>Send a message to test bot/agent flows</li>
       <li>Test agent handoff functionality</li>
     </ol>
     
@@ -93,17 +93,17 @@
       <li>✅ WebSocket connection to backend</li>
       <li>✅ Session persistence (localStorage)</li>
       <li>✅ Auto-reconnect on disconnect</li>
-      <li>✅ Message display (visitor, AI, agent)</li>
+      <li>✅ Message display (visitor, bot, agent)</li>
       <li>✅ Real-time bidirectional messaging</li>
-      <li>✅ Dynamic configuration fetch from backend</li>
+      <li>✅ Dynamic configuration via loader.js</li>
       <li>✅ Customizable theme, position, and colors</li>
       <li>✅ Responsive design</li>
     </ul>
     
     <h2>Widget Configuration:</h2>
     <p>
-      The widget automatically fetches its configuration from the backend API:
-      <code>GET /websites/{website_id}/widget-config</code>
+      The widget loader embeds website configuration server-side:
+      <code>GET /widget/loader.js?key=YOUR_WIDGET_KEY</code>
     </p>
     <p>
       If the API is unavailable, it falls back to sensible defaults:

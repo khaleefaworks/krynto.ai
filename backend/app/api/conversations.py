@@ -14,10 +14,27 @@ from app.models.user import User
 from app.models.conversation import Conversation
 from app.services.conversation_service import ConversationService
 from app.services.conversation_orchestrator import ConversationOrchestrator
+from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
 from typing import Optional
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+def _ensure_visible(db: Session, *, current_user: User, conversation_id: int) -> Conversation:
+    conv = db.query(Conversation).filter(Conversation.id == int(conversation_id)).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and int(conv.website_id) not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Chat not available")
+    if scope.team_ids is not None:
+        tid = getattr(conv, "team_id", None)
+        if tid is not None and int(tid) not in set(scope.team_ids):
+            raise HTTPException(status_code=403, detail="Chat not available")
+
+    return conv
 
 
 class ClaimResponse(BaseModel):
@@ -47,6 +64,7 @@ def claim_conversation(
     
     This is the CRITICAL endpoint that prevents race conditions.
     """
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     conversation_service = ConversationService(db)
     
     success, message = conversation_service.claim_conversation(
@@ -76,6 +94,7 @@ def check_can_message(
     
     Returns permission status and reason.
     """
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     conversation_service = ConversationService(db)
     
     allowed, reason = conversation_service.can_agent_message(
@@ -97,6 +116,7 @@ async def takeover_conversation(
     db: Session = Depends(get_db),
 ):
     """Force-assign a conversation to the current agent (explicit confirmation flow)."""
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     orchestrator = ConversationOrchestrator(db)
 
     result = await orchestrator.handle_agent_takeover(
@@ -112,6 +132,8 @@ async def takeover_conversation(
         "conversation_id": conversation_id,
         "message_obj": result.get("message_obj"),
         "message_id": result.get("message_id"),
+        "agent_is_available": result.get("agent_is_available"),
+        "availability_changed": result.get("availability_changed"),
     }
 
 
@@ -123,6 +145,7 @@ def tag_conversation(
     db: Session = Depends(get_db)
 ):
     """Add a tag to a conversation"""
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     conversation_service = ConversationService(db)
     success = conversation_service.tag_conversation(
         conversation_id=conversation_id,
@@ -142,6 +165,7 @@ def untag_conversation(
     db: Session = Depends(get_db)
 ):
     """Remove a tag from a conversation"""
+    _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
     conversation_service = ConversationService(db)
     success = conversation_service.untag_conversation(
         conversation_id=conversation_id,

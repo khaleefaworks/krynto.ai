@@ -155,13 +155,18 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             detail="System not initialized. Create admin first via /auth/bootstrap"
         )
     
-    # Special case: Allow "Administrator" as username
+    # Special case: Allow "Administrator" as username (even if email changes).
     email = login_request.email
-    if email.lower() == "administrator":
-        email = "administrator@chatassist.system"
-    
-    # Find user by email
-    user = db.query(User).filter(User.email == email).first()
+    if str(email or "").strip().lower() == "administrator":
+        user = (
+            db.query(User)
+            .filter(User.role == UserRole.SYSTEM_MANAGER)
+            .order_by(User.id.asc())
+            .first()
+        )
+    else:
+        # Find user by email
+        user = db.query(User).filter(User.email == email).first()
     
     if not user:
         raise HTTPException(
@@ -226,7 +231,7 @@ async def register(
         password_hash=get_password_hash(register_request.password),
         role=register_request.role,
         is_active=True,
-        is_available=True
+        is_available=False
     )
     
     db.add(user)
@@ -259,7 +264,7 @@ async def list_users(
     List all users (for admin purposes).
     Only accessible by admins.
     """
-    users = db.query(User).filter(User.is_active == True).all()
+    users = db.query(User).all()
     return [
         {
             "id": user.id,

@@ -9,6 +9,8 @@ import time
 from app.repos import agent_sessions as agent_sessions_repo
 from app.repos import users as users_repo
 from app.infra import realtime_bus, BusEvent
+from app.models.agent_website_assignment import AgentWebsiteAssignment
+from app.models.user import User
 
 logger = get_logger(__name__)
 
@@ -91,11 +93,28 @@ class AgentService:
             except Exception:
                 pass
         
+        # Compute website visibility for this socket (admins unrestricted).
+        visible_website_ids: list[int] | None
+        try:
+            user = self.db.query(User).filter(User.id == int(agent_id)).first()
+            if user and user.is_admin():
+                visible_website_ids = None
+            else:
+                rows = (
+                    self.db.query(AgentWebsiteAssignment.website_id)
+                    .filter(AgentWebsiteAssignment.agent_id == int(agent_id))
+                    .all()
+                )
+                visible_website_ids = sorted({int(r[0]) for r in rows})
+        except Exception:
+            visible_website_ids = []
+
         # Store WebSocket connection
         AgentService.active_agents[websocket_id] = {
             "agent_id": agent_id,
             "website_id": website_id,
-            "websocket": websocket
+            "websocket": websocket,
+            "visible_website_ids": visible_website_ids,
         }
         
         # Create session record
@@ -196,6 +215,16 @@ class AgentService:
             ws_website_id = agent_info.get("website_id")
             should_send = False
 
+            # Enforce per-agent website visibility (agents only).
+            if website_id is not None:
+                visible = agent_info.get("visible_website_ids")
+                if visible is not None:
+                    try:
+                        if int(website_id) not in set(int(x) for x in visible):
+                            continue
+                    except Exception:
+                        continue
+
             # A socket connected to website_id=0 is treated as a global agent socket.
             # In production we prefer a single global socket per agent, which must
             # receive website-scoped events too.
@@ -253,6 +282,15 @@ class AgentService:
             for agent_info in cls.active_agents.values():
                 ws_website_id = agent_info.get("website_id")
                 should_send = False
+
+                if website_id is not None:
+                    visible = agent_info.get("visible_website_ids")
+                    if visible is not None:
+                        try:
+                            if int(website_id) not in set(int(x) for x in visible):
+                                continue
+                        except Exception:
+                            continue
                 if ws_website_id == 0 and (include_global or website_id is not None):
                     should_send = True
                 if website_id is not None and ws_website_id == website_id:

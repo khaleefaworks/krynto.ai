@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw } from 'lucide-react'
+import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -78,8 +78,8 @@ export default function DashboardLayout() {
       <Link
         to="/dashboard/chats"
         className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all relative ${isActive('/dashboard/chats')
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
       >
         <div className="relative">
@@ -99,10 +99,21 @@ export default function DashboardLayout() {
       </Link>
 
       <Link
+        to="/dashboard/customers/visitors"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/customers')
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+      >
+        <Users className="h-5 w-5" />
+        <span className="md:hidden lg:block">Customers</span>
+      </Link>
+
+      <Link
         to="/dashboard/settings"
         className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/settings')
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
       >
         <Settings className="h-5 w-5" />
@@ -112,8 +123,8 @@ export default function DashboardLayout() {
       <Link
         to="/dashboard/analytics"
         className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
       >
         <BarChart3 className="h-5 w-5" />
@@ -125,8 +136,8 @@ export default function DashboardLayout() {
         <Link
           to="/dashboard/reset"
           className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/reset')
-              ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-              : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+            : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
             }`}
         >
           <RotateCcw className="h-5 w-5" />
@@ -263,8 +274,8 @@ export default function DashboardLayout() {
                 <Link
                   to="/dashboard/chats"
                   className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/chats')
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
                   <MessageSquare className="h-5 w-5" />
@@ -278,17 +289,17 @@ export default function DashboardLayout() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Link
-                  to="/dashboard/settings"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/settings')
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  to="/dashboard/customers/visitors"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/customers')
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
-                  <Settings className="h-5 w-5" />
+                  <Users className="h-5 w-5" />
                 </Link>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <p>Settings</p>
+                <p>Customers</p>
               </TooltipContent>
             </Tooltip>
 
@@ -297,8 +308,8 @@ export default function DashboardLayout() {
                 <Link
                   to="/dashboard/analytics"
                   className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
                   <BarChart3 className="h-5 w-5" />
@@ -323,6 +334,23 @@ export default function DashboardLayout() {
               </TooltipTrigger>
               <TooltipContent side="right">
                 <p>{darkMode ? 'Light mode' : 'Dark mode'}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/settings"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/settings')
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                >
+                  <Settings className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Settings</p>
               </TooltipContent>
             </Tooltip>
 

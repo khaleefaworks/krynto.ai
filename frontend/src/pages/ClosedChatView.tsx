@@ -6,9 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft } from "lucide-react"
 
 interface Message {
-  id?: number
+  id?: number | string
   sender?: string
   sender_type?: "visitor" | "agent" | "system"
+  actor?: "visitor" | "agent" | "bot" | "ai" | "system"
+  kind?: "chat" | "event"
   event_type?: string | null
   content: string
   created_at?: string
@@ -23,7 +25,7 @@ export default function ClosedChatView() {
   useEffect(() => {
     async function loadHistory() {
       if (!conversationId) return
-      
+
       setLoading(true)
       try {
         const history = await fetchChatMessages(conversationId)
@@ -74,16 +76,21 @@ export default function ClosedChatView() {
                 No messages in this conversation
               </p>
             )}
-            
+
             {messages.map((m, i) => (
               (() => {
-                const senderType = (m as any).sender_type || m.sender
+                const senderType = (m as any).sender_type || m.sender || "system"
+                const actor = (m as any).actor || senderType
+                const kind = (m as any).kind || (actor === "system" ? "event" : "chat")
                 const eventType = (m as any).event_type || null
-                const isJoin = senderType === "system" && eventType === "agent_join"
-                const isBot = senderType === "system" && !isJoin
-                const isAgent = senderType === "agent"
+                const isSystemEvent = actor === "system" && kind === "event"
+                const isJoin = isSystemEvent && eventType === "agent_join"
+                const isBot = actor === "bot"
+                  || (actor === "system" && kind === "chat")
+                  || (senderType === "system" && (eventType === "bot" || (eventType && eventType.startsWith("automation"))))
+                const isAgent = actor === "agent" || senderType === "agent"
 
-                if (isJoin) {
+                if (isSystemEvent) {
                   return (
                     <div key={i} className="flex justify-center">
                       <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
@@ -96,13 +103,12 @@ export default function ClosedChatView() {
                 return (
                   <div key={i} className={`flex ${isAgent ? "justify-end" : "justify-start"}`}>
                     <div
-                      className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
-                        isAgent
+                      className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${isAgent
                           ? "bg-black dark:bg-gray-800 text-white"
                           : isBot
-                          ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
-                          : "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300"
-                      }`}
+                            ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+                            : "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300"
+                        }`}
                     >
                       <p className="text-sm">{m.content}</p>
                       <div className="flex items-center justify-between mt-1">

@@ -117,6 +117,7 @@ def validate_attachment_upload(
     Allowed:
     - PNG/JPEG/GIF/WEBP images (strict magic-byte validation)
     - PDF documents (magic-byte validation)
+    - Common office and text formats (MIME-based allowlist)
 
     This is intentionally strict.
     """
@@ -141,4 +142,33 @@ def validate_attachment_upload(
             raise HTTPException(status_code=400, detail="Invalid PDF file")
         return "pdf"
 
-    raise HTTPException(status_code=400, detail="Unsupported attachment type. Use an image or PDF")
+    # Office + text attachments (intentionally allowlist MIME types)
+    office_mime_to_ext = {
+        # Word
+        "application/msword": "doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+        # Excel
+        "application/vnd.ms-excel": "xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+        # PowerPoint
+        "application/vnd.ms-powerpoint": "ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+        # CSV / text
+        "text/plain": "txt",
+        "text/csv": "csv",
+        "application/csv": "csv",
+    }
+
+    if file.content_type in office_mime_to_ext:
+        # Basic sanity: ensure file is non-empty.
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(0)
+        if size <= 0:
+            raise HTTPException(status_code=400, detail="Empty file")
+        return office_mime_to_ext[file.content_type]
+
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported attachment type. Use an image, PDF, or a common office/text document",
+    )

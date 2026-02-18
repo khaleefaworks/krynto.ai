@@ -6,7 +6,16 @@ export type ActiveChat = {
   website_id: number
   website_name?: string
   session_id: string
+  visitor_name?: string | null
+  visitor_email?: string | null
+  visitor_phone?: string | null
+  device_info?: string | null
+  browser_info?: string | null
+  visit_count?: number | null
+  last_seen_at?: string | null
+  visitor_avatar_color?: string | null
   last_message?: string
+  last_message_at?: string
   status: string
   is_handoff: boolean
   assigned_agent_id: number | null
@@ -108,4 +117,19 @@ export async function fetchClosedConversations(websiteId?: number, agentId?: num
       Authorization: `Bearer ${token}`,
     },
   })
+}
+
+export async function fetchChatSummary(chatId: number): Promise<ActiveChat> {
+  const token = useAppStore.getState().token
+
+  const chat = await apiRequest<ActiveChat>(`/chats/${chatId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  return {
+    ...chat,
+    current_agent_id: (chat as any).assigned_agent_id,
+  }
 }

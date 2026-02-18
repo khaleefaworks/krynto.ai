@@ -13,6 +13,8 @@ import asyncio
 from app.core.message_presenter import serialize_message
 from app.repos import messages as messages_repo
 from app.repos import users as users_repo
+from app.repos import conversations as conversations_repo
+from app.services.visibility import compute_visibility_scope
 from datetime import datetime
 from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
 import structlog
@@ -150,6 +152,15 @@ async def agent_ws(
             logger.debug("agent_message_received", agent_id=agent_id, data=data)
             payload = json.loads(data)
 
+            # The agent WebSocket uses a long-lived DB session. Other HTTP requests
+            # (e.g. /chats/{id}/join) may update rows in separate sessions.
+            # Expire the identity map so we don't make decisions on stale ORM state
+            # (e.g. assigned_agent_id still None right after join).
+            try:
+                db.expire_all()
+            except Exception:
+                pass
+
             # Any inbound message counts as activity for presence.
             try:
                 AgentService.mark_heartbeat(agent_id)
@@ -190,6 +201,21 @@ async def agent_ws(
 
                 is_typing = bool(payload.get("is_typing"))
 
+                conv = conversations_repo.get_conversation_by_id(db, conversation_id)
+                if not conv:
+                    await websocket.send_json({"type": "error", "message": "Conversation not found"})
+                    continue
+
+                scope = compute_visibility_scope(db, user=user)
+                if scope.website_ids is not None and int(conv.website_id) not in set(scope.website_ids):
+                    await websocket.send_json({"type": "error", "message": "Chat not available"})
+                    continue
+                if scope.team_ids is not None:
+                    tid = getattr(conv, "team_id", None)
+                    if tid is not None and int(tid) not in set(scope.team_ids):
+                        await websocket.send_json({"type": "error", "message": "Chat not available"})
+                        continue
+
                 await ChatService.send_to_visitor(
                     conversation_id,
                     {
@@ -211,6 +237,21 @@ async def agent_ws(
                     await websocket.send_json({"type": "error", "message": "Invalid conversation_id"})
                     continue
                 logger.info("agent_joining_conversation", agent_id=agent_id, conversation_id=conversation_id)
+
+                conv = conversations_repo.get_conversation_by_id(db, conversation_id)
+                if not conv:
+                    await websocket.send_json({"type": "error", "message": "Conversation not found"})
+                    continue
+
+                scope = compute_visibility_scope(db, user=user)
+                if scope.website_ids is not None and int(conv.website_id) not in set(scope.website_ids):
+                    await websocket.send_json({"type": "error", "message": "Chat not available"})
+                    continue
+                if scope.team_ids is not None:
+                    tid = getattr(conv, "team_id", None)
+                    if tid is not None and int(tid) not in set(scope.team_ids):
+                        await websocket.send_json({"type": "error", "message": "Chat not available"})
+                        continue
 
                 result = await orchestrator.handle_agent_join(
                     conversation_id=conversation_id,
@@ -249,12 +290,20 @@ async def agent_ws(
                 if not content or not conversation_id:
                     continue
 
-                # Send acknowledgment immediately
-                if message_id:
-                    await websocket.send_json({
-                        "type": "ack",
-                        "message_id": message_id
-                    })
+                conv = conversations_repo.get_conversation_by_id(db, conversation_id)
+                if not conv:
+                    await websocket.send_json({"type": "error", "message": "Conversation not found"})
+                    continue
+
+                scope = compute_visibility_scope(db, user=user)
+                if scope.website_ids is not None and int(conv.website_id) not in set(scope.website_ids):
+                    await websocket.send_json({"type": "error", "message": "Chat not available"})
+                    continue
+                if scope.team_ids is not None:
+                    tid = getattr(conv, "team_id", None)
+                    if tid is not None and int(tid) not in set(scope.team_ids):
+                        await websocket.send_json({"type": "error", "message": "Chat not available"})
+                        continue
 
                 logger.info("agent_sending_message", agent_id=agent_id, conversation_id=conversation_id, content_length=len(content), message_id=message_id)
 
@@ -267,6 +316,14 @@ async def agent_ws(
                 if result.get("error"):
                     await websocket.send_json({"type": "error", "message": result["error"]})
                     continue
+
+                # ACK only after successful processing so the client won't drop
+                # messages that failed validation/persistence.
+                if message_id:
+                    await websocket.send_json({
+                        "type": "ack",
+                        "message_id": message_id,
+                    })
 
                 message_obj = None
                 try:
@@ -283,7 +340,10 @@ async def agent_ws(
                     "type": "message_sent",
                     "conversation_id": conversation_id,
                     "content": content,
+                    "client_message_id": message_id,
                     "message_obj": message_obj,
+                    "agent_is_available": result.get("agent_is_available"),
+                    "availability_changed": result.get("availability_changed"),
                     "success": True
                 })
 

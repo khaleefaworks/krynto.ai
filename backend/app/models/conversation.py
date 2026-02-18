@@ -25,12 +25,16 @@ class Conversation(Base, TimestampMixin):
     )
     is_handoff = Column(Boolean, default=False)
     assigned_agent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Optional website-team routing (website-scoped teams)
+    team_id = Column(Integer, ForeignKey("website_teams.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Inactivity tracking for auto-release
     last_agent_message_at = Column(DateTime, nullable=True)
     last_visitor_message_at = Column(DateTime, nullable=True)
     
     # Visitor metadata
+    visitor_ip = Column(String(45), nullable=True)  # IPv4/IPv6 string
     visitor_name = Column(String(255), nullable=True)
     visitor_email = Column(String(255), nullable=True)
     visitor_phone = Column(String(50), nullable=True)
@@ -39,9 +43,13 @@ class Conversation(Base, TimestampMixin):
     visit_count = Column(Integer, default=1, nullable=False)  # Number of visits by this visitor
     last_seen_at = Column(DateTime, nullable=True)  # When visitor was last active
 
+    # UI: persisted avatar background color (hex), stable per visitor/session
+    visitor_avatar_color = Column(String(16), nullable=True)
+
     # Read state for visitor
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
 
     website = relationship("Website", back_populates="conversations")
+    team = relationship("WebsiteTeam")
     tags = relationship("ConversationTag", back_populates="conversation", cascade="all, delete-orphan")
     assigned_agent = relationship("User", foreign_keys=[assigned_agent_id])

@@ -13,9 +13,11 @@ Scope:
 
 from typing import Optional, Any
 import asyncio
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.services.conversation_service import ConversationService
+from app.services.automation_service import AutomationService
 from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.models.user import User
@@ -32,13 +34,64 @@ logger = get_logger(__name__)
 _waiting_bot_message_scheduled: set[int] = set()
 
 
-async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int) -> None:
+def _should_skip_due_to_repeat(
+    *,
+    db: Session,
+    conversation_id: int,
+    event_type: str,
+    repeat: str | None,
+    repeat_cooldown_seconds: int | None,
+) -> bool:
+    """Return True if an automation action should be suppressed due to repeat rules.
+
+    repeat:
+    - once: at most once per conversation lifetime for this event_type (existing behavior)
+    - cooldown: suppress if last event is within cooldown window
+    - always: never suppress
+    """
+
+    mode = str(repeat or "").strip().lower() or "once"
+    if mode == "always":
+        return False
+
+    from app.repos import messages as messages_repo
+
+    existing = messages_repo.get_last_event_message(db, conversation_id, str(event_type))
+    if not existing:
+        return False
+
+    if mode != "cooldown":
+        return True
+
+    # cooldown
+    cooldown = repeat_cooldown_seconds
+    if cooldown is None:
+        return True
+
+    created_at = getattr(existing, "created_at", None)
+    if created_at is None:
+        return True
+
+    try:
+        if getattr(created_at, "tzinfo", None) is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        return True
+
+    now = datetime.now(timezone.utc)
+    try:
+        return (now - created_at).total_seconds() < float(cooldown)
+    except Exception:
+        return True
+
+
+async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
     """After 60s, if still unassigned, send a single bot message to the visitor."""
     try:
         from app.core.database import SessionLocal
         from app.models.conversation import Conversation
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(max(1, int(delay_seconds or 60)))
 
         db = SessionLocal()
         try:
@@ -52,21 +105,43 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             # Only send if visitor is connected.
             # Persist as a bot message so both widget + agent dashboard show it.
             from app.services.conversation_service import ConversationService
+            from app.services.automation_service import AutomationService
+            from app.repos import messages as messages_repo
 
-            saved = ConversationService(db).add_bot_message(
-                conversation_id,
-                "Thanks! An agent will be with you shortly.",
-                event_type="bot",
+            automation_service = AutomationService(db)
+            actions = automation_service.get_bot_message_actions(
+                website_id=website_id,
+                trigger="no_agent_assigned_for",
             )
 
-            await ChatService.send_to_visitor(
-                conversation_id,
-                {
-                    "type": "ai",
-                    "message": "Thanks! An agent will be with you shortly.",
-                    "message_obj": serialize_message(db, saved),
-                },
-            )
+            if not actions:
+                return
+
+            for action in actions:
+                event_type = action.get("event_type") or "bot_waiting"
+                if _should_skip_due_to_repeat(
+                    db=db,
+                    conversation_id=conversation_id,
+                    event_type=str(event_type),
+                    repeat=action.get("repeat"),
+                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                ):
+                    continue
+
+                saved = ConversationService(db).add_bot_message(
+                    conversation_id,
+                    action["message"],
+                    event_type=event_type,
+                )
+
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {
+                        "type": "bot",
+                        "message": action["message"],
+                        "message_obj": serialize_message(db, saved),
+                    },
+                )
         finally:
             db.close()
     except Exception as e:
@@ -87,6 +162,55 @@ class ConversationOrchestrator:
         self.conversation_service = ConversationService(db)
         self.agent_service = AgentService(db)
 
+    def _ensure_agent_available(self, user: User) -> bool:
+        """Best-effort: flip availability to True when the agent actively works."""
+
+        if user.is_available is False:
+            user.is_available = True
+            return True
+        return False
+
+    def _should_record_presence_event(self, *, conversation: Conversation) -> bool:
+        """Presence timeline events should only be recorded for meaningful scenarios.
+
+        Current rule (simple + practical): only record presence events when the
+        last *human* message is from the agent (i.e. the visitor likely left after
+        receiving an agent reply).
+        """
+
+        try:
+            if conversation.status != ConversationStatus.OPEN:
+                return False
+        except Exception:
+            return False
+
+        # Require that the agent has actually participated.
+        try:
+            if not getattr(conversation, "last_agent_message_at", None):
+                return False
+        except Exception:
+            return False
+
+        try:
+            from app.repos import messages as messages_repo
+            from app.models.message import MessageSenderType
+
+            last = messages_repo.get_last_human_message(self.db, int(conversation.id))
+            if not last:
+                return False
+
+            sender_type = getattr(last, "sender_type", None)
+            # sender_type is usually a MessageSenderType enum value.
+            if sender_type == MessageSenderType.AGENT:
+                return True
+            # Defensive: if DB/model ever returns a raw string.
+            try:
+                return str(getattr(sender_type, "value", sender_type) or "").strip().lower() == "agent"
+            except Exception:
+                return False
+        except Exception:
+            return False
+
     async def handle_visitor_message(
         self,
         *,
@@ -95,6 +219,7 @@ class ConversationOrchestrator:
         message: str,
         visitor_ws: Any | None = None,
         client_message_id: str | None = None,
+        visitor_ip: str | None = None,
     ) -> Optional[str]:
         """Process a visitor message and route appropriately.
 
@@ -103,6 +228,7 @@ class ConversationOrchestrator:
         conversation = self.conversation_service.get_or_create_conversation(
             website_id=website_id,
             session_id=session_id,
+            visitor_ip=visitor_ip,
         )
 
         # Track the live visitor socket for downstream forwarding
@@ -116,7 +242,86 @@ class ConversationOrchestrator:
             conversation.assigned_agent_id = None
             conversation.is_handoff = False
             self.db.commit()
-            self.db.refresh(conversation)
+
+            # Optional automations when reopening.
+            try:
+                from app.repos import messages as messages_repo
+
+                automation_service = AutomationService(self.db)
+
+                # Emit system events only if configured.
+                system_actions = automation_service.get_system_event_actions(
+                    website_id=website_id,
+                    trigger="conversation_reopened",
+                )
+                for action in system_actions:
+                    event_type = action.get("event_type") or "conversation_reopened"
+                    content = action.get("content")
+                    if not content:
+                        continue
+
+                    if _should_skip_due_to_repeat(
+                        db=self.db,
+                        conversation_id=conversation.id,
+                        event_type=str(event_type),
+                        repeat=action.get("repeat"),
+                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                    ):
+                        continue
+                    saved_evt = self.conversation_service.add_system_message(
+                        conversation.id,
+                        str(content),
+                        event_type=str(event_type),
+                    )
+                    if visitor_ws is not None:
+                        try:
+                            await visitor_ws.send_json(
+                                {
+                                    "type": "system",
+                                    "message": saved_evt.content,
+                                    "message_obj": serialize_message(self.db, saved_evt),
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                # Optional bot messages on reopen.
+                bot_actions = automation_service.get_bot_message_actions(
+                    website_id=website_id,
+                    trigger="conversation_reopened",
+                )
+                for action in bot_actions:
+                    event_type = action.get("event_type") or "bot_reopened"
+
+                    if _should_skip_due_to_repeat(
+                        db=self.db,
+                        conversation_id=conversation.id,
+                        event_type=str(event_type),
+                        repeat=action.get("repeat"),
+                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                    ):
+                        continue
+                    saved_bot = self.conversation_service.add_bot_message(
+                        conversation.id,
+                        action["message"],
+                        event_type=str(event_type),
+                    )
+                    if visitor_ws is not None:
+                        try:
+                            await visitor_ws.send_json(
+                                {
+                                    "type": "bot",
+                                    "message": action["message"],
+                                    "message_obj": serialize_message(self.db, saved_bot),
+                                }
+                            )
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
 
         # Determine if this is the first message before persisting
         prior_message_count = (
@@ -249,22 +454,42 @@ class ConversationOrchestrator:
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
         # Send a single bot prompt (no repeats).
-        if not is_website_online(website_id):
+        if (not is_website_online(website_id)) and not (
+            prior_message_count > 0 and getattr(conversation, "assigned_agent_id", None)
+        ):
             if prior_message_count == 0:
-                # Persist the offline prompt as a bot message so it appears in thread history.
-                saved = self.conversation_service.add_bot_message(
-                    conversation.id,
-                    "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                    event_type="bot",
+                automation_service = AutomationService(self.db)
+                from app.repos import messages as messages_repo
+
+                actions = automation_service.get_bot_message_actions(
+                    website_id=website_id,
+                    trigger="website_offline_first_message",
                 )
-                await ChatService.send_to_visitor(
-                    conversation.id,
-                    {
-                        "type": "ai",
-                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                        "message_obj": serialize_message(self.db, saved),
-                    },
-                )
+
+                if not actions:
+                    return None
+
+                for action in actions:
+                    event_type = action.get("event_type") or "bot_offline"
+                    existing = messages_repo.get_last_event_message(
+                        self.db, conversation.id, event_type
+                    )
+                    if existing:
+                        continue
+
+                    saved = self.conversation_service.add_bot_message(
+                        conversation.id,
+                        action["message"],
+                        event_type=event_type,
+                    )
+                    await ChatService.send_to_visitor(
+                        conversation.id,
+                        {
+                            "type": "bot",
+                            "message": action["message"],
+                            "message_obj": serialize_message(self.db, saved),
+                        },
+                    )
             return None
 
         # Someone is online.
@@ -275,10 +500,17 @@ class ConversationOrchestrator:
         # Schedule a single waiting bot message after 60s if still unassigned.
         if conversation.id not in _waiting_bot_message_scheduled:
             _waiting_bot_message_scheduled.add(conversation.id)
+            automation_service = AutomationService(self.db)
+            delay_seconds = automation_service.get_delay_seconds(
+                website_id=website_id,
+                trigger="no_agent_assigned_for",
+                default_seconds=60,
+            )
             asyncio.create_task(
                 _send_delayed_waiting_message_if_unassigned(
                     conversation_id=conversation.id,
                     website_id=website_id,
+                    delay_seconds=delay_seconds,
                 )
             )
 
@@ -358,11 +590,15 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
-        # Simplified: Any active user can join any chat
+        # Any active user can join any chat.
         user = self.db.query(User).filter(User.id == agent_id).first()
 
         if not user or not user.is_active:
             return {"error": "User not found or inactive"}
+
+        # Practical behavior: if an agent starts handling a chat, treat them as available.
+        # This avoids confusing states where an agent is "unavailable" but actively joins chats.
+        availability_changed = self._ensure_agent_available(user)
 
         # Enforce single owner
         if conversation.assigned_agent_id and conversation.assigned_agent_id != agent_id:
@@ -411,6 +647,8 @@ class ConversationOrchestrator:
             "success": True,
             "message_id": getattr(saved, "id", None),
             "message_obj": serialize_message(self.db, saved),
+            "agent_is_available": bool(getattr(user, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def handle_agent_takeover(self, *, conversation_id: int, agent_id: int) -> dict:
@@ -425,6 +663,8 @@ class ConversationOrchestrator:
         user = self.db.query(User).filter(User.id == agent_id).first()
         if not user or not user.is_active:
             return {"error": "User not found or inactive"}
+
+        availability_changed = self._ensure_agent_available(user)
 
         previous_agent_id = conversation.assigned_agent_id
 
@@ -468,6 +708,8 @@ class ConversationOrchestrator:
             "success": True,
             "message_id": getattr(saved, "id", None),
             "message_obj": serialize_message(self.db, saved),
+            "agent_is_available": bool(getattr(user, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def handle_agent_message(
@@ -484,6 +726,12 @@ class ConversationOrchestrator:
         if conversation.assigned_agent_id != agent_id:
             return {"error": "Conversation is assigned to another agent"}
 
+        agent = self.db.query(User).filter(User.id == agent_id).first()
+        if not agent or not agent.is_active:
+            return {"error": "User not found or inactive"}
+
+        availability_changed = self._ensure_agent_available(agent)
+
         saved = self.conversation_service.add_agent_message(
             conversation_id=conversation_id,
             agent_id=agent_id,
@@ -495,7 +743,6 @@ class ConversationOrchestrator:
 
         logger.info("agent_message_saved", conversation_id=conversation_id, agent_id=agent_id, content_length=len(content))
 
-        agent = self.db.query(User).filter(User.id == agent_id).first()
         agent_name = (agent.name if agent and agent.name else "Support Agent")
 
         # Canonical DTO for clients that want consistent schemas.
@@ -516,20 +763,29 @@ class ConversationOrchestrator:
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),
+            "agent_is_available": bool(getattr(agent, "is_available", False)),
+            "availability_changed": availability_changed,
         }
 
     async def close_conversation(self, *, conversation_id: int) -> dict:
-        """Close a conversation and emit final system message."""
-        success = self.conversation_service.close_conversation(conversation_id)
-        if not success:
+        """Close a conversation.
+
+        Visitor-facing messages are automation-driven (no hardcoded close text).
+        """
+        conversation = self.conversation_service.close_conversation(conversation_id)
+        if not conversation:
             return {"error": "Conversation not found"}
 
-        await ChatService.send_to_visitor(
-            conversation_id,
-            {
-                "type": "system",
-                "message": "This conversation has been closed.",
-            }
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        # Optional: automation-driven system event + bot closing message.
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="conversation_resolved",
+            default_system_event_type="conversation_resolved",
+            default_bot_event_type="bot_closing",
+            log_key="conversation_resolve_automation_failed",
         )
 
         # Notify dashboards to remove/refresh the closed conversation.
@@ -550,6 +806,227 @@ class ConversationOrchestrator:
         )
 
         return {"success": True}
+
+    async def visitor_closed_chat(self, *, conversation_id: int) -> dict:
+        """Visitor explicitly ended the chat UI.
+
+        This MUST NOT resolve the conversation; only agents decide that.
+        """
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_closed_chat",
+            default_system_event_type="visitor_closed_chat",
+            default_bot_event_type="bot_visitor_closed",
+            log_key="visitor_closed_chat_automation_failed",
+        )
+
+        # Best-effort realtime notice to dashboards.
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_closed_chat",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
+        """Visitor websocket connected for an existing conversation.
+
+        This is used for Smartsupp-like timeline events (e.g. visitor connected/left).
+        These are dashboard/internal events and should not be pushed into the visitor UI.
+        """
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        if not self._should_record_presence_event(conversation=conversation):
+            return {"success": True}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_socket_connected",
+            default_system_event_type="visitor_socket_connected",
+            default_bot_event_type=None,
+            log_key="visitor_socket_connected_automation_failed",
+            send_system_events_to_visitor=False,
+            send_bot_messages_to_visitor=False,
+        )
+
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_socket_connected",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def visitor_left_website(self, *, conversation_id: int) -> dict:
+        """Visitor websocket appears to have disconnected (left the website/tab)."""
+
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        if not self._should_record_presence_event(conversation=conversation):
+            return {"success": True}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_trigger(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_left_website",
+            default_system_event_type="visitor_left_website",
+            default_bot_event_type=None,
+            log_key="visitor_left_website_automation_failed",
+            send_system_events_to_visitor=False,
+            send_bot_messages_to_visitor=False,
+        )
+
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_left_website",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def _run_automation_trigger(
+        self,
+        *,
+        conversation_id: int,
+        website_id: int | None,
+        trigger: str,
+        default_system_event_type: str | None,
+        default_bot_event_type: str | None,
+        log_key: str,
+        send_system_events_to_visitor: bool = True,
+        send_bot_messages_to_visitor: bool = True,
+    ) -> None:
+        if not website_id:
+            return
+
+        try:
+            automation_service = AutomationService(self.db)
+
+            system_actions = automation_service.get_system_event_actions(
+                website_id=int(website_id),
+                trigger=str(trigger),
+            )
+            for action in system_actions:
+                event_type = action.get("event_type") or default_system_event_type or str(trigger)
+                content = action.get("content")
+                if not content:
+                    continue
+
+                if _should_skip_due_to_repeat(
+                    db=self.db,
+                    conversation_id=conversation_id,
+                    event_type=str(event_type),
+                    repeat=action.get("repeat"),
+                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                ):
+                    continue
+
+                saved_evt = self.conversation_service.add_system_message(
+                    conversation_id,
+                    str(content),
+                    event_type=str(event_type),
+                )
+                if send_system_events_to_visitor:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "system",
+                            "message": saved_evt.content,
+                            "message_obj": serialize_message(self.db, saved_evt),
+                        },
+                    )
+
+            bot_actions = automation_service.get_bot_message_actions(
+                website_id=int(website_id),
+                trigger=str(trigger),
+            )
+            for action in bot_actions or []:
+                event_type = action.get("event_type") or default_bot_event_type
+                if not event_type:
+                    continue
+
+                if _should_skip_due_to_repeat(
+                    db=self.db,
+                    conversation_id=conversation_id,
+                    event_type=str(event_type),
+                    repeat=action.get("repeat"),
+                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
+                ):
+                    continue
+
+                saved_bot = self.conversation_service.add_bot_message(
+                    conversation_id,
+                    action["message"],
+                    event_type=str(event_type),
+                )
+                if send_bot_messages_to_visitor:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "bot",
+                            "message": action["message"],
+                            "message_obj": serialize_message(self.db, saved_bot),
+                        },
+                    )
+        except Exception as e:
+            logger.error(
+                str(log_key),
+                conversation_id=conversation_id,
+                website_id=website_id,
+                trigger=str(trigger),
+                error=str(e),
+                exc_info=True,
+            )
 
     async def handle_reconnect(
         self,

@@ -17,6 +17,7 @@ from app.models.website import Website
 from app.services.website_resolver import is_website_online
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.avatar_colors import pick_avatar_color
 from typing import Optional
 
 logger = get_logger(__name__)
@@ -35,7 +36,8 @@ class ConversationService:
     def get_or_create_conversation(
         self,
         website_id: int,
-        session_id: str
+        session_id: str,
+        visitor_ip: str | None = None,
     ) -> Conversation:
         """
         Get existing conversation or create new one.
@@ -59,6 +61,24 @@ class ConversationService:
                 conversation_id=conversation.id,
                 status=conversation.status.value
             )
+
+            # Best-effort: backfill visitor IP if newly observed.
+            try:
+                ip = str(visitor_ip or "").strip() or None
+                if ip and not getattr(conversation, "visitor_ip", None):
+                    conversation.visitor_ip = ip
+                # Best-effort: backfill avatar color.
+                if not getattr(conversation, "visitor_avatar_color", None):
+                    conversation.visitor_avatar_color = pick_avatar_color(str(conversation.session_id))
+
+                if self.db.is_modified(conversation):
+                    self.db.commit()
+                    self.db.refresh(conversation)
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
             return conversation
         
         # Get website to validate it exists
@@ -77,7 +97,9 @@ class ConversationService:
             session_id=session_id,
             status=ConversationStatus.OPEN,
             is_handoff=False,
-            assigned_agent_id=None
+            assigned_agent_id=None,
+            visitor_ip=(str(visitor_ip).strip() if visitor_ip else None),
+            visitor_avatar_color=pick_avatar_color(str(session_id)),
         )
         
         self.db.add(conversation)
@@ -171,7 +193,7 @@ class ConversationService:
     
 
     
-    def close_conversation(self, conversation_id: int) -> bool:
+    def close_conversation(self, conversation_id: int) -> Optional[Conversation]:
         """
         Resolve a conversation (OPEN → RESOLVED).
         
@@ -179,36 +201,34 @@ class ConversationService:
             conversation_id: Conversation to resolve
             
         Returns:
-            True if transition successful, False otherwise
+            Conversation if successful, None otherwise
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         
         if not conversation:
             logger.error("resolve_failed_conversation_not_found", conversation_id=conversation_id)
-            return False
+            return None
         
         if conversation.status == ConversationStatus.RESOLVED:
             logger.warning("conversation_already_resolved", conversation_id=conversation_id)
-            return True  # Already resolved is success
+            return conversation
         
         # Update status
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
         self.db.commit()
-        
-        # Add system message
-        self.add_system_message(
-            conversation_id,
-            "This conversation has been resolved."
-        )
+        try:
+            self.db.refresh(conversation)
+        except Exception:
+            pass
         
         logger.info(
             "conversation_resolved",
             conversation_id=conversation_id,
             previous_status=old_status.value
         )
-        
-        return True
+
+        return conversation
     
     def claim_conversation(
         self,
