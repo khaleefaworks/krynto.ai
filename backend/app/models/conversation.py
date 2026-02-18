@@ -25,6 +25,9 @@ class Conversation(Base, TimestampMixin):
     )
     is_handoff = Column(Boolean, default=False)
     assigned_agent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Optional website-team routing (website-scoped teams)
+    team_id = Column(Integer, ForeignKey("website_teams.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Inactivity tracking for auto-release
     last_agent_message_at = Column(DateTime, nullable=True)
@@ -44,5 +47,6 @@ class Conversation(Base, TimestampMixin):
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
 
     website = relationship("Website", back_populates="conversations")
+    team = relationship("WebsiteTeam")
     tags = relationship("ConversationTag", back_populates="conversation", cascade="all, delete-orphan")
     assigned_agent = relationship("User", foreign_keys=[assigned_agent_id])

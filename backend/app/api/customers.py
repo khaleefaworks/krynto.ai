@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from app.api.deps import require_agent
 from app.core.database import get_db
 from app.models.user import User
 from app.repos import customers as customers_repo
+from app.services.visibility import compute_visibility_scope
 
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -96,11 +97,18 @@ def get_visitors(
     recently_left_within_seconds: int = 600,
     limit: int = 200,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_agent),
+    current_user: User = Depends(require_agent),
 ):
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and not scope.website_ids:
+        return []
+    if website_id is not None and scope.website_ids is not None:
+        if int(website_id) not in set(scope.website_ids):
+            return []
     return customers_repo.list_active_visitors(
         db,
         website_id=website_id,
+        website_ids=None if scope.website_ids is None else scope.website_ids,
         recently_left_within_seconds=recently_left_within_seconds,
         limit=limit,
     )
@@ -113,12 +121,16 @@ def get_visitor_details(
     recently_left_within_seconds: int = 600,
     page_view_limit: int = 50,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_agent),
+    current_user: User = Depends(require_agent),
 ):
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and int(website_id) not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Visitor not available")
     return customers_repo.get_visitor_details(
         db,
         website_id=website_id,
         session_id=session_id,
+        team_ids=scope.team_ids,
         recently_left_within_seconds=recently_left_within_seconds,
         page_view_limit=page_view_limit,
     )
@@ -131,6 +143,9 @@ def initiate_visitor_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_agent),
 ):
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and int(website_id) not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Visitor not available")
     return customers_repo.initiate_conversation_for_visitor(
         db,
         website_id=website_id,
@@ -144,9 +159,20 @@ def get_contacts(
     website_id: int | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_agent),
+    current_user: User = Depends(require_agent),
 ):
-    return customers_repo.list_contacts(db, website_id=website_id, limit=limit)
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and not scope.website_ids:
+        return []
+    if website_id is not None and scope.website_ids is not None:
+        if int(website_id) not in set(scope.website_ids):
+            return []
+    return customers_repo.list_contacts(
+        db,
+        website_id=website_id,
+        website_ids=None if scope.website_ids is None else scope.website_ids,
+        limit=limit,
+    )
 
 
 @router.get("/contacts/{contact_key}", response_model=ContactDetailsResponse)
@@ -154,6 +180,16 @@ def get_contact_details(
     contact_key: str,
     website_id: int | None = None,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_agent),
+    current_user: User = Depends(require_agent),
 ):
-    return customers_repo.get_contact_details(db, website_id=website_id, contact_key=contact_key)
+    scope = compute_visibility_scope(db, user=current_user)
+    if website_id is not None and scope.website_ids is not None:
+        if int(website_id) not in set(scope.website_ids):
+            raise HTTPException(status_code=403, detail="Contact not available")
+    return customers_repo.get_contact_details(
+        db,
+        website_id=website_id,
+        website_ids=None if scope.website_ids is None else scope.website_ids,
+        contact_key=contact_key,
+        team_ids=scope.team_ids,
+    )

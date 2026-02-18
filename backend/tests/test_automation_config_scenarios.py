@@ -15,6 +15,7 @@ def client_and_seeded_db():
     from app.models.website import Website
     from app.models.user import User, UserRole
     from app.models.automation import Automation
+    from app.models.agent_website_assignment import AgentWebsiteAssignment
 
     init_db()
 
@@ -52,6 +53,16 @@ def client_and_seeded_db():
             except Exception:
                 pass
 
+            db.commit()
+
+        # Ensure agent 1 is assigned to website 1 (required for website-scoped delivery).
+        existing_assignment = (
+            db.query(AgentWebsiteAssignment)
+            .filter(AgentWebsiteAssignment.agent_id == 1, AgentWebsiteAssignment.website_id == 1)
+            .first()
+        )
+        if not existing_assignment:
+            db.add(AgentWebsiteAssignment(agent_id=1, website_id=1))
             db.commit()
 
         # Admin user required for POST/PUT/DELETE /automations.

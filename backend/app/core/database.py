@@ -31,5 +31,8 @@ def get_db():
 
 
 def init_db():
+    # Ensure all models are imported so metadata is complete.
+    from app import models  # noqa: F401
+
     # Create tables for all models
     Base.metadata.create_all(bind=engine)

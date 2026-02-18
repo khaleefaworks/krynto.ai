@@ -120,6 +120,7 @@ def list_active_visitors(
     db: Session,
     *,
     website_id: int | None = None,
+    website_ids: list[int] | None = None,
     recently_left_within_seconds: int = 600,
     limit: int = 200,
 ) -> List[dict]:
@@ -129,15 +130,26 @@ def list_active_visitors(
     now = _utcnow()
     cutoff = now - timedelta(seconds=recently_left_within_seconds)
 
+    allowed_websites: set[int] | None = None
+    if website_ids is not None:
+        allowed_websites = {int(w) for w in website_ids}
+        if website_id is not None:
+            allowed_websites = allowed_websites.intersection({int(website_id)})
+        if not allowed_websites:
+            return []
+
     # 1) Prefer websocket presence (online + recently disconnected).
     presence = ChatService.session_presence_snapshot(
-        website_id=website_id,
+        website_id=website_id if website_id is not None else None,
         recently_left_within_seconds=recently_left_within_seconds,
     )
     presence_by_key: Dict[Tuple[int, str], dict] = {
         (int(r["website_id"]), str(r["session_id"])): r for r in presence
         if isinstance(r, dict) and ("website_id" in r) and ("session_id" in r)
     }
+
+    if allowed_websites is not None:
+        presence_by_key = {k: v for k, v in presence_by_key.items() if int(k[0]) in allowed_websites}
 
     keys: List[Tuple[int, str]] = list(presence_by_key.keys())
 
@@ -157,6 +169,8 @@ def list_active_visitors(
     )
     if website_id is not None:
         recent_q = recent_q.filter(ConversationPageView.website_id == int(website_id))
+    elif allowed_websites is not None:
+        recent_q = recent_q.filter(ConversationPageView.website_id.in_([int(w) for w in allowed_websites]))
     recent_subq = recent_q.subquery()
     recent_rows = (
         db.query(recent_subq)
@@ -359,6 +373,7 @@ def get_visitor_details(
     *,
     website_id: int,
     session_id: str,
+    team_ids: list[int] | None = None,
     recently_left_within_seconds: int = 600,
     page_view_limit: int = 50,
 ) -> dict:
@@ -411,12 +426,19 @@ def get_visitor_details(
     )
     visits_int = int(visits or 0)
 
-    conversations = (
+    conv_q = (
         db.query(Conversation)
         .filter_by(website_id=website_id_int, session_id=session_id_str)
         .order_by(Conversation.created_at.desc())
-        .all()
     )
+    if team_ids is not None:
+        team_ids_norm = [int(t) for t in team_ids]
+        if not team_ids_norm:
+            conv_q = conv_q.filter(Conversation.team_id.is_(None))
+        else:
+            conv_q = conv_q.filter(or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
+
+    conversations = conv_q.all()
 
     visitor_initiated_chat = any(getattr(c, "last_visitor_message_at", None) is not None for c in conversations)
 
@@ -491,7 +513,9 @@ def get_contact_details(
     db: Session,
     *,
     website_id: int | None,
+    website_ids: list[int] | None = None,
     contact_key: str,
+    team_ids: list[int] | None = None,
 ) -> dict:
     contact_key_str = str(contact_key)
 
@@ -500,6 +524,29 @@ def get_contact_details(
     )
     if website_id is not None:
         q = q.filter(Conversation.website_id == int(website_id))
+    if website_ids is not None:
+        website_ids_norm = [int(w) for w in website_ids]
+        if not website_ids_norm:
+            return {
+                "contact_key": contact_key_str,
+                "website_id": int(website_id) if website_id is not None else None,
+                "name": None,
+                "email": None,
+                "phone": None,
+                "visits": 0,
+                "chats": 0,
+                "conversations": [],
+                "tags": [],
+                "last_update": None,
+            }
+        q = q.filter(Conversation.website_id.in_(website_ids_norm))
+
+    if team_ids is not None:
+        team_ids_norm = [int(t) for t in team_ids]
+        if not team_ids_norm:
+            q = q.filter(Conversation.team_id.is_(None))
+        else:
+            q = q.filter(or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
 
     conversations = q.order_by(Conversation.created_at.desc()).all()
     if not conversations:
@@ -572,6 +619,7 @@ def list_contacts(
     db: Session,
     *,
     website_id: int | None = None,
+    website_ids: list[int] | None = None,
     limit: int = 200,
 ) -> List[dict]:
     limit = max(1, min(500, int(limit)))
@@ -598,6 +646,11 @@ def list_contacts(
     )
     if website_id is not None:
         q = q.filter(Conversation.website_id == int(website_id))
+    if website_ids is not None:
+        website_ids_norm = [int(w) for w in website_ids]
+        if not website_ids_norm:
+            return []
+        q = q.filter(Conversation.website_id.in_(website_ids_norm))
 
     latest_subq = q.subquery()
 
