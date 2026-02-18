@@ -182,7 +182,7 @@
     if (!el) return;
     if (isTyping) {
       const label = el.querySelector('.chatassist-typing-label');
-      if (label) label.textContent = `${name || 'Agent'} is typing`;
+      if (label) label.textContent = 'Agent is typing';
       el.style.display = 'flex';
     } else {
       el.style.display = 'none';
@@ -585,6 +585,23 @@
     }
   }
 
+  function normalizeBareDomainUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+
+    // Strip trailing punctuation that commonly follows URLs in sentences.
+    const cleaned = s.replace(/[),.;:!?]+$/g, '');
+    if (!cleaned) return null;
+
+    // If it already has a scheme, keep it.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(cleaned)) return cleaned;
+
+    // Avoid treating emails as bare URLs.
+    if (cleaned.includes('@')) return null;
+
+    return `https://${cleaned}`;
+  }
+
   function isProbablyImageFile(file) {
     if (!file) return false;
     try {
@@ -598,12 +615,14 @@
 
   function attachmentToMarkdown(att) {
     if (!att || !att.url) return '';
-    const url = String(att.url);
-    const safeUrl = isSafeHref(url);
+    const rawUrl = String(att.url);
+    const absoluteUrl = getFullAssetUrl(rawUrl) || rawUrl;
+    const safeUrl = isSafeHref(absoluteUrl);
     if (!safeUrl) return '';
 
     if (att.kind === 'image') {
-      return `![](${safeUrl})`;
+      const alt = String(att.name || 'image').replace(/[\[\]]/g, '').trim();
+      return `![${alt || 'image'}](${safeUrl})`;
     }
     const label = String(att.name || 'attachment');
     return `[${label}](${safeUrl})`;
@@ -644,12 +663,29 @@
     }
     wrap.style.display = 'flex';
     draftAttachments.forEach((att) => {
-      const chip = document.createElement('div');
-      chip.className = 'chatassist-attachment-chip';
+      const tile = document.createElement('div');
+      tile.className = 'chatassist-attachment-tile';
 
-      const name = document.createElement('span');
-      name.className = 'chatassist-attachment-name';
-      name.textContent = String(att.name || 'attachment');
+      const thumb = document.createElement('div');
+      thumb.className = 'chatassist-attachment-thumb';
+
+      if (att.kind === 'image' && att.url) {
+        const img = document.createElement('img');
+        img.src = String(getFullAssetUrl(att.url) || att.url);
+        img.alt = String(att.name || 'image');
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        thumb.appendChild(img);
+      } else {
+        thumb.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+
+        const ext = document.createElement('div');
+        ext.className = 'chatassist-attachment-ext';
+        const raw = String(att.name || 'FILE');
+        const m = raw.toUpperCase().match(/\.([A-Z0-9]{1,6})$/);
+        ext.textContent = m ? m[1] : 'FILE';
+        tile.appendChild(ext);
+      }
 
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -661,9 +697,9 @@
         renderAttachmentChips();
       });
 
-      chip.appendChild(name);
-      chip.appendChild(remove);
-      wrap.appendChild(chip);
+      tile.appendChild(thumb);
+      tile.appendChild(remove);
+      wrap.appendChild(tile);
     });
   }
 
@@ -686,10 +722,11 @@
     }
     const data = await res.json();
     if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || CONFIG.conversationId || 0;
+    const absoluteUrl = getFullAssetUrl(data.url) || data.url;
     return {
       id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `att-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       name: data.filename || file.name || 'attachment',
-      url: data.url,
+      url: absoluteUrl,
       kind: isProbablyImageFile(file) ? 'image' : 'file',
     };
   }
@@ -703,6 +740,8 @@
       { type: 'link', re: /\[([^\]]+)\]\(([^)]+)\)/g },
       { type: 'bold', re: /\*\*([^*]+)\*\*/g },
       { type: 'italic', re: /\*([^*\n]+)\*/g },
+      // Bare domains like abc.com, docs.example.co.uk/path
+      { type: 'bare', re: /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
       { type: 'url', re: /https?:\/\/[^\s<]+/g },
     ];
 
@@ -740,6 +779,13 @@
           img.loading = 'lazy';
           img.decoding = 'async';
           img.className = 'chatassist-md-img';
+          img.style.cursor = 'zoom-in';
+          img.addEventListener('click', (e) => {
+            try {
+              e.preventDefault();
+              window.open(src, '_blank', 'noopener,noreferrer');
+            } catch (err) { }
+          });
           frag.appendChild(img);
         } else {
           frag.appendChild(document.createTextNode(full));
@@ -793,6 +839,30 @@
           frag.appendChild(a);
         } else {
           frag.appendChild(document.createTextNode(full));
+        }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bare') {
+        const display = String(full);
+        const normalized = normalizeBareDomainUrl(display);
+        const href = normalized ? isSafeHref(normalized) : null;
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = display.replace(/[),.;:!?]+$/g, '');
+          frag.appendChild(a);
+
+          // If we stripped punctuation, append it back as text.
+          const stripped = display.match(/[),.;:!?]+$/g);
+          if (stripped && stripped[0]) {
+            frag.appendChild(document.createTextNode(stripped[0]));
+          }
+        } else {
+          frag.appendChild(document.createTextNode(display));
         }
         i = best.index + full.length;
         continue;
@@ -1164,8 +1234,9 @@
               <span></span><span></span><span></span>
             </span>
           </div>
-          <div id="chatassist-attachments" style="display:none;"></div>
           <div id="chatassist-input-container">
+            <div id="chatassist-attachments" style="display:none;"></div>
+            <div id="chatassist-input-row">
             ${CONFIG.showAttachments ? `
               <input id="chatassist-file" type="file" style="display:none;" multiple />
               <button id="chatassist-attach" class="chatassist-attach" type="button" aria-label="Attach files">
@@ -1179,6 +1250,7 @@
             ` : ``}
             <input type="text" id="chatassist-input" placeholder="Type your message..." />
             <button id="chatassist-send">Send</button>
+            </div>
           </div>
           <div id="chatassist-branding">${CONFIG.brandingText}</div>
         </div>

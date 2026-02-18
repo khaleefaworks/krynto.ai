@@ -292,6 +292,8 @@ export default function ChatComposer({
                 const e = event as KeyboardEvent
                 if (!editor) return false
 
+                const isInList = editor.isActive('orderedList') || editor.isActive('bulletList') || editor.isActive('listItem')
+
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
                     e.preventDefault()
                     editor.chain().focus().toggleBold().run()
@@ -330,7 +332,20 @@ export default function ChatComposer({
                     }
                 }
 
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter') {
+                    // In lists, users rely on Shift+Enter (since Enter sends) to create the next list item.
+                    if (isInList) {
+                        e.preventDefault()
+                        editor.chain().focus().splitListItem('listItem').run()
+                        return true
+                    }
+
+                    if (e.shiftKey) {
+                        e.preventDefault()
+                        editor.chain().focus().setHardBreak().run()
+                        return true
+                    }
+
                     e.preventDefault()
                     sendNow()
                     return true
@@ -560,7 +575,7 @@ export default function ChatComposer({
                 )}
 
                 <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
-                    <div className="px-3 py-2 max-h-36 overflow-y-auto min-h-[40px]">
+                    <div className="px-3 py-4 max-h-36 overflow-y-auto min-h-[40px]">
                         <EditorContent editor={editor} />
                     </div>
 
