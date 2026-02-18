@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { 
+import {
   User,
-  Mail, 
-  Phone, 
+  Mail,
+  Phone,
   Monitor,
   Plus,
   X
@@ -33,9 +33,10 @@ interface VisitorDetailsPanelProps {
     browser_info?: string
     visit_count?: number
     last_seen_at?: string
+    visitor_avatar_color?: string | null
     created_at?: string
   }
-  notes?: Array<{ 
+  notes?: Array<{
     id: number
     content: string
     created_at: string
@@ -125,6 +126,7 @@ export default function VisitorDetailsPanel({
         <div className="flex flex-col items-center">
           <UserAvatar
             seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
+            bgColor={conversation.visitor_avatar_color}
             className="w-20 h-20 shadow-lg mb-3"
             iconClassName="w-10 h-10"
             title={conversation.visitor_name || shortSessionId(conversation.session_id)}
@@ -266,9 +268,9 @@ export default function VisitorDetailsPanel({
               <Button size="sm" onClick={handleAddNote} className="flex-1">
                 Save
               </Button>
-              <Button 
-                size="sm" 
-                variant="outline" 
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => {
                   setAddingNote(false)
                   setNewNote("")

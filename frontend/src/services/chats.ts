@@ -6,6 +6,14 @@ export type ActiveChat = {
   website_id: number
   website_name?: string
   session_id: string
+  visitor_name?: string | null
+  visitor_email?: string | null
+  visitor_phone?: string | null
+  device_info?: string | null
+  browser_info?: string | null
+  visit_count?: number | null
+  last_seen_at?: string | null
+  visitor_avatar_color?: string | null
   last_message?: string
   last_message_at?: string
   status: string

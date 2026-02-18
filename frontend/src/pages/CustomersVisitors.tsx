@@ -343,6 +343,7 @@ export default function CustomersVisitors() {
                                                     <div className="relative">
                                                         <UserAvatar
                                                             seed={String(r.session_id || 'visitor')}
+                                                            bgColor={r.visitor_avatar_color}
                                                             className="w-10 h-10"
                                                             iconClassName="w-5 h-5"
                                                             title={shortSessionId(r.session_id)}

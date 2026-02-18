@@ -172,6 +172,7 @@ interface ConversationDetails {
     browser_info?: string
     visit_count?: number
     last_seen_at?: string
+    visitor_avatar_color?: string | null
     created_at?: string
     last_message_at?: string
     status?: string
@@ -1649,6 +1650,7 @@ export default function ConversationsView() {
                                     <div className="flex items-start gap-3">
                                         <UserAvatar
                                             seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
+                                            bgColor={(chat as any).visitor_avatar_color}
                                             className="w-12 h-12 flex-shrink-0"
                                             iconClassName="w-6 h-6"
                                             title={(chat as any).visitor_name || shortSessionId(chat.session_id)}
@@ -1698,6 +1700,7 @@ export default function ConversationsView() {
                             <div className="flex items-center gap-3 min-w-0">
                                 <UserAvatar
                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                    bgColor={conversation?.visitor_avatar_color}
                                     className="w-10 h-10 flex-shrink-0"
                                     iconClassName="w-5 h-5"
                                     title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
@@ -1906,6 +1909,7 @@ export default function ConversationsView() {
                                                             {!isAgent && (
                                                                 <UserAvatar
                                                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                                                    bgColor={conversation?.visitor_avatar_color}
                                                                     className="w-8 h-8 flex-shrink-0"
                                                                     iconClassName="w-4 h-4"
                                                                     title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
@@ -2227,6 +2231,7 @@ export default function ConversationsView() {
                             </Button>
                             <UserAvatar
                                 seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                bgColor={conversation?.visitor_avatar_color}
                                 className="w-10 h-10"
                                 iconClassName="w-5 h-5"
                                 title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}

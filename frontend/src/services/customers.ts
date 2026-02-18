@@ -9,6 +9,7 @@ export interface CustomerVisitor {
     visitor_initiated_chat: boolean
     agent_joined: boolean
     assigned_agent: { id: number; name: string | null; avatar_url: string | null } | null
+    visitor_avatar_color?: string | null
     current_page: {
         title: string | null
         url: string
@@ -39,6 +40,7 @@ export interface CustomerVisitorDetails {
     session_id: string
     is_online: boolean
     online_seconds: number | null
+    visitor_avatar_color?: string | null
     visitor_initiated_chat: boolean
     agent_joined: boolean
     assigned_agent: { id: number; name: string | null; avatar_url: string | null } | null

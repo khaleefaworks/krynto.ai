@@ -31,6 +31,7 @@ class VisitorResponse(BaseModel):
     visitor_initiated_chat: bool = False
     agent_joined: bool = False
     assigned_agent: Dict[str, Any] | None = None
+    visitor_avatar_color: str | None = None
     current_page: CurrentPage
     came_from: str | None = None
     visits: int
@@ -43,6 +44,7 @@ class VisitorDetailsResponse(BaseModel):
     session_id: str
     is_online: bool
     online_seconds: int | None = None
+    visitor_avatar_color: str | None = None
     visitor_initiated_chat: bool = False
     agent_joined: bool = False
     assigned_agent: Dict[str, Any] | None = None

@@ -14,6 +14,7 @@ from app.models.conversation_tag import ConversationTag
 from app.models.tag import Tag
 from app.models.user import User
 from app.services.chat_service import ChatService
+from app.core.avatar_colors import pick_avatar_color
 
 
 def initiate_conversation_for_visitor(
@@ -43,11 +44,14 @@ def initiate_conversation_for_visitor(
         cid = int(existing.id)
         # Ensure agent assignment.
         try:
+            if not getattr(existing, "visitor_avatar_color", None):
+                existing.visitor_avatar_color = pick_avatar_color(session_id_str)
             if not getattr(existing, "assigned_agent_id", None):
                 existing.assigned_agent_id = agent_id_int
                 existing.is_handoff = True
                 if getattr(existing, "last_agent_message_at", None) is None:
                     existing.last_agent_message_at = datetime.utcnow()
+            if db.is_modified(existing):
                 db.commit()
         except Exception:
             try:
@@ -72,6 +76,7 @@ def initiate_conversation_for_visitor(
         is_handoff=True,
         assigned_agent_id=agent_id_int,
         last_agent_message_at=datetime.utcnow(),
+        visitor_avatar_color=pick_avatar_color(session_id_str),
     )
 
     db.add(conv)
@@ -253,6 +258,7 @@ def list_active_visitors(
             Conversation.session_id.label("session_id"),
             Conversation.id.label("conversation_id"),
             Conversation.assigned_agent_id.label("assigned_agent_id"),
+            Conversation.visitor_avatar_color.label("visitor_avatar_color"),
             latest_conv_rank,
         )
         .filter(tuple_(Conversation.website_id, Conversation.session_id).in_(key_tuples))
@@ -267,6 +273,7 @@ def list_active_visitors(
         latest_conv_by_key[k] = {
             "conversation_id": int(r.conversation_id) if r.conversation_id is not None else None,
             "assigned_agent_id": assigned_id,
+            "visitor_avatar_color": getattr(r, "visitor_avatar_color", None),
         }
         if assigned_id is not None:
             assigned_agent_ids.add(int(assigned_id))
@@ -343,6 +350,7 @@ def list_active_visitors(
         latest_conv = latest_conv_by_key.get((wid, sid), {})
         assigned_id = latest_conv.get("assigned_agent_id")
         assigned_agent = agent_by_id.get(int(assigned_id)) if assigned_id is not None else None
+        visitor_avatar_color = latest_conv.get("visitor_avatar_color") or pick_avatar_color(str(sid))
 
         result.append(
             {
@@ -354,6 +362,7 @@ def list_active_visitors(
                 "visitor_initiated_chat": bool(visitor_initiated_map.get((wid, sid), False)),
                 "agent_joined": bool(assigned_id is not None),
                 "assigned_agent": assigned_agent,
+                "visitor_avatar_color": visitor_avatar_color,
                 "current_page": {
                     "title": latest_info.get("title"),
                     "url": url,
@@ -440,6 +449,12 @@ def get_visitor_details(
 
     conversations = conv_q.all()
 
+    visitor_avatar_color = None
+    if conversations:
+        visitor_avatar_color = getattr(conversations[0], "visitor_avatar_color", None)
+    if not visitor_avatar_color:
+        visitor_avatar_color = pick_avatar_color(session_id_str)
+
     visitor_initiated_chat = any(getattr(c, "last_visitor_message_at", None) is not None for c in conversations)
 
     latest_assigned_agent = None
@@ -494,6 +509,7 @@ def get_visitor_details(
         "session_id": session_id_str,
         "is_online": is_online,
         "online_seconds": online_seconds,
+        "visitor_avatar_color": visitor_avatar_color,
         "visitor_initiated_chat": bool(visitor_initiated_chat),
         "agent_joined": bool(latest_assigned_agent is not None),
         "assigned_agent": latest_assigned_agent,

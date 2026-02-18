@@ -43,6 +43,9 @@ class Conversation(Base, TimestampMixin):
     visit_count = Column(Integer, default=1, nullable=False)  # Number of visits by this visitor
     last_seen_at = Column(DateTime, nullable=True)  # When visitor was last active
 
+    # UI: persisted avatar background color (hex), stable per visitor/session
+    visitor_avatar_color = Column(String(16), nullable=True)
+
     # Read state for visitor
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
 

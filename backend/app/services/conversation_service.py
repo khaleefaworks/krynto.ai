@@ -17,6 +17,7 @@ from app.models.website import Website
 from app.services.website_resolver import is_website_online
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.avatar_colors import pick_avatar_color
 from typing import Optional
 
 logger = get_logger(__name__)
@@ -66,6 +67,11 @@ class ConversationService:
                 ip = str(visitor_ip or "").strip() or None
                 if ip and not getattr(conversation, "visitor_ip", None):
                     conversation.visitor_ip = ip
+                # Best-effort: backfill avatar color.
+                if not getattr(conversation, "visitor_avatar_color", None):
+                    conversation.visitor_avatar_color = pick_avatar_color(str(conversation.session_id))
+
+                if self.db.is_modified(conversation):
                     self.db.commit()
                     self.db.refresh(conversation)
             except Exception:
@@ -93,6 +99,7 @@ class ConversationService:
             is_handoff=False,
             assigned_agent_id=None,
             visitor_ip=(str(visitor_ip).strip() if visitor_ip else None),
+            visitor_avatar_color=pick_avatar_color(str(session_id)),
         )
         
         self.db.add(conversation)
