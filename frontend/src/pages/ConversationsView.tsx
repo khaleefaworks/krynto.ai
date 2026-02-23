@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useLayoutEffect, useCallback } from 'react'
-import { useLocation, useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState, useRef, useLayoutEffect, useCallback } from 'react'
+import { Link, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input'
 import ChatComposer from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { isAdmin } from '@/lib/roles'
 import {
     Check,
     MessageSquare,
@@ -36,7 +38,8 @@ import {
     PanelRightOpen,
     Inbox,
     Users,
-    Bot
+    Bot,
+    Plus
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -127,9 +130,24 @@ function getVisitorAvatarSeed(visitorName: string | null | undefined, sessionId:
     return name || 'visitor'
 }
 
-function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
-    const raw = String(hexColor || '').trim()
-    if (!raw.startsWith('#')) return 'white'
+function isDarkMode(): boolean {
+    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+}
+
+function getTagPillBackground(color: unknown): string {
+    const raw = String(color || '').trim()
+    if (!raw) return 'transparent'
+
+    // A bit stronger in dark mode so it stays visible.
+    const alpha = isDarkMode() ? 0.30 : 0.18
+    const pct = `${Math.round(alpha * 100)}%`
+
+    // If it's a valid CSS color but not hex, lean on color-mix.
+    if (!raw.startsWith('#')) {
+        // color-mix() is supported in modern Chromium/Firefox/Safari.
+        // If unsupported, browser will drop it and we fall back to transparent.
+        return `color-mix(in srgb, ${raw} ${pct}, transparent)`
+    }
 
     const hex = raw.slice(1)
     const normalized =
@@ -139,15 +157,24 @@ function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
                 ? hex
                 : ''
 
-    if (!normalized) return 'white'
+    if (!normalized) return 'transparent'
     const r = parseInt(normalized.slice(0, 2), 16)
     const g = parseInt(normalized.slice(2, 4), 16)
     const b = parseInt(normalized.slice(4, 6), 16)
-    if (![r, g, b].every((n) => Number.isFinite(n))) return 'white'
+    if (![r, g, b].every((n) => Number.isFinite(n))) return 'transparent'
 
-    // Relative luminance (sRGB), quick approximation is good enough here.
-    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-    return luminance > 0.6 ? 'black' : 'white'
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function TagIcon({ className }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 24 24" focusable="false" role="presentation" className={className} aria-hidden="true">
+            <path
+                fill="currentColor"
+                d="M21.41 11.58L12.41 2.58A2 2 0 0 0 11 2H4A2 2 0 0 0 2 4V11A2 2 0 0 0 2.59 12.42L11.59 21.42A2 2 0 0 0 13 22A2 2 0 0 0 14.41 21.41L21.41 14.41A2 2 0 0 0 22 13A2 2 0 0 0 21.41 11.58M13 20L4 11V4H11L20 13M6.5 5A1.5 1.5 0 1 1 5 6.5A1.5 1.5 0 0 1 6.5 5Z"
+            ></path>
+        </svg>
+    )
 }
 
 interface ConversationDetails {
@@ -250,7 +277,23 @@ export default function ConversationsView() {
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
-    const [tagToAddId, setTagToAddId] = useState<string>('')
+
+    const [tagPickerOpen, setTagPickerOpen] = useState(false)
+    const [tagPickerQuery, setTagPickerQuery] = useState('')
+
+    const unassignedTags = useMemo(() => {
+        const assigned = new Set(conversationTags.map((t: any) => Number(t?.id)))
+        return availableTags
+            .filter((t: any) => !assigned.has(Number(t?.id)))
+            .slice()
+            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+    }, [availableTags, conversationTags])
+
+    const filteredUnassignedTags = useMemo(() => {
+        const q = String(tagPickerQuery || '').trim().toLowerCase()
+        if (!q) return unassignedTags
+        return unassignedTags.filter((t: any) => String(t?.name || '').toLowerCase().includes(q))
+    }, [unassignedTags, tagPickerQuery])
 
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
@@ -1045,17 +1088,16 @@ export default function ConversationsView() {
                 body: JSON.stringify({ tag_id: tagId })
             })
             // Update local state
-            const tag = availableTags.find(t => t.id === tagId)
+            const tag = availableTags.find(t => Number((t as any)?.id) === tagId)
             if (tag) {
-                setConversationTags(prev => [...prev.filter(t => t.id !== tagId), tag])
+                setConversationTags(prev => [...prev.filter(t => Number((t as any)?.id) !== tagId), tag])
             }
             // Also update in activeChats list to keep it in sync
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
-                    ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => t.id !== tagId), tag] }
+                    ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId), tag] }
                     : c
             ))
-            setTagToAddId('')
         } catch (error) {
             console.error("Failed to add tag:", error)
         }
@@ -1068,11 +1110,11 @@ export default function ConversationsView() {
                 method: 'DELETE'
             })
             // Update local state
-            setConversationTags(prev => prev.filter(t => t.id !== tagId))
+            setConversationTags(prev => prev.filter(t => Number((t as any)?.id) !== tagId))
             // Also update in activeChats list
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
-                    ? { ...c, tags: ((c as any).tags || []).filter((t: any) => t.id !== tagId) }
+                    ? { ...c, tags: ((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId) }
                     : c
             ))
         } catch (error) {
@@ -1649,70 +1691,121 @@ export default function ConversationsView() {
                         </div>
 
                         {/* Tags Row (below header) */}
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2 min-w-0">
-                                {conversationTags.length === 0 ? (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">No tags</span>
-                                ) : (
-                                    conversationTags
-                                        .slice()
-                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                        .map((t: any) => (
-                                            <Badge
-                                                key={t.id}
-                                                variant="secondary"
-                                                className="gap-1 border border-transparent"
-                                                style={{
-                                                    backgroundColor: String(t?.color || ''),
-                                                    color: getContrastTextColor(t?.color),
-                                                }}
-                                            >
-                                                <span className="truncate max-w-40">{t.name}</span>
-                                                <button
-                                                    type="button"
-                                                    className="ml-1 opacity-80 hover:opacity-100"
-                                                    onClick={() => handleRemoveTag(Number(t.id))}
-                                                    aria-label={`Remove tag ${String(t.name || '')}`}
-                                                    title="Remove"
-                                                >
-                                                    ×
-                                                </button>
-                                            </Badge>
-                                        ))
-                                )}
-                            </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {conversationTags
+                                .slice()
+                                .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                                .map((t: any) => (
+                                    <Badge
+                                        key={t.id}
+                                        variant="outline"
+                                        className="gap-1"
+                                        style={{
+                                            borderColor: String(t?.color || ''),
+                                            color: String(t?.color || ''),
+                                            backgroundColor: getTagPillBackground(t?.color),
+                                        }}
+                                    >
+                                        <span className="truncate max-w-40">{t.name}</span>
+                                        <button
+                                            type="button"
+                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                            onClick={() => handleRemoveTag(Number(t.id))}
+                                            aria-label={`Remove tag ${String(t.name || '')}`}
+                                            title="Remove"
+                                        >
+                                            ×
+                                        </button>
+                                    </Badge>
+                                ))}
 
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                <select
-                                    value={tagToAddId}
-                                    onChange={(e) => setTagToAddId(e.target.value)}
-                                    className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 text-sm text-gray-900 dark:text-white"
-                                >
-                                    <option value="">Add tag…</option>
-                                    {availableTags
-                                        .filter((t: any) => !conversationTags.some((ct: any) => ct?.id === t?.id))
-                                        .slice()
-                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                        .map((t: any) => (
-                                            <option key={t.id} value={String(t.id)}>
-                                                {String(t.name || '')}
-                                            </option>
-                                        ))}
-                                </select>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                        const id = Number(tagToAddId)
-                                        if (!Number.isFinite(id) || id <= 0) return
-                                        handleAddTag(id)
-                                    }}
-                                    disabled={!tagToAddId}
-                                >
-                                    Add
-                                </Button>
-                            </div>
+                            <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
+                                <PopoverTrigger asChild>
+                                    {conversationTags.length === 0 ? (
+                                        <Button
+                                            type="button"
+                                            variant="link"
+                                            className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                        >
+                                            <TagIcon className="h-4 w-4" />
+                                            Tag conversation
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-7 w-7 rounded-full"
+                                            aria-label="Add tag"
+                                            title="Add tag"
+                                        >
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    )}
+                                </PopoverTrigger>
+
+                                <PopoverContent align="start" className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg">
+                                    <div className="space-y-2">
+                                        <Input
+                                            value={tagPickerQuery}
+                                            onChange={(e) => setTagPickerQuery(e.target.value)}
+                                            placeholder="Search tags…"
+                                            className="h-9"
+                                            autoFocus
+                                        />
+
+                                        <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                            {filteredUnassignedTags.length === 0 ? (
+                                                <div className="p-2 text-xs text-gray-500 dark:text-gray-400">
+                                                    No matching tags
+                                                </div>
+                                            ) : (
+                                                <div className="p-1">
+                                                    {filteredUnassignedTags.map((t: any) => (
+                                                        <button
+                                                            key={t.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const id = Number(t?.id)
+                                                                if (!Number.isFinite(id) || id <= 0) return
+                                                                handleAddTag(id)
+                                                                setTagPickerOpen(false)
+                                                                setTagPickerQuery('')
+                                                            }}
+                                                            className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                        >
+                                                            <span className="truncate">{String(t?.name || '')}</span>
+                                                            <span
+                                                                className="inline-flex h-2.5 w-2.5 rounded-full border"
+                                                                style={{
+                                                                    borderColor: String(t?.color || ''),
+                                                                    backgroundColor: String(t?.color || ''),
+                                                                }}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {isAdmin(user) ? (
+                                            <div className="pt-1 text-right">
+                                                <Link
+                                                    to="/dashboard/settings/tags"
+                                                    className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                    onClick={() => {
+                                                        setTagPickerOpen(false)
+                                                        setTagPickerQuery('')
+                                                    }}
+                                                >
+                                                    Manage tags
+                                                </Link>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
                         </div>
 
                     </div>
