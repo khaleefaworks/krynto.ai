@@ -11,6 +11,7 @@ CRITICAL: This must be used by:
 """
 
 from app.core.database import SessionLocal
+from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.website import Website
 from app.models.user import User, UserRole
 from app.repos import users as users_repo
@@ -57,11 +58,21 @@ def is_website_online(website_id: int) -> bool:
         if not is_within_office_hours(getattr(website, "widget_config", None) or {}):
             return False
 
-        # Product decision: agent-website assignment UI removed.
-        # Treat any eligible agent as able to serve any website.
+        # Website online status is assignment-based.
+        # If no agents are assigned, the website is offline.
+        assignment_rows = (
+            db.query(AgentWebsiteAssignment.agent_id)
+            .filter(AgentWebsiteAssignment.website_id == int(website_id))
+            .all()
+        )
+        assigned_agent_ids = sorted({int(r[0]) for r in assignment_rows})
+        if not assigned_agent_ids:
+            return False
+
         assigned_agents = (
             db.query(User)
             .filter(
+                User.id.in_(assigned_agent_ids),
                 User.is_active == True,  # noqa: E712
                 User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
             )

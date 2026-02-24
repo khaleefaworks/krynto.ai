@@ -155,8 +155,8 @@ async def update_availability(
     db.refresh(current_user)
 
     # Push presence updates to all connected visitor widgets.
-    # Presence currently treats eligible agents as available for ANY website.
-    # So a single agent toggling availability can affect multiple sites.
+    # Presence is website-scoped and assignment-based.
+    # So a single agent toggling availability can affect any websites they're assigned to.
     try:
         await PresenceService.broadcast_all()
     except Exception:
