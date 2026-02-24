@@ -465,23 +465,23 @@ export default function AgentDetail() {
                 onChange={(e) => setFormData({ ...formData, role: e.target.value as 'system_manager' | 'manager' | 'agent' })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 required
-                disabled={!isNew && agent?.role === 'system_manager' && !isAdministrator(currentUser)}
+                disabled={saving || (!isNew && isAdministratorAccount)}
               >
-                <option value="agent">Agent - Chat handling only</option>
-                <option value="manager">Manager - Full access except reset</option>
-                {/* System Manager is reserved for the one-time bootstrap admin.
-                    We never allow selecting it during user creation or role changes. */}
-                {!isNew && agent?.role === 'system_manager' && (
-                  <option value="system_manager" disabled>System Manager - Full system access</option>
+                {isAdministratorAccount ? (
+                  <option value="system_manager">System Manager - Full system access</option>
+                ) : (
+                  <>
+                    <option value="agent">Agent - Chat handling only</option>
+                    <option value="manager">Manager - Full access except reset</option>
+                  </>
                 )}
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {isNew
                   ? 'Determines user permissions and access level'
-                  : !isAdministrator(currentUser) && agent?.role === 'full_access'
-                    ? 'Only administrators can modify administrator accounts'
-                    : 'Change user role to update permissions'
-                }
+                  : isAdministratorAccount
+                    ? 'Administrator account role is fixed (bootstrap-only)'
+                    : 'Change user role to update permissions'}
               </p>
             </div>
           </CardContent>

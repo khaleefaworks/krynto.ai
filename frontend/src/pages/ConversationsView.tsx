@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import ChatComposer from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
+import Logo from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { isAdmin } from '@/lib/roles'
@@ -1978,44 +1979,14 @@ export default function ConversationsView() {
             ) : (
                 /* Empty State */
                 <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-                    <div className="text-center text-gray-400 dark:text-gray-600 max-w-2xl px-8">
-                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
-                            <MessageSquare className="h-12 w-12 text-white" />
+                    <div className="text-center max-w-2xl px-8">
+                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                            <Logo size={56} />
                         </div>
-                        <h2 className="text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">Have a moment?</h2>
-                        <p className="text-gray-500 dark:text-gray-400 mb-8">
-                            Great! Use the spare time and learn some best practices for supporting visitors.
+                        <h2 className="text-2xl font-semibold mb-3 text-gray-900 dark:text-white">Select a conversation</h2>
+                        <p className="text-gray-600 dark:text-gray-400">
+                            Choose a chat from the list to view messages and reply.
                         </p>
-
-                        <div className="space-y-4 text-left">
-                            <div className="flex gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg">
-                                <div className="flex-shrink-0">
-                                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                                        <MessageSquare className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Customize the chat box to match your website</h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                                        With a good profile picture, personalized brand colors, and friendly texts, you'll make the right impression.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg">
-                                <div className="flex-shrink-0">
-                                    <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
-                                        <Check className="h-5 w-5 text-green-600 dark:text-green-400" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Discover how the live chat works</h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                                        We'll show you how to work with the live chat and you'll be able to attend to your first visitor in no time.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}

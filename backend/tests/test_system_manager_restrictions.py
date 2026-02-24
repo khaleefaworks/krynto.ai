@@ -29,6 +29,21 @@ def client_and_seeded_db():
             )
             db.commit()
 
+        # Secondary administrator for tests that must avoid "cannot change your own role".
+        if not db.query(User).filter_by(id=3).first():
+            db.add(
+                User(
+                    id=3,
+                    name="Administrator 2",
+                    email="administrator2@chatassist.system",
+                    password_hash="x",
+                    role=UserRole.SYSTEM_MANAGER,
+                    is_active=True,
+                    is_available=True,
+                )
+            )
+            db.commit()
+
         # Ensure a normal user exists for role-update tests.
         if not db.query(User).filter_by(id=1).first():
             db.add(
@@ -83,3 +98,18 @@ def test_role_update_rejects_promote_to_system_manager(client_and_seeded_db):
 
     assert resp.status_code == 400
     assert "bootstrap" in (resp.json().get("detail") or "").lower()
+
+
+def test_role_update_rejects_demote_system_manager(client_and_seeded_db):
+    from app.core.security import create_access_token
+
+    token = create_access_token({"user_id": 3})
+
+    resp = client_and_seeded_db.patch(
+        "/users/2/role",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "manager"},
+    )
+
+    assert resp.status_code == 400
+    assert "cannot be changed" in (resp.json().get("detail") or "").lower()

@@ -390,6 +390,14 @@ def update_user_role(
             detail="User not found"
         )
 
+    # System Manager is a bootstrap-only Administrator account.
+    # Do not allow changing its role (including demotion).
+    if user.role == UserRole.SYSTEM_MANAGER and payload.role != UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Administrator account role cannot be changed",
+        )
+
     # System Manager role is reserved for the one-time bootstrap administrator.
     # Do not allow promoting other accounts to SYSTEM_MANAGER.
     if payload.role == UserRole.SYSTEM_MANAGER and user.role != UserRole.SYSTEM_MANAGER:
