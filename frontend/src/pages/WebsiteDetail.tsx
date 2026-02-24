@@ -1458,7 +1458,7 @@ export default function WebsiteDetail() {
                                 .filter((u) => !assignedIds.has(u.id))
                                 .filter((u) => {
                                   const role = String((u as any).role || '').toLowerCase()
-                                  return !role || role.includes('agent')
+                                  return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
                                 })
 
                               if (candidates.length === 0) {
