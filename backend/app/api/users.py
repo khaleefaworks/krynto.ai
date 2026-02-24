@@ -389,6 +389,14 @@ def update_user_role(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+
+    # System Manager role is reserved for the one-time bootstrap administrator.
+    # Do not allow promoting other accounts to SYSTEM_MANAGER.
+    if payload.role == UserRole.SYSTEM_MANAGER and user.role != UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="System Manager role can only be created during initial bootstrap",
+        )
     
     # Prevent changing your own role
     if user.id == current_admin.id:

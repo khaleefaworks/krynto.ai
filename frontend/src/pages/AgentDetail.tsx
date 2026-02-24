@@ -469,13 +469,10 @@ export default function AgentDetail() {
               >
                 <option value="agent">Agent - Chat handling only</option>
                 <option value="manager">Manager - Full access except reset</option>
-                {/* Only administrators can create/modify administrator role */}
-                {isAdministrator(currentUser) && (
-                  <option value="system_manager">System Manager - Full system access</option>
-                )}
-                {/* Show current administrator role if editing an admin (but disabled) */}
-                {!isAdministrator(currentUser) && agent?.role === 'full_access' && (
-                  <option value="full_access" disabled>Administrator - Full system access</option>
+                {/* System Manager is reserved for the one-time bootstrap admin.
+                    We never allow selecting it during user creation or role changes. */}
+                {!isNew && agent?.role === 'system_manager' && (
+                  <option value="system_manager" disabled>System Manager - Full system access</option>
                 )}
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
