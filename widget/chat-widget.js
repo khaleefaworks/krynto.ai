@@ -178,6 +178,97 @@
     container.style.display = 'none';
   }
 
+  // --- Message Popup (Smartsupp-style notification above bubble) ---
+
+  let dotsPreviewTimer = null;
+  let msgPopupTimer = null;
+
+  function showDotsPreview() {
+    hideMessagePopup(true);
+    const el = document.getElementById('chatassist-dots-preview');
+    if (el) el.classList.add('chatassist-dots-visible');
+  }
+
+  function hideDotsPreview() {
+    const el = document.getElementById('chatassist-dots-preview');
+    if (el) el.classList.remove('chatassist-dots-visible');
+    if (dotsPreviewTimer) {
+      clearTimeout(dotsPreviewTimer);
+      dotsPreviewTimer = null;
+    }
+  }
+
+  function showMessagePopup(senderName, avatarUrl, messageText) {
+    hideDotsPreview();
+
+    const popup = document.getElementById('chatassist-msg-popup');
+    const nameEl = document.getElementById('chatassist-popup-name');
+    const bodyEl = document.getElementById('chatassist-popup-body');
+    const avatarWrap = document.getElementById('chatassist-popup-avatar-wrap');
+
+    if (!popup) return;
+
+    if (nameEl) nameEl.textContent = senderName || 'Support';
+    if (bodyEl) {
+      const plain = String(messageText || '').replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
+      const truncated = plain.slice(0, 150);
+      bodyEl.textContent = truncated + (plain.length > 150 ? '\u2026' : '');
+    }
+    if (avatarWrap) {
+      const url = getFullAssetUrl(avatarUrl);
+      if (url) {
+        avatarWrap.className = 'chatassist-popup-avatar';
+        avatarWrap.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = senderName || 'Agent';
+        img.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+        avatarWrap.appendChild(img);
+      } else {
+        avatarWrap.className = 'chatassist-popup-avatar-placeholder';
+        const initials = (senderName || 'S').trim().split(/\s+/).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || 'S';
+        avatarWrap.innerHTML = '';
+        avatarWrap.textContent = initials;
+      }
+    }
+
+    popup.classList.add('chatassist-popup-visible');
+
+    if (msgPopupTimer) clearTimeout(msgPopupTimer);
+    msgPopupTimer = setTimeout(function () { hideMessagePopup(); }, 8000);
+  }
+
+  function hideMessagePopup(skipAnimation) {
+    const popup = document.getElementById('chatassist-msg-popup');
+    if (!popup) return;
+    if (msgPopupTimer) {
+      clearTimeout(msgPopupTimer);
+      msgPopupTimer = null;
+    }
+    if (skipAnimation) {
+      popup.classList.remove('chatassist-popup-visible');
+      popup.style.animation = '';
+      return;
+    }
+    popup.style.animation = 'chatassist-popup-out 0.25s ease-in forwards';
+    popup.addEventListener('animationend', function onEnd() {
+      popup.removeEventListener('animationend', onEnd);
+      popup.classList.remove('chatassist-popup-visible');
+      popup.style.animation = '';
+    }, { once: true });
+  }
+
+  function notifyNewMessage(senderName, avatarUrl, messageText) {
+    if (isWidgetOpen() && !document.hidden) return;
+    bumpUnread();
+    playNotificationSound();
+    showDotsPreview();
+    dotsPreviewTimer = setTimeout(function () {
+      hideDotsPreview();
+      showMessagePopup(senderName, avatarUrl, messageText);
+    }, 1200);
+  }
+
   function setAgentTyping(isTyping, name) {
     const el = document.getElementById('chatassist-typing');
     if (!el) return;
@@ -372,6 +463,7 @@
       if (!container) return;
       container.innerHTML = '';
       lastAppendedDateStr = null;
+      container.classList.add('chatassist-no-animate');
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -398,6 +490,7 @@
           appendMessage('ai', m.content, m.created_at, null, m.id);
         }
       });
+      container.classList.remove('chatassist-no-animate');
       updateEmptyState();
       isAtBottom = true;
       smartScroll();
@@ -428,9 +521,7 @@
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
         if (!isWidgetOpen() || document.hidden) {
-          bumpUnread();
-          playNotificationSound();
-          showToast('New message');
+          notifyNewMessage('Support', null, data.message);
         } else if (isAtBottom) {
           markRead();
         }
@@ -444,9 +535,7 @@
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       if (!isWidgetOpen() || document.hidden) {
-        bumpUnread();
-        playNotificationSound();
-        showToast('New message');
+        notifyNewMessage('Support', null, data.message);
       } else if (isAtBottom) {
         markRead();
       }
@@ -471,9 +560,7 @@
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
       if (!isWidgetOpen() || document.hidden) {
-        bumpUnread();
-        playNotificationSound();
-        showToast('New message');
+        notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
       } else if (isAtBottom) {
         markRead();
       }
@@ -1280,9 +1367,29 @@
     container.id = 'chatassist-widget';
     container.innerHTML = `
       <div id="chatassist-bubble">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-        <span id="chatassist-bubble-unread" style="display:none;"></span>
-        <div id="chatassist-bubble-text">${CONFIG.bubbleText}</div>
+        <div id="chatassist-dots-preview">
+          <span></span><span></span><span></span>
+        </div>
+        <div id="chatassist-msg-popup">
+          <div class="chatassist-popup-header">
+            <div id="chatassist-popup-avatar-wrap" class="chatassist-popup-avatar-placeholder">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="chatassist-popup-name" id="chatassist-popup-name">Support</div>
+            <button class="chatassist-popup-close" id="chatassist-popup-close" type="button">&times;</button>
+          </div>
+          <div class="chatassist-popup-body" id="chatassist-popup-body"></div>
+          <button class="chatassist-popup-reply" id="chatassist-popup-reply" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            Reply
+          </button>
+        </div>
+        <div id="chatassist-bubble-pill">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span id="chatassist-bubble-text">${CONFIG.bubbleText}</span>
+          <span id="chatassist-bubble-unread" style="display:none;"></span>
+          <div id="chatassist-bubble-online-dot"></div>
+        </div>
       </div>
       <div id="chatassist-window" style="display: none;">
         <div id="chatassist-contact-overlay" class="chatassist-contact-overlay">
@@ -1317,18 +1424,19 @@
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
               <div id="chatassist-header-icon-inner"></div>
-              <span id="chatassist-presence-badge" class="chatassist-presence-badge"></span>
             </div>
             <div class="chatassist-header-info">
               <span class="chatassist-header-title">${CONFIG.headerTitle}</span>
-              <div class="chatassist-online-status"><span class="chatassist-online-text">${CONFIG.onlineStatusText}</span></div>
+              <div class="chatassist-online-status"><span class="chatassist-online-dot"></span><span class="chatassist-online-text">${CONFIG.onlineStatusText}</span></div>
             </div>
           </div>
           <div class="chatassist-header-actions">
             <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </button>
-            <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">&times;</button>
+            <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
           </div>
         </div>
         <div id="chatassist-messages"></div>
@@ -1362,7 +1470,7 @@
               </button>
             ` : ``}
             <textarea id="chatassist-input" placeholder="Type your message..." rows="1"></textarea>
-            <button id="chatassist-send">Send</button>
+            <button id="chatassist-send" aria-label="Send message"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
             </div>
           </div>
           <div id="chatassist-branding">${CONFIG.brandingText}</div>
@@ -1378,26 +1486,42 @@
     const win = document.getElementById('chatassist-window');
     const input = document.getElementById('chatassist-input');
 
-    bubble.addEventListener('click', () => {
+    function openWidget() {
       enableNotificationSound();
       setUnreadCount(0);
       markRead();
+      hideDotsPreview();
+      hideMessagePopup(true);
       bubble.style.display = 'none';
       win.style.display = 'flex';
+      // Re-trigger open animation
+      win.classList.remove('chatassist-window-closing');
+      win.style.animation = 'none';
+      win.offsetHeight; // force reflow
+      win.style.animation = '';
       input.focus();
       isAtBottom = true;
       hideNewMsgIndicator();
-      // Allow layout to settle before scrolling (avoids race with display:flex paint).
-      setTimeout(() => { scrollToBottom(false); }, 50);
-      // Ensure End button state is applied on reopen.
+      setTimeout(function () { scrollToBottom(false); }, 50);
       if (endChatDisabled) setEndChatDisabled(true);
-    });
+    }
+
+    function closeWidget(restoreOverlay) {
+      win.classList.add('chatassist-window-closing');
+      win.addEventListener('animationend', function onEnd() {
+        win.removeEventListener('animationend', onEnd);
+        win.classList.remove('chatassist-window-closing');
+        win.style.display = 'none';
+        bubble.style.display = 'inline-flex';
+      }, { once: true });
+      if (restoreOverlay) hideContactOverlay(true);
+      hideEndOverlay();
+    }
+
+    bubble.addEventListener('click', openWidget);
 
     document.getElementById('chatassist-minimize').addEventListener('click', () => {
-      win.style.display = 'none';
-      bubble.style.display = 'flex';
-      hideContactOverlay(true);
-      hideEndOverlay();
+      closeWidget(true);
     });
 
     document.getElementById('chatassist-end').addEventListener('click', () => {
@@ -1420,14 +1544,23 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      win.style.display = 'none';
-      bubble.style.display = 'flex';
-      hideContactOverlay(true);
+      closeWidget(true);
     });
 
     document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
+
+    // Popup notification buttons
+    document.getElementById('chatassist-popup-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      hideMessagePopup();
+    });
+    document.getElementById('chatassist-popup-reply').addEventListener('click', function (e) {
+      e.stopPropagation();
+      hideMessagePopup(true);
+      openWidget();
+    });
 
     if (CONFIG.showAttachments) {
       const fileInput = document.getElementById('chatassist-file');
@@ -1614,18 +1747,19 @@
   function applyPresence(presence) {
     const titleEl = document.querySelector('.chatassist-header-title');
     const statusTextEl = document.querySelector('.chatassist-online-text');
-    const badgeEl = document.getElementById('chatassist-presence-badge');
     if (!titleEl || !statusTextEl) return;
 
     const count = presence.available_agents_count ?? (presence.agents?.length || 0);
     presenceOnline = count > 0;
     if (presenceOnline) hideContactOverlay(false);
 
-    if (badgeEl) {
-      badgeEl.style.display = 'flex';
-      badgeEl.classList.toggle('chatassist-presence-badge-offline', !presenceOnline);
-      badgeEl.textContent = presenceOnline ? String(count) : '';
-    }
+    // Update bubble online dot
+    const bubbleDot = document.getElementById('chatassist-bubble-online-dot');
+    if (bubbleDot) bubbleDot.classList.toggle('chatassist-dot-visible', presenceOnline);
+
+    // Update header online dot
+    const headerDot = document.querySelector('.chatassist-online-dot');
+    if (headerDot) headerDot.style.background = presenceOnline ? '#22c55e' : '#ef4444';
 
     if (!presenceOnline) {
       titleEl.textContent = 'Send us a message';
@@ -1684,9 +1818,13 @@
         const widget = document.getElementById('chatassist-widget');
         const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
         widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
-        document.getElementById('chatassist-bubble').style.background = CONFIG.primaryColor;
+        const pillEl = document.getElementById('chatassist-bubble-pill');
+        if (pillEl) pillEl.style.background = CONFIG.primaryColor;
         document.getElementById('chatassist-header').style.background = CONFIG.primaryColor;
         document.getElementById('chatassist-send').style.background = CONFIG.primaryColor;
+        // Update popup reply button color too
+        const replyBtn = document.getElementById('chatassist-popup-reply');
+        if (replyBtn) replyBtn.style.background = CONFIG.primaryColor;
       } catch (e) { }
 
       await fetchReadState();

@@ -421,13 +421,30 @@ async def chat_ws(
                         should_send = bool(last_activity_at and (now - last_activity_at) > cooldown)
 
             if should_send:
+                # Read configurable delay from automation conditions (default 3s).
+                welcome_delay = 3.0
+                try:
+                    welcome_automation = automation_service.list_enabled_for_trigger(
+                        website_id=website_id, trigger="visitor_connected"
+                    )
+                    if welcome_automation:
+                        conds = welcome_automation[0].conditions or {}
+                        if isinstance(conds, str):
+                            import json as _json
+                            conds = _json.loads(conds)
+                        raw_delay = conds.get("welcome_delay_seconds")
+                        if raw_delay is not None:
+                            welcome_delay = max(0.0, float(raw_delay))
+                except Exception:
+                    pass
+
                 asyncio.create_task(
                     _send_delayed_welcome(
                         websocket=websocket,
                         website_id=website_id,
                         session_id=session_id,
                         welcome_message=str(welcome_message).strip(),
-                        delay_seconds=4.0,
+                        delay_seconds=welcome_delay,
                     )
                 )
         except Exception as e:

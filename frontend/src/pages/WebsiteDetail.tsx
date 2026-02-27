@@ -118,6 +118,7 @@ type AutomationDraft = {
   event_type?: string
   delay_seconds?: number
   cooldown_hours?: number
+  welcome_delay_seconds?: number
   repeat?: 'once' | 'cooldown' | 'always'
   repeat_cooldown_seconds?: number
 }
@@ -682,6 +683,10 @@ export default function WebsiteDetail() {
         automation.trigger === 'no_agent_assigned_for' && Number.isFinite(delay) ? Math.max(1, delay) : undefined,
       cooldown_hours:
         automation.trigger === 'visitor_connected' && Number.isFinite(cooldownHours) ? Math.max(1, cooldownHours) : undefined,
+      welcome_delay_seconds:
+        automation.trigger === 'visitor_connected'
+          ? Math.max(0, Number(automation.conditions?.welcome_delay_seconds ?? 3))
+          : undefined,
       repeat:
         automation.trigger !== 'no_agent_assigned_for' && automation.trigger !== 'visitor_connected'
           ? (repeatMode || 'once')
@@ -799,7 +804,10 @@ export default function WebsiteDetail() {
         isWaiting
           ? { delay_seconds: Math.max(1, Number(builderDraft.delay_seconds ?? 60) || 60) }
           : isWelcome
-            ? { cooldown_hours: Math.max(1, Number(builderDraft.cooldown_hours ?? 24) || 24) }
+            ? {
+              cooldown_hours: Math.max(1, Number(builderDraft.cooldown_hours ?? 24) || 24),
+              welcome_delay_seconds: Math.max(0, Number(builderDraft.welcome_delay_seconds ?? 3) || 0),
+            }
             : canConfigureRepeat
               ? {
                 repeat: builderDraft.repeat || 'once',
@@ -2133,6 +2141,7 @@ export default function WebsiteDetail() {
                                   trigger: nextTrigger,
                                   delay_seconds: nextTrigger === 'no_agent_assigned_for' ? (builderDraft.delay_seconds ?? 60) : undefined,
                                   cooldown_hours: nextTrigger === 'visitor_connected' ? (builderDraft.cooldown_hours ?? 24) : undefined,
+                                  welcome_delay_seconds: nextTrigger === 'visitor_connected' ? (builderDraft.welcome_delay_seconds ?? 3) : undefined,
                                   repeat: nextCanRepeat ? (builderDraft.repeat || 'once') : undefined,
                                   repeat_cooldown_seconds: nextCanRepeat
                                     ? builderDraft.repeat === 'cooldown'
@@ -2184,19 +2193,41 @@ export default function WebsiteDetail() {
                             />
                           </div>
                         ) : builderDraft.trigger === 'visitor_connected' ? (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cooldown (hours)</label>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={String(builderDraft.cooldown_hours ?? 24)}
-                              onChange={(e) =>
-                                setBuilderDraft({
-                                  ...builderDraft,
-                                  cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
-                                })
-                              }
-                            />
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={String(builderDraft.welcome_delay_seconds ?? 3)}
+                                onChange={(e) =>
+                                  setBuilderDraft({
+                                    ...builderDraft,
+                                    welcome_delay_seconds: Math.max(0, parseInt(e.target.value || '3', 10) || 0),
+                                  })
+                                }
+                              />
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                How many seconds after the visitor connects before the welcome message appears. Set to 0 for instant.
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cooldown (hours)</label>
+                              <Input
+                                type="number"
+                                min={1}
+                                value={String(builderDraft.cooldown_hours ?? 24)}
+                                onChange={(e) =>
+                                  setBuilderDraft({
+                                    ...builderDraft,
+                                    cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
+                                  })
+                                }
+                              />
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                How long before the welcome message can be sent again to the same visitor.
+                              </div>
+                            </div>
                           </div>
                         ) : (
                           <div className="space-y-3">
