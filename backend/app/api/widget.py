@@ -147,13 +147,28 @@ async def get_widget_read_state(
         
     last_read_at = conv.visitor_last_read_at
     
-    # Find the earliest AGENT or BOT or SYSTEM message after last_read_at.
+    # Count unread agent/bot chat messages (exclude system events like
+    # agent_join, conversation_resolved, etc. which aren't meaningful to visitors).
+    _SYSTEM_EVENT_TYPES = (
+        "agent_join", "visitor_connected", "visitor_socket_connected",
+        "visitor_left_website", "conversation_resolved", "conversation_reopened",
+        "visitor_closed_chat",
+    )
     first_unread_message_id = None
     unread_count = 0
     try:
+        from sqlalchemy import or_
+
         q = db.query(Message).filter(
             Message.conversation_id == conv.id,
-            Message.sender_type != MessageSenderType.VISITOR
+            Message.sender_type != MessageSenderType.VISITOR,
+            # Include: agent messages (event_type IS NULL) + bot/automation chat messages.
+            # Exclude: system timeline events.
+            or_(
+                Message.sender_type == MessageSenderType.AGENT,
+                Message.event_type.ilike("automation%"),
+                Message.event_type == "bot",
+            ),
         )
         if last_read_at is not None:
             q = q.filter(Message.created_at > last_read_at)

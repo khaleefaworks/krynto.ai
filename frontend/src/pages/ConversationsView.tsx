@@ -469,10 +469,10 @@ export default function ConversationsView() {
             fetchActiveChats({ showSpinner: false })
         }
 
-        if (eventType === 'visitor_message' && selectedChat && eventConversationId === selectedChat) {
-            console.log('🔄 Global visitor_message: refreshing messages from server...')
-            loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-        }
+        // NOTE: visitor_message for the selected chat is handled by the local WS
+        // handler (addMessage(dto)) which adds the message DTO instantly without an
+        // API round-trip.  A redundant loadChatData here would clear + re-fetch,
+        // causing a visible flash/delay.
 
         if (eventType === 'visitor_closed_chat' && selectedChat && eventConversationId === selectedChat) {
             loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -1899,8 +1899,8 @@ export default function ConversationsView() {
                                                 ) : isBot ? (
                                                     // Bot/automation/system messages render on the agent side with a robot avatar.
                                                     <div className="flex justify-end">
-                                                        <div className="flex items-end gap-2 max-w-[70%]">
-                                                            <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
+                                                        <div className="flex items-end gap-2 max-w-[70%] min-w-0">
+                                                            <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700 min-w-0">
                                                                 <MarkdownMessage content={msg.content} className="text-inherit" />
                                                                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1913,7 +1913,7 @@ export default function ConversationsView() {
                                                     </div>
                                                 ) : (
                                                     <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                                                        <div className="flex items-end gap-2 max-w-[70%]">
+                                                        <div className="flex items-end gap-2 max-w-[70%] min-w-0">
                                                             {!isAgent && (
                                                                 <UserAvatar
                                                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
@@ -1923,7 +1923,7 @@ export default function ConversationsView() {
                                                                     title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
                                                                 />
                                                             )}
-                                                            <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
+                                                            <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
                                                                 <MarkdownMessage content={msg.content} className="text-inherit" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

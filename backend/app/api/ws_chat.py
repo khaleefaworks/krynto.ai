@@ -120,6 +120,67 @@ async def _send_delayed_visitor_left_event(*, conversation_id: int, delay_second
             pass
 
 
+async def _send_delayed_welcome(
+    *,
+    websocket: WebSocket,
+    website_id: int,
+    session_id: str,
+    welcome_message: str,
+    delay_seconds: float = 4.0,
+) -> None:
+    """Send the welcome automation message after a short delay.
+
+    Delaying the welcome creates a more natural "someone is messaging you"
+    feel and gives the widget time to arm notification sounds via user gesture.
+    """
+    try:
+        await asyncio.sleep(delay_seconds)
+
+        db2 = SessionLocal()
+        try:
+            from app.services.conversation_service import ConversationService
+
+            service = ConversationService(db2)
+
+            conversation = service.get_or_create_conversation(
+                website_id=website_id,
+                session_id=session_id,
+            )
+            if not conversation:
+                return
+
+            # Register visitor socket if not already registered.
+            ChatService.register_visitor(conversation.id, websocket)
+
+            # Ensure last_seen_at is set for newly created conversations.
+            if not conversation.last_seen_at:
+                conversation.last_seen_at = datetime.utcnow()
+                conversation.visit_count = int(conversation.visit_count or 0) or 1
+                db2.commit()
+
+            saved = service.add_bot_message(
+                conversation.id,
+                welcome_message,
+                event_type="automation_welcome",
+            )
+            await websocket.send_json(
+                {
+                    "type": "bot",
+                    "message": welcome_message,
+                    "message_obj": serialize_message(db2, saved),
+                }
+            )
+        finally:
+            db2.close()
+    except Exception as e:
+        logger.warning(
+            "delayed_welcome_failed",
+            website_id=website_id,
+            session_id=session_id,
+            error=str(e),
+        )
+
+
 def _ws_close_reason(reason: str | None) -> str:
     if not reason:
         return ""
@@ -360,26 +421,14 @@ async def chat_ws(
                         should_send = bool(last_activity_at and (now - last_activity_at) > cooldown)
 
             if should_send:
-                service = ConversationService(db)
-                if not conversation:
-                    conversation = service.get_or_create_conversation(website_id=website_id, session_id=session_id)
-                    ChatService.register_visitor(conversation.id, websocket)
-                    registered_conversation_id = conversation.id
-
-                # Ensure last_seen_at is set for newly created conversations.
-                if not conversation.last_seen_at:
-                    conversation.last_seen_at = now
-                    conversation.visit_count = int(conversation.visit_count or 0) or 1
-                    db.commit()
-
-                # Keep event_type stable for idempotency and history queries.
-                saved = service.add_bot_message(conversation.id, str(welcome_message).strip(), event_type="automation_welcome")
-                await websocket.send_json(
-                    {
-                        "type": "bot",
-                        "message": str(welcome_message).strip(),
-                        "message_obj": serialize_message(db, saved),
-                    }
+                asyncio.create_task(
+                    _send_delayed_welcome(
+                        websocket=websocket,
+                        website_id=website_id,
+                        session_id=session_id,
+                        welcome_message=str(welcome_message).strip(),
+                        delay_seconds=4.0,
+                    )
                 )
         except Exception as e:
             try:

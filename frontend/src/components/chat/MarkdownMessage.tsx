@@ -89,7 +89,7 @@ export default function MarkdownMessage({ content, className }: Props) {
     const text = linkifyPlainDomains(String(content || ''))
 
     return (
-        <div className={cn('break-words', className)}>
+        <div className={cn('[overflow-wrap:anywhere]', className)}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
                 rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
@@ -139,7 +139,7 @@ export default function MarkdownMessage({ content, className }: Props) {
                         </ul>
                     ),
                     p: ({ children, ...props }) => (
-                        <p className="whitespace-pre-wrap" {...props}>
+                        <p {...props}>
                             {children}
                         </p>
                     ),

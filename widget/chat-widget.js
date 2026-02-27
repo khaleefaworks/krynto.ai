@@ -72,6 +72,7 @@
   let isReadStateFetched = false;
   let isAtBottom = true;
   let hasScrolledToUnread = false;
+  let lastAppendedDateStr = null;
 
   let presenceOnline = true;
   let activeAgentAvatarUrl = null;
@@ -241,18 +242,19 @@
       osc.type = 'sine';
       osc.frequency.value = 880;
       gain.gain.value = 0.04;
-      // Best-effort: arm audio on first user gesture so notification beeps can work.
-      // Browsers block audio until the user interacts.
-      try {
-        const _arm = () => enableNotificationSound();
-        document.addEventListener('pointerdown', _arm, { once: true, passive: true });
-        document.addEventListener('keydown', _arm, { once: true });
-        document.addEventListener('touchstart', _arm, { once: true, passive: true });
-      } catch (e) { }
       osc.connect(gain);
       gain.connect(notificationAudioCtx.destination);
       osc.start();
       osc.stop(notificationAudioCtx.currentTime + 0.14);
+    } catch (e) { }
+  }
+
+  function armSoundOnFirstGesture() {
+    try {
+      const _arm = () => enableNotificationSound();
+      document.addEventListener('pointerdown', _arm, { once: true, passive: true });
+      document.addEventListener('keydown', _arm, { once: true });
+      document.addEventListener('touchstart', _arm, { once: true, passive: true });
     } catch (e) { }
   }
 
@@ -369,6 +371,7 @@
       const container = document.getElementById('chatassist-messages');
       if (!container) return;
       container.innerHTML = '';
+      lastAppendedDateStr = null;
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -395,6 +398,8 @@
           appendMessage('ai', m.content, m.created_at, null, m.id);
         }
       });
+      updateEmptyState();
+      isAtBottom = true;
       smartScroll();
       return;
     }
@@ -422,6 +427,14 @@
       } else {
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
+        if (!isWidgetOpen() || document.hidden) {
+          bumpUnread();
+          playNotificationSound();
+          showToast('New message');
+        } else if (isAtBottom) {
+          markRead();
+        }
+        showNewMsgIndicator();
       }
       smartScroll();
       return;
@@ -430,6 +443,14 @@
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
+      if (!isWidgetOpen() || document.hidden) {
+        bumpUnread();
+        playNotificationSound();
+        showToast('New message');
+      } else if (isAtBottom) {
+        markRead();
+      }
+      showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'visitor_message_saved') {
       const clientId = data.message_id;
@@ -453,7 +474,10 @@
         bumpUnread();
         playNotificationSound();
         showToast('New message');
+      } else if (isAtBottom) {
+        markRead();
       }
+      showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'agent_joined') {
       setAgentTyping(false);
@@ -504,30 +528,63 @@
         if (unreadDivider && !hasScrolledToUnread) {
           hasScrolledToUnread = true;
           unreadDivider.scrollIntoView({ behavior: 'auto', block: 'center' });
-
-          // Auto-remove divider after 5 seconds of viewing
-          setTimeout(() => {
-            unreadDivider.classList.add('chatassist-unread-divider-hidden');
-            setTimeout(() => {
-              if (unreadDivider.parentNode) unreadDivider.parentNode.removeChild(unreadDivider);
-            }, 1000);
-          }, 5000);
           return;
         }
 
-        if (isAtBottom || !unreadDivider) {
+        if (isAtBottom) {
           el.scrollTop = el.scrollHeight;
         }
       });
     });
   }
 
+  function scrollToBottom(smooth) {
+    const el = document.getElementById('chatassist-messages');
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+      isAtBottom = true;
+    });
+  }
+
   function handleMessagesScroll() {
     const el = document.getElementById('chatassist-messages');
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40; // Increased threshold for better reliability
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     isAtBottom = nearBottom;
-    if (nearBottom && firstUnreadMessageId) markRead();
+    if (nearBottom) {
+      if (firstUnreadMessageId) markRead();
+      hideNewMsgIndicator();
+    }
+    // Remove unread divider once the user scrolls past it.
+    const divider = document.getElementById('chatassist-unread-divider');
+    if (divider && el) {
+      try {
+        const dividerTop = divider.offsetTop;
+        const scrolledPast = el.scrollTop > dividerTop;
+        if (scrolledPast) {
+          divider.classList.add('chatassist-unread-divider-hidden');
+          setTimeout(() => { if (divider.parentNode) divider.parentNode.removeChild(divider); }, 600);
+        }
+      } catch (e) { }
+    }
+  }
+
+  function showNewMsgIndicator() {
+    if (isAtBottom || !isWidgetOpen()) return;
+    const el = document.getElementById('chatassist-new-msg-indicator');
+    if (el) {
+      el.style.display = 'flex';
+      el.style.opacity = '1';
+    }
+  }
+
+  function hideNewMsgIndicator() {
+    const el = document.getElementById('chatassist-new-msg-indicator');
+    if (el) {
+      el.style.display = 'none';
+      el.style.opacity = '0';
+    }
   }
 
   // --- UI Construction ---
@@ -954,6 +1011,29 @@
     const container = document.getElementById('chatassist-messages');
     if (!container) return;
 
+    // Hide empty state once a message is added.
+    const emptyEl = document.getElementById('chatassist-empty-state');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    // Date separator: insert when the date changes between messages.
+    try {
+      const msgDate = createdAtIso ? new Date(createdAtIso) : new Date();
+      const dateKey = msgDate.toDateString();
+      if (dateKey !== lastAppendedDateStr) {
+        lastAppendedDateStr = dateKey;
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        let label = msgDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        if (msgDate.toDateString() === today.toDateString()) label = 'Today';
+        else if (msgDate.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+        const sep = document.createElement('div');
+        sep.className = 'chatassist-date-separator';
+        sep.innerHTML = '<span>' + label + '</span>';
+        container.appendChild(sep);
+      }
+    } catch (e) { }
+
     if (firstUnreadMessageId && Number(messageId) === firstUnreadMessageId) {
       const divider = document.createElement('div');
       divider.className = 'chatassist-unread-divider';
@@ -1064,9 +1144,11 @@
       const outgoing = serializeMessageWithAttachments(message, draftAttachments);
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
+      autoResizeInput();
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);
+      isAtBottom = true;
       smartScroll();
       return;
     }
@@ -1085,9 +1167,11 @@
       const outgoing = serializeMessageWithAttachments(message, draftAttachments);
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
+      autoResizeInput();
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);
+      isAtBottom = true;
       smartScroll();
       return;
     }
@@ -1096,13 +1180,26 @@
     pendingOfflineAttachments = draftAttachments.slice();
     draftAttachments = [];
     renderAttachmentChips();
-    input.value = '';
+    // Keep input value so the visitor can see their message is preserved.
     showContactOverlay();
   }
 
   function showContactOverlay() {
     const el = document.getElementById('chatassist-contact-overlay');
     if (el) {
+      // Show pending message preview so visitor knows their message is safe.
+      const preview = document.getElementById('chatassist-contact-msg-preview');
+      if (preview) {
+        if (pendingOfflineMessage) {
+          const truncated = pendingOfflineMessage.length > 120
+            ? pendingOfflineMessage.slice(0, 120) + '…'
+            : pendingOfflineMessage;
+          preview.textContent = '"' + truncated + '"';
+          preview.style.display = 'block';
+        } else {
+          preview.style.display = 'none';
+        }
+      }
       el.style.display = 'flex';
       el.classList.add('chatassist-contact-overlay-visible');
       document.getElementById('chatassist-contact-email')?.focus();
@@ -1111,17 +1208,24 @@
 
   function hideContactOverlay(restore) {
     const el = document.getElementById('chatassist-contact-overlay');
-    if (el) {
-      el.classList.remove('chatassist-contact-overlay-visible');
-      el.style.display = 'none';
-      if (restore && pendingOfflineMessage != null) {
-        const input = document.getElementById('chatassist-input');
-        if (input) input.value = pendingOfflineMessage;
-      }
-      if (restore && pendingOfflineAttachments && pendingOfflineAttachments.length) {
+    if (!el) return;
+    // Only act if the overlay is actually visible; prevents clearing the input
+    // when applyPresence() calls hideContactOverlay(false) on every presence tick.
+    const wasVisible = el.style.display !== 'none' && el.classList.contains('chatassist-contact-overlay-visible');
+    el.classList.remove('chatassist-contact-overlay-visible');
+    el.style.display = 'none';
+    if (!wasVisible) return;
+    if (restore) {
+      const input = document.getElementById('chatassist-input');
+      if (input && pendingOfflineMessage != null) input.value = pendingOfflineMessage;
+      if (pendingOfflineAttachments && pendingOfflineAttachments.length) {
         draftAttachments = pendingOfflineAttachments.slice();
         renderAttachmentChips();
       }
+    } else {
+      // Clear the input after successful submit.
+      const input = document.getElementById('chatassist-input');
+      if (input) input.value = '';
     }
   }
 
@@ -1188,7 +1292,8 @@
               <div class="chatassist-contact-overlay-title">Please introduce yourself</div>
               <button id="chatassist-contact-overlay-close" class="chatassist-contact-overlay-close">&times;</button>
             </div>
-            <div class="chatassist-contact-overlay-subtitle">We'll use your contact info only if all agents are offline and can't reply immediately.</div>
+            <div class="chatassist-contact-overlay-subtitle">Leave your contact info so we can get back to you.</div>
+            <div id="chatassist-contact-msg-preview" class="chatassist-contact-msg-preview" style="display:none;"></div>
             <div class="chatassist-contact-form">
               <input type="text" id="chatassist-contact-name" placeholder="Your name" autocomplete="name" />
               <input type="email" id="chatassist-contact-email" placeholder="Your email" autocomplete="email" />
@@ -1223,10 +1328,18 @@
             <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </button>
-            <button id="chatassist-end" class="chatassist-header-btn" aria-label="End chat">&times;</button>
+            <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">&times;</button>
           </div>
         </div>
         <div id="chatassist-messages"></div>
+        <div id="chatassist-empty-state" class="chatassist-empty-state">
+          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div>Send a message to start the conversation</div>
+        </div>
+        <div id="chatassist-new-msg-indicator" class="chatassist-new-msg-indicator" style="display:none;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          <span>New message</span>
+        </div>
         <div id="chatassist-footer">
           <div id="chatassist-typing" class="chatassist-typing" style="display:none;">
             <span class="chatassist-typing-label">Agent is typing</span>
@@ -1248,7 +1361,7 @@
                 <span class="chatassist-attach-spinner" aria-hidden="true"></span>
               </button>
             ` : ``}
-            <input type="text" id="chatassist-input" placeholder="Type your message..." />
+            <textarea id="chatassist-input" placeholder="Type your message..." rows="1"></textarea>
             <button id="chatassist-send">Send</button>
             </div>
           </div>
@@ -1268,11 +1381,14 @@
     bubble.addEventListener('click', () => {
       enableNotificationSound();
       setUnreadCount(0);
+      markRead();
       bubble.style.display = 'none';
       win.style.display = 'flex';
       input.focus();
       isAtBottom = true;
-      smartScroll();
+      hideNewMsgIndicator();
+      // Allow layout to settle before scrolling (avoids race with display:flex paint).
+      setTimeout(() => { scrollToBottom(false); }, 50);
       // Ensure End button state is applied on reopen.
       if (endChatDisabled) setEndChatDisabled(true);
     });
@@ -1290,6 +1406,12 @@
 
     document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
       hideEndOverlay();
+    });
+
+    document.getElementById('chatassist-new-msg-indicator').addEventListener('click', () => {
+      hideNewMsgIndicator();
+      scrollToBottom(true);
+      markRead();
     });
 
     document.getElementById('chatassist-end-confirm').addEventListener('click', () => {
@@ -1346,6 +1468,7 @@
     });
 
     input.addEventListener('input', () => {
+      autoResizeInput();
       const value = input.value || '';
       const hasText = value.trim().length > 0;
 
@@ -1392,6 +1515,29 @@
 
     refreshHeaderIcon();
     renderAttachmentChips();
+    updateEmptyState();
+
+    // Arm notification sound on first user gesture (must happen early).
+    armSoundOnFirstGesture();
+  }
+
+  function autoResizeInput() {
+    const input = document.getElementById('chatassist-input');
+    if (!input) return;
+    input.style.height = 'auto';
+    const maxH = 100; // max ~4 lines
+    input.style.height = Math.min(input.scrollHeight, maxH) + 'px';
+    input.style.overflowY = input.scrollHeight > maxH ? 'auto' : 'hidden';
+  }
+
+  function updateEmptyState() {
+    const emptyEl = document.getElementById('chatassist-empty-state');
+    if (!emptyEl) return;
+    const container = document.getElementById('chatassist-messages');
+    if (!container) return;
+    // Show empty state only when there are no message elements.
+    const hasMessages = container.querySelector('.chatassist-message, .chatassist-date-separator');
+    emptyEl.style.display = hasMessages ? 'none' : 'flex';
   }
 
   function setupPageViewTracking() {

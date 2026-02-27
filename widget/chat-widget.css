@@ -335,7 +335,7 @@
 }
 
 #chatassist-end {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
 }
 
@@ -605,6 +605,35 @@
   margin: 10px 0;
 }
 
+/* Date separator */
+.chatassist-date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 12px 0 4px;
+  position: relative;
+}
+
+.chatassist-date-separator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #e5e7eb;
+  z-index: 1;
+}
+
+.chatassist-date-separator span {
+  background: #f9fafb;
+  padding: 0 10px;
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 500;
+  z-index: 2;
+  position: relative;
+}
+
 .chatassist-unread-divider {
   display: flex;
   align-items: center;
@@ -638,6 +667,79 @@
   font-weight: 500;
   z-index: 2;
   position: relative;
+}
+
+/* New message floating indicator */
+.chatassist-new-msg-indicator {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  z-index: 40;
+  transition: opacity 0.2s;
+  animation: chatassist-toast-fade-in 0.25s ease-out;
+}
+
+.chatassist-new-msg-indicator:hover {
+  background: #1f2937;
+}
+
+/* Empty state */
+.chatassist-empty-state {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #9ca3af;
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 20px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* End chat button (power icon) */
+.chatassist-end-btn {
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.chatassist-end-btn:hover {
+  opacity: 1;
+}
+
+/* Offline contact overlay message preview */
+.chatassist-contact-msg-preview {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #374151;
+  font-style: italic;
+  word-break: break-word;
+  max-height: 60px;
+  overflow: hidden;
 }
 
 /* Footer */
@@ -890,8 +992,13 @@
   border: 1px solid #d1d5db;
   border-radius: 8px;
   font-size: 14px;
+  font-family: inherit;
   outline: none;
   transition: border-color 0.2s;
+  resize: none;
+  overflow-y: hidden;
+  line-height: 1.4;
+  max-height: 100px;
 }
 
 #chatassist-input:focus {
@@ -928,8 +1035,15 @@
 @media (max-width: 480px) {
   #chatassist-window {
     width: calc(100vw - 40px);
-    height: calc(100vh - 40px);
+    height: calc(100dvh - 40px);
+    height: calc(100vh - 40px); /* fallback for older browsers */
     border-radius: 12px;
+  }
+
+  @supports (height: 100dvh) {
+    #chatassist-window {
+      height: calc(100dvh - 40px);
+    }
   }
 
   #chatassist-widget {

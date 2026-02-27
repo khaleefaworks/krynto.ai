@@ -380,18 +380,22 @@ class ConversationOrchestrator:
                 },
             )
 
-            # Web Push for assigned agent
+            # Web Push for assigned agent (non-blocking: runs in thread executor)
             try:
                 from app.repos import push_subscriptions as push_subs_repo
                 from app.services.push_service import send_web_push_to_subscriptions
                 
                 subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
                 if subs:
-                    send_web_push_to_subscriptions(
-                        subscriptions=subs,
-                        title=f"New message in conversation #{conversation.id}",
-                        body=(message or "New message")[:120],
-                        url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                    loop = asyncio.get_event_loop()
+                    loop.run_in_executor(
+                        None,
+                        lambda: send_web_push_to_subscriptions(
+                            subscriptions=subs,
+                            title=f"New message in conversation #{conversation.id}",
+                            body=(message or "New message")[:120],
+                            url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                        ),
                     )
             except Exception as e:
                 logger.error("assigned_agent_push_failed", error=str(e))
@@ -412,7 +416,7 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push for unassigned: notify all available agents
+        # Web Push for unassigned: notify all available agents (non-blocking)
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
@@ -430,11 +434,15 @@ class ConversationOrchestrator:
             agent_ids = {int(u.id) for u in candidates}
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
             if subs:
-                send_web_push_to_subscriptions(
-                    subscriptions=subs,
-                    title=f"Unassigned message - Website {website_id}",
-                    body=(message or "New message")[:120],
-                    url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(
+                    None,
+                    lambda: send_web_push_to_subscriptions(
+                        subscriptions=subs,
+                        title=f"Unassigned message - Website {website_id}",
+                        body=(message or "New message")[:120],
+                        url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                    ),
                 )
         except Exception:
             pass
