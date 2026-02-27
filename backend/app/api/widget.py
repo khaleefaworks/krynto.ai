@@ -147,13 +147,28 @@ async def get_widget_read_state(
         
     last_read_at = conv.visitor_last_read_at
     
-    # Find the earliest AGENT or BOT or SYSTEM message after last_read_at.
+    # Count unread agent/bot chat messages (exclude system events like
+    # agent_join, conversation_resolved, etc. which aren't meaningful to visitors).
+    _SYSTEM_EVENT_TYPES = (
+        "agent_join", "visitor_connected", "visitor_socket_connected",
+        "visitor_left_website", "conversation_resolved", "conversation_reopened",
+        "visitor_closed_chat",
+    )
     first_unread_message_id = None
     unread_count = 0
     try:
+        from sqlalchemy import or_
+
         q = db.query(Message).filter(
             Message.conversation_id == conv.id,
-            Message.sender_type != MessageSenderType.VISITOR
+            Message.sender_type != MessageSenderType.VISITOR,
+            # Include: agent messages (event_type IS NULL) + bot/automation chat messages.
+            # Exclude: system timeline events.
+            or_(
+                Message.sender_type == MessageSenderType.AGENT,
+                Message.event_type.ilike("automation%"),
+                Message.event_type == "bot",
+            ),
         )
         if last_read_at is not None:
             q = q.filter(Message.created_at > last_read_at)
@@ -314,7 +329,10 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     theme = config.get('theme', 'dark')
     position = config.get('position', 'bottom-right')
     welcome_message = config.get('welcome_message', 'Hi! How can we help you today?')
-    primary_color = config.get('primary_color', '#000000')
+    primary_color = config.get('primary_color', '#3b82f6')
+    color_mode = config.get('color_mode', 'gradient')
+    gradient_start = config.get('gradient_start', '#3b82f6')
+    gradient_end = config.get('gradient_end', '#2563eb')
 
     header_title = config.get("header_title", "How can we help?")
     online_status_text = config.get("online_status_text", "We reply immediately")
@@ -351,6 +369,9 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
   _aichatassist.position = '{position}';
     _aichatassist.welcomeMessage = {json.dumps(welcome_message)};
   _aichatassist.primaryColor = '{primary_color}';
+    _aichatassist.colorMode = '{color_mode}';
+    _aichatassist.gradientStart = '{gradient_start}';
+    _aichatassist.gradientEnd = '{gradient_end}';
 
     // Optional UI config (if not provided, widget defaults apply)
     _aichatassist.headerTitle = {json.dumps(header_title)};

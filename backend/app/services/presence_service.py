@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.logging import get_logger
+from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.website import Website
 from app.models.user import User, UserRole
 from app.repos import users as users_repo
@@ -81,9 +82,25 @@ class PresenceService:
             ttl_seconds=75,
         )
 
+        assignment_rows = (
+            db.query(AgentWebsiteAssignment.agent_id)
+            .filter(AgentWebsiteAssignment.website_id == int(website_id))
+            .all()
+        )
+        assigned_agent_ids = sorted({int(r[0]) for r in assignment_rows})
+        if not assigned_agent_ids:
+            return {
+                "type": "presence",
+                "website_id": int(website_id),
+                "online": False,
+                "available_agents_count": 0,
+                "agents": [],
+            }
+
         candidates = (
             db.query(User)
             .filter(
+                User.id.in_(assigned_agent_ids),
                 User.is_active == True,  # noqa: E712
                 User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
             )

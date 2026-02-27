@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useLayoutEffect, useCallback } from 'react'
-import { useLocation, useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState, useRef, useLayoutEffect, useCallback } from 'react'
+import { Link, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
@@ -25,10 +25,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import ChatComposer from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
+import Logo from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { isAdmin } from '@/lib/roles'
 import {
     Check,
-    MessageSquare,
+    MessageCircle,
     Search,
     ChevronLeft,
     ChevronRight,
@@ -36,7 +39,8 @@ import {
     PanelRightOpen,
     Inbox,
     Users,
-    Bot
+    Bot,
+    Plus
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -127,9 +131,24 @@ function getVisitorAvatarSeed(visitorName: string | null | undefined, sessionId:
     return name || 'visitor'
 }
 
-function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
-    const raw = String(hexColor || '').trim()
-    if (!raw.startsWith('#')) return 'white'
+function isDarkMode(): boolean {
+    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+}
+
+function getTagPillBackground(color: unknown): string {
+    const raw = String(color || '').trim()
+    if (!raw) return 'transparent'
+
+    // A bit stronger in dark mode so it stays visible.
+    const alpha = isDarkMode() ? 0.30 : 0.18
+    const pct = `${Math.round(alpha * 100)}%`
+
+    // If it's a valid CSS color but not hex, lean on color-mix.
+    if (!raw.startsWith('#')) {
+        // color-mix() is supported in modern Chromium/Firefox/Safari.
+        // If unsupported, browser will drop it and we fall back to transparent.
+        return `color-mix(in srgb, ${raw} ${pct}, transparent)`
+    }
 
     const hex = raw.slice(1)
     const normalized =
@@ -139,15 +158,24 @@ function getContrastTextColor(hexColor: unknown): 'black' | 'white' {
                 ? hex
                 : ''
 
-    if (!normalized) return 'white'
+    if (!normalized) return 'transparent'
     const r = parseInt(normalized.slice(0, 2), 16)
     const g = parseInt(normalized.slice(2, 4), 16)
     const b = parseInt(normalized.slice(4, 6), 16)
-    if (![r, g, b].every((n) => Number.isFinite(n))) return 'white'
+    if (![r, g, b].every((n) => Number.isFinite(n))) return 'transparent'
 
-    // Relative luminance (sRGB), quick approximation is good enough here.
-    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-    return luminance > 0.6 ? 'black' : 'white'
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function TagIcon({ className }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 24 24" focusable="false" role="presentation" className={className} aria-hidden="true">
+            <path
+                fill="currentColor"
+                d="M21.41 11.58L12.41 2.58A2 2 0 0 0 11 2H4A2 2 0 0 0 2 4V11A2 2 0 0 0 2.59 12.42L11.59 21.42A2 2 0 0 0 13 22A2 2 0 0 0 14.41 21.41L21.41 14.41A2 2 0 0 0 22 13A2 2 0 0 0 21.41 11.58M13 20L4 11V4H11L20 13M6.5 5A1.5 1.5 0 1 1 5 6.5A1.5 1.5 0 0 1 6.5 5Z"
+            ></path>
+        </svg>
+    )
 }
 
 interface ConversationDetails {
@@ -250,7 +278,23 @@ export default function ConversationsView() {
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
-    const [tagToAddId, setTagToAddId] = useState<string>('')
+
+    const [tagPickerOpen, setTagPickerOpen] = useState(false)
+    const [tagPickerQuery, setTagPickerQuery] = useState('')
+
+    const unassignedTags = useMemo(() => {
+        const assigned = new Set(conversationTags.map((t: any) => Number(t?.id)))
+        return availableTags
+            .filter((t: any) => !assigned.has(Number(t?.id)))
+            .slice()
+            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+    }, [availableTags, conversationTags])
+
+    const filteredUnassignedTags = useMemo(() => {
+        const q = String(tagPickerQuery || '').trim().toLowerCase()
+        if (!q) return unassignedTags
+        return unassignedTags.filter((t: any) => String(t?.name || '').toLowerCase().includes(q))
+    }, [unassignedTags, tagPickerQuery])
 
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
@@ -425,10 +469,10 @@ export default function ConversationsView() {
             fetchActiveChats({ showSpinner: false })
         }
 
-        if (eventType === 'visitor_message' && selectedChat && eventConversationId === selectedChat) {
-            console.log('🔄 Global visitor_message: refreshing messages from server...')
-            loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-        }
+        // NOTE: visitor_message for the selected chat is handled by the local WS
+        // handler (addMessage(dto)) which adds the message DTO instantly without an
+        // API round-trip.  A redundant loadChatData here would clear + re-fetch,
+        // causing a visible flash/delay.
 
         if (eventType === 'visitor_closed_chat' && selectedChat && eventConversationId === selectedChat) {
             loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -1045,17 +1089,16 @@ export default function ConversationsView() {
                 body: JSON.stringify({ tag_id: tagId })
             })
             // Update local state
-            const tag = availableTags.find(t => t.id === tagId)
+            const tag = availableTags.find(t => Number((t as any)?.id) === tagId)
             if (tag) {
-                setConversationTags(prev => [...prev.filter(t => t.id !== tagId), tag])
+                setConversationTags(prev => [...prev.filter(t => Number((t as any)?.id) !== tagId), tag])
             }
             // Also update in activeChats list to keep it in sync
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
-                    ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => t.id !== tagId), tag] }
+                    ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId), tag] }
                     : c
             ))
-            setTagToAddId('')
         } catch (error) {
             console.error("Failed to add tag:", error)
         }
@@ -1068,11 +1111,11 @@ export default function ConversationsView() {
                 method: 'DELETE'
             })
             // Update local state
-            setConversationTags(prev => prev.filter(t => t.id !== tagId))
+            setConversationTags(prev => prev.filter(t => Number((t as any)?.id) !== tagId))
             // Also update in activeChats list
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
-                    ? { ...c, tags: ((c as any).tags || []).filter((t: any) => t.id !== tagId) }
+                    ? { ...c, tags: ((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId) }
                     : c
             ))
         } catch (error) {
@@ -1316,7 +1359,7 @@ export default function ConversationsView() {
     const getFilterIcon = () => {
         switch (activeFilter) {
             case 'all':
-                return <MessageSquare className="h-5 w-5" />
+                return <MessageCircle className="h-5 w-5" />
             case 'mine':
                 return <Users className="h-5 w-5" />
             case 'unassigned':
@@ -1324,7 +1367,7 @@ export default function ConversationsView() {
             case 'resolved':
                 return <Check className="h-5 w-5" />
             default:
-                return <MessageSquare className="h-5 w-5" />
+                return <MessageCircle className="h-5 w-5" />
         }
     }
 
@@ -1389,13 +1432,13 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <MessageSquare className="h-5 w-5 flex-shrink-0" />
+                                                <MessageCircle className="h-5 w-5 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <MessageSquare className="h-5 w-5 flex-shrink-0" />
+                                                    <MessageCircle className="h-5 w-5 flex-shrink-0" />
                                                     <span className="flex-1 text-left">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
@@ -1549,7 +1592,7 @@ export default function ConversationsView() {
                         </div>
                     ) : filteredChats.length === 0 ? (
                         <div className="text-center p-8 text-gray-400 dark:text-gray-600">
-                            <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                            <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
                             <p>You don't have any {activeFilter !== 'all' ? activeFilter : ''} conversations at the moment.</p>
                         </div>
                     ) : (
@@ -1649,70 +1692,121 @@ export default function ConversationsView() {
                         </div>
 
                         {/* Tags Row (below header) */}
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2 min-w-0">
-                                {conversationTags.length === 0 ? (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">No tags</span>
-                                ) : (
-                                    conversationTags
-                                        .slice()
-                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                        .map((t: any) => (
-                                            <Badge
-                                                key={t.id}
-                                                variant="secondary"
-                                                className="gap-1 border border-transparent"
-                                                style={{
-                                                    backgroundColor: String(t?.color || ''),
-                                                    color: getContrastTextColor(t?.color),
-                                                }}
-                                            >
-                                                <span className="truncate max-w-40">{t.name}</span>
-                                                <button
-                                                    type="button"
-                                                    className="ml-1 opacity-80 hover:opacity-100"
-                                                    onClick={() => handleRemoveTag(Number(t.id))}
-                                                    aria-label={`Remove tag ${String(t.name || '')}`}
-                                                    title="Remove"
-                                                >
-                                                    ×
-                                                </button>
-                                            </Badge>
-                                        ))
-                                )}
-                            </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {conversationTags
+                                .slice()
+                                .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                                .map((t: any) => (
+                                    <Badge
+                                        key={t.id}
+                                        variant="outline"
+                                        className="gap-1"
+                                        style={{
+                                            borderColor: String(t?.color || ''),
+                                            color: String(t?.color || ''),
+                                            backgroundColor: getTagPillBackground(t?.color),
+                                        }}
+                                    >
+                                        <span className="truncate max-w-40">{t.name}</span>
+                                        <button
+                                            type="button"
+                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                            onClick={() => handleRemoveTag(Number(t.id))}
+                                            aria-label={`Remove tag ${String(t.name || '')}`}
+                                            title="Remove"
+                                        >
+                                            ×
+                                        </button>
+                                    </Badge>
+                                ))}
 
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                <select
-                                    value={tagToAddId}
-                                    onChange={(e) => setTagToAddId(e.target.value)}
-                                    className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 text-sm text-gray-900 dark:text-white"
-                                >
-                                    <option value="">Add tag…</option>
-                                    {availableTags
-                                        .filter((t: any) => !conversationTags.some((ct: any) => ct?.id === t?.id))
-                                        .slice()
-                                        .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                        .map((t: any) => (
-                                            <option key={t.id} value={String(t.id)}>
-                                                {String(t.name || '')}
-                                            </option>
-                                        ))}
-                                </select>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                        const id = Number(tagToAddId)
-                                        if (!Number.isFinite(id) || id <= 0) return
-                                        handleAddTag(id)
-                                    }}
-                                    disabled={!tagToAddId}
-                                >
-                                    Add
-                                </Button>
-                            </div>
+                            <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
+                                <PopoverTrigger asChild>
+                                    {conversationTags.length === 0 ? (
+                                        <Button
+                                            type="button"
+                                            variant="link"
+                                            className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                        >
+                                            <TagIcon className="h-4 w-4" />
+                                            Tag conversation
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-7 w-7 rounded-full"
+                                            aria-label="Add tag"
+                                            title="Add tag"
+                                        >
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    )}
+                                </PopoverTrigger>
+
+                                <PopoverContent align="start" className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg">
+                                    <div className="space-y-2">
+                                        <Input
+                                            value={tagPickerQuery}
+                                            onChange={(e) => setTagPickerQuery(e.target.value)}
+                                            placeholder="Search tags…"
+                                            className="h-9"
+                                            autoFocus
+                                        />
+
+                                        <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                            {filteredUnassignedTags.length === 0 ? (
+                                                <div className="p-2 text-xs text-gray-500 dark:text-gray-400">
+                                                    No matching tags
+                                                </div>
+                                            ) : (
+                                                <div className="p-1">
+                                                    {filteredUnassignedTags.map((t: any) => (
+                                                        <button
+                                                            key={t.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const id = Number(t?.id)
+                                                                if (!Number.isFinite(id) || id <= 0) return
+                                                                handleAddTag(id)
+                                                                setTagPickerOpen(false)
+                                                                setTagPickerQuery('')
+                                                            }}
+                                                            className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                        >
+                                                            <span className="truncate">{String(t?.name || '')}</span>
+                                                            <span
+                                                                className="inline-flex h-2.5 w-2.5 rounded-full border"
+                                                                style={{
+                                                                    borderColor: String(t?.color || ''),
+                                                                    backgroundColor: String(t?.color || ''),
+                                                                }}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {isAdmin(user) ? (
+                                            <div className="pt-1 text-right">
+                                                <Link
+                                                    to="/dashboard/settings/tags"
+                                                    className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                    onClick={() => {
+                                                        setTagPickerOpen(false)
+                                                        setTagPickerQuery('')
+                                                    }}
+                                                >
+                                                    Manage tags
+                                                </Link>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
                         </div>
 
                     </div>
@@ -1740,7 +1834,7 @@ export default function ConversationsView() {
                         ) : messages.length === 0 ? (
                             <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-600">
                                 <div className="text-center">
-                                    <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                                    <MessageCircle className="h-16 w-16 mx-auto mb-4 opacity-50" />
                                     <p className="text-lg">No messages yet</p>
                                     <p className="text-sm mt-2">Start the conversation!</p>
                                 </div>
@@ -1805,8 +1899,8 @@ export default function ConversationsView() {
                                                 ) : isBot ? (
                                                     // Bot/automation/system messages render on the agent side with a robot avatar.
                                                     <div className="flex justify-end">
-                                                        <div className="flex items-end gap-2 max-w-[70%]">
-                                                            <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700">
+                                                        <div className="flex items-end gap-2 max-w-[70%] min-w-0">
+                                                            <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700 min-w-0">
                                                                 <MarkdownMessage content={msg.content} className="text-inherit" />
                                                                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1819,7 +1913,7 @@ export default function ConversationsView() {
                                                     </div>
                                                 ) : (
                                                     <div className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                                                        <div className="flex items-end gap-2 max-w-[70%]">
+                                                        <div className="flex items-end gap-2 max-w-[70%] min-w-0">
                                                             {!isAgent && (
                                                                 <UserAvatar
                                                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
@@ -1829,7 +1923,7 @@ export default function ConversationsView() {
                                                                     title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
                                                                 />
                                                             )}
-                                                            <div className={`group relative ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
+                                                            <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
                                                                 <MarkdownMessage content={msg.content} className="text-inherit" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1885,44 +1979,14 @@ export default function ConversationsView() {
             ) : (
                 /* Empty State */
                 <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-                    <div className="text-center text-gray-400 dark:text-gray-600 max-w-2xl px-8">
-                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
-                            <MessageSquare className="h-12 w-12 text-white" />
+                    <div className="text-center max-w-2xl px-8">
+                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                            <Logo size={56} />
                         </div>
-                        <h2 className="text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">Have a moment?</h2>
-                        <p className="text-gray-500 dark:text-gray-400 mb-8">
-                            Great! Use the spare time and learn some best practices for supporting visitors.
+                        <h2 className="text-2xl font-semibold mb-3 text-gray-900 dark:text-white">Select a conversation</h2>
+                        <p className="text-gray-600 dark:text-gray-400">
+                            Choose a chat from the list to view messages and reply.
                         </p>
-
-                        <div className="space-y-4 text-left">
-                            <div className="flex gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg">
-                                <div className="flex-shrink-0">
-                                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                                        <MessageSquare className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Customize the chat box to match your website</h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                                        With a good profile picture, personalized brand colors, and friendly texts, you'll make the right impression.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg">
-                                <div className="flex-shrink-0">
-                                    <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
-                                        <Check className="h-5 w-5 text-green-600 dark:text-green-400" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Discover how the live chat works</h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                                        We'll show you how to work with the live chat and you'll be able to attend to your first visitor in no time.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}

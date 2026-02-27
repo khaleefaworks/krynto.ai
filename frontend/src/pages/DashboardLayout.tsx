@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageSquare, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw, Users } from 'lucide-react'
+import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw, Users, UserCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -83,7 +83,7 @@ export default function DashboardLayout() {
           }`}
       >
         <div className="relative">
-          <MessageSquare className="h-5 w-5" />
+          <MessageCircle className="h-5 w-5" />
           {unreadChatsCount > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-4 w-4 flex items-center justify-center animate-pulse">
               {unreadChatsCount > 9 ? '9+' : unreadChatsCount}
@@ -107,6 +107,17 @@ export default function DashboardLayout() {
       >
         <Users className="h-5 w-5" />
         <span className="md:hidden lg:block">Customers</span>
+      </Link>
+
+      <Link
+        to="/dashboard/teams"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/teams')
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+      >
+        <UserCheck className="h-5 w-5" />
+        <span className="md:hidden lg:block">Teams</span>
       </Link>
 
       <Link
@@ -278,7 +289,7 @@ export default function DashboardLayout() {
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
-                  <MessageSquare className="h-5 w-5" />
+                  <MessageCircle className="h-5 w-5" />
                 </Link>
               </TooltipTrigger>
               <TooltipContent side="right">
@@ -300,6 +311,23 @@ export default function DashboardLayout() {
               </TooltipTrigger>
               <TooltipContent side="right">
                 <p>Customers</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/teams"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/teams')
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                >
+                  <UserCheck className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Teams</p>
               </TooltipContent>
             </Tooltip>
 

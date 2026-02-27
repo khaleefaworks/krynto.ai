@@ -223,6 +223,14 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+
+    # System Manager accounts can only be created during the one-time bootstrap.
+    # This keeps the deployment model simple: exactly one default Administrator.
+    if register_request.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="System Manager role can only be created during initial bootstrap",
+        )
     
     # Create new user
     user = User(

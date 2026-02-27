@@ -22,6 +22,7 @@ import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import TagsSettings from './pages/TagsSettings'
+import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
@@ -413,6 +414,9 @@ function App() {
                   </div>
                 } />
               </Route>
+
+              {/* Teams - All users (placeholder) */}
+              <Route path="teams" element={<Teams />} />
 
               {/* Analytics - All users (placeholder) */}
               <Route path="analytics" element={<Analytics />} />

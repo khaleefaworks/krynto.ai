@@ -155,8 +155,8 @@ async def update_availability(
     db.refresh(current_user)
 
     # Push presence updates to all connected visitor widgets.
-    # Presence currently treats eligible agents as available for ANY website.
-    # So a single agent toggling availability can affect multiple sites.
+    # Presence is website-scoped and assignment-based.
+    # So a single agent toggling availability can affect any websites they're assigned to.
     try:
         await PresenceService.broadcast_all()
     except Exception:
@@ -388,6 +388,22 @@ def update_user_role(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
+        )
+
+    # System Manager is a bootstrap-only Administrator account.
+    # Do not allow changing its role (including demotion).
+    if user.role == UserRole.SYSTEM_MANAGER and payload.role != UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Administrator account role cannot be changed",
+        )
+
+    # System Manager role is reserved for the one-time bootstrap administrator.
+    # Do not allow promoting other accounts to SYSTEM_MANAGER.
+    if payload.role == UserRole.SYSTEM_MANAGER and user.role != UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="System Manager role can only be created during initial bootstrap",
         )
     
     # Prevent changing your own role
