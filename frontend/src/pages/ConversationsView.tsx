@@ -31,7 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { isAdmin } from '@/lib/roles'
 import {
     Check,
-    MessageSquare,
+    MessageCircle,
     Search,
     ChevronLeft,
     ChevronRight,
@@ -1359,7 +1359,7 @@ export default function ConversationsView() {
     const getFilterIcon = () => {
         switch (activeFilter) {
             case 'all':
-                return <MessageSquare className="h-5 w-5" />
+                return <MessageCircle className="h-5 w-5" />
             case 'mine':
                 return <Users className="h-5 w-5" />
             case 'unassigned':
@@ -1367,7 +1367,7 @@ export default function ConversationsView() {
             case 'resolved':
                 return <Check className="h-5 w-5" />
             default:
-                return <MessageSquare className="h-5 w-5" />
+                return <MessageCircle className="h-5 w-5" />
         }
     }
 
@@ -1432,13 +1432,13 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <MessageSquare className="h-5 w-5 flex-shrink-0" />
+                                                <MessageCircle className="h-5 w-5 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <MessageSquare className="h-5 w-5 flex-shrink-0" />
+                                                    <MessageCircle className="h-5 w-5 flex-shrink-0" />
                                                     <span className="flex-1 text-left">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
@@ -1592,7 +1592,7 @@ export default function ConversationsView() {
                         </div>
                     ) : filteredChats.length === 0 ? (
                         <div className="text-center p-8 text-gray-400 dark:text-gray-600">
-                            <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                            <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
                             <p>You don't have any {activeFilter !== 'all' ? activeFilter : ''} conversations at the moment.</p>
                         </div>
                     ) : (
@@ -1834,7 +1834,7 @@ export default function ConversationsView() {
                         ) : messages.length === 0 ? (
                             <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-600">
                                 <div className="text-center">
-                                    <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                                    <MessageCircle className="h-16 w-16 mx-auto mb-4 opacity-50" />
                                     <p className="text-lg">No messages yet</p>
                                     <p className="text-sm mt-2">Start the conversation!</p>
                                 </div>

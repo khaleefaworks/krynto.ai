@@ -329,7 +329,10 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     theme = config.get('theme', 'dark')
     position = config.get('position', 'bottom-right')
     welcome_message = config.get('welcome_message', 'Hi! How can we help you today?')
-    primary_color = config.get('primary_color', '#000000')
+    primary_color = config.get('primary_color', '#3b82f6')
+    color_mode = config.get('color_mode', 'gradient')
+    gradient_start = config.get('gradient_start', '#3b82f6')
+    gradient_end = config.get('gradient_end', '#2563eb')
 
     header_title = config.get("header_title", "How can we help?")
     online_status_text = config.get("online_status_text", "We reply immediately")
@@ -366,6 +369,9 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
   _aichatassist.position = '{position}';
     _aichatassist.welcomeMessage = {json.dumps(welcome_message)};
   _aichatassist.primaryColor = '{primary_color}';
+    _aichatassist.colorMode = '{color_mode}';
+    _aichatassist.gradientStart = '{gradient_start}';
+    _aichatassist.gradientEnd = '{gradient_end}';
 
     // Optional UI config (if not provided, widget defaults apply)
     _aichatassist.headerTitle = {json.dumps(header_title)};

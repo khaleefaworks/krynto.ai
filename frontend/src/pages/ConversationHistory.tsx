@@ -4,7 +4,7 @@ import { fetchClosedConversations } from '@/services/chats'
 import type { ActiveChat } from '@/services/chats'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Clock, Eye } from 'lucide-react'
+import { MessageCircle, Clock, Eye } from 'lucide-react'
 
 export default function ConversationHistory() {
   const navigate = useNavigate()
@@ -56,7 +56,7 @@ export default function ConversationHistory() {
   if (closedChats.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <MessageSquare className="h-16 w-16 text-gray-300 dark:text-gray-700 mb-4" />
+        <MessageCircle className="h-16 w-16 text-gray-300 dark:text-gray-700 mb-4" />
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Closed Conversations</h3>
         <p className="text-gray-500 dark:text-gray-400">Closed conversations will appear here</p>
         <Button onClick={fetchHistory} variant="outline" className="mt-4">
@@ -77,7 +77,7 @@ export default function ConversationHistory() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {closedChats.map((chat) => (
-          <Card 
+          <Card
             key={chat.id}
             className="hover:shadow-lg transition-shadow cursor-pointer border-gray-200 dark:border-gray-700 dark:bg-gray-800"
           >
@@ -96,7 +96,7 @@ export default function ConversationHistory() {
                   <span className="font-medium text-gray-700 dark:text-gray-300">Website:</span>
                   <span className="ml-2 text-gray-600 dark:text-gray-400">{chat.website_name || `Website ${chat.website_id}`}</span>
                 </div>
-                
+
                 <div className="text-sm">
                   <span className="font-medium text-gray-700 dark:text-gray-300">Last Message:</span>
                   <p className="text-gray-600 dark:text-gray-400 truncate mt-1">

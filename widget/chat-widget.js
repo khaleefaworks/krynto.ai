@@ -41,7 +41,10 @@
     theme: globalConfig.theme || 'dark',
     position: globalConfig.position || 'bottom-right',
     welcomeMessage: globalConfig.welcomeMessage || 'Hi! How can we help you today?',
-    primaryColor: globalConfig.primaryColor || '#000000',
+    primaryColor: globalConfig.primaryColor || '#3b82f6',
+    colorMode: globalConfig.colorMode || 'gradient',
+    gradientStart: globalConfig.gradientStart || '#3b82f6',
+    gradientEnd: globalConfig.gradientEnd || '#2563eb',
     headerTitle: globalConfig.headerTitle || 'Support Chat',
     onlineStatusText: globalConfig.onlineStatusText || 'Online',
     bubbleText: globalConfig.bubbleText || 'Chat with us',
@@ -1385,8 +1388,8 @@
           </button>
         </div>
         <div id="chatassist-bubble-pill">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
           <span id="chatassist-bubble-text">${CONFIG.bubbleText}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" preserveAspectRatio="xMidYMid meet" width="24" height="24"><path d="M63.113,18.51v-.16C60.323,7.05,44.582,3,31.972,3S3.582,7,.792,18.5a66.22,66.22,0,0,0,0,20.46c1.18,4.74,5.05,8.63,11.36,11.41l-4,5A3.47,3.47,0,0,0,10.882,61a3.39,3.39,0,0,0,1.44-.31L26.862,54c1.79.18,3.49.27,5.07.27,11.04.04,28.41-4.04,31.18-15.43a60.33,60.33,0,0,0,0-20.33Z"></path></svg>
           <span id="chatassist-bubble-unread" style="display:none;"></span>
           <div id="chatassist-bubble-online-dot"></div>
         </div>
@@ -1818,13 +1821,28 @@
         const widget = document.getElementById('chatassist-widget');
         const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
         widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
+        // Compute the CSS background value based on color mode
+        const themeBackground = CONFIG.colorMode === 'gradient'
+          ? `linear-gradient(135deg, ${CONFIG.gradientStart} 0%, ${CONFIG.gradientEnd} 100%)`
+          : CONFIG.primaryColor;
         const pillEl = document.getElementById('chatassist-bubble-pill');
-        if (pillEl) pillEl.style.background = CONFIG.primaryColor;
-        document.getElementById('chatassist-header').style.background = CONFIG.primaryColor;
-        document.getElementById('chatassist-send').style.background = CONFIG.primaryColor;
+        if (pillEl) pillEl.style.background = themeBackground;
+        document.getElementById('chatassist-header').style.background = themeBackground;
+        document.getElementById('chatassist-send').style.background = themeBackground;
         // Update popup reply button color too
         const replyBtn = document.getElementById('chatassist-popup-reply');
-        if (replyBtn) replyBtn.style.background = CONFIG.primaryColor;
+        if (replyBtn) replyBtn.style.background = themeBackground;
+        // Update visitor message bubbles and contact overlay submit
+        const contactSubmit = document.querySelector('.chatassist-contact-overlay-submit');
+        if (contactSubmit) contactSubmit.style.background = themeBackground;
+        // Apply to visitor message CSS via a dynamic style element
+        let themeStyle = document.getElementById('chatassist-theme-style');
+        if (!themeStyle) {
+          themeStyle = document.createElement('style');
+          themeStyle.id = 'chatassist-theme-style';
+          document.head.appendChild(themeStyle);
+        }
+        themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }`;
       } catch (e) { }
 
       await fetchReadState();

@@ -23,6 +23,9 @@ interface Website {
     position?: string
     welcome_message?: string
     primary_color?: string
+    color_mode?: 'solid' | 'gradient'
+    gradient_start?: string
+    gradient_end?: string
     header_title?: string
     online_status_text?: string
     bubble_text?: string
@@ -204,7 +207,10 @@ export default function WebsiteDetail() {
       theme: 'dark',
       position: 'bottom-right',
       welcome_message: 'Hi! How can we help you today?',
-      primary_color: '#000000',
+      primary_color: '#3b82f6',
+      color_mode: 'gradient' as 'solid' | 'gradient',
+      gradient_start: '#3b82f6',
+      gradient_end: '#2563eb',
       header_title: 'How can we help?',
       online_status_text: 'We reply immediately',
       bubble_text: 'Chat',
@@ -977,7 +983,10 @@ export default function WebsiteDetail() {
           theme: data.widget_config?.theme || 'dark',
           position: data.widget_config?.position || 'bottom-right',
           welcome_message: defaultWelcome,
-          primary_color: data.widget_config?.primary_color || '#000000',
+          primary_color: data.widget_config?.primary_color || '#3b82f6',
+          color_mode: (data.widget_config as any)?.color_mode === 'solid' ? 'solid' : 'gradient',
+          gradient_start: (data.widget_config as any)?.gradient_start || '#3b82f6',
+          gradient_end: (data.widget_config as any)?.gradient_end || '#2563eb',
           header_title: data.widget_config?.header_title || 'How can we help?',
           online_status_text: data.widget_config?.online_status_text || 'We reply immediately',
           bubble_text: data.widget_config?.bubble_text || 'Chat',
@@ -2798,31 +2807,193 @@ export default function WebsiteDetail() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Primary Color
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Main Color
                 </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={formData.widget_config.primary_color}
-                    onChange={(e) => setFormData({
+
+                {/* Color mode toggle */}
+                <div className="flex items-center gap-1 mb-3 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({
                       ...formData,
-                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                      widget_config: { ...formData.widget_config, color_mode: 'gradient' }
                     })}
-                    className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600"
-                  />
-                  <Input
-                    value={formData.widget_config.primary_color}
-                    onChange={(e) => setFormData({
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'gradient'
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                  >
+                    Gradient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({
                       ...formData,
-                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                      widget_config: { ...formData.widget_config, color_mode: 'solid' }
                     })}
-                    placeholder="#000000"
-                    className="flex-1"
-                  />
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'solid'
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                  >
+                    Solid
+                  </button>
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Main color for header, buttons, and bubble
+
+                {/* Preset color swatches */}
+                {(() => {
+                  const presets = formData.widget_config.color_mode === 'gradient'
+                    ? [
+                      { start: '#3b82f6', end: '#2563eb' },  // Blue
+                      { start: '#ef4444', end: '#dc2626' },  // Red
+                      { start: '#f97316', end: '#ea580c' },  // Orange
+                      { start: '#22c55e', end: '#16a34a' },  // Green
+                      { start: '#0ea5e9', end: '#0284c7' },  // Sky
+                      { start: '#8b5cf6', end: '#7c3aed' },  // Purple
+                      { start: '#ec4899', end: '#db2777' },  // Pink
+                      { start: '#14b8a6', end: '#0d9488' },  // Teal
+                      { start: '#6366f1', end: '#4f46e5' },  // Indigo
+                      { start: '#111827', end: '#374151' },  // Dark
+                    ]
+                    : [
+                      { color: '#3b82f6' },  // Blue
+                      { color: '#ef4444' },  // Red
+                      { color: '#f97316' },  // Orange
+                      { color: '#22c55e' },  // Green
+                      { color: '#0ea5e9' },  // Sky
+                      { color: '#8b5cf6' },  // Purple
+                      { color: '#ec4899' },  // Pink
+                      { color: '#14b8a6' },  // Teal
+                      { color: '#6366f1' },  // Indigo
+                      { color: '#111827' },  // Dark
+                    ];
+                  return (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {formData.widget_config.color_mode === 'gradient'
+                        ? (presets as { start: string; end: string }[]).map((p, i) => {
+                          const isSelected = formData.widget_config.gradient_start === p.start && formData.widget_config.gradient_end === p.end;
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setFormData({
+                                ...formData,
+                                widget_config: {
+                                  ...formData.widget_config,
+                                  gradient_start: p.start,
+                                  gradient_end: p.end,
+                                  primary_color: p.start,
+                                }
+                              })}
+                              className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                              style={{ background: `linear-gradient(135deg, ${p.start} 0%, ${p.end} 100%)` }}
+                              title={`${p.start} → ${p.end}`}
+                            />
+                          );
+                        })
+                        : (presets as { color: string }[]).map((p, i) => {
+                          const isSelected = formData.widget_config.primary_color === p.color;
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setFormData({
+                                ...formData,
+                                widget_config: {
+                                  ...formData.widget_config,
+                                  primary_color: p.color,
+                                }
+                              })}
+                              className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                              style={{ background: p.color }}
+                              title={p.color}
+                            />
+                          );
+                        })
+                      }
+                    </div>
+                  );
+                })()}
+
+                {/* Custom color inputs */}
+                {formData.widget_config.color_mode === 'gradient' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={formData.widget_config.gradient_start}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
+                          })}
+                          className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                        />
+                        <Input
+                          value={formData.widget_config.gradient_start}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
+                          })}
+                          placeholder="#3b82f6"
+                          className="flex-1 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">End Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={formData.widget_config.gradient_end}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, gradient_end: e.target.value }
+                          })}
+                          className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                        />
+                        <Input
+                          value={formData.widget_config.gradient_end}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, gradient_end: e.target.value }
+                          })}
+                          placeholder="#2563eb"
+                          className="flex-1 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-2">
+                      <div className="h-8 rounded-lg w-full" style={{ background: `linear-gradient(135deg, ${formData.widget_config.gradient_start} 0%, ${formData.widget_config.gradient_end} 100%)` }} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={formData.widget_config.primary_color}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                      })}
+                      className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                    />
+                    <Input
+                      value={formData.widget_config.primary_color}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                      })}
+                      placeholder="#3b82f6"
+                      className="flex-1"
+                    />
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Main color for header, buttons, message bubbles, and chat bubble
                 </p>
               </div>
 
