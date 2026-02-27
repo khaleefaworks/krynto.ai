@@ -1292,7 +1292,7 @@
       }
       el.style.display = 'flex';
       el.classList.add('chatassist-contact-overlay-visible');
-      document.getElementById('chatassist-contact-email')?.focus();
+      document.getElementById('chatassist-contact-name')?.focus();
     }
   }
 
@@ -1338,8 +1338,14 @@
   function submitContactAndSendPending() {
     const email = document.getElementById('chatassist-contact-email')?.value.trim();
     const name = document.getElementById('chatassist-contact-name')?.value.trim();
+    if (!name) {
+      showToast('Please enter your name.');
+      document.getElementById('chatassist-contact-name')?.focus();
+      return;
+    }
     if (!email) {
-      showToast('Please enter your email so we can contact you.');
+      showToast('Please enter your email.');
+      document.getElementById('chatassist-contact-email')?.focus();
       return;
     }
     const msg = pendingOfflineMessage;
@@ -1758,7 +1764,7 @@
 
     // Update bubble online dot
     const bubbleDot = document.getElementById('chatassist-bubble-online-dot');
-    if (bubbleDot) bubbleDot.classList.toggle('chatassist-dot-visible', presenceOnline);
+    if (bubbleDot) bubbleDot.classList.toggle('chatassist-dot-online', presenceOnline);
 
     // Update header online dot
     const headerDot = document.querySelector('.chatassist-online-dot');
