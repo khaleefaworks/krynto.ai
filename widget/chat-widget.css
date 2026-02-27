@@ -77,15 +77,15 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #22c55e;
+  background: #ef4444;
   border: 3px solid #fff;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  display: none;
+  display: block;
   z-index: 2;
 }
 
-#chatassist-bubble-online-dot.chatassist-dot-visible {
-  display: block;
+#chatassist-bubble-online-dot.chatassist-dot-online {
+  background: #22c55e;
 }
 
 /* Unread badge */
@@ -915,12 +915,20 @@
   color: #6b7280;
 }
 
+.chatassist-contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .chatassist-contact-form input {
   padding: 10px 12px;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   outline: none;
   font-size: 14px;
+  width: 100%;
   transition: border-color 0.15s;
 }
 
