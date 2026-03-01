@@ -170,7 +170,7 @@ export default function DashboardLayout() {
             <Menu className="h-6 w-6 text-gray-700 dark:text-gray-300" />
           </button>
           <div className="flex items-center gap-2">
-            <Logo size={32} />
+            <Logo size={32} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
             <span className="font-semibold text-gray-900 dark:text-white">AI ChatAssist</span>
           </div>
         </div>
@@ -203,7 +203,7 @@ export default function DashboardLayout() {
         {/* Mobile Sidebar Header */}
         <div className="h-16 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
-            <Logo size={32} />
+            <Logo size={32} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
             <span className="font-semibold text-gray-900 dark:text-white">AI ChatAssist</span>
           </div>
           <button
@@ -272,7 +272,7 @@ export default function DashboardLayout() {
       <aside className="hidden md:flex md:w-16 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shadow-sm">
         {/* Desktop Logo */}
         <div className="h-16 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
-          <Logo size={40} />
+          <Logo size={40} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
         </div>
 
         {/* Desktop Navigation - Icon Only */}
