@@ -6,14 +6,15 @@ from app.models.conversation_tag import ConversationTag
 def get_tag(db: Session, tag_id: int) -> Optional[Tag]:
     return db.query(Tag).filter(Tag.id == tag_id).first()
 
-def list_tags(db: Session) -> List[Tag]:
-    return db.query(Tag).order_by(Tag.name.asc()).all()
+def list_tags(db: Session, website_id: int) -> List[Tag]:
+    return db.query(Tag).filter(Tag.website_id == website_id).order_by(Tag.name.asc()).all()
 
-def create_tag(db: Session, name: str, color: str, description: Optional[str] = None) -> Tag:
+def create_tag(db: Session, name: str, color: str, website_id: int, description: Optional[str] = None) -> Tag:
     db_tag = Tag(
         name=name,
         color=color,
-        description=description
+        description=description,
+        website_id=website_id,
     )
     db.add(db_tag)
     db.commit()

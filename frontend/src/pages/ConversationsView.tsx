@@ -1026,25 +1026,10 @@ export default function ConversationsView() {
                 setConversation(chatData as any)
                 setConversationTags((chatData as any).tags || [])
 
-                // Tags are global (not website-scoped)
-                apiRequest<any[]>(`/tags`).then(tags => {
-                    if (loadDetailsTokenRef.current === token) {
-                        setAvailableTags(Array.isArray(tags) ? tags : [])
-                    }
-                }).catch(() => {
-                    if (loadDetailsTokenRef.current === token) {
-                        setAvailableTags([])
-                    }
-                })
-            } else {
-                try {
-                    const summary = await fetchChatSummary(chatId)
-                    if (loadDetailsTokenRef.current === token) {
-                        setConversation(summary as any)
-                        setConversationTags(((summary as any).tags || []) as any)
-                    }
-
-                    apiRequest<any[]>(`/tags`).then(tags => {
+                // Fetch tags scoped to the conversation's website
+                const wid = (chatData as any).website_id
+                if (wid) {
+                    apiRequest<any[]>(`/websites/${wid}/tags`).then(tags => {
                         if (loadDetailsTokenRef.current === token) {
                             setAvailableTags(Array.isArray(tags) ? tags : [])
                         }
@@ -1053,6 +1038,27 @@ export default function ConversationsView() {
                             setAvailableTags([])
                         }
                     })
+                }
+            } else {
+                try {
+                    const summary = await fetchChatSummary(chatId)
+                    if (loadDetailsTokenRef.current === token) {
+                        setConversation(summary as any)
+                        setConversationTags(((summary as any).tags || []) as any)
+                    }
+
+                    const wid = (summary as any).website_id
+                    if (wid) {
+                        apiRequest<any[]>(`/websites/${wid}/tags`).then(tags => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTags(Array.isArray(tags) ? tags : [])
+                            }
+                        }).catch(() => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTags([])
+                            }
+                        })
+                    }
                 } catch {
                     // ignore
                 }

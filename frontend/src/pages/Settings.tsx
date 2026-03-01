@@ -1,7 +1,7 @@
 import { useAppStore } from "@/store/appStore"
 import { isAdmin } from "@/lib/roles"
 import { Link, useLocation, Outlet } from "react-router-dom"
-import { Globe, User as UserIcon, Users, Tag, Zap } from "lucide-react"
+import { Globe, User as UserIcon, Users, Zap } from "lucide-react"
 
 export default function Settings() {
   const { user } = useAppStore()
@@ -48,16 +48,6 @@ export default function Settings() {
                 >
                   <Users className="h-4 w-4" />
                   Users
-                </Link>
-                <Link
-                  to="/dashboard/settings/tags"
-                  className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium ${isActive('/dashboard/settings/tags')
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
-                >
-                  <Tag className="h-4 w-4" />
-                  Tags
                 </Link>
                 <div className="mb-4" />
               </>

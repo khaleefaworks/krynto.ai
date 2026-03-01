@@ -21,7 +21,6 @@ import CustomersVisitors from './pages/CustomersVisitors'
 import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
-import TagsSettings from './pages/TagsSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
@@ -395,11 +394,7 @@ function App() {
                 <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
                 <Route path="agents/:id" element={<LegacySettingsAgentsRedirect />} />
 
-                {/* Tags management - Admin only */}
-                <Route
-                  path="tags"
-                  element={isAdmin(user) ? <TagsSettings /> : <Navigate to="/dashboard/chats" replace />}
-                />
+                {/* Tags route removed – tags are now per-website inside WebsiteDetail */}
 
                 {/* Personal settings - All users */}
                 <Route path="personal" element={<PersonalSettings />} />

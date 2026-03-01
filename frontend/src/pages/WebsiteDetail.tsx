@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users, Zap } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users, Zap, Tag as TagIcon } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
@@ -102,7 +102,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags'
 
 type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
 
@@ -171,6 +171,23 @@ export default function WebsiteDetail() {
   const [newWebsiteShortcut, setNewWebsiteShortcut] = useState('')
   const [newWebsiteShortcutMessage, setNewWebsiteShortcutMessage] = useState('')
   const [newWebsiteShortcutActive, setNewWebsiteShortcutActive] = useState(true)
+
+  // Tags tab (admin-only)
+  type WebsiteTag = {
+    id: number
+    name: string
+    color: string
+    description: string | null
+    website_id: number
+    created_at: string
+    updated_at: string | null
+  }
+
+  const [websiteTags, setWebsiteTags] = useState<WebsiteTag[]>([])
+  const [websiteTagsLoading, setWebsiteTagsLoading] = useState(false)
+  const [websiteTagsSaving, setWebsiteTagsSaving] = useState(false)
+  const [websiteTagsError, setWebsiteTagsError] = useState<string | null>(null)
+  const [editingTag, setEditingTag] = useState<Partial<WebsiteTag> | null>(null)
 
   // Teams tab (admin-only)
   type WebsiteTeam = { id: number; website_id: number; name: string; description?: string | null; member_count: number }
@@ -251,6 +268,13 @@ export default function WebsiteDetail() {
     loadWebsiteShortcuts()
   }, [activeTab, websiteId, user])
 
+  useEffect(() => {
+    if (!websiteId) return
+    if (activeTab !== 'tags') return
+    if (!isAdmin(user)) return
+    loadWebsiteTags()
+  }, [activeTab, websiteId, user])
+
   const loadWebsiteShortcuts = async () => {
     if (!websiteId) return
     try {
@@ -262,6 +286,68 @@ export default function WebsiteDetail() {
       setWebsiteShortcutsError(err?.message || 'Failed to load website shortcuts')
     } finally {
       setWebsiteShortcutsLoading(false)
+    }
+  }
+
+  const loadWebsiteTags = async () => {
+    if (!websiteId) return
+    try {
+      setWebsiteTagsLoading(true)
+      setWebsiteTagsError(null)
+      const data = await apiRequest<WebsiteTag[]>(`/websites/${websiteId}/tags`)
+      setWebsiteTags(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setWebsiteTagsError(err?.message || 'Failed to load tags')
+    } finally {
+      setWebsiteTagsLoading(false)
+    }
+  }
+
+  const saveWebsiteTag = async () => {
+    if (!websiteId || !editingTag) return
+    const name = String(editingTag.name || '').trim()
+    const color = String(editingTag.color || '').trim() || '#000000'
+    const description = editingTag.description ?? ''
+    if (!name) {
+      setWebsiteTagsError('Tag name is required')
+      return
+    }
+    try {
+      setWebsiteTagsSaving(true)
+      setWebsiteTagsError(null)
+      if (editingTag.id) {
+        await apiRequest(`/websites/${websiteId}/tags/${editingTag.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name, color, description }),
+        })
+      } else {
+        await apiRequest(`/websites/${websiteId}/tags`, {
+          method: 'POST',
+          body: JSON.stringify({ name, color, description }),
+        })
+      }
+      setEditingTag(null)
+      await loadWebsiteTags()
+    } catch (err: any) {
+      setWebsiteTagsError(err?.message || 'Failed to save tag')
+    } finally {
+      setWebsiteTagsSaving(false)
+    }
+  }
+
+  const deleteWebsiteTag = async (tagId: number) => {
+    if (!websiteId) return
+    if (!confirm('Delete this tag? It will be removed from all conversations.')) return
+    try {
+      setWebsiteTagsSaving(true)
+      setWebsiteTagsError(null)
+      await apiRequest(`/websites/${websiteId}/tags/${tagId}`, { method: 'DELETE' })
+      setWebsiteTags((prev) => prev.filter((t) => t.id !== tagId))
+      if (editingTag?.id === tagId) setEditingTag(null)
+    } catch (err: any) {
+      setWebsiteTagsError(err?.message || 'Failed to delete tag')
+    } finally {
+      setWebsiteTagsSaving(false)
     }
   }
 
@@ -1228,6 +1314,16 @@ export default function WebsiteDetail() {
                   <Zap className="w-4 h-4 inline-block mr-2 mb-1" />
                   Shortcuts
                 </button>
+                <button
+                  onClick={() => setActiveTab('tags')}
+                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'tags'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                    }`}
+                >
+                  <TagIcon className="w-4 h-4 inline-block mr-2 mb-1" />
+                  Tags
+                </button>
               </>
             )}
           </nav>
@@ -1697,6 +1793,134 @@ export default function WebsiteDetail() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* Tags Tab (admin-only) */}
+        {!isNew && activeTab === 'tags' && isAdmin(user) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TagIcon className="w-5 h-5" />
+                  Tags
+                </CardTitle>
+                <CardDescription>
+                  {websiteTagsLoading ? 'Loading…' : `${websiteTags.length} total`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {websiteTagsError && (
+                  <div className="mb-4 rounded-md p-3 text-sm bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200">
+                    {websiteTagsError}
+                  </div>
+                )}
+
+                {websiteTagsLoading ? (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+                ) : websiteTags.length === 0 ? (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">No tags yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {[...websiteTags]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((t) => (
+                        <div key={t.id} className="flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
+                          <button
+                            type="button"
+                            className="flex items-center gap-3 min-w-0 text-left"
+                            onClick={() => setEditingTag({ ...t })}
+                            disabled={websiteTagsSaving}
+                            title="Edit"
+                          >
+                            <span className="inline-flex h-5 w-5 rounded" style={{ backgroundColor: t.color }} />
+                            <span className="font-medium text-gray-900 dark:text-white truncate">{t.name}</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                              {t.description || ''}
+                            </span>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteWebsiteTag(t.id)}
+                            disabled={websiteTagsSaving}
+                            className="text-red-600 hover:text-red-700"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{editingTag?.id ? 'Edit Tag' : 'Create Tag'}</CardTitle>
+                <CardDescription>Tags are scoped to this website.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                  <Input
+                    value={String(editingTag?.name || '')}
+                    onChange={(e) => setEditingTag({ ...(editingTag || {}), name: e.target.value })}
+                    placeholder="e.g. Urgent"
+                    disabled={websiteTagsSaving}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={String(editingTag?.color || '#000000')}
+                      onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
+                      className="w-10 h-10 p-0 border-0 rounded"
+                      disabled={websiteTagsSaving}
+                    />
+                    <Input
+                      value={String(editingTag?.color || '#000000')}
+                      onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
+                      placeholder="#000000"
+                      disabled={websiteTagsSaving}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>
+                  <Input
+                    value={String(editingTag?.description || '')}
+                    onChange={(e) => setEditingTag({ ...(editingTag || {}), description: e.target.value })}
+                    placeholder="What is this tag used for?"
+                    disabled={websiteTagsSaving}
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditingTag(null)}
+                    disabled={websiteTagsSaving}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={saveWebsiteTag}
+                    disabled={websiteTagsSaving}
+                  >
+                    {websiteTagsSaving ? 'Saving…' : (editingTag?.id ? 'Save' : 'Create')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* Automations Tab */}
