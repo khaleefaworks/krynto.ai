@@ -14,6 +14,8 @@ interface Agent {
   role: string
   is_active: boolean
   is_available: boolean
+  is_connected?: boolean
+  can_receive_chats?: boolean
   avatar_url?: string | null
 }
 
@@ -171,7 +173,7 @@ export default function AgentsList() {
                                 {initials}
                               </div>
                             )}
-                            <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-white dark:border-gray-800 rounded-full ${agent.is_available ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                            <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-white dark:border-gray-800 rounded-full ${agent.can_receive_chats ? 'bg-green-500' : 'bg-red-500'}`}></div>
                           </div>
                           <span className="text-sm font-medium text-gray-900 dark:text-white">
                             {agent.name}
