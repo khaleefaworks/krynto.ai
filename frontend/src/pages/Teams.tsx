@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 
 import { API_BASE } from '@/config/endpoints'
@@ -6,6 +6,7 @@ import UserAvatar from '@/components/UserAvatar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { AgentAvailability, TeamOverview, WebsiteTeamsOverview } from '@/services/teams'
 import { teamsApi } from '@/services/teams'
+import { addMessageHandler } from '@/services/agentSocket'
 
 function toFullAvatarUrl(raw: string | null | undefined): string | null {
     const v = String(raw || '').trim()
@@ -103,11 +104,13 @@ export default function Teams() {
     const [error, setError] = useState<string | null>(null)
     const [rows, setRows] = useState<WebsiteTeamsOverview[]>([])
     const [selectedWebsiteId, setSelectedWebsiteId] = useState<number | null>(null)
+    const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve())
 
     const refresh = async () => {
         const data = await teamsApi.overview()
         setRows(Array.isArray(data) ? data : [])
     }
+    refreshRef.current = refresh
 
     useEffect(() => {
         let cancelled = false
@@ -127,6 +130,16 @@ export default function Teams() {
         return () => {
             cancelled = true
         }
+    }, [])
+
+    // Listen for real-time availability changes via agent WebSocket
+    useEffect(() => {
+        const removeHandler = addMessageHandler((data: any) => {
+            if (data?.type === 'availability_changed') {
+                refreshRef.current().catch(() => { })
+            }
+        })
+        return removeHandler
     }, [])
 
     const sorted = useMemo(() => {

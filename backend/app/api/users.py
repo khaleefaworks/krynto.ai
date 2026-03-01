@@ -12,6 +12,7 @@ from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_ima
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
 from app.services.presence_service import PresenceService
+from app.services.agent_service import AgentService
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -161,6 +162,21 @@ async def update_availability(
         await PresenceService.broadcast_all()
     except Exception:
         # Never fail the availability toggle because of a best-effort broadcast.
+        pass
+
+    # Notify all connected agent dashboards so Teams/Users pages can update in real-time.
+    try:
+        agent_svc = AgentService(db)
+        await agent_svc.broadcast_to_active_agents(
+            website_id=None,
+            message_data={
+                "type": "availability_changed",
+                "agent_id": current_user.id,
+                "is_available": current_user.is_available,
+            },
+            include_global=True,
+        )
+    except Exception:
         pass
     
     return AvailabilityResponse(is_available=current_user.is_available)

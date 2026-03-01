@@ -229,9 +229,7 @@ export default function DashboardLayout() {
                   {getInitials(user?.name, user?.email)}
                 </div>
               )}
-              {user?.is_available && (
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
-              )}
+              <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-white dark:border-gray-800 rounded-full ${user?.is_available ? 'bg-green-500' : 'bg-red-500'}`}></div>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
@@ -398,9 +396,7 @@ export default function DashboardLayout() {
                         {getInitials(user?.name, user?.email)}
                       </div>
                     )}
-                    {user?.is_available && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
-                    )}
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-white dark:border-gray-800 rounded-full ${user?.is_available ? 'bg-green-500' : 'bg-red-500'}`}></div>
                   </div>
                 </div>
               </DropdownMenuTrigger>

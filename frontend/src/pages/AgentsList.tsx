@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
-import { Plus, User, CheckCircle, XCircle } from 'lucide-react'
-import { Badge } from '../components/ui/badge'
+import { Plus, User } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { API_BASE } from '@/config/endpoints'
+import { addMessageHandler } from '@/services/agentSocket'
 
 interface Agent {
   id: number
@@ -22,10 +22,7 @@ export default function AgentsList() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    loadAgents()
-  }, [])
+  const loadAgentsRef = useRef<() => Promise<void>>(() => Promise.resolve())
 
   const loadAgents = async () => {
     try {
@@ -40,6 +37,27 @@ export default function AgentsList() {
       setLoading(false)
     }
   }
+  loadAgentsRef.current = loadAgents
+
+  useEffect(() => {
+    loadAgents()
+  }, [])
+
+  // Listen for real-time availability changes via agent WebSocket
+  useEffect(() => {
+    const removeHandler = addMessageHandler((data: any) => {
+      if (data?.type === 'availability_changed') {
+        const agentId = data.agent_id
+        const isAvailable = data.is_available
+        if (typeof agentId === 'number') {
+          setAgents(prev => prev.map(a =>
+            a.id === agentId ? { ...a, is_available: isAvailable } : a
+          ))
+        }
+      }
+    })
+    return removeHandler
+  }, [])
 
   const handleRowClick = (agentId: number) => {
     navigate(`/dashboard/settings/users/${agentId}`)
@@ -144,17 +162,20 @@ export default function AgentsList() {
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
-                          {avatar ? (
-                            <img
-                              src={avatar}
-                              alt={agent.name}
-                              className="w-10 h-10 rounded-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
-                              {initials}
-                            </div>
-                          )}
+                          <div className="relative">
+                            {avatar ? (
+                              <img
+                                src={avatar}
+                                alt={agent.name}
+                                className="w-10 h-10 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
+                                {initials}
+                              </div>
+                            )}
+                            <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-white dark:border-gray-800 rounded-full ${agent.is_available ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          </div>
                           <span className="text-sm font-medium text-gray-900 dark:text-white">
                             {agent.name}
                           </span>
@@ -177,19 +198,6 @@ export default function AgentsList() {
                               })
                             }}
                           />
-                          <Badge variant={(isAdministrator ? true : agent.is_active) ? 'default' : 'destructive'} className="gap-1">
-                            {(isAdministrator ? true : agent.is_active) ? (
-                              <>
-                                <CheckCircle className="w-3 h-3" />
-                                Active
-                              </>
-                            ) : (
-                              <>
-                                <XCircle className="w-3 h-3" />
-                                Inactive
-                              </>
-                            )}
-                          </Badge>
                         </div>
                       </td>
                     </tr>
