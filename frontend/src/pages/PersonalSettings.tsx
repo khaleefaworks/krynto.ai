@@ -222,13 +222,14 @@ export default function PersonalSettings() {
   }
 
   return (
-    <div className="p-8">
-      <div className="max-w-2xl">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Personal Settings</h1>
-        <p className="text-gray-600 dark:text-gray-400 mb-8">Manage your profile information</p>
+    <div>
+      <div className="h-16 flex items-center border-b dark:border-gray-700 px-6">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Personal Settings</h1>
+      </div>
 
+      <div className="max-w-2xl px-6 py-4">
         {message && (
-          <div className={`mb-6 p-4 rounded-md ${message.type === 'success'
+          <div className={`mb-4 p-3 rounded-md text-sm ${message.type === 'success'
             ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300'
             : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'
             }`}>
@@ -236,12 +237,12 @@ export default function PersonalSettings() {
           </div>
         )}
 
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Profile Information</CardTitle>
-            <CardDescription>Your account details and avatar</CardDescription>
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Profile Information</CardTitle>
+            <CardDescription className="text-xs">Your account details and avatar</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4">
             <div>
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
                 Profile Avatar
@@ -252,11 +253,11 @@ export default function PersonalSettings() {
                     <img
                       src={avatarPreview}
                       alt={user?.name || 'Avatar'}
-                      className="w-20 h-20 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                      className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
                     />
                   ) : (
-                    <div className="w-20 h-20 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                      <UserIcon className="w-10 h-10 text-gray-400 dark:text-gray-500" />
+                    <div className="w-16 h-16 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                      <UserIcon className="w-8 h-8 text-gray-400 dark:text-gray-500" />
                     </div>
                   )}
                 </div>
@@ -314,10 +315,10 @@ export default function PersonalSettings() {
           </CardContent>
         </Card>
 
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Browser Notifications</CardTitle>
-            <CardDescription>Enable push notifications for new chats while you are away</CardDescription>
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Browser Notifications</CardTitle>
+            <CardDescription className="text-xs">Enable push notifications for new chats while you are away</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-sm text-gray-700 dark:text-gray-300">
@@ -338,6 +339,7 @@ export default function PersonalSettings() {
               onClick={handleEnablePush}
               disabled={pushLoading || !isPushSupported() || vapidPublicKeyPresent === false}
               variant="outline"
+              size="sm"
             >
               {pushLoading ? 'Enabling…' : 'Enable Notifications'}
             </Button>

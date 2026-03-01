@@ -14,8 +14,8 @@ export default function Customers() {
         <div className="flex h-screen">
             {/* Customers Sidebar */}
             <aside className="w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700">
-                <div className="p-6 border-b dark:border-gray-700">
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Customers</h1>
+                <div className="px-6 h-16 border-b dark:border-gray-700 flex items-center">
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Customers</h1>
                 </div>
 
                 <nav className="p-4">

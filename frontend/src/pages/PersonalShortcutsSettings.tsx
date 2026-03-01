@@ -103,23 +103,26 @@ export default function PersonalShortcutsSettings() {
     }
 
     return (
-        <div className="p-8">
-            <div className="max-w-4xl">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Personal Shortcuts</h1>
-                <p className="text-gray-600 dark:text-gray-400 mb-8">
+        <div>
+            <div className="h-16 flex items-center border-b dark:border-gray-700 px-6">
+                <h1 className="text-xl font-bold text-gray-900 dark:text-white">Personal Shortcuts</h1>
+            </div>
+
+            <div className="max-w-4xl px-6 py-4">
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Create your own quick replies. Trigger them by typing <span className="font-mono">/</span> or <span className="font-mono">.</span> at the start of a message.
                 </p>
 
                 {error && (
-                    <div className="mb-6 p-4 rounded-md bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300">
+                    <div className="mb-4 p-3 rounded-md text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300">
                         {error}
                     </div>
                 )}
 
-                <Card className="mb-6">
-                    <CardHeader>
-                        <CardTitle>Create shortcut</CardTitle>
-                        <CardDescription>Example: <span className="font-mono">hello</span> expands to your message.</CardDescription>
+                <Card className="mb-4">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Create shortcut</CardTitle>
+                        <CardDescription className="text-xs">Example: <span className="font-mono">hello</span> expands to your message.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -151,7 +154,7 @@ export default function PersonalShortcutsSettings() {
                         </div>
 
                         <div className="flex justify-end">
-                            <Button onClick={handleCreate} disabled={saving}>
+                            <Button size="sm" onClick={handleCreate} disabled={saving}>
                                 {saving ? "Saving..." : "Create"}
                             </Button>
                         </div>
@@ -159,9 +162,9 @@ export default function PersonalShortcutsSettings() {
                 </Card>
 
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Your shortcuts</CardTitle>
-                        <CardDescription>{loading ? "Loading..." : `${sorted.length} total`}</CardDescription>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Your shortcuts</CardTitle>
+                        <CardDescription className="text-xs">{loading ? "Loading..." : `${sorted.length} total`}</CardDescription>
                     </CardHeader>
                     <CardContent>
                         {sorted.length === 0 ? (

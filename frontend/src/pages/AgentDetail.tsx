@@ -239,7 +239,7 @@ export default function AgentDetail() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div>
         <div className="flex items-center justify-center h-64">
           <div className="text-gray-500 dark:text-gray-400">Loading user...</div>
         </div>
@@ -248,63 +248,60 @@ export default function AgentDetail() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/dashboard/settings/users')}
-          className="gap-2 mb-4"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Users
-        </Button>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {isNew ? 'Add New User' : 'Edit User'}
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              {isNew ? 'Create a new user account' : 'Update user account details'}
-            </p>
-          </div>
-          {!isNew && (
-            <div className="flex items-center gap-4">
-              <Button
-                variant={formData.is_active ? 'outline' : 'default'}
-                onClick={toggleStatus}
-                disabled={saving || isAdministratorAccount}
-                className="gap-2"
-              >
-                {formData.is_active ? (
-                  <>
-                    <XCircle className="w-4 h-4" />
-                    Deactivate
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4" />
-                    Activate
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={saving}
-                className="gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete
-              </Button>
-            </div>
-          )}
+    <div>
+      <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/dashboard/settings/users')}
+            className="gap-1"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Button>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+            {isNew ? 'Add New User' : 'Edit User'}
+          </h1>
         </div>
+        {!isNew && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant={formData.is_active ? 'outline' : 'default'}
+              size="sm"
+              onClick={toggleStatus}
+              disabled={saving || isAdministratorAccount}
+              className="gap-1"
+            >
+              {formData.is_active ? (
+                <>
+                  <XCircle className="w-3.5 h-3.5" />
+                  Deactivate
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Activate
+                </>
+              )}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={saving}
+              className="gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       {!isNew && agent && isAdmin(currentUser) && (
-        <Card className="p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Avatar</h2>
+        <Card className="p-4 mx-6 mt-4">
+          <h2 className="text-base font-semibold mb-3 text-gray-900 dark:text-white">Avatar</h2>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
               {agent.avatar_url ? (
@@ -333,6 +330,7 @@ export default function AgentDetail() {
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => {
                   if (!confirm('Remove this user\'s avatar?')) return
                   deleteAvatarForUser(agent.id)
@@ -344,21 +342,26 @@ export default function AgentDetail() {
             </div>
           </div>
         </Card>
-      )}
+      )
+      }
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-red-800 dark:text-red-300">{error}</p>
-        </div>
-      )}
+      {
+        error && (
+          <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+          </div>
+        )
+      }
 
-      {successMessage && (
-        <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-          <p className="text-green-800 dark:text-green-300">{successMessage}</p>
-        </div>
-      )}
+      {
+        successMessage && (
+          <div className="mx-6 mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+            <p className="text-sm text-green-800 dark:text-green-300">{successMessage}</p>
+          </div>
+        )
+      }
 
-      <form onSubmit={handleSave} className="space-y-6 max-w-2xl">
+      <form onSubmit={handleSave} className="space-y-4 max-w-2xl px-6 py-4">
         {/* Agent Information */}
         <Card>
           <CardHeader>
@@ -487,20 +490,21 @@ export default function AgentDetail() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center gap-4">
-          <Button type="submit" disabled={saving} className="gap-2">
+        <div className="flex items-center gap-3">
+          <Button type="submit" size="sm" disabled={saving} className="gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Saving...' : isNew ? 'Create User' : 'Save Changes'}
           </Button>
           <Button
             type="button"
             variant="outline"
+            size="sm"
             onClick={() => navigate('/dashboard/settings/users')}
           >
             Cancel
           </Button>
         </div>
       </form>
-    </div>
+    </div >
   )
 }

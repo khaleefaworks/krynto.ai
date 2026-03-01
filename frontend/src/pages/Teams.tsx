@@ -159,11 +159,11 @@ export default function Teams() {
     }, [sorted, selectedWebsiteId])
 
     return (
-        <div className="p-6 bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
+        <div className="bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden">
+            <div className="flex items-center justify-between mb-4 h-16 border-b dark:border-gray-700 px-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Teams</h1>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Agent availability by website</p>
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Teams</h1>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Agent availability by website</p>
                 </div>
             </div>
 
@@ -193,7 +193,7 @@ export default function Teams() {
             ) : null}
 
             {!loading && !error && sorted.length ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-7rem)]">
+                <div className="mx-4 grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-6rem)]">
                     <Card className="lg:col-span-4 xl:col-span-3 dark:bg-gray-800 dark:border-gray-700 overflow-hidden">
                         <CardHeader className="pb-3">
                             <CardTitle className="text-base">Websites</CardTitle>

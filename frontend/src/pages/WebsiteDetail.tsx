@@ -1193,7 +1193,7 @@ export default function WebsiteDetail() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div>
         <div className="flex items-center justify-center h-64">
           <div className="text-gray-500 dark:text-gray-400">Loading website...</div>
         </div>
@@ -1202,55 +1202,51 @@ export default function WebsiteDetail() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/dashboard/settings/websites')}
-          className="gap-2 mb-4"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Websites
-        </Button>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {isNew ? 'Add New Website' : 'Edit Website'}
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              {isNew ? 'Configure a new website integration' : 'Update website configuration and widget settings'}
-            </p>
-          </div>
-          {!isNew && (
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={saving}
-              className="gap-2"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </Button>
-          )}
+    <div>
+      <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/dashboard/settings/websites')}
+            className="gap-1"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Button>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+            {isNew ? 'Add New Website' : 'Edit Website'}
+          </h1>
         </div>
+        {!isNew && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={saving}
+            className="gap-1"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </Button>
+        )}
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-red-800 dark:text-red-300">{error}</p>
+        <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
         </div>
       )}
 
       {successMessage && (
-        <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-          <p className="text-green-800 dark:text-green-300">{successMessage}</p>
+        <div className="mx-6 mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+          <p className="text-sm text-green-800 dark:text-green-300">{successMessage}</p>
         </div>
       )}
 
       {!isNew && (
-        <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-          <nav className="-mb-px flex space-x-8">
+        <div className="mx-6 mt-4 mb-4 border-b border-gray-200 dark:border-gray-700">
+          <nav className="-mb-px flex space-x-6 overflow-x-auto">
             <button
               onClick={() => setActiveTab('installation')}
               className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'installation'
@@ -1330,7 +1326,7 @@ export default function WebsiteDetail() {
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-6 max-w-4xl">
+      <form onSubmit={handleSave} className="space-y-4 max-w-4xl px-6 pb-6">
         {/* Installation Tab */}
         {!isNew && activeTab === 'installation' && (
           <Card>
@@ -3277,14 +3273,15 @@ export default function WebsiteDetail() {
         )}
 
 
-        <div className="flex items-center gap-4">
-          <Button type="submit" disabled={saving} className="gap-2">
+        <div className="flex items-center gap-3">
+          <Button type="submit" size="sm" disabled={saving} className="gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Saving...' : isNew ? 'Create Website' : 'Save Changes'}
           </Button>
           <Button
             type="button"
             variant="outline"
+            size="sm"
             onClick={() => navigate('/dashboard/settings/websites')}
           >
             Cancel

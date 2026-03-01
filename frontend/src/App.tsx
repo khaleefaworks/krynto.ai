@@ -24,6 +24,7 @@ import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
+import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
@@ -400,11 +401,15 @@ function App() {
                 <Route path="personal" element={<PersonalSettings />} />
                 <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
                 <Route index element={
-                  <div className="p-8">
-                    <div className="max-w-4xl">
-                      <div className="text-center text-gray-500 dark:text-gray-400 py-12">
-                        Select a settings section from the sidebar
+                  <div className="flex-1 flex items-center justify-center h-full bg-gray-50 dark:bg-gray-900">
+                    <div className="text-center max-w-2xl px-8">
+                      <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                        <Logo size={56} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
                       </div>
+                      <h2 className="text-2xl font-semibold mb-3 text-gray-900 dark:text-white">Settings</h2>
+                      <p className="text-gray-600 dark:text-gray-400">
+                        Select a section from the sidebar to get started.
+                      </p>
                     </div>
                   </div>
                 } />

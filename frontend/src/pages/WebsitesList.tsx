@@ -45,7 +45,7 @@ export default function WebsitesList() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div>
         <div className="flex items-center justify-center h-64">
           <div className="text-gray-500 dark:text-gray-400">Loading websites...</div>
         </div>
@@ -55,8 +55,8 @@ export default function WebsitesList() {
 
   if (error) {
     return (
-      <div className="p-8">
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+      <div>
+        <div className="mx-6 mt-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
           <p className="text-red-800 dark:text-red-300">{error}</p>
         </div>
       </div>
@@ -64,34 +64,31 @@ export default function WebsitesList() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+    <div>
+      <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Websites</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Manage your website integrations and chat widget configurations
-          </p>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Websites</h1>
         </div>
-        <Button onClick={() => navigate('/dashboard/settings/websites/new')} className="gap-2">
+        <Button size="sm" onClick={() => navigate('/dashboard/settings/websites/new')} className="gap-2">
           <Plus className="w-4 h-4" />
           Add Website
         </Button>
       </div>
 
       {websites.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center">
-          <Globe className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No websites yet</h3>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-6 mt-4">
+          <Globe className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-base font-medium text-gray-900 dark:text-white mb-2">No websites yet</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
             Add your first website to start using the chat widget
           </p>
-          <Button onClick={() => navigate('/dashboard/settings/websites/new')} className="gap-2">
+          <Button size="sm" onClick={() => navigate('/dashboard/settings/websites/new')} className="gap-2">
             <Plus className="w-4 h-4" />
             Add Website
           </Button>
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mx-6 mt-4">
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
               <tr>

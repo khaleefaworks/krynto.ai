@@ -132,17 +132,17 @@ export default function CustomersContacts() {
     }
 
     return (
-        <div className="p-8">
-            <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+            <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Contacts</h1>
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Contacts</h1>
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
                     Number of contacts <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 px-6 py-4">
                 <div className="relative w-full max-w-sm">
                     <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
@@ -155,11 +155,11 @@ export default function CustomersContacts() {
             </div>
 
             {filtered.length === 0 ? (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-6 mb-6">
                     <div className="text-gray-600 dark:text-gray-400">No contacts found</div>
                 </div>
             ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mx-6 mb-6">
                     <table className="w-full">
                         <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
                             <tr>
