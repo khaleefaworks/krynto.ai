@@ -3,7 +3,7 @@ from app.core.database import SessionLocal
 from app.models.user import User, UserRole
 from app.models.website import Website
 from app.models.agent_website_assignment import AgentWebsiteAssignment
-from app.models.message_shortcut import MessageShortcut
+from app.models.website_message_shortcut import WebsiteMessageShortcut
 from app.models.system_settings import SystemSettings
 from app.core.security import get_password_hash
 
@@ -87,13 +87,13 @@ def seed_database():
         ]
         
         for shortcut_data in shortcuts_data:
-            existing_shortcut = db.query(MessageShortcut).filter_by(
+            existing_shortcut = db.query(WebsiteMessageShortcut).filter_by(
                 website_id=website.id,
                 shortcut=shortcut_data["shortcut"]
             ).first()
             
             if not existing_shortcut:
-                shortcut = MessageShortcut(
+                shortcut = WebsiteMessageShortcut(
                     website_id=website.id,
                     **shortcut_data
                 )
@@ -121,7 +121,7 @@ def seed_database():
                 print("ℹ️  System already initialized")
         
         print("\n📋 Login Credentials:")
-        print("   Admin: admin@chatassist.local / admin123")
+        print("   Admin: ragul.k@noveloffice.in / $0ft%963$")
         print("   Agent: agent@test.com / agent123")
         
     except Exception as e:

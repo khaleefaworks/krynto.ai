@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
-import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, RotateCcw, Users, UserCheck } from 'lucide-react'
+import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
-import { isAdministrator } from '@/lib/roles'
+
 import { API_BASE } from '@/config/endpoints'
 
 function getFullAvatarUrl(url: string | null | undefined): string | null {
@@ -77,23 +77,16 @@ export default function DashboardLayout() {
     <>
       <Link
         to="/dashboard/chats"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all relative ${isActive('/dashboard/chats')
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/chats')
           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
           : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
           }`}
       >
-        <div className="relative">
-          <MessageCircle className="h-5 w-5" />
-          {unreadChatsCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-4 w-4 flex items-center justify-center animate-pulse">
-              {unreadChatsCount > 9 ? '9+' : unreadChatsCount}
-            </span>
-          )}
-        </div>
+        <MessageCircle className="h-5 w-5" />
         <span className="md:hidden lg:block">Chats</span>
         {unreadChatsCount > 0 && (
-          <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5 md:hidden lg:block">
-            {unreadChatsCount}
+          <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5">
+            {unreadChatsCount > 99 ? '99+' : unreadChatsCount}
           </span>
         )}
       </Link>
@@ -142,19 +135,6 @@ export default function DashboardLayout() {
         <span className="md:hidden lg:block">Analytics</span>
       </Link>
 
-      {/* Reset Application - Administrator Only */}
-      {isAdministrator(user) && (
-        <Link
-          to="/dashboard/reset"
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/reset')
-            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-            : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-            }`}
-        >
-          <RotateCcw className="h-5 w-5" />
-          <span className="md:hidden lg:block">Reset App</span>
-        </Link>
-      )}
     </>
   )
 
@@ -282,12 +262,17 @@ export default function DashboardLayout() {
               <TooltipTrigger asChild>
                 <Link
                   to="/dashboard/chats"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/chats')
+                  className={`relative flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/chats')
                     ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
                   <MessageCircle className="h-5 w-5" />
+                  {unreadChatsCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 min-w-[16px] flex items-center justify-center px-1">
+                      {unreadChatsCount > 99 ? '99+' : unreadChatsCount}
+                    </span>
+                  )}
                 </Link>
               </TooltipTrigger>
               <TooltipContent side="right">

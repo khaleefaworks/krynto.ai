@@ -284,8 +284,8 @@ function App() {
 
         try {
           const chats = await fetchActiveChats()
-          const openChats = chats.filter((c) => c.status === 'open')
-          setUnreadChatsCount(openChats.length)
+          const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
+          setUnreadChatsCount(unreadChats.length)
         } catch (error) {
           console.error('Failed to update chat count:', error)
         }
@@ -296,8 +296,8 @@ function App() {
     const updateChatCount = async () => {
       try {
         const chats = await fetchActiveChats()
-        const openChats = chats.filter(c => c.status === 'open')
-        setUnreadChatsCount(openChats.length)
+        const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
+        setUnreadChatsCount(unreadChats.length)
       } catch (error) {
         console.error('Failed to update chat count:', error)
       }
