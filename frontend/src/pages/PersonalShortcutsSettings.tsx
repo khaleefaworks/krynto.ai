@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { apiRequest } from "@/services/api"
+import { Plus, Trash2, Zap } from "lucide-react"
 
 interface Shortcut {
     id: number
@@ -108,97 +108,110 @@ export default function PersonalShortcutsSettings() {
                 <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Personal Shortcuts</h1>
             </div>
 
-            <div className="max-w-4xl px-6 py-4">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-                    Create your own quick replies. Trigger them by typing <span className="font-mono">/</span> or <span className="font-mono">.</span> at the start of a message.
+            <div className="max-w-2xl px-6 py-6 space-y-6">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Create quick-reply shortcuts. Type <kbd className="mx-0.5 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">/</kbd> or <kbd className="mx-0.5 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">.</kbd> at the start of a message to trigger them.
                 </p>
 
                 {error && (
-                    <div className="mb-4 p-3 rounded-md text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300">
+                    <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800">
                         {error}
                     </div>
                 )}
 
-                <Card className="mb-4">
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Create shortcut</CardTitle>
-                        <CardDescription className="text-xs">Example: <span className="font-mono">hello</span> expands to your message.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Shortcut</label>
+                {/* Create form */}
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 p-5 space-y-4">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <Plus className="h-4 w-4" /> New Shortcut
+                    </h3>
+
+                    <div className="flex items-center gap-3">
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Trigger word</label>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-mono text-sm">/</span>
                                 <Input
                                     value={newShortcut}
                                     onChange={(e) => setNewShortcut(e.target.value)}
                                     placeholder="hello"
-                                    className="dark:bg-gray-800 dark:border-gray-700"
+                                    className="pl-7 dark:bg-gray-800 dark:border-gray-700"
                                 />
                             </div>
-                            <div className="flex items-end gap-3">
-                                <div className="flex items-center gap-2">
-                                    <Switch checked={newActive} onCheckedChange={setNewActive} />
-                                    <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
-                                </div>
-                            </div>
                         </div>
-
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Message</label>
-                            <Textarea
-                                value={newMessage}
-                                onChange={(e) => setNewMessage(e.target.value)}
-                                placeholder="Hello! How can I help you today?"
-                                className="dark:bg-gray-800 dark:border-gray-700"
-                            />
+                        <div className="flex items-end pb-0.5">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <Switch checked={newActive} onCheckedChange={setNewActive} />
+                                <span className="text-xs text-gray-600 dark:text-gray-400">Active</span>
+                            </label>
                         </div>
+                    </div>
 
-                        <div className="flex justify-end">
-                            <Button size="sm" onClick={handleCreate} disabled={saving}>
-                                {saving ? "Saving..." : "Create"}
-                            </Button>
+                    <div>
+                        <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Reply message</label>
+                        <Textarea
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            placeholder="Hello! How can I help you today?"
+                            rows={3}
+                            className="dark:bg-gray-800 dark:border-gray-700 resize-none"
+                        />
+                    </div>
+
+                    <div className="flex justify-end">
+                        <Button size="sm" onClick={handleCreate} disabled={saving || !newShortcut.trim() || !newMessage.trim()}>
+                            {saving ? "Creating…" : "Create Shortcut"}
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Existing shortcuts */}
+                <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                        Your Shortcuts {!loading && <span className="font-normal text-gray-500 dark:text-gray-400">({sorted.length})</span>}
+                    </h3>
+
+                    {loading ? (
+                        <div className="text-sm text-gray-500 dark:text-gray-400 py-8 text-center">Loading…</div>
+                    ) : sorted.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 py-10 text-center">
+                            <Zap className="h-8 w-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500 dark:text-gray-400">No shortcuts yet</p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Create one above to get started.</p>
                         </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Your shortcuts</CardTitle>
-                        <CardDescription className="text-xs">{loading ? "Loading..." : `${sorted.length} total`}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {sorted.length === 0 ? (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">No shortcuts yet.</div>
-                        ) : (
-                            <div className="space-y-3">
-                                {sorted.map((s) => (
-                                    <div
-                                        key={s.id}
-                                        className="flex items-start justify-between gap-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"
-                                    >
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-3">
-                                                <div className="font-mono text-sm text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
-                                                <div className="flex items-center gap-2">
-                                                    <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleActive(s, v)} />
-                                                    <span className="text-xs text-gray-600 dark:text-gray-400">Active</span>
-                                                </div>
-                                            </div>
-                                            <div className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
-                                                {s.message}
-                                            </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {sorted.map((s) => (
+                                <div
+                                    key={s.id}
+                                    className="group flex items-start gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <code className="text-sm font-semibold text-gray-900 dark:text-gray-100">/{s.shortcut}</code>
+                                            {!s.is_active && (
+                                                <span className="text-[10px] uppercase tracking-wider font-medium text-gray-400 dark:text-gray-500">Disabled</span>
+                                            )}
                                         </div>
-                                        <div className="flex-shrink-0">
-                                            <Button variant="ghost" size="sm" onClick={() => handleDelete(s)}>
-                                                Delete
-                                            </Button>
-                                        </div>
+                                        <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words line-clamp-2">
+                                            {s.message}
+                                        </p>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+                                    <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
+                                        <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleActive(s, v)} />
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDelete(s)}
+                                            className="h-8 w-8 p-0 text-gray-400 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     )
