@@ -4,7 +4,8 @@ from app.core.database import get_db
 from app.models.website import Website
 from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.user import User
-from app.api.deps import require_admin, require_authenticated_user
+from app.api.deps import require_admin, require_administrator, require_authenticated_user
+from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -64,23 +65,26 @@ def list_websites(
     current_user: User = Depends(require_authenticated_user)
 ):
     """
-    List all websites.
-    Available to all authenticated users (admins and agents).
+    List websites visible to the current user.
+    - Administrator: all websites
+    - Manager/Agent: only assigned websites
     """
-    websites = db.query(Website).all()
-    return websites
+    scope = compute_visibility_scope(db, user=current_user)
+    query = db.query(Website)
+    if scope.website_ids is not None:
+        query = query.filter(Website.id.in_(scope.website_ids))
+    return query.all()
 
 
 @router.post("", response_model=WebsiteResponse, status_code=201)
 def create_website(
     website_data: WebsiteCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin)
+    admin: User = Depends(require_administrator)
 ):
     """
     Create a new website.
-    Requires admin access (SYSTEM_MANAGER or MANAGER role).
-    Widget key is automatically generated.
+    Requires Administrator (SYSTEM_MANAGER) access.
     """
     # Check if domain already exists
     existing = db.query(Website).filter_by(domain=website_data.domain).first()
@@ -118,11 +122,14 @@ def get_website(
 ):
     """
     Get a specific website by ID.
-    Available to all authenticated users.
+    Respects visibility scope — managers/agents can only access assigned websites.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and website.id not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Website not assigned")
     return website
 
 
@@ -165,11 +172,11 @@ def update_website(
 def delete_website(
     website_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin)
+    admin: User = Depends(require_administrator)
 ):
     """
     Delete a website.
-    Requires admin access (SYSTEM_MANAGER or MANAGER role).
+    Requires Administrator (SYSTEM_MANAGER) access.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:

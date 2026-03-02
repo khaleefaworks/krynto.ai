@@ -28,8 +28,9 @@ def _unique_sorted_ints(values: Iterable[int]) -> list[int]:
 
 
 def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
-    # Admins are unrestricted by website/team.
-    if user.is_admin():
+    # Only system_manager (Administrator) is unrestricted.
+    # Managers are scoped to their assigned websites, same as agents.
+    if user.is_administrator():
         return VisibilityScope(website_ids=None, team_ids=None)
 
     website_rows = (

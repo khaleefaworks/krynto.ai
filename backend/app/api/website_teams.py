@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.website import Website
 from app.models.website_team import WebsiteTeam, WebsiteTeamMember
+from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
 
 router = APIRouter(prefix="/websites/{website_id}/teams", tags=["website_teams"])
@@ -50,6 +51,15 @@ def _get_website_or_404(db: Session, website_id: int) -> Website:
     return website
 
 
+def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
+    """Raise 403 if the user doesn't have visibility to this website."""
+    scope = compute_visibility_scope(db, user=user)
+    try:
+        ensure_website_visible(scope, website_id=int(website_id))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Website not assigned")
+
+
 def _get_team_or_404(db: Session, *, website_id: int, team_id: int) -> WebsiteTeam:
     team = (
         db.query(WebsiteTeam)
@@ -68,6 +78,7 @@ def list_teams(
     _admin: User = Depends(require_admin),
 ):
     _get_website_or_404(db, website_id)
+    _enforce_website_access(db, website_id=website_id, user=_admin)
 
     teams = (
         db.query(WebsiteTeam)
@@ -109,6 +120,7 @@ def create_team(
     _admin: User = Depends(require_admin),
 ):
     _get_website_or_404(db, website_id)
+    _enforce_website_access(db, website_id=website_id, user=_admin)
 
     name = (payload.name or "").strip()
     if not name:
@@ -144,6 +156,7 @@ def update_team(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    _enforce_website_access(db, website_id=website_id, user=_admin)
     team = _get_team_or_404(db, website_id=website_id, team_id=team_id)
 
     if payload.name is not None:
@@ -188,6 +201,7 @@ def delete_team(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    _enforce_website_access(db, website_id=website_id, user=_admin)
     team = _get_team_or_404(db, website_id=website_id, team_id=team_id)
 
     db.delete(team)
@@ -203,6 +217,7 @@ def get_team_members(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    _enforce_website_access(db, website_id=website_id, user=_admin)
     team = _get_team_or_404(db, website_id=website_id, team_id=team_id)
 
     rows = (
@@ -224,6 +239,7 @@ def set_team_members(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    _enforce_website_access(db, website_id=website_id, user=_admin)
     team = _get_team_or_404(db, website_id=website_id, team_id=team_id)
 
     next_ids = sorted({int(x) for x in (payload.user_ids or [])})

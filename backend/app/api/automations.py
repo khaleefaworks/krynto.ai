@@ -9,6 +9,16 @@ from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 from app.repos import automations as automations_repo
 from app.models.website import Website
+from app.services.visibility import compute_visibility_scope, ensure_website_visible
+
+
+def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
+    """Raise 403 if the user doesn't have visibility to this website."""
+    scope = compute_visibility_scope(db, user=user)
+    try:
+        ensure_website_visible(scope, website_id=int(website_id))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Website not assigned")
 
 router = APIRouter(prefix="/automations", tags=["automations"])
 
@@ -55,6 +65,7 @@ def list_automations(
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+    _enforce_website_access(db, website_id=website_id, user=_current_user)
 
     return automations_repo.list_automations(db, website_id=website_id)
 
@@ -69,6 +80,7 @@ def create_automation(
     website = db.query(Website).filter_by(id=payload.website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+    _enforce_website_access(db, website_id=payload.website_id, user=_admin)
 
     return automations_repo.create_automation(
         db,
@@ -90,6 +102,7 @@ def get_automation(
     automation = automations_repo.get_automation(db, automation_id=automation_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
+    _enforce_website_access(db, website_id=automation.website_id, user=_current_user)
     return automation
 
 
@@ -103,6 +116,7 @@ def update_automation(
     automation = automations_repo.get_automation(db, automation_id=automation_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
+    _enforce_website_access(db, website_id=automation.website_id, user=_admin)
 
     return automations_repo.update_automation(
         db,
@@ -124,6 +138,7 @@ def delete_automation(
     automation = automations_repo.get_automation(db, automation_id=automation_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
+    _enforce_website_access(db, website_id=automation.website_id, user=_admin)
 
     automations_repo.delete_automation(db, automation=automation)
     return None

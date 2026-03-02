@@ -58,7 +58,7 @@ def _ensure_website_exists(db: Session, *, website_id: int) -> Website:
 
 
 def _ensure_website_access(db: Session, *, website_id: int, user: User) -> None:
-    if user.is_admin():
+    if user.is_administrator():
         return
     scope = compute_visibility_scope(db, user=user)
     try:

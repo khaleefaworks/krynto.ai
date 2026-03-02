@@ -8,6 +8,16 @@ from app.core.database import get_db
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 from app.repos import tags as tag_repo
+from app.services.visibility import compute_visibility_scope, ensure_website_visible
+
+
+def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
+    """Raise 403 if the user doesn't have visibility to this website."""
+    scope = compute_visibility_scope(db, user=user)
+    try:
+        ensure_website_visible(scope, website_id=int(website_id))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Website not assigned")
 
 router = APIRouter(prefix="/websites/{website_id}/tags", tags=["tags"])
 
@@ -40,6 +50,7 @@ def list_tags(
     _current_user: User = Depends(require_authenticated_user),
 ):
     """List tags for a specific website."""
+    _enforce_website_access(db, website_id=website_id, user=_current_user)
     return tag_repo.list_tags(db, website_id=website_id)
 
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
@@ -50,6 +61,7 @@ def create_tag(
     current_user: User = Depends(require_admin)
 ):
     """Create a new tag for a website (Admin only)."""
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     return tag_repo.create_tag(
         db,
         name=tag_data.name,
@@ -67,6 +79,7 @@ def update_tag(
     current_user: User = Depends(require_admin)
 ):
     """Update a tag (Admin only)."""
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     tag = tag_repo.get_tag(db, tag_id=tag_id)
     if not tag or tag.website_id != website_id:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -87,6 +100,7 @@ def delete_tag(
     current_user: User = Depends(require_admin)
 ):
     """Delete a tag (Admin only)."""
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     tag = tag_repo.get_tag(db, tag_id=tag_id)
     if not tag or tag.website_id != website_id:
         raise HTTPException(status_code=404, detail="Tag not found")
