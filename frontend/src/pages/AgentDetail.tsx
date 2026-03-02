@@ -4,7 +4,7 @@ import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft, Save, Trash2, User, Mail, Lock, CheckCircle, XCircle } from 'lucide-react'
+import { Save, Trash2, User, Mail, Lock, CheckCircle, XCircle } from 'lucide-react'
 import { Badge } from '../components/ui/badge'
 import { useAppStore } from '@/store/appStore'
 import { isAdministrator, isAdmin } from '@/lib/roles'
@@ -249,21 +249,10 @@ export default function AgentDetail() {
 
   return (
     <div>
-      <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/dashboard/settings/users')}
-            className="gap-1"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-            {isNew ? 'Add New User' : 'Edit User'}
-          </h1>
-        </div>
+      <div className="h-14 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
+        <h1 className="text-base font-semibold text-gray-900 dark:text-white">
+          {isNew ? 'Add New User' : (agent?.name || 'Edit User')}
+        </h1>
         {!isNew && (
           <div className="flex items-center gap-2">
             <Button

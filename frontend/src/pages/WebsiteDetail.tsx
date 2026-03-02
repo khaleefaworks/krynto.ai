@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { ArrowLeft, Save, Trash2, Globe, Code, Settings, Palette, Copy, Check, Bot, Plus, X, Users, Zap, Tag as TagIcon } from 'lucide-react'
+import { Save, Trash2, Globe, Code, Palette, Copy, Check, Bot, Plus, X, Users, Zap, Tag as TagIcon, AlertTriangle } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
@@ -102,7 +102,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'danger'
 
 type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
 
@@ -132,7 +132,8 @@ export default function WebsiteDetail() {
   const { user } = useAppStore()
   const isNew = id === 'new'
   const websiteId = id && id !== 'new' ? parseInt(id) : null
-  const [activeTab, setActiveTab] = useState<TabType>('installation')
+  const [searchParams] = useSearchParams()
+  const activeTab = (searchParams.get('tab') as TabType) || 'installation'
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1203,34 +1204,25 @@ export default function WebsiteDetail() {
 
   return (
     <div>
-      <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/dashboard/settings/websites')}
-            className="gap-1"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-            {isNew ? 'Add New Website' : 'Edit Website'}
+      {/* Header */}
+      {isNew ? (
+        <div className="h-14 flex items-center gap-3 border-b dark:border-gray-700 px-6">
+          <h1 className="text-base font-semibold text-gray-900 dark:text-white">
+            Add New Website
           </h1>
         </div>
-        {!isNew && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleDelete}
-            disabled={saving}
-            className="gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete
-          </Button>
-        )}
-      </div>
+      ) : (
+        <div className="h-16 flex items-center gap-3 border-b dark:border-gray-700 px-6">
+          <div>
+            <h1 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">
+              {formData.name || 'Website'}
+            </h1>
+            {formData.domain && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">{formData.domain}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -1244,89 +1236,7 @@ export default function WebsiteDetail() {
         </div>
       )}
 
-      {!isNew && (
-        <div className="mx-6 mt-4 mb-4 border-b border-gray-200 dark:border-gray-700">
-          <nav className="-mb-px flex space-x-6 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('installation')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'installation'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-            >
-              <Code className="w-4 h-4 inline-block mr-2 mb-1" />
-              Installation
-            </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'settings'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-            >
-              <Settings className="w-4 h-4 inline-block mr-2 mb-1" />
-              Settings
-            </button>
-            <button
-              onClick={() => setActiveTab('widget')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'widget'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-            >
-              <Palette className="w-4 h-4 inline-block mr-2 mb-1" />
-              Widget Customization
-            </button>
-            <button
-              onClick={() => setActiveTab('automations')}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'automations'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-            >
-              <Bot className="w-4 h-4 inline-block mr-2 mb-1" />
-              Automations
-            </button>
-
-            {isAdmin(user) && (
-              <>
-                <button
-                  onClick={() => setActiveTab('teams')}
-                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'teams'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                    }`}
-                >
-                  <Users className="w-4 h-4 inline-block mr-2 mb-1" />
-                  Teams
-                </button>
-                <button
-                  onClick={() => setActiveTab('shortcuts')}
-                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'shortcuts'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                    }`}
-                >
-                  <Zap className="w-4 h-4 inline-block mr-2 mb-1" />
-                  Shortcuts
-                </button>
-                <button
-                  onClick={() => setActiveTab('tags')}
-                  className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'tags'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                    }`}
-                >
-                  <TagIcon className="w-4 h-4 inline-block mr-2 mb-1" />
-                  Tags
-                </button>
-              </>
-            )}
-          </nav>
-        </div>
-      )}
-
-      <form onSubmit={handleSave} className="space-y-4 max-w-4xl px-6 pb-6">
+      <form onSubmit={handleSave} className="space-y-4 max-w-4xl px-6 py-6">
         {/* Installation Tab */}
         {!isNew && activeTab === 'installation' && (
           <Card>
@@ -3272,21 +3182,59 @@ export default function WebsiteDetail() {
 
         )}
 
+        {/* Danger Zone Tab */}
+        {!isNew && activeTab === 'danger' && (
+          <Card className="border-red-200 dark:border-red-800">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <AlertTriangle className="w-5 h-5" />
+                Danger Zone
+              </CardTitle>
+              <CardDescription>
+                Irreversible actions for this website
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    This will permanently remove the website, all its conversations, teams, tags, and automations.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className="gap-1 shrink-0 ml-4"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Website
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        <div className="flex items-center gap-3">
-          <Button type="submit" size="sm" disabled={saving} className="gap-2">
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving...' : isNew ? 'Create Website' : 'Save Changes'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/dashboard/settings/websites')}
-          >
-            Cancel
-          </Button>
-        </div>
+        {/* Save / Cancel buttons (shown on tabs that have form data) */}
+        {(isNew || activeTab === 'settings' || activeTab === 'widget') && (
+          <div className="flex items-center gap-3 pt-2">
+            <Button type="submit" size="sm" disabled={saving} className="gap-2">
+              <Save className="w-4 h-4" />
+              {saving ? 'Saving...' : isNew ? 'Create Website' : 'Save Changes'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/dashboard/settings/websites')}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
       </form>
     </div>
   )

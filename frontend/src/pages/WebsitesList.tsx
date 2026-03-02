@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
-import { Plus, ExternalLink, Globe, Settings } from 'lucide-react'
-import { Badge } from '../components/ui/badge'
+import { Plus, ExternalLink, Globe } from 'lucide-react'
 
 interface Website {
   id: number
@@ -66,9 +65,7 @@ export default function WebsitesList() {
   return (
     <div>
       <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Websites</h1>
-        </div>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Websites</h1>
         <Button size="sm" onClick={() => navigate('/dashboard/settings/websites/new')} className="gap-2">
           <Plus className="w-4 h-4" />
           Add Website

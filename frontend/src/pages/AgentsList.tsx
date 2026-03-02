@@ -109,9 +109,7 @@ export default function AgentsList() {
   return (
     <div>
       <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Users</h1>
-        </div>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Users</h1>
         <Button size="sm" onClick={() => navigate('/dashboard/settings/users/new')} className="gap-2">
           <Plus className="w-4 h-4" />
           Add User

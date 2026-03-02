@@ -105,7 +105,7 @@ export default function PersonalShortcutsSettings() {
     return (
         <div>
             <div className="h-16 flex items-center border-b dark:border-gray-700 px-6">
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">Personal Shortcuts</h1>
+                <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Personal Shortcuts</h1>
             </div>
 
             <div className="max-w-4xl px-6 py-4">
