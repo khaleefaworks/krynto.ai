@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_authenticated_user
 from app.core.database import get_db
 from app.models.user import User
 from app.models.website import Website
@@ -75,10 +75,10 @@ def _get_team_or_404(db: Session, *, website_id: int, team_id: int) -> WebsiteTe
 def list_teams(
     website_id: int,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    current_user: User = Depends(require_authenticated_user),
 ):
     _get_website_or_404(db, website_id)
-    _enforce_website_access(db, website_id=website_id, user=_admin)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
 
     teams = (
         db.query(WebsiteTeam)
