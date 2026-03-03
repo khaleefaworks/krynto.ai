@@ -52,6 +52,11 @@ def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
     )
     team_ids = _unique_sorted_ints([int(r[0]) for r in team_rows])
 
+    # If the user is not a member of any team, they can see all chats
+    # for their assigned websites (team_ids=None means unrestricted).
+    if not team_ids:
+        return VisibilityScope(website_ids=website_ids, team_ids=None)
+
     return VisibilityScope(website_ids=website_ids, team_ids=team_ids)
 
 

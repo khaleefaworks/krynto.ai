@@ -28,7 +28,7 @@ import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import Logo from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { isAdmin } from '@/lib/roles'
+import { isAdmin, isAgent } from '@/lib/roles'
 import {
     Check,
     MessageCircle,
@@ -817,6 +817,12 @@ export default function ConversationsView() {
                 if (selectedChat && dataConversationId === selectedChat) {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'conversation_team_changed') {
+                // Team assignment changed — refresh list (agent scope may differ)
+                fetchActiveChats({ showSpinner: false })
+                if (selectedChat && dataConversationId === selectedChat) {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
             } else if (data.type === 'conversation_assigned') {
                 // Another agent (or us) claimed a conversation.
                 fetchActiveChats({ showSpinner: false })
@@ -1181,16 +1187,8 @@ export default function ConversationsView() {
 
             setConversation((prev) => (prev ? ({ ...(prev as any), team_id: teamId } as any) : prev))
 
-            setActiveChats(activeChats.map((c: any) =>
-                c.id === selectedChat
-                    ? { ...c, team_id: teamId }
-                    : c
-            ))
-            setResolvedChats(resolvedChats.map((c: any) =>
-                c.id === selectedChat
-                    ? { ...c, team_id: teamId }
-                    : c
-            ))
+            // Re-fetch from server so visibility / team-scope filtering is applied
+            await fetchActiveChats({ showSpinner: false })
         } catch (error) {
             console.error('Failed to set team:', error)
         }
@@ -1880,77 +1878,81 @@ export default function ConversationsView() {
                                 {selectedTeam ? (
                                     <Badge
                                         variant="outline"
-                                        className="gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
-                                        onClick={() => setTeamPickerOpen(true)}
-                                        title="Click to change team"
+                                        className={`gap-1${isAdmin(user) ? ' cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700' : ''}`}
+                                        onClick={isAdmin(user) ? () => setTeamPickerOpen(true) : undefined}
+                                        title={isAdmin(user) ? 'Click to change team' : String((selectedTeam as any)?.name || '')}
                                     >
                                         <span className="truncate max-w-40">{String((selectedTeam as any)?.name || '')}</span>
-                                        <button
-                                            type="button"
-                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                                            onClick={(e) => { e.stopPropagation(); handleSetTeam(null) }}
-                                            aria-label="Clear team"
-                                            title="Clear"
-                                        >
-                                            ×
-                                        </button>
+                                        {isAdmin(user) && (
+                                            <button
+                                                type="button"
+                                                className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                                onClick={(e) => { e.stopPropagation(); handleSetTeam(null) }}
+                                                aria-label="Clear team"
+                                                title="Clear"
+                                            >
+                                                ×
+                                            </button>
+                                        )}
                                     </Badge>
                                 ) : null}
 
-                                <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
-                                    {!selectedTeam ? (
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                type="button"
-                                                variant="link"
-                                                className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                                            >
-                                                <Users className="h-4 w-4" />
-                                                Assign team
-                                            </Button>
-                                        </PopoverTrigger>
-                                    ) : null}
+                                {isAdmin(user) && (
+                                    <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
+                                        {!selectedTeam ? (
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="link"
+                                                    className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                                >
+                                                    <Users className="h-4 w-4" />
+                                                    Assign team
+                                                </Button>
+                                            </PopoverTrigger>
+                                        ) : null}
 
-                                    <PopoverContent
-                                        align="end"
-                                        className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
-                                    >
-                                        <div className="space-y-2">
-                                            <Input
-                                                value={teamPickerQuery}
-                                                onChange={(e) => setTeamPickerQuery(e.target.value)}
-                                                placeholder="Search teams…"
-                                                className="h-9"
-                                                autoFocus
-                                            />
+                                        <PopoverContent
+                                            align="end"
+                                            className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
+                                        >
+                                            <div className="space-y-2">
+                                                <Input
+                                                    value={teamPickerQuery}
+                                                    onChange={(e) => setTeamPickerQuery(e.target.value)}
+                                                    placeholder="Search teams…"
+                                                    className="h-9"
+                                                    autoFocus
+                                                />
 
-                                            <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
-                                                {filteredTeams.length === 0 ? (
-                                                    <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching teams</div>
-                                                ) : (
-                                                    <div className="p-1">
-                                                        {filteredTeams.map((t: any) => (
-                                                            <button
-                                                                key={t.id}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const id = Number(t?.id)
-                                                                    if (!Number.isFinite(id) || id <= 0) return
-                                                                    handleSetTeam(id)
-                                                                    setTeamPickerOpen(false)
-                                                                    setTeamPickerQuery('')
-                                                                }}
-                                                                className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                            >
-                                                                <span className="truncate">{String(t?.name || '')}</span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                                    {filteredTeams.length === 0 ? (
+                                                        <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching teams</div>
+                                                    ) : (
+                                                        <div className="p-1">
+                                                            {filteredTeams.map((t: any) => (
+                                                                <button
+                                                                    key={t.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const id = Number(t?.id)
+                                                                        if (!Number.isFinite(id) || id <= 0) return
+                                                                        handleSetTeam(id)
+                                                                        setTeamPickerOpen(false)
+                                                                        setTeamPickerQuery('')
+                                                                    }}
+                                                                    className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                                >
+                                                                    <span className="truncate">{String(t?.name || '')}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    </PopoverContent>
-                                </Popover>
+                                        </PopoverContent>
+                                    </Popover>
+                                )}
                             </div>
                         </div>
 
