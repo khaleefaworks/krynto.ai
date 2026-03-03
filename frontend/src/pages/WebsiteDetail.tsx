@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
@@ -10,9 +10,9 @@ import { isAdmin } from '@/lib/roles'
 import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
-import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
 import WebsiteShortcutsTab from './WebsiteShortcutsTab'
 import WebsiteTagsTab from './WebsiteTagsTab'
+import WebsiteTeamsTab from './WebsiteTeamsTab'
 
 interface Website {
   id: number
@@ -155,33 +155,6 @@ export default function WebsiteDetail() {
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
 
-  // Teams tab (admin-only)
-  type WebsiteTeam = { id: number; website_id: number; name: string; description?: string | null; member_count: number }
-  type WebsiteAgent = { id: number; email: string; name?: string | null; role?: string; is_active?: boolean; assigned_at?: string | null }
-  type TeamMembersResponse = { team_id: number; user_ids: number[] }
-
-  const [teams, setTeams] = useState<WebsiteTeam[]>([])
-  const [teamsLoading, setTeamsLoading] = useState(false)
-  const [teamsError, setTeamsError] = useState<string | null>(null)
-  const [creatingTeam, setCreatingTeam] = useState(false)
-  const [newTeamName, setNewTeamName] = useState('')
-  const [newTeamDescription, setNewTeamDescription] = useState('')
-  const [websiteAgents, setWebsiteAgents] = useState<WebsiteAgent[]>([])
-  const [agentsLoading, setAgentsLoading] = useState(false)
-  const [agentsError, setAgentsError] = useState<string | null>(null)
-  const [allAgents, setAllAgents] = useState<Agent[]>([])
-  const [allAgentsLoading, setAllAgentsLoading] = useState(false)
-  const [allAgentsError, setAllAgentsError] = useState<string | null>(null)
-  const [assigningAgentId, setAssigningAgentId] = useState<number | null>(null)
-  const [unassigningAgentId, setUnassigningAgentId] = useState<number | null>(null)
-  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null)
-  const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState<number[]>([])
-  const [membersLoading, setMembersLoading] = useState(false)
-  const [membersSaving, setMembersSaving] = useState(false)
-  const teamMembersLoadSeq = useRef(0)
-
-  const selectedTeam = selectedTeamId ? teams.find((t) => t.id === selectedTeamId) : undefined
-
   // Form data
   const [formData, setFormData] = useState({
     name: '',
@@ -217,169 +190,6 @@ export default function WebsiteDetail() {
     if (activeTab !== 'automations') return
     loadAutomations()
   }, [activeTab, websiteId])
-
-  useEffect(() => {
-    if (!websiteId) return
-    if (activeTab !== 'teams') return
-    if (!isAdmin(user)) return
-    loadTeams()
-    loadWebsiteAgents()
-    loadAllAgents()
-  }, [activeTab, websiteId, user])
-
-  const loadTeams = async () => {
-    if (!websiteId) return
-    try {
-      setTeamsLoading(true)
-      setTeamsError(null)
-      const data = await apiRequest<WebsiteTeam[]>(`/websites/${websiteId}/teams`)
-      setTeams(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setTeamsError(err?.message || 'Failed to load teams')
-    } finally {
-      setTeamsLoading(false)
-    }
-  }
-
-  const loadWebsiteAgents = async () => {
-    if (!websiteId) return
-    try {
-      setAgentsLoading(true)
-      setAgentsError(null)
-      const data = await apiRequest<WebsiteAgent[]>(`/agent-assignments/website/${websiteId}/agents`)
-      setWebsiteAgents(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setAgentsError(err?.message || 'Failed to load assigned agents')
-    } finally {
-      setAgentsLoading(false)
-    }
-  }
-
-  const loadAllAgents = async () => {
-    try {
-      setAllAgentsLoading(true)
-      setAllAgentsError(null)
-      const data = await agentAssignmentsApi.listAgents()
-      setAllAgents(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setAllAgentsError(err?.message || 'Failed to load agents')
-    } finally {
-      setAllAgentsLoading(false)
-    }
-  }
-
-  const handleAssignWebsiteAgent = async (agentId: number) => {
-    if (!websiteId) return
-    try {
-      setAssigningAgentId(agentId)
-      setAllAgentsError(null)
-      await agentAssignmentsApi.assignAgentToWebsite(agentId, websiteId)
-      await loadWebsiteAgents()
-    } catch (err: any) {
-      setAllAgentsError(err?.message || 'Failed to assign agent')
-    } finally {
-      setAssigningAgentId(null)
-    }
-  }
-
-  const handleUnassignWebsiteAgent = async (agentId: number) => {
-    if (!websiteId) return
-    try {
-      setUnassigningAgentId(agentId)
-      setAllAgentsError(null)
-      await agentAssignmentsApi.unassignAgentFromWebsite(agentId, websiteId)
-      await loadWebsiteAgents()
-
-      // Keep the team membership selection consistent with the currently assigned website agents.
-      setSelectedTeamMemberIds((prev) => prev.filter((id) => id !== agentId))
-    } catch (err: any) {
-      setAllAgentsError(err?.message || 'Failed to unassign agent')
-    } finally {
-      setUnassigningAgentId(null)
-    }
-  }
-
-  const loadTeamMembers = async (teamId: number) => {
-    if (!websiteId) return
-    const seq = ++teamMembersLoadSeq.current
-    try {
-      setMembersLoading(true)
-      const data = await apiRequest<TeamMembersResponse>(`/websites/${websiteId}/teams/${teamId}/members`)
-      const ids = Array.isArray(data?.user_ids) ? data.user_ids.map((x) => Number(x)).filter((x) => Number.isFinite(x)) : []
-
-      // Ignore out-of-order responses when switching teams quickly.
-      if (seq !== teamMembersLoadSeq.current) return
-      setSelectedTeamMemberIds(ids)
-    } catch (err: any) {
-      setTeamsError(err?.message || 'Failed to load team members')
-    } finally {
-      if (seq === teamMembersLoadSeq.current) setMembersLoading(false)
-    }
-  }
-
-  const handleCreateTeam = async () => {
-    if (!websiteId) return
-    const name = newTeamName.trim()
-    if (!name) {
-      setTeamsError('Team name is required')
-      return
-    }
-    try {
-      setCreatingTeam(true)
-      setTeamsError(null)
-      await apiRequest(`/websites/${websiteId}/teams`, {
-        method: 'POST',
-        body: JSON.stringify({ name, description: newTeamDescription.trim() || null }),
-      })
-      setNewTeamName('')
-      setNewTeamDescription('')
-      await loadTeams()
-    } catch (err: any) {
-      setTeamsError(err?.message || 'Failed to create team')
-    } finally {
-      setCreatingTeam(false)
-    }
-  }
-
-  const handleDeleteTeam = async (teamId: number) => {
-    if (!websiteId) return
-    if (!confirm('Delete this team?')) return
-    try {
-      setTeamsError(null)
-      await apiRequest(`/websites/${websiteId}/teams/${teamId}`, { method: 'DELETE' })
-      if (selectedTeamId === teamId) {
-        setSelectedTeamId(null)
-        setSelectedTeamMemberIds([])
-      }
-      await loadTeams()
-    } catch (err: any) {
-      setTeamsError(err?.message || 'Failed to delete team')
-    }
-  }
-
-  const handleSaveMembers = async () => {
-    if (!websiteId || !selectedTeamId) return
-    try {
-      setMembersSaving(true)
-      setTeamsError(null)
-      await apiRequest(`/websites/${websiteId}/teams/${selectedTeamId}/members`, {
-        method: 'PUT',
-        body: JSON.stringify({ user_ids: selectedTeamMemberIds }),
-      })
-
-      // Optimistically reflect the count immediately.
-      setTeams((prev) => prev.map((t) => (t.id === selectedTeamId ? { ...t, member_count: selectedTeamMemberIds.length } : t)))
-      await loadTeams()
-      await loadTeamMembers(selectedTeamId)
-
-      setSuccessMessage('Team members saved')
-      setTimeout(() => setSuccessMessage(null), 2000)
-    } catch (err: any) {
-      setTeamsError(err?.message || 'Failed to save members')
-    } finally {
-      setMembersSaving(false)
-    }
-  }
 
   useEffect(() => {
     if (activeTab !== 'automations') return
@@ -1039,16 +849,19 @@ export default function WebsiteDetail() {
         </div>
       </div>
 
-      {/* Full-height Shortcuts / Tags tabs (rendered outside scroll wrapper) */}
+      {/* Full-height tabs with slide-over panels (rendered outside scroll wrapper) */}
       {!isNew && activeTab === 'shortcuts' && isAdmin(user) && websiteId && (
         <WebsiteShortcutsTab websiteId={websiteId} />
       )}
       {!isNew && activeTab === 'tags' && isAdmin(user) && websiteId && (
         <WebsiteTagsTab websiteId={websiteId} />
       )}
+      {!isNew && activeTab === 'teams' && isAdmin(user) && websiteId && (
+        <WebsiteTeamsTab websiteId={websiteId} />
+      )}
 
       {/* Scrollable content (hidden when full-height tabs are active) */}
-      {activeTab !== 'shortcuts' && activeTab !== 'tags' && (
+      {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && (
         <div className="flex-1 overflow-auto">
           <div className="px-6 py-6 space-y-6">
             {error && (
@@ -1134,256 +947,6 @@ export default function WebsiteDetail() {
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                     <span>Widget will only load on <span className="font-medium text-gray-700 dark:text-gray-300">{formData.domain || 'your configured domain'}</span>. Change it in the General tab.</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Teams Tab (admin-only) */}
-              {!isNew && activeTab === 'teams' && isAdmin(user) && (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Teams</h2>
-                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create website-specific teams and assign members.</p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => { loadWebsiteAgents(); loadAllAgents() }}
-                    >
-                      Refresh
-                    </Button>
-                  </div>
-
-                  {teamsError && (
-                    <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                      {teamsError}
-                    </div>
-                  )}
-
-                  <div className="grid gap-6 md:grid-cols-3">
-                    {/* Left column – Create & Team list */}
-                    <div className="md:col-span-1 space-y-4">
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Team</p>
-                        <Input
-                          value={newTeamName}
-                          onChange={(e) => setNewTeamName(e.target.value)}
-                          placeholder="Team name"
-                          className="dark:bg-gray-800 dark:border-gray-700"
-                        />
-                        <Textarea
-                          value={newTeamDescription}
-                          onChange={(e) => setNewTeamDescription(e.target.value)}
-                          placeholder="Description (optional)"
-                          rows={2}
-                          className="dark:bg-gray-800 dark:border-gray-700"
-                        />
-                        <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} size="sm" className="w-full gap-1.5">
-                          <Plus className="w-3.5 h-3.5" />
-                          {creatingTeam ? 'Creating...' : 'Create Team'}
-                        </Button>
-                      </div>
-
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Teams</p>
-                          {teamsLoading && <span className="text-xs text-gray-400">Loading...</span>}
-                        </div>
-                        {teams.length === 0 && !teamsLoading ? (
-                          <div className="px-4 py-6 text-center text-sm text-gray-400">No teams yet.</div>
-                        ) : (
-                          <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {teams.map((t) => (
-                              <div
-                                key={t.id}
-                                className={`flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer transition-colors ${selectedTeamId === t.id
-                                  ? 'bg-blue-50 dark:bg-blue-900/20'
-                                  : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                                  }`}
-                                onClick={() => {
-                                  setTeamsError(null)
-                                  setSelectedTeamId(t.id)
-                                  setSelectedTeamMemberIds([])
-                                  loadTeamMembers(t.id)
-                                }}
-                              >
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</p>
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleDeleteTeam(t.id) }}
-                                  className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 flex-shrink-0"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right column – Agents & Members */}
-                    <div className="md:col-span-2 space-y-4">
-                      {/* Website agent assignment */}
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Website Assignment</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Assign agents to this website. Team membership is managed below.</p>
-                        </div>
-
-                        {allAgentsError && (
-                          <div className="text-sm text-red-600 dark:text-red-400">{allAgentsError}</div>
-                        )}
-
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div>
-                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                              Assigned ({websiteAgents.length})
-                            </p>
-                            {agentsError && <div className="mb-2 text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
-                            {agentsLoading ? (
-                              <div className="text-sm text-gray-400">Loading...</div>
-                            ) : websiteAgents.length === 0 ? (
-                              <div className="text-sm text-gray-400">No agents assigned yet.</div>
-                            ) : (
-                              <div className="space-y-1.5">
-                                {websiteAgents.map((a) => (
-                                  <div key={a.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
-                                    <div className="min-w-0">
-                                      <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
-                                      {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
-                                    </div>
-                                    <button
-                                      type="button"
-                                      disabled={unassigningAgentId === a.id}
-                                      onClick={() => handleUnassignWebsiteAgent(a.id)}
-                                      className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50"
-                                    >
-                                      {unassigningAgentId === a.id ? '...' : <X className="h-3.5 w-3.5" />}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Available</p>
-                            {allAgentsLoading ? (
-                              <div className="text-sm text-gray-400">Loading...</div>
-                            ) : (
-                              (() => {
-                                const assignedIds = new Set(websiteAgents.map((x) => x.id))
-                                const candidates = allAgents
-                                  .filter((u) => !assignedIds.has(u.id))
-                                  .filter((u) => {
-                                    const role = String((u as any).role || '').toLowerCase()
-                                    return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
-                                  })
-                                if (candidates.length === 0) {
-                                  return <div className="text-sm text-gray-400">No available agents.</div>
-                                }
-                                return (
-                                  <div className="space-y-1.5">
-                                    {candidates.map((u) => (
-                                      <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
-                                        <div className="min-w-0">
-                                          <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</p>
-                                          {(u as any).role && <p className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</p>}
-                                        </div>
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          disabled={assigningAgentId === u.id}
-                                          onClick={() => handleAssignWebsiteAgent(u.id)}
-                                          className="h-7 text-xs"
-                                        >
-                                          {assigningAgentId === u.id ? '...' : 'Assign'}
-                                        </Button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              })()
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Team members */}
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
-                          </p>
-                          {membersLoading && <span className="text-xs text-gray-400">Loading...</span>}
-                        </div>
-
-                        {!selectedTeamId ? (
-                          <div className="py-6 text-center text-sm text-gray-400">Select a team to manage members.</div>
-                        ) : (
-                          <>
-                            {agentsError && <div className="text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
-                            {agentsLoading ? (
-                              <div className="text-sm text-gray-400">Loading assigned agents...</div>
-                            ) : websiteAgents.length === 0 ? (
-                              <div className="text-sm text-gray-400">Assign agents above to enable member selection.</div>
-                            ) : (
-                              <div className="space-y-1.5 max-h-[400px] overflow-auto">
-                                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pb-1">
-                                  <span>Check agents who belong to this team</span>
-                                  <span>{selectedTeamMemberIds.length} selected</span>
-                                </div>
-                                {websiteAgents.map((a) => {
-                                  const checked = selectedTeamMemberIds.includes(a.id)
-                                  const label = a.name ? `${a.name} (${a.email})` : a.email
-                                  return (
-                                    <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-md border transition-colors cursor-pointer ${checked
-                                      ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
-                                      : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
-                                      }`}>
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={membersLoading || membersSaving}
-                                        onChange={(e) => {
-                                          const next = e.target.checked
-                                            ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
-                                            : selectedTeamMemberIds.filter((mid) => mid !== a.id)
-                                          setSelectedTeamMemberIds(next)
-                                        }}
-                                        className="rounded border-gray-300 dark:border-gray-600"
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-gray-900 dark:text-gray-100">{label}</p>
-                                        {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
-                                      </div>
-                                    </label>
-                                  )
-                                })}
-                              </div>
-                            )}
-
-                            <div className="flex justify-end pt-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={handleSaveMembers}
-                                disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
-                                className="gap-1.5"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                {membersSaving ? 'Saving...' : 'Save Members'}
-                              </Button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
