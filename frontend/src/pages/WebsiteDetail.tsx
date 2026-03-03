@@ -7,10 +7,12 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { Save, Trash2, Globe, Copy, Check, Plus, X } from 'lucide-react'
+import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
+import WebsiteShortcutsTab from './WebsiteShortcutsTab'
+import WebsiteTagsTab from './WebsiteTagsTab'
 
 interface Website {
   id: number
@@ -153,42 +155,6 @@ export default function WebsiteDetail() {
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
 
-  // Website shortcuts tab (admin-only)
-  type WebsiteShortcut = {
-    id: number
-    website_id: number
-    shortcut: string
-    message: string
-    is_active: boolean
-    created_at: string
-    updated_at: string | null
-  }
-
-  const [websiteShortcuts, setWebsiteShortcuts] = useState<WebsiteShortcut[]>([])
-  const [websiteShortcutsLoading, setWebsiteShortcutsLoading] = useState(false)
-  const [websiteShortcutsSaving, setWebsiteShortcutsSaving] = useState(false)
-  const [websiteShortcutsError, setWebsiteShortcutsError] = useState<string | null>(null)
-  const [newWebsiteShortcut, setNewWebsiteShortcut] = useState('')
-  const [newWebsiteShortcutMessage, setNewWebsiteShortcutMessage] = useState('')
-  const [newWebsiteShortcutActive, setNewWebsiteShortcutActive] = useState(true)
-
-  // Tags tab (admin-only)
-  type WebsiteTag = {
-    id: number
-    name: string
-    color: string
-    description: string | null
-    website_id: number
-    created_at: string
-    updated_at: string | null
-  }
-
-  const [websiteTags, setWebsiteTags] = useState<WebsiteTag[]>([])
-  const [websiteTagsLoading, setWebsiteTagsLoading] = useState(false)
-  const [websiteTagsSaving, setWebsiteTagsSaving] = useState(false)
-  const [websiteTagsError, setWebsiteTagsError] = useState<string | null>(null)
-  const [editingTag, setEditingTag] = useState<Partial<WebsiteTag> | null>(null)
-
   // Teams tab (admin-only)
   type WebsiteTeam = { id: number; website_id: number; name: string; description?: string | null; member_count: number }
   type WebsiteAgent = { id: number; email: string; name?: string | null; role?: string; is_active?: boolean; assigned_at?: string | null }
@@ -260,151 +226,6 @@ export default function WebsiteDetail() {
     loadWebsiteAgents()
     loadAllAgents()
   }, [activeTab, websiteId, user])
-
-  useEffect(() => {
-    if (!websiteId) return
-    if (activeTab !== 'shortcuts') return
-    if (!isAdmin(user)) return
-    loadWebsiteShortcuts()
-  }, [activeTab, websiteId, user])
-
-  useEffect(() => {
-    if (!websiteId) return
-    if (activeTab !== 'tags') return
-    if (!isAdmin(user)) return
-    loadWebsiteTags()
-  }, [activeTab, websiteId, user])
-
-  const loadWebsiteShortcuts = async () => {
-    if (!websiteId) return
-    try {
-      setWebsiteShortcutsLoading(true)
-      setWebsiteShortcutsError(null)
-      const data = await apiRequest<WebsiteShortcut[]>(`/websites/${websiteId}/shortcuts`)
-      setWebsiteShortcuts(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setWebsiteShortcutsError(err?.message || 'Failed to load website shortcuts')
-    } finally {
-      setWebsiteShortcutsLoading(false)
-    }
-  }
-
-  const loadWebsiteTags = async () => {
-    if (!websiteId) return
-    try {
-      setWebsiteTagsLoading(true)
-      setWebsiteTagsError(null)
-      const data = await apiRequest<WebsiteTag[]>(`/websites/${websiteId}/tags`)
-      setWebsiteTags(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setWebsiteTagsError(err?.message || 'Failed to load tags')
-    } finally {
-      setWebsiteTagsLoading(false)
-    }
-  }
-
-  const saveWebsiteTag = async () => {
-    if (!websiteId || !editingTag) return
-    const name = String(editingTag.name || '').trim()
-    const color = String(editingTag.color || '').trim() || '#000000'
-    const description = editingTag.description ?? ''
-    if (!name) {
-      setWebsiteTagsError('Tag name is required')
-      return
-    }
-    try {
-      setWebsiteTagsSaving(true)
-      setWebsiteTagsError(null)
-      if (editingTag.id) {
-        await apiRequest(`/websites/${websiteId}/tags/${editingTag.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ name, color, description }),
-        })
-      } else {
-        await apiRequest(`/websites/${websiteId}/tags`, {
-          method: 'POST',
-          body: JSON.stringify({ name, color, description }),
-        })
-      }
-      setEditingTag(null)
-      await loadWebsiteTags()
-    } catch (err: any) {
-      setWebsiteTagsError(err?.message || 'Failed to save tag')
-    } finally {
-      setWebsiteTagsSaving(false)
-    }
-  }
-
-  const deleteWebsiteTag = async (tagId: number) => {
-    if (!websiteId) return
-    if (!confirm('Delete this tag? It will be removed from all conversations.')) return
-    try {
-      setWebsiteTagsSaving(true)
-      setWebsiteTagsError(null)
-      await apiRequest(`/websites/${websiteId}/tags/${tagId}`, { method: 'DELETE' })
-      setWebsiteTags((prev) => prev.filter((t) => t.id !== tagId))
-      if (editingTag?.id === tagId) setEditingTag(null)
-    } catch (err: any) {
-      setWebsiteTagsError(err?.message || 'Failed to delete tag')
-    } finally {
-      setWebsiteTagsSaving(false)
-    }
-  }
-
-  const handleCreateWebsiteShortcut = async () => {
-    if (!websiteId) return
-    const shortcut = newWebsiteShortcut.trim()
-    const message = newWebsiteShortcutMessage.trim()
-    if (!shortcut || !message) {
-      setWebsiteShortcutsError('Shortcut and message are required')
-      return
-    }
-    try {
-      setWebsiteShortcutsSaving(true)
-      setWebsiteShortcutsError(null)
-      const created = await apiRequest<WebsiteShortcut>(`/websites/${websiteId}/shortcuts`, {
-        method: 'POST',
-        body: JSON.stringify({ shortcut, message, is_active: newWebsiteShortcutActive }),
-      })
-      setWebsiteShortcuts((prev) => [...prev, created])
-      setNewWebsiteShortcut('')
-      setNewWebsiteShortcutMessage('')
-      setNewWebsiteShortcutActive(true)
-    } catch (err: any) {
-      setWebsiteShortcutsError(err?.message || 'Failed to create shortcut')
-    } finally {
-      setWebsiteShortcutsSaving(false)
-    }
-  }
-
-  const handleToggleWebsiteShortcutActive = async (item: WebsiteShortcut, nextActive: boolean) => {
-    if (!websiteId) return
-    setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? { ...s, is_active: nextActive } : s)))
-    try {
-      const updated = await apiRequest<WebsiteShortcut>(`/websites/${websiteId}/shortcuts/${item.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ is_active: nextActive }),
-      })
-      setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? updated : s)))
-    } catch (err: any) {
-      setWebsiteShortcuts((prev) => prev.map((s) => (s.id === item.id ? { ...s, is_active: item.is_active } : s)))
-      setWebsiteShortcutsError(err?.message || 'Failed to update shortcut')
-    }
-  }
-
-  const handleDeleteWebsiteShortcut = async (item: WebsiteShortcut) => {
-    if (!websiteId) return
-    if (!confirm(`Delete shortcut '${item.shortcut}'?`)) return
-    setWebsiteShortcutsError(null)
-    const prev = websiteShortcuts
-    setWebsiteShortcuts((s) => s.filter((x) => x.id !== item.id))
-    try {
-      await apiRequest<void>(`/websites/${websiteId}/shortcuts/${item.id}`, { method: 'DELETE' })
-    } catch (err: any) {
-      setWebsiteShortcuts(prev)
-      setWebsiteShortcutsError(err?.message || 'Failed to delete shortcut')
-    }
-  }
 
   const loadTeams = async () => {
     if (!websiteId) return
@@ -1218,1460 +1039,1181 @@ export default function WebsiteDetail() {
         </div>
       </div>
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-4xl px-6 py-6 space-y-6">
-          {error && (
-            <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-              {error}
-            </div>
-          )}
+      {/* Full-height Shortcuts / Tags tabs (rendered outside scroll wrapper) */}
+      {!isNew && activeTab === 'shortcuts' && isAdmin(user) && websiteId && (
+        <WebsiteShortcutsTab websiteId={websiteId} />
+      )}
+      {!isNew && activeTab === 'tags' && isAdmin(user) && websiteId && (
+        <WebsiteTagsTab websiteId={websiteId} />
+      )}
 
-          {successMessage && (
-            <div className="p-3 rounded-lg text-sm bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
-              {successMessage}
-            </div>
-          )}
-
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Installation Tab */}
-        {!isNew && activeTab === 'installation' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Installation</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Copy and paste this code into your website before the closing &lt;/body&gt; tag</p>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 overflow-hidden">
-              <div className="flex">
-                <div className="flex-1 px-4 py-3 bg-white dark:bg-gray-800/40">
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Website ID</p>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100">{websiteId ?? '—'}</p>
-                </div>
-                <div className="flex-1 px-4 py-3 bg-white dark:bg-gray-800/40 border-l border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Widget Key</p>
-                    <button
-                      type="button"
-                      onClick={copyWidgetKey}
-                      disabled={!widgetKey}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-40 inline-flex items-center gap-1"
-                    >
-                      {widgetKeyCopied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
-                    </button>
-                  </div>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">{widgetKey || '—'}</p>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Embed Snippet</p>
-                <Button type="button" onClick={copySnippet} variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                  {snippetCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
-                </Button>
-              </div>
-              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-4">
-                <pre className="text-sm overflow-x-auto text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap">
-                  {widgetSnippet || 'Loading...'}
-                </pre>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Installation Instructions</p>
-              <ol className="list-decimal list-inside space-y-1.5 text-sm text-gray-600 dark:text-gray-400 ml-1">
-                <li>Copy the embed snippet above</li>
-                <li>Paste it into your website's HTML before the closing &lt;/body&gt; tag</li>
-                <li>The chat widget will automatically appear on your website</li>
-                <li>Make sure at least one agent is assigned to this website</li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {/* Teams Tab (admin-only) */}
-        {!isNew && activeTab === 'teams' && isAdmin(user) && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Teams</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create website-specific teams and assign members.</p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => { loadWebsiteAgents(); loadAllAgents() }}
-              >
-                Refresh
-              </Button>
-            </div>
-
-            {teamsError && (
+      {/* Scrollable content (hidden when full-height tabs are active) */}
+      {activeTab !== 'shortcuts' && activeTab !== 'tags' && (
+        <div className="flex-1 overflow-auto">
+          <div className="px-6 py-6 space-y-6">
+            {error && (
               <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                {teamsError}
+                {error}
               </div>
             )}
 
-            <div className="grid gap-6 md:grid-cols-3">
-              {/* Left column – Create & Team list */}
-              <div className="md:col-span-1 space-y-4">
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Team</p>
-                  <Input
-                    value={newTeamName}
-                    onChange={(e) => setNewTeamName(e.target.value)}
-                    placeholder="Team name"
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
-                  <Textarea
-                    value={newTeamDescription}
-                    onChange={(e) => setNewTeamDescription(e.target.value)}
-                    placeholder="Description (optional)"
-                    rows={2}
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
-                  <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} size="sm" className="w-full gap-1.5">
-                    <Plus className="w-3.5 h-3.5" />
-                    {creatingTeam ? 'Creating...' : 'Create Team'}
-                  </Button>
-                </div>
-
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Teams</p>
-                    {teamsLoading && <span className="text-xs text-gray-400">Loading...</span>}
-                  </div>
-                  {teams.length === 0 && !teamsLoading ? (
-                    <div className="px-4 py-6 text-center text-sm text-gray-400">No teams yet.</div>
-                  ) : (
-                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {teams.map((t) => (
-                        <div
-                          key={t.id}
-                          className={`flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer transition-colors ${selectedTeamId === t.id
-                            ? 'bg-blue-50 dark:bg-blue-900/20'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                          }`}
-                          onClick={() => {
-                            setTeamsError(null)
-                            setSelectedTeamId(t.id)
-                            setSelectedTeamMemberIds([])
-                            loadTeamMembers(t.id)
-                          }}
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleDeleteTeam(t.id) }}
-                            className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 flex-shrink-0"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+            {successMessage && (
+              <div className="p-3 rounded-lg text-sm bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                {successMessage}
               </div>
+            )}
 
-              {/* Right column – Agents & Members */}
-              <div className="md:col-span-2 space-y-4">
-                {/* Website agent assignment */}
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+            <form onSubmit={handleSave} className="space-y-6">
+              {/* Installation Tab */}
+              {!isNew && activeTab === 'installation' && (
+                <div className="space-y-5">
                   <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Website Assignment</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Assign agents to this website. Team membership is managed below.</p>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">Installation</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Add the chat widget to your website in minutes.</p>
                   </div>
 
-                  {allAgentsError && (
-                    <div className="text-sm text-red-600 dark:text-red-400">{allAgentsError}</div>
-                  )}
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                        Assigned ({websiteAgents.length})
-                      </p>
-                      {agentsError && <div className="mb-2 text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
-                      {agentsLoading ? (
-                        <div className="text-sm text-gray-400">Loading...</div>
-                      ) : websiteAgents.length === 0 ? (
-                        <div className="text-sm text-gray-400">No agents assigned yet.</div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {websiteAgents.map((a) => (
-                            <div key={a.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
-                              <div className="min-w-0">
-                                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
-                                {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
-                              </div>
-                              <button
-                                type="button"
-                                disabled={unassigningAgentId === a.id}
-                                onClick={() => handleUnassignWebsiteAgent(a.id)}
-                                className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50"
-                              >
-                                {unassigningAgentId === a.id ? '...' : <X className="h-3.5 w-3.5" />}
-                              </button>
-                            </div>
-                          ))}
+                  {/* Quick-start steps */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    {[
+                      { step: '1', label: 'Copy snippet', desc: 'Copy the embed code below' },
+                      { step: '2', label: 'Paste in HTML', desc: 'Before closing </body> tag' },
+                      { step: '3', label: 'Assign agents', desc: 'In the Teams tab' },
+                      { step: '4', label: 'Go live', desc: 'Widget appears automatically' },
+                    ].map((s) => (
+                      <div key={s.step} className="flex items-start gap-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 px-3 py-2.5">
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-bold text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">{s.step}</span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white leading-tight">{s.label}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{s.desc}</p>
                         </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Available</p>
-                      {allAgentsLoading ? (
-                        <div className="text-sm text-gray-400">Loading...</div>
-                      ) : (
-                        (() => {
-                          const assignedIds = new Set(websiteAgents.map((x) => x.id))
-                          const candidates = allAgents
-                            .filter((u) => !assignedIds.has(u.id))
-                            .filter((u) => {
-                              const role = String((u as any).role || '').toLowerCase()
-                              return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
-                            })
-                          if (candidates.length === 0) {
-                            return <div className="text-sm text-gray-400">No available agents.</div>
-                          }
-                          return (
-                            <div className="space-y-1.5">
-                              {candidates.map((u) => (
-                                <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</p>
-                                    {(u as any).role && <p className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</p>}
-                                  </div>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    disabled={assigningAgentId === u.id}
-                                    onClick={() => handleAssignWebsiteAgent(u.id)}
-                                    className="h-7 text-xs"
-                                  >
-                                    {assigningAgentId === u.id ? '...' : 'Assign'}
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                          )
-                        })()
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Team members */}
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
-                    </p>
-                    {membersLoading && <span className="text-xs text-gray-400">Loading...</span>}
-                  </div>
-
-                  {!selectedTeamId ? (
-                    <div className="py-6 text-center text-sm text-gray-400">Select a team to manage members.</div>
-                  ) : (
-                    <>
-                      {agentsError && <div className="text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
-                      {agentsLoading ? (
-                        <div className="text-sm text-gray-400">Loading assigned agents...</div>
-                      ) : websiteAgents.length === 0 ? (
-                        <div className="text-sm text-gray-400">Assign agents above to enable member selection.</div>
-                      ) : (
-                        <div className="space-y-1.5 max-h-[400px] overflow-auto">
-                          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pb-1">
-                            <span>Check agents who belong to this team</span>
-                            <span>{selectedTeamMemberIds.length} selected</span>
-                          </div>
-                          {websiteAgents.map((a) => {
-                            const checked = selectedTeamMemberIds.includes(a.id)
-                            const label = a.name ? `${a.name} (${a.email})` : a.email
-                            return (
-                              <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-md border transition-colors cursor-pointer ${checked
-                                ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
-                                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
-                              }`}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  disabled={membersLoading || membersSaving}
-                                  onChange={(e) => {
-                                    const next = e.target.checked
-                                      ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
-                                      : selectedTeamMemberIds.filter((mid) => mid !== a.id)
-                                    setSelectedTeamMemberIds(next)
-                                  }}
-                                  className="rounded border-gray-300 dark:border-gray-600"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm text-gray-900 dark:text-gray-100">{label}</p>
-                                  {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
-                                </div>
-                              </label>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      <div className="flex justify-end pt-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={handleSaveMembers}
-                          disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
-                          className="gap-1.5"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          {membersSaving ? 'Saving...' : 'Save Members'}
-                        </Button>
                       </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Shortcuts Tab (admin-only) */}
-        {!isNew && activeTab === 'shortcuts' && isAdmin(user) && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Shortcuts</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Website-global shortcuts available to all assigned agents.</p>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={loadWebsiteShortcuts} disabled={websiteShortcutsLoading}>
-                {websiteShortcutsLoading ? 'Refreshing…' : 'Refresh'}
-              </Button>
-            </div>
-
-            {websiteShortcutsError && (
-              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                {websiteShortcutsError}
-              </div>
-            )}
-
-            {/* Create form */}
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Create Shortcut</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Shortcut</label>
-                  <Input
-                    value={newWebsiteShortcut}
-                    onChange={(e) => setNewWebsiteShortcut(e.target.value)}
-                    placeholder="hello"
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={newWebsiteShortcutActive} onCheckedChange={setNewWebsiteShortcutActive} />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
+                    ))}
                   </div>
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Message</label>
-                <Textarea
-                  value={newWebsiteShortcutMessage}
-                  onChange={(e) => setNewWebsiteShortcutMessage(e.target.value)}
-                  placeholder="Hello! How can I help you today?"
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-              </div>
-              <div className="flex justify-end">
-                <Button type="button" size="sm" onClick={handleCreateWebsiteShortcut} disabled={websiteShortcutsSaving}>
-                  {websiteShortcutsSaving ? 'Saving…' : 'Create'}
-                </Button>
-              </div>
-            </div>
 
-            {/* Shortcuts list as table */}
-            {websiteShortcutsLoading ? (
-              <div className="py-8 text-center text-sm text-gray-400">Loading shortcuts…</div>
-            ) : websiteShortcuts.length === 0 ? (
-              <div className="py-8 text-center text-sm text-gray-400">No shortcuts yet.</div>
-            ) : (
-              <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
-                      <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Shortcut</th>
-                      <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Message</th>
-                      <th className="text-center px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-20">Active</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-16"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {[...websiteShortcuts]
-                      .sort((a, b) => String(a.shortcut || '').localeCompare(String(b.shortcut || '')))
-                      .map((s) => (
-                        <tr key={s.id} className="bg-white dark:bg-gray-800/30">
-                          <td className="px-4 py-3">
-                            <span className="font-mono text-sm text-gray-900 dark:text-gray-100">/{s.shortcut}</span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-xs truncate">{s.message}</td>
-                          <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                            <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleWebsiteShortcutActive(s, v)} />
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteWebsiteShortcut(s)}
-                              className="text-gray-400 hover:text-red-500 transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tags Tab (admin-only) */}
-        {!isNew && activeTab === 'tags' && isAdmin(user) && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Tags</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage conversation tags scoped to this website.</p>
-            </div>
-
-            {websiteTagsError && (
-              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                {websiteTagsError}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-              {/* Tag list (left, wider) */}
-              <div className="lg:col-span-3">
-                {websiteTagsLoading ? (
-                  <div className="py-8 text-center text-sm text-gray-400">Loading…</div>
-                ) : websiteTags.length === 0 ? (
-                  <div className="py-8 text-center text-sm text-gray-400">No tags yet. Create one on the right.</div>
-                ) : (
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {[...websiteTags]
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((t) => (
-                          <div
-                            key={t.id}
-                            className={`flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800/30 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors ${editingTag?.id === t.id ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
-                            onClick={() => setEditingTag({ ...t })}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="inline-flex h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
-                              <span className="font-medium text-sm text-gray-900 dark:text-white truncate">{t.name}</span>
-                              {t.description && (
-                                <span className="text-xs text-gray-400 dark:text-gray-500 truncate hidden sm:inline">{t.description}</span>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); deleteWebsiteTag(t.id) }}
-                              disabled={websiteTagsSaving}
-                              className="text-gray-400 hover:text-red-500 transition-colors shrink-0 ml-3"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ))}
+                  {/* Credentials row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 px-3.5 py-2.5">
+                      <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Website ID</p>
+                      <p className="mt-0.5 font-mono text-sm text-gray-900 dark:text-gray-100">{websiteId ?? '—'}</p>
                     </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Create / Edit form (right, narrower) */}
-              <div className="lg:col-span-2">
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {editingTag?.id ? 'Edit Tag' : 'Create Tag'}
-                  </p>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Name</label>
-                    <Input
-                      value={String(editingTag?.name || '')}
-                      onChange={(e) => setEditingTag({ ...(editingTag || {}), name: e.target.value })}
-                      placeholder="e.g. Urgent"
-                      disabled={websiteTagsSaving}
-                      className="dark:bg-gray-800 dark:border-gray-700"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={String(editingTag?.color || '#000000')}
-                        onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
-                        className="w-9 h-9 p-0 border-0 rounded cursor-pointer"
-                        disabled={websiteTagsSaving}
-                      />
-                      <Input
-                        value={String(editingTag?.color || '#000000')}
-                        onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
-                        placeholder="#000000"
-                        disabled={websiteTagsSaving}
-                        className="flex-1 dark:bg-gray-800 dark:border-gray-700"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Description</label>
-                    <Input
-                      value={String(editingTag?.description || '')}
-                      onChange={(e) => setEditingTag({ ...(editingTag || {}), description: e.target.value })}
-                      placeholder="What is this tag used for?"
-                      disabled={websiteTagsSaving}
-                      className="dark:bg-gray-800 dark:border-gray-700"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setEditingTag(null)} disabled={websiteTagsSaving}>
-                      Clear
-                    </Button>
-                    <Button type="button" size="sm" onClick={saveWebsiteTag} disabled={websiteTagsSaving}>
-                      {websiteTagsSaving ? 'Saving…' : (editingTag?.id ? 'Save' : 'Create')}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Automations Tab */}
-        {!isNew && activeTab === 'automations' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Automations</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure per-website auto messages and triggers.</p>
-              </div>
-              <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
-                <Plus className="w-4 h-4" />
-                Build from scratch
-              </Button>
-            </div>
-
-            {/* Sub-tab pills */}
-            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
-              {(['templates', 'auto_messages', 'chatbots'] as const).map((tab) => {
-                const labels = { templates: 'Templates', auto_messages: 'Auto Messages', chatbots: 'Chatbots' }
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setAutomationsSubTab(tab)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${automationsSubTab === tab
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    {labels[tab]}
-                  </button>
-                )
-              })}
-            </div>
-
-            {automationsError && (
-              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                {automationsError}
-              </div>
-            )}
-
-              {automationsLoading ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
-              ) : automationsSubTab === 'templates' ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {(() => {
-                      const t = {
-                        name: 'Welcome message',
-                        trigger: 'visitor_connected',
-                        enabled: true,
-                        action_type: 'send_bot_message',
-                        cooldown_hours: 24,
-                        message: 'Hi! How can we help you today?',
-                        event_type: 'automation_welcome',
-                        description: 'Sends when a visitor opens the widget, with a cooldown.',
-                      } as const
-                      const existing = getAutomationByTemplate(t)
-                      return (
-                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
-                            </div>
-                            {existing ? (
-                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
-                                Edit
-                              </Button>
-                            ) : (
-                              <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
-                                Use template
-                              </Button>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-500">
-                            Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
-                          </div>
-                        </div>
-                      )
-                    })()}
-
-                    {(
-                      [
-                        {
-                          name: 'Waiting message',
-                          trigger: 'no_agent_assigned_for',
-                          enabled: true,
-                          action_type: 'send_bot_message',
-                          delay_seconds: 60,
-                          message: 'Thanks! An agent will be with you shortly.',
-                          event_type: 'bot_waiting',
-                          description: 'Sends after the visitor waits without an assigned agent.',
-                        },
-                        {
-                          name: 'Offline prompt',
-                          trigger: 'website_offline_first_message',
-                          enabled: true,
-                          action_type: 'send_bot_message',
-                          message:
-                            "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                          event_type: 'bot_offline',
-                          description: 'Sends when the website is offline and the visitor sends the first message.',
-                        },
-                        {
-                          name: 'Visitor closed message',
-                          trigger: 'visitor_closed_chat',
-                          enabled: false,
-                          action_type: 'send_bot_message',
-                          message: 'Thanks! If you need anything else, just send another message.',
-                          event_type: 'bot_visitor_closed',
-                          description: 'Optional message when a visitor ends the chat UI (does not resolve the conversation).',
-                        },
-                        {
-                          name: 'Visitor closed event',
-                          trigger: 'visitor_closed_chat',
-                          enabled: true,
-                          action_type: 'emit_system_event',
-                          message: 'Visitor closed chat.',
-                          event_type: 'visitor_closed_chat',
-                          description: 'System event shown in the timeline when a visitor ends the chat UI (conversation remains open).',
-                        },
-                        {
-                          name: 'Visitor connected event',
-                          trigger: 'visitor_socket_connected',
-                          enabled: false,
-                          action_type: 'emit_system_event',
-                          message: 'Visitor has just connected.',
-                          event_type: 'visitor_socket_connected',
-                          description: 'Internal timeline event when the visitor opens/reconnects (not shown to the visitor).',
-                          repeat: 'cooldown',
-                          repeat_cooldown_seconds: 10,
-                        },
-                        {
-                          name: 'Visitor left website event',
-                          trigger: 'visitor_left_website',
-                          enabled: true,
-                          action_type: 'emit_system_event',
-                          message: 'Visitor left website.',
-                          event_type: 'visitor_left_website',
-                          description: 'Internal timeline event when the visitor closes the tab or navigates away (best-effort).',
-                          repeat: 'cooldown',
-                          repeat_cooldown_seconds: 10,
-                        },
-                        {
-                          name: 'Closing message',
-                          trigger: 'conversation_resolved',
-                          enabled: false,
-                          action_type: 'send_bot_message',
-                          message: 'Thanks! This conversation is now closed.',
-                          event_type: 'bot_closing',
-                          description: 'Optional message sent after a conversation is resolved.',
-                        },
-                        {
-                          name: 'Resolved event',
-                          trigger: 'conversation_resolved',
-                          enabled: false,
-                          action_type: 'emit_system_event',
-                          message: 'This conversation has been resolved.',
-                          event_type: 'conversation_resolved',
-                          description: 'Optional system event shown in the timeline when a conversation is resolved.',
-                        },
-                        {
-                          name: 'Reopened event',
-                          trigger: 'conversation_reopened',
-                          enabled: false,
-                          action_type: 'emit_system_event',
-                          message: 'This conversation has been reopened.',
-                          event_type: 'conversation_reopened',
-                          description: 'Optional system event shown in the timeline when a resolved conversation is reopened.',
-                        },
-                      ] as const
-                    ).map((t) => {
-                      const existing = getAutomationByTemplate(t)
-                      return (
-                        <div
-                          key={`${t.trigger}:${t.action_type}:${t.event_type || ''}`}
-                          className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                    <div className="sm:col-span-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 px-3.5 py-2.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Widget Key</p>
+                        <button
+                          type="button"
+                          onClick={copyWidgetKey}
+                          disabled={!widgetKey}
+                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-40 inline-flex items-center gap-1"
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
-                            </div>
-                            {existing ? (
-                              <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
-                                Edit
-                              </Button>
-                            ) : (
-                              <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
-                                Use template
-                              </Button>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-500">
-                            Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
-                          </div>
-                        </div>
-                      )
-                    })}
+                          {widgetKeyCopied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
+                        </button>
+                      </div>
+                      <p className="mt-0.5 font-mono text-sm text-gray-900 dark:text-gray-100 break-all leading-snug">{widgetKey || '—'}</p>
+                    </div>
                   </div>
-                </div>
-              ) : automationsSubTab === 'auto_messages' ? (
-                automations.length === 0 ? (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    No DB-backed auto messages found. Use Templates or Build from scratch.
+
+                  {/* Embed snippet */}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Code className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Embed Snippet</span>
+                      </div>
+                      <Button type="button" onClick={copySnippet} variant="outline" size="sm" className="h-6 gap-1.5 text-[11px] px-2">
+                        {snippetCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
+                      </Button>
+                    </div>
+                    <div className="bg-gray-900 dark:bg-gray-950 p-4 overflow-x-auto">
+                      <pre className="text-[13px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap">
+                        {widgetSnippet || 'Loading...'}
+                      </pre>
+                    </div>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {(() => {
-                      const rows = automations.flatMap((automation) => {
-                        const actions = normalizeAutomationActions(automation)
-                        if (actions.length === 0) {
-                          return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
-                        }
-                        return actions.map((action, idx) => ({
-                          automation,
-                          action,
-                          idx,
-                          showControls: idx === 0,
-                        }))
-                      })
 
-                      return rows.map(({ automation, action, idx, showControls }) => {
-                        const delay = Number(automation.conditions?.delay_seconds ?? 60)
-                        const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
-                        const actionTypeLabel = action?.type === 'emit_system_event' ? 'System event' : 'Bot message'
-                        const text = extractActionText(action)
-                        const eventType = action?.event_type ? String(action.event_type) : ''
-                        const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
-                        const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
-                        const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
-                        const hasCollision = collisions.length > 1
-
-                        return (
-                          <div
-                            key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
-                            className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">Action: {actionTypeLabel}{eventType ? ` • event_type: ${eventType}` : ''}</div>
-                                {hasCollision && (
-                                  <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
-                                    <span className="font-medium">Warning:</span> Duplicate event_type for this trigger. Only one message/event may fire per conversation due to idempotency.
-                                  </div>
-                                )}
-                                {automation.trigger === 'no_agent_assigned_for' && (
-                                  <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
-                                )}
-                                {automation.trigger === 'visitor_connected' && (
-                                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                                    Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
-                                  </div>
-                                )}
-                                {text && <div className="text-xs text-gray-600 dark:text-gray-400">{text}</div>}
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                {showControls ? (
-                                  <Switch
-                                    checked={automation.enabled}
-                                    onCheckedChange={(checked) => {
-                                      const next = { ...automation, enabled: checked }
-                                      updateAutomationLocal(automation.id, { enabled: checked })
-                                      saveAutomation(next)
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="w-10" />
-                                )}
-
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openBuilderForAutomationAction(automation, action, idx)}
-                                >
-                                  Edit
-                                </Button>
-
-                                {showControls ? (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => deleteAutomation(automation)}
-                                    disabled={deletingAutomationId === automation.id}
-                                    className="gap-2"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                    {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
-                                  </Button>
-                                ) : (
-                                  <div className="w-[92px]" />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })
-                    })()}
-                  </div>
-                )
-              ) : (
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbots</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    Chatbot builder will be added later. For now, use Auto messages.
+                  {/* Domain hint */}
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                    <span>Widget will only load on <span className="font-medium text-gray-700 dark:text-gray-300">{formData.domain || 'your configured domain'}</span>. Change it in the General tab.</span>
                   </div>
                 </div>
               )}
-          </div>
-        )}
 
-        {builderOpen && (
-          <div className="!mt-0 fixed inset-0 z-50">
-            <div
-              className="absolute inset-0 bg-black/40"
-              onClick={closeBuilder}
-              role="button"
-              tabIndex={0}
-              aria-label="Close automation builder"
-            />
-            <div className="absolute inset-y-0 right-0 w-full max-w-xl bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-md">
-              <div className="h-full flex flex-col">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      {builderDraft?.id
-                        ? 'Edit auto message'
-                        : 'Build from scratch'}
+              {/* Teams Tab (admin-only) */}
+              {!isNew && activeTab === 'teams' && isAdmin(user) && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Teams</h2>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create website-specific teams and assign members.</p>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      Structured editor (MVP)
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { loadWebsiteAgents(); loadAllAgents() }}
+                    >
+                      Refresh
+                    </Button>
                   </div>
-                  <Button type="button" variant="ghost" size="sm" onClick={closeBuilder}>
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                  {builderStep === 'pick_type' && (
-                    <div className="space-y-4">
-                      <div className="text-sm text-gray-700 dark:text-gray-300">
-                        Choose what you want to build.
-                      </div>
-                      <div className="grid grid-cols-1 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBuilderCreateType('auto_message')
-                            setBuilderStep('edit_auto_message')
-                          }}
-                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 hover:bg-gray-50 dark:hover:bg-gray-900"
-                        >
-                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Auto message</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Trigger-based bot message (waiting/offline/closing).
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled
-                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
-                        >
-                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbot</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled
-                          className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
-                        >
-                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI assistant</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
-                        </button>
-                      </div>
+                  {teamsError && (
+                    <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                      {teamsError}
                     </div>
                   )}
 
-                  {builderStep === 'edit_auto_message' && builderDraft && (
-                    <div className="space-y-4">
-                      {(() => {
-                        const effective = getEffectiveEventTypeForDraft(builderDraft)
-                        if (!effective) return null
+                  <div className="grid gap-6 md:grid-cols-3">
+                    {/* Left column – Create & Team list */}
+                    <div className="md:col-span-1 space-y-4">
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Team</p>
+                        <Input
+                          value={newTeamName}
+                          onChange={(e) => setNewTeamName(e.target.value)}
+                          placeholder="Team name"
+                          className="dark:bg-gray-800 dark:border-gray-700"
+                        />
+                        <Textarea
+                          value={newTeamDescription}
+                          onChange={(e) => setNewTeamDescription(e.target.value)}
+                          placeholder="Description (optional)"
+                          rows={2}
+                          className="dark:bg-gray-800 dark:border-gray-700"
+                        />
+                        <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} size="sm" className="w-full gap-1.5">
+                          <Plus className="w-3.5 h-3.5" />
+                          {creatingTeam ? 'Creating...' : 'Create Team'}
+                        </Button>
+                      </div>
 
-                        const key = `${String(builderDraft.trigger || '')}::${effective}`
-                        const refs = enabledEventTypeCollisions.get(key) || []
-                        const others = refs.filter((r) => {
-                          if (!builderDraft.id) return true
-                          if (typeof builderDraft.action_index === 'number') {
-                            return !(r.automationId === builderDraft.id && r.idx === builderDraft.action_index)
-                          }
-                          return r.automationId !== builderDraft.id
-                        })
-
-                        if (others.length === 0) return null
-
-                        const names = Array.from(new Set(others.map((r) => r.automationName))).slice(0, 3)
-                        const suffix = others.length > names.length ? '…' : ''
-                        return (
-                          <div className="text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-3">
-                            <span className="font-medium">Warning:</span> Another enabled automation uses event_type “{effective}” for this trigger ({names.join(', ')}{suffix}). Due to idempotency, only one may run per conversation.
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Teams</p>
+                          {teamsLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                        </div>
+                        {teams.length === 0 && !teamsLoading ? (
+                          <div className="px-4 py-6 text-center text-sm text-gray-400">No teams yet.</div>
+                        ) : (
+                          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                            {teams.map((t) => (
+                              <div
+                                key={t.id}
+                                className={`flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer transition-colors ${selectedTeamId === t.id
+                                  ? 'bg-blue-50 dark:bg-blue-900/20'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                  }`}
+                                onClick={() => {
+                                  setTeamsError(null)
+                                  setSelectedTeamId(t.id)
+                                  setSelectedTeamMemberIds([])
+                                  loadTeamMembers(t.id)
+                                }}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteTeam(t.id) }}
+                                  className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 flex-shrink-0"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                        )
-                      })()}
+                        )}
+                      </div>
+                    </div>
 
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">When</div>
-                        <div className="grid grid-cols-1 gap-3">
+                    {/* Right column – Agents & Members */}
+                    <div className="md:col-span-2 space-y-4">
+                      {/* Website agent assignment */}
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Website Assignment</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Assign agents to this website. Team membership is managed below.</p>
+                        </div>
+
+                        {allAgentsError && (
+                          <div className="text-sm text-red-600 dark:text-red-400">{allAgentsError}</div>
+                        )}
+
+                        <div className="grid gap-4 md:grid-cols-2">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-                            <Input
-                              value={builderDraft.name}
-                              onChange={(e) => setBuilderDraft({ ...builderDraft, name: e.target.value })}
-                              placeholder="Automation name"
-                            />
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                              Assigned ({websiteAgents.length})
+                            </p>
+                            {agentsError && <div className="mb-2 text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
+                            {agentsLoading ? (
+                              <div className="text-sm text-gray-400">Loading...</div>
+                            ) : websiteAgents.length === 0 ? (
+                              <div className="text-sm text-gray-400">No agents assigned yet.</div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {websiteAgents.map((a) => (
+                                  <div key={a.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                                    <div className="min-w-0">
+                                      <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
+                                      {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={unassigningAgentId === a.id}
+                                      onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                      className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50"
+                                    >
+                                      {unassigningAgentId === a.id ? '...' : <X className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Trigger</label>
-                            <select
-                              value={builderDraft.trigger}
-                              onChange={(e) => {
-                                const nextTrigger = e.target.value
-                                const isNextWaiting = nextTrigger === 'no_agent_assigned_for'
-                                const isNextWelcome = nextTrigger === 'visitor_connected'
-                                const nextCanRepeat = !isNextWaiting && !isNextWelcome
-                                setBuilderDraft({
-                                  ...builderDraft,
-                                  trigger: nextTrigger,
-                                  delay_seconds: nextTrigger === 'no_agent_assigned_for' ? (builderDraft.delay_seconds ?? 60) : undefined,
-                                  cooldown_hours: nextTrigger === 'visitor_connected' ? (builderDraft.cooldown_hours ?? 24) : undefined,
-                                  welcome_delay_seconds: nextTrigger === 'visitor_connected' ? (builderDraft.welcome_delay_seconds ?? 3) : undefined,
-                                  repeat: nextCanRepeat ? (builderDraft.repeat || 'once') : undefined,
-                                  repeat_cooldown_seconds: nextCanRepeat
-                                    ? builderDraft.repeat === 'cooldown'
-                                      ? (builderDraft.repeat_cooldown_seconds ?? 3600)
-                                      : builderDraft.repeat_cooldown_seconds
-                                    : undefined,
-                                })
-                              }}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                            >
-                              <option value="visitor_connected">Visitor connected</option>
-                              <option value="visitor_socket_connected">Visitor (re)connected</option>
-                              <option value="no_agent_assigned_for">No agent assigned for</option>
-                              <option value="website_offline_first_message">Website offline: first message</option>
-                              <option value="visitor_closed_chat">Visitor closed chat</option>
-                              <option value="visitor_left_website">Visitor left website</option>
-                              <option value="conversation_resolved">Conversation resolved</option>
-                              <option value="conversation_reopened">Conversation reopened</option>
-                            </select>
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Available</p>
+                            {allAgentsLoading ? (
+                              <div className="text-sm text-gray-400">Loading...</div>
+                            ) : (
+                              (() => {
+                                const assignedIds = new Set(websiteAgents.map((x) => x.id))
+                                const candidates = allAgents
+                                  .filter((u) => !assignedIds.has(u.id))
+                                  .filter((u) => {
+                                    const role = String((u as any).role || '').toLowerCase()
+                                    return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
+                                  })
+                                if (candidates.length === 0) {
+                                  return <div className="text-sm text-gray-400">No available agents.</div>
+                                }
+                                return (
+                                  <div className="space-y-1.5">
+                                    {candidates.map((u) => (
+                                      <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                                        <div className="min-w-0">
+                                          <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</p>
+                                          {(u as any).role && <p className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</p>}
+                                        </div>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          disabled={assigningAgentId === u.id}
+                                          onClick={() => handleAssignWebsiteAgent(u.id)}
+                                          className="h-7 text-xs"
+                                        >
+                                          {assigningAgentId === u.id ? '...' : 'Assign'}
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              })()
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Where</div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
-                      </div>
+                      {/* Team members */}
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
+                          </p>
+                          {membersLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                        </div>
 
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Audience</div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
-                      </div>
-
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Scheduling</div>
-                        {builderDraft.trigger === 'no_agent_assigned_for' ? (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={String(builderDraft.delay_seconds ?? 60)}
-                              onChange={(e) =>
-                                setBuilderDraft({
-                                  ...builderDraft,
-                                  delay_seconds: Math.max(1, parseInt(e.target.value || '60', 10) || 60),
-                                })
-                              }
-                            />
-                          </div>
-                        ) : builderDraft.trigger === 'visitor_connected' ? (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
-                              <Input
-                                type="number"
-                                min={0}
-                                value={String(builderDraft.welcome_delay_seconds ?? 3)}
-                                onChange={(e) =>
-                                  setBuilderDraft({
-                                    ...builderDraft,
-                                    welcome_delay_seconds: Math.max(0, parseInt(e.target.value || '3', 10) || 0),
-                                  })
-                                }
-                              />
-                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                How many seconds after the visitor connects before the welcome message appears. Set to 0 for instant.
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cooldown (hours)</label>
-                              <Input
-                                type="number"
-                                min={1}
-                                value={String(builderDraft.cooldown_hours ?? 24)}
-                                onChange={(e) =>
-                                  setBuilderDraft({
-                                    ...builderDraft,
-                                    cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
-                                  })
-                                }
-                              />
-                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                How long before the welcome message can be sent again to the same visitor.
-                              </div>
-                            </div>
-                          </div>
+                        {!selectedTeamId ? (
+                          <div className="py-6 text-center text-sm text-gray-400">Select a team to manage members.</div>
                         ) : (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Repeat</label>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                {(['once', 'cooldown', 'always'] as const).map((mode) => {
-                                  const active = (builderDraft.repeat || 'once') === mode
-                                  const label = mode === 'once' ? 'Once' : mode === 'cooldown' ? 'Cooldown' : 'Always'
+                          <>
+                            {agentsError && <div className="text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
+                            {agentsLoading ? (
+                              <div className="text-sm text-gray-400">Loading assigned agents...</div>
+                            ) : websiteAgents.length === 0 ? (
+                              <div className="text-sm text-gray-400">Assign agents above to enable member selection.</div>
+                            ) : (
+                              <div className="space-y-1.5 max-h-[400px] overflow-auto">
+                                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pb-1">
+                                  <span>Check agents who belong to this team</span>
+                                  <span>{selectedTeamMemberIds.length} selected</span>
+                                </div>
+                                {websiteAgents.map((a) => {
+                                  const checked = selectedTeamMemberIds.includes(a.id)
+                                  const label = a.name ? `${a.name} (${a.email})` : a.email
                                   return (
-                                    <Button
-                                      key={mode}
-                                      type="button"
-                                      size="sm"
-                                      variant={active ? 'secondary' : 'outline'}
-                                      onClick={() =>
-                                        setBuilderDraft({
-                                          ...builderDraft,
-                                          repeat: mode,
-                                          repeat_cooldown_seconds:
-                                            mode === 'cooldown'
-                                              ? Math.max(1, Number(builderDraft.repeat_cooldown_seconds ?? 3600) || 3600)
-                                              : undefined,
-                                        })
-                                      }
-                                    >
-                                      {label}
-                                    </Button>
+                                    <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-md border transition-colors cursor-pointer ${checked
+                                      ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                                      : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                      }`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={membersLoading || membersSaving}
+                                        onChange={(e) => {
+                                          const next = e.target.checked
+                                            ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
+                                            : selectedTeamMemberIds.filter((mid) => mid !== a.id)
+                                          setSelectedTeamMemberIds(next)
+                                        }}
+                                        className="rounded border-gray-300 dark:border-gray-600"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-gray-900 dark:text-gray-100">{label}</p>
+                                        {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
+                                      </div>
+                                    </label>
                                   )
                                 })}
                               </div>
-                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                Controls whether this automation can run again for the same conversation.
+                            )}
+
+                            <div className="flex justify-end pt-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={handleSaveMembers}
+                                disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
+                                className="gap-1.5"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                {membersSaving ? 'Saving...' : 'Save Members'}
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Automations Tab */}
+              {!isNew && activeTab === 'automations' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Automations</h2>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure per-website auto messages and triggers.</p>
+                    </div>
+                    <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
+                      <Plus className="w-4 h-4" />
+                      Build from scratch
+                    </Button>
+                  </div>
+
+                  {/* Sub-tab pills */}
+                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+                    {(['templates', 'auto_messages', 'chatbots'] as const).map((tab) => {
+                      const labels = { templates: 'Templates', auto_messages: 'Auto Messages', chatbots: 'Chatbots' }
+                      return (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setAutomationsSubTab(tab)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${automationsSubTab === tab
+                            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
+                        >
+                          {labels[tab]}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {automationsError && (
+                    <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                      {automationsError}
+                    </div>
+                  )}
+
+                  {automationsLoading ? (
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
+                  ) : automationsSubTab === 'templates' ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {(() => {
+                          const t = {
+                            name: 'Welcome message',
+                            trigger: 'visitor_connected',
+                            enabled: true,
+                            action_type: 'send_bot_message',
+                            cooldown_hours: 24,
+                            message: 'Hi! How can we help you today?',
+                            event_type: 'automation_welcome',
+                            description: 'Sends when a visitor opens the widget, with a cooldown.',
+                          } as const
+                          const existing = getAutomationByTemplate(t)
+                          return (
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                                </div>
+                                {existing ? (
+                                  <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
+                                    Edit
+                                  </Button>
+                                ) : (
+                                  <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
+                                    Use template
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-500">
+                                Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
+                              </div>
+                            </div>
+                          )
+                        })()}
+
+                        {(
+                          [
+                            {
+                              name: 'Waiting message',
+                              trigger: 'no_agent_assigned_for',
+                              enabled: true,
+                              action_type: 'send_bot_message',
+                              delay_seconds: 60,
+                              message: 'Thanks! An agent will be with you shortly.',
+                              event_type: 'bot_waiting',
+                              description: 'Sends after the visitor waits without an assigned agent.',
+                            },
+                            {
+                              name: 'Offline prompt',
+                              trigger: 'website_offline_first_message',
+                              enabled: true,
+                              action_type: 'send_bot_message',
+                              message:
+                                "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
+                              event_type: 'bot_offline',
+                              description: 'Sends when the website is offline and the visitor sends the first message.',
+                            },
+                            {
+                              name: 'Visitor closed message',
+                              trigger: 'visitor_closed_chat',
+                              enabled: false,
+                              action_type: 'send_bot_message',
+                              message: 'Thanks! If you need anything else, just send another message.',
+                              event_type: 'bot_visitor_closed',
+                              description: 'Optional message when a visitor ends the chat UI (does not resolve the conversation).',
+                            },
+                            {
+                              name: 'Visitor closed event',
+                              trigger: 'visitor_closed_chat',
+                              enabled: true,
+                              action_type: 'emit_system_event',
+                              message: 'Visitor closed chat.',
+                              event_type: 'visitor_closed_chat',
+                              description: 'System event shown in the timeline when a visitor ends the chat UI (conversation remains open).',
+                            },
+                            {
+                              name: 'Visitor connected event',
+                              trigger: 'visitor_socket_connected',
+                              enabled: false,
+                              action_type: 'emit_system_event',
+                              message: 'Visitor has just connected.',
+                              event_type: 'visitor_socket_connected',
+                              description: 'Internal timeline event when the visitor opens/reconnects (not shown to the visitor).',
+                              repeat: 'cooldown',
+                              repeat_cooldown_seconds: 10,
+                            },
+                            {
+                              name: 'Visitor left website event',
+                              trigger: 'visitor_left_website',
+                              enabled: true,
+                              action_type: 'emit_system_event',
+                              message: 'Visitor left website.',
+                              event_type: 'visitor_left_website',
+                              description: 'Internal timeline event when the visitor closes the tab or navigates away (best-effort).',
+                              repeat: 'cooldown',
+                              repeat_cooldown_seconds: 10,
+                            },
+                            {
+                              name: 'Closing message',
+                              trigger: 'conversation_resolved',
+                              enabled: false,
+                              action_type: 'send_bot_message',
+                              message: 'Thanks! This conversation is now closed.',
+                              event_type: 'bot_closing',
+                              description: 'Optional message sent after a conversation is resolved.',
+                            },
+                            {
+                              name: 'Resolved event',
+                              trigger: 'conversation_resolved',
+                              enabled: false,
+                              action_type: 'emit_system_event',
+                              message: 'This conversation has been resolved.',
+                              event_type: 'conversation_resolved',
+                              description: 'Optional system event shown in the timeline when a conversation is resolved.',
+                            },
+                            {
+                              name: 'Reopened event',
+                              trigger: 'conversation_reopened',
+                              enabled: false,
+                              action_type: 'emit_system_event',
+                              message: 'This conversation has been reopened.',
+                              event_type: 'conversation_reopened',
+                              description: 'Optional system event shown in the timeline when a resolved conversation is reopened.',
+                            },
+                          ] as const
+                        ).map((t) => {
+                          const existing = getAutomationByTemplate(t)
+                          return (
+                            <div
+                              key={`${t.trigger}:${t.action_type}:${t.event_type || ''}`}
+                              className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                                </div>
+                                {existing ? (
+                                  <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
+                                    Edit
+                                  </Button>
+                                ) : (
+                                  <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
+                                    Use template
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-500">
+                                Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : automationsSubTab === 'auto_messages' ? (
+                    automations.length === 0 ? (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        No DB-backed auto messages found. Use Templates or Build from scratch.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {(() => {
+                          const rows = automations.flatMap((automation) => {
+                            const actions = normalizeAutomationActions(automation)
+                            if (actions.length === 0) {
+                              return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
+                            }
+                            return actions.map((action, idx) => ({
+                              automation,
+                              action,
+                              idx,
+                              showControls: idx === 0,
+                            }))
+                          })
+
+                          return rows.map(({ automation, action, idx, showControls }) => {
+                            const delay = Number(automation.conditions?.delay_seconds ?? 60)
+                            const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
+                            const actionTypeLabel = action?.type === 'emit_system_event' ? 'System event' : 'Bot message'
+                            const text = extractActionText(action)
+                            const eventType = action?.event_type ? String(action.event_type) : ''
+                            const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
+                            const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
+                            const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
+                            const hasCollision = collisions.length > 1
+
+                            return (
+                              <div
+                                key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
+                                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">Action: {actionTypeLabel}{eventType ? ` • event_type: ${eventType}` : ''}</div>
+                                    {hasCollision && (
+                                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
+                                        <span className="font-medium">Warning:</span> Duplicate event_type for this trigger. Only one message/event may fire per conversation due to idempotency.
+                                      </div>
+                                    )}
+                                    {automation.trigger === 'no_agent_assigned_for' && (
+                                      <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
+                                    )}
+                                    {automation.trigger === 'visitor_connected' && (
+                                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                                        Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
+                                      </div>
+                                    )}
+                                    {text && <div className="text-xs text-gray-600 dark:text-gray-400">{text}</div>}
+                                  </div>
+
+                                  <div className="flex items-center gap-3">
+                                    {showControls ? (
+                                      <Switch
+                                        checked={automation.enabled}
+                                        onCheckedChange={(checked) => {
+                                          const next = { ...automation, enabled: checked }
+                                          updateAutomationLocal(automation.id, { enabled: checked })
+                                          saveAutomation(next)
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="w-10" />
+                                    )}
+
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openBuilderForAutomationAction(automation, action, idx)}
+                                    >
+                                      Edit
+                                    </Button>
+
+                                    {showControls ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() => deleteAutomation(automation)}
+                                        disabled={deletingAutomationId === automation.id}
+                                        className="gap-2"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                        {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
+                                      </Button>
+                                    ) : (
+                                      <div className="w-[92px]" />
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbots</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        Chatbot builder will be added later. For now, use Auto messages.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {builderOpen && (
+                <div className="!mt-0 fixed inset-0 z-50">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={closeBuilder}
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Close automation builder"
+                  />
+                  <div className="absolute inset-y-0 right-0 w-full max-w-xl bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-md">
+                    <div className="h-full flex flex-col">
+                      <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {builderDraft?.id
+                              ? 'Edit auto message'
+                              : 'Build from scratch'}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Structured editor (MVP)
+                          </div>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" onClick={closeBuilder}>
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                        {builderStep === 'pick_type' && (
+                          <div className="space-y-4">
+                            <div className="text-sm text-gray-700 dark:text-gray-300">
+                              Choose what you want to build.
+                            </div>
+                            <div className="grid grid-cols-1 gap-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBuilderCreateType('auto_message')
+                                  setBuilderStep('edit_auto_message')
+                                }}
+                                className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 hover:bg-gray-50 dark:hover:bg-gray-900"
+                              >
+                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Auto message</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  Trigger-based bot message (waiting/offline/closing).
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled
+                                className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
+                              >
+                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbot</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled
+                                className="text-left rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 opacity-60 cursor-not-allowed"
+                              >
+                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI assistant</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Coming soon.</div>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {builderStep === 'edit_auto_message' && builderDraft && (
+                          <div className="space-y-4">
+                            {(() => {
+                              const effective = getEffectiveEventTypeForDraft(builderDraft)
+                              if (!effective) return null
+
+                              const key = `${String(builderDraft.trigger || '')}::${effective}`
+                              const refs = enabledEventTypeCollisions.get(key) || []
+                              const others = refs.filter((r) => {
+                                if (!builderDraft.id) return true
+                                if (typeof builderDraft.action_index === 'number') {
+                                  return !(r.automationId === builderDraft.id && r.idx === builderDraft.action_index)
+                                }
+                                return r.automationId !== builderDraft.id
+                              })
+
+                              if (others.length === 0) return null
+
+                              const names = Array.from(new Set(others.map((r) => r.automationName))).slice(0, 3)
+                              const suffix = others.length > names.length ? '…' : ''
+                              return (
+                                <div className="text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-3">
+                                  <span className="font-medium">Warning:</span> Another enabled automation uses event_type “{effective}” for this trigger ({names.join(', ')}{suffix}). Due to idempotency, only one may run per conversation.
+                                </div>
+                              )
+                            })()}
+
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">When</div>
+                              <div className="grid grid-cols-1 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                                  <Input
+                                    value={builderDraft.name}
+                                    onChange={(e) => setBuilderDraft({ ...builderDraft, name: e.target.value })}
+                                    placeholder="Automation name"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Trigger</label>
+                                  <select
+                                    value={builderDraft.trigger}
+                                    onChange={(e) => {
+                                      const nextTrigger = e.target.value
+                                      const isNextWaiting = nextTrigger === 'no_agent_assigned_for'
+                                      const isNextWelcome = nextTrigger === 'visitor_connected'
+                                      const nextCanRepeat = !isNextWaiting && !isNextWelcome
+                                      setBuilderDraft({
+                                        ...builderDraft,
+                                        trigger: nextTrigger,
+                                        delay_seconds: nextTrigger === 'no_agent_assigned_for' ? (builderDraft.delay_seconds ?? 60) : undefined,
+                                        cooldown_hours: nextTrigger === 'visitor_connected' ? (builderDraft.cooldown_hours ?? 24) : undefined,
+                                        welcome_delay_seconds: nextTrigger === 'visitor_connected' ? (builderDraft.welcome_delay_seconds ?? 3) : undefined,
+                                        repeat: nextCanRepeat ? (builderDraft.repeat || 'once') : undefined,
+                                        repeat_cooldown_seconds: nextCanRepeat
+                                          ? builderDraft.repeat === 'cooldown'
+                                            ? (builderDraft.repeat_cooldown_seconds ?? 3600)
+                                            : builderDraft.repeat_cooldown_seconds
+                                          : undefined,
+                                      })
+                                    }}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                  >
+                                    <option value="visitor_connected">Visitor connected</option>
+                                    <option value="visitor_socket_connected">Visitor (re)connected</option>
+                                    <option value="no_agent_assigned_for">No agent assigned for</option>
+                                    <option value="website_offline_first_message">Website offline: first message</option>
+                                    <option value="visitor_closed_chat">Visitor closed chat</option>
+                                    <option value="visitor_left_website">Visitor left website</option>
+                                    <option value="conversation_resolved">Conversation resolved</option>
+                                    <option value="conversation_reopened">Conversation reopened</option>
+                                  </select>
+                                </div>
                               </div>
                             </div>
 
-                            {(builderDraft.repeat || 'once') === 'cooldown' ? (
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                  Cooldown (seconds)
-                                </label>
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  value={String(builderDraft.repeat_cooldown_seconds ?? 3600)}
-                                  onChange={(e) =>
-                                    setBuilderDraft({
-                                      ...builderDraft,
-                                      repeat_cooldown_seconds: Math.max(1, parseInt(e.target.value || '3600', 10) || 3600),
-                                    })
-                                  }
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Where</div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
+                            </div>
+
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Audience</div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">Coming soon.</div>
+                            </div>
+
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Scheduling</div>
+                              {builderDraft.trigger === 'no_agent_assigned_for' ? (
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    value={String(builderDraft.delay_seconds ?? 60)}
+                                    onChange={(e) =>
+                                      setBuilderDraft({
+                                        ...builderDraft,
+                                        delay_seconds: Math.max(1, parseInt(e.target.value || '60', 10) || 60),
+                                      })
+                                    }
+                                  />
+                                </div>
+                              ) : builderDraft.trigger === 'visitor_connected' ? (
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Delay (seconds)</label>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      value={String(builderDraft.welcome_delay_seconds ?? 3)}
+                                      onChange={(e) =>
+                                        setBuilderDraft({
+                                          ...builderDraft,
+                                          welcome_delay_seconds: Math.max(0, parseInt(e.target.value || '3', 10) || 0),
+                                        })
+                                      }
+                                    />
+                                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                      How many seconds after the visitor connects before the welcome message appears. Set to 0 for instant.
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cooldown (hours)</label>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={String(builderDraft.cooldown_hours ?? 24)}
+                                      onChange={(e) =>
+                                        setBuilderDraft({
+                                          ...builderDraft,
+                                          cooldown_hours: Math.max(1, parseInt(e.target.value || '24', 10) || 24),
+                                        })
+                                      }
+                                    />
+                                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                      How long before the welcome message can be sent again to the same visitor.
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Repeat</label>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {(['once', 'cooldown', 'always'] as const).map((mode) => {
+                                        const active = (builderDraft.repeat || 'once') === mode
+                                        const label = mode === 'once' ? 'Once' : mode === 'cooldown' ? 'Cooldown' : 'Always'
+                                        return (
+                                          <Button
+                                            key={mode}
+                                            type="button"
+                                            size="sm"
+                                            variant={active ? 'secondary' : 'outline'}
+                                            onClick={() =>
+                                              setBuilderDraft({
+                                                ...builderDraft,
+                                                repeat: mode,
+                                                repeat_cooldown_seconds:
+                                                  mode === 'cooldown'
+                                                    ? Math.max(1, Number(builderDraft.repeat_cooldown_seconds ?? 3600) || 3600)
+                                                    : undefined,
+                                              })
+                                            }
+                                          >
+                                            {label}
+                                          </Button>
+                                        )
+                                      })}
+                                    </div>
+                                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                                      Controls whether this automation can run again for the same conversation.
+                                    </div>
+                                  </div>
+
+                                  {(builderDraft.repeat || 'once') === 'cooldown' ? (
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Cooldown (seconds)
+                                      </label>
+                                      <Input
+                                        type="number"
+                                        min={1}
+                                        value={String(builderDraft.repeat_cooldown_seconds ?? 3600)}
+                                        onChange={(e) =>
+                                          setBuilderDraft({
+                                            ...builderDraft,
+                                            repeat_cooldown_seconds: Math.max(1, parseInt(e.target.value || '3600', 10) || 3600),
+                                          })
+                                        }
+                                      />
+                                    </div>
+                                  ) : null}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Behavior</div>
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Enabled</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Turn this automation on/off.</div>
+                                </div>
+                                <Switch
+                                  checked={builderDraft.enabled}
+                                  onCheckedChange={(checked) => setBuilderDraft({ ...builderDraft, enabled: checked })}
                                 />
                               </div>
-                            ) : null}
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Action type</label>
+                                <select
+                                  value={builderDraft.action_type}
+                                  onChange={(e) => {
+                                    const nextType = e.target.value === 'emit_system_event' ? 'emit_system_event' : 'send_bot_message'
+                                    setBuilderDraft({
+                                      ...builderDraft,
+                                      action_type: nextType,
+                                      event_type:
+                                        nextType === 'emit_system_event'
+                                          ? builderDraft.event_type || builderDraft.trigger
+                                          : builderDraft.event_type,
+                                    })
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                >
+                                  <option value="send_bot_message">Bot message</option>
+                                  <option value="emit_system_event">System event</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  {builderDraft.action_type === 'emit_system_event' ? 'Content' : 'Message'}
+                                </label>
+                                <Textarea
+                                  value={builderDraft.message}
+                                  onChange={(e) => setBuilderDraft({ ...builderDraft, message: e.target.value })}
+                                  placeholder="Enter bot message..."
+                                />
+                              </div>
+
+                              <div>
+                                {builderDraft.action_type === 'emit_system_event' ? (
+                                  <>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type</label>
+                                    <Input
+                                      value={builderDraft.event_type || ''}
+                                      onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
+                                      placeholder={builderDraft.trigger || 'conversation_resolved'}
+                                    />
+                                  </>
+                                ) : builderDraft.trigger !== 'visitor_connected' && (
+                                  <>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type (optional)</label>
+                                    <Input
+                                      value={builderDraft.event_type || ''}
+                                      onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
+                                      placeholder="bot_waiting"
+                                    />
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Behavior</div>
-                        <div className="flex items-center justify-between gap-4">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Enabled</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Turn this automation on/off.</div>
-                          </div>
-                          <Switch
-                            checked={builderDraft.enabled}
-                            onCheckedChange={(checked) => setBuilderDraft({ ...builderDraft, enabled: checked })}
-                          />
+                      <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Button type="button" variant="outline" onClick={closeBuilder}>
+                            Cancel
+                          </Button>
+
+                          {builderStep === 'edit_auto_message' && builderDraft?.id ? (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              onClick={() => {
+                                if (!builderDraft?.id) return
+                                const automation = automations.find((a) => a.id === builderDraft.id)
+                                if (!automation) {
+                                  setAutomationsError('Automation not found')
+                                  return
+                                }
+                                deleteAutomation(automation)
+                              }}
+                              disabled={deletingAutomationId === builderDraft.id}
+                              className="gap-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              {deletingAutomationId === builderDraft.id ? 'Deleting…' : 'Delete'}
+                            </Button>
+                          ) : null}
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Action type</label>
-                          <select
-                            value={builderDraft.action_type}
-                            onChange={(e) => {
-                              const nextType = e.target.value === 'emit_system_event' ? 'emit_system_event' : 'send_bot_message'
-                              setBuilderDraft({
-                                ...builderDraft,
-                                action_type: nextType,
-                                event_type:
-                                  nextType === 'emit_system_event'
-                                    ? builderDraft.event_type || builderDraft.trigger
-                                    : builderDraft.event_type,
-                              })
-                            }}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                          >
-                            <option value="send_bot_message">Bot message</option>
-                            <option value="emit_system_event">System event</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            {builderDraft.action_type === 'emit_system_event' ? 'Content' : 'Message'}
-                          </label>
-                          <Textarea
-                            value={builderDraft.message}
-                            onChange={(e) => setBuilderDraft({ ...builderDraft, message: e.target.value })}
-                            placeholder="Enter bot message..."
-                          />
-                        </div>
-
-                        <div>
-                          {builderDraft.action_type === 'emit_system_event' ? (
-                            <>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type</label>
-                              <Input
-                                value={builderDraft.event_type || ''}
-                                onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
-                                placeholder={builderDraft.trigger || 'conversation_resolved'}
-                              />
-                            </>
-                          ) : builderDraft.trigger !== 'visitor_connected' && (
-                            <>
-                              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Event type (optional)</label>
-                              <Input
-                                value={builderDraft.event_type || ''}
-                                onChange={(e) => setBuilderDraft({ ...builderDraft, event_type: e.target.value || undefined })}
-                                placeholder="bot_waiting"
-                              />
-                            </>
-                          )}
-                        </div>
+                        {builderStep === 'edit_auto_message' ? (
+                          <Button type="button" onClick={saveBuilderDraft} disabled={builderSaving} className="gap-2">
+                            <Save className="w-4 h-4" />
+                            {builderSaving ? 'Saving…' : 'Save automation'}
+                          </Button>
+                        ) : (
+                          <Button type="button" onClick={closeBuilder}>Done</Button>
+                        )}
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
+              )}
 
-                <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={closeBuilder}>
-                      Cancel
-                    </Button>
-
-                    {builderStep === 'edit_auto_message' && builderDraft?.id ? (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        onClick={() => {
-                          if (!builderDraft?.id) return
-                          const automation = automations.find((a) => a.id === builderDraft.id)
-                          if (!automation) {
-                            setAutomationsError('Automation not found')
-                            return
-                          }
-                          deleteAutomation(automation)
-                        }}
-                        disabled={deletingAutomationId === builderDraft.id}
-                        className="gap-2"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        {deletingAutomationId === builderDraft.id ? 'Deleting…' : 'Delete'}
-                      </Button>
-                    ) : null}
+              {/* Basic Settings Tab */}
+              {(isNew || activeTab === 'settings') && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">General</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Website identification and domain settings.</p>
                   </div>
 
-                  {builderStep === 'edit_auto_message' ? (
-                    <Button type="button" onClick={saveBuilderDraft} disabled={builderSaving} className="gap-2">
-                      <Save className="w-4 h-4" />
-                      {builderSaving ? 'Saving…' : 'Save automation'}
-                    </Button>
-                  ) : (
-                    <Button type="button" onClick={closeBuilder}>Done</Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Basic Settings Tab */}
-        {(isNew || activeTab === 'settings') && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">General</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Website identification and domain settings.</p>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Website Name *</label>
-                <Input
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="My Website"
-                  required
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">A friendly name to identify this website</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Domain *</label>
-                <Input
-                  value={formData.domain}
-                  onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-                  placeholder="example.com"
-                  required
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">The domain where the chat widget will be embedded</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Office Hours */}
-        {(isNew || activeTab === 'settings') && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Office Hours</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">When enabled, the widget is forced offline outside these hours.</p>
-              </div>
-              <Switch
-                checked={!!(formData.widget_config as any).office_hours?.enabled}
-                onCheckedChange={(checked) => {
-                  const current = coerceOfficeHours((formData.widget_config as any).office_hours)
-                  setFormData({
-                    ...formData,
-                    widget_config: {
-                      ...formData.widget_config,
-                      office_hours: { ...current, enabled: checked },
-                    },
-                  })
-                }}
-              />
-            </div>
-
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Timezone</label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={String((formData.widget_config as any).office_hours?.timezone || '')}
-                    onChange={(e) => {
-                      const current = coerceOfficeHours((formData.widget_config as any).office_hours)
-                      setFormData({
-                        ...formData,
-                        widget_config: {
-                          ...formData.widget_config,
-                          office_hours: { ...current, timezone: e.target.value },
-                        },
-                      })
-                    }}
-                    placeholder="e.g. Europe/London"
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const current = coerceOfficeHours((formData.widget_config as any).office_hours)
-                      setFormData({
-                        ...formData,
-                        widget_config: {
-                          ...formData.widget_config,
-                          office_hours: { ...current, timezone: getBrowserTimeZone() },
-                        },
-                      })
-                    }}
-                  >
-                    Use browser
-                  </Button>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Uses IANA timezone names (must match your account timezone).</p>
-              </div>
-
-              <div className="space-y-2">
-                {(
-                  [
-                    { key: 'mon', label: 'Monday' },
-                    { key: 'tue', label: 'Tuesday' },
-                    { key: 'wed', label: 'Wednesday' },
-                    { key: 'thu', label: 'Thursday' },
-                    { key: 'fri', label: 'Friday' },
-                    { key: 'sat', label: 'Saturday' },
-                    { key: 'sun', label: 'Sunday' },
-                  ] as { key: DayKey; label: string }[]
-                ).map((day) => {
-                  const current = coerceOfficeHours((formData.widget_config as any).office_hours)
-                  const intervals = current.schedule[day.key] || []
-                  const dayEnabled = intervals.length > 0
-                  const disabled = !current.enabled
-
-                  return (
-                    <div key={day.key} className="flex items-start gap-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
-                      <div className="w-24 shrink-0 pt-1">
-                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</span>
-                      </div>
-                      <Switch
-                        checked={dayEnabled}
-                        disabled={disabled}
-                        onCheckedChange={(checked) => {
-                          const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                          const nextSchedule = { ...next.schedule }
-                          nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
-                          setFormData({
-                            ...formData,
-                            widget_config: {
-                              ...formData.widget_config,
-                              office_hours: { ...next, schedule: nextSchedule },
-                            },
-                          })
-                        }}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Website Name *</label>
+                      <Input
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="My Website"
+                        required
+                        className="dark:bg-gray-800 dark:border-gray-700"
                       />
-                      <div className="flex-1">
-                        {dayEnabled ? (
-                          <div className="space-y-2">
-                            {intervals.map((interval, idx) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <input
-                                  type="time"
-                                  value={interval.start}
-                                  disabled={disabled}
-                                  onChange={(e) => {
-                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                    const nextSchedule = { ...next.schedule }
-                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                    nextIntervals[idx] = { ...nextIntervals[idx], start: e.target.value }
-                                    nextSchedule[day.key] = nextIntervals
-                                    setFormData({
-                                      ...formData,
-                                      widget_config: {
-                                        ...formData.widget_config,
-                                        office_hours: { ...next, schedule: nextSchedule },
-                                      },
-                                    })
-                                  }}
-                                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                />
-                                <span className="text-xs text-gray-400">–</span>
-                                <input
-                                  type="time"
-                                  value={interval.end}
-                                  disabled={disabled}
-                                  onChange={(e) => {
-                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                    const nextSchedule = { ...next.schedule }
-                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                    nextIntervals[idx] = { ...nextIntervals[idx], end: e.target.value }
-                                    nextSchedule[day.key] = nextIntervals
-                                    setFormData({
-                                      ...formData,
-                                      widget_config: {
-                                        ...formData.widget_config,
-                                        office_hours: { ...next, schedule: nextSchedule },
-                                      },
-                                    })
-                                  }}
-                                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={disabled}
-                                  onClick={() => {
-                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                    const nextSchedule = { ...next.schedule }
-                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                    nextIntervals.splice(idx, 1)
-                                    nextSchedule[day.key] = nextIntervals
-                                    setFormData({
-                                      ...formData,
-                                      widget_config: {
-                                        ...formData.widget_config,
-                                        office_hours: { ...next, schedule: nextSchedule },
-                                      },
-                                    })
-                                  }}
-                                  className="text-gray-400 hover:text-red-500 transition-colors"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              type="button"
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">A friendly name to identify this website</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Domain *</label>
+                      <Input
+                        value={formData.domain}
+                        onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                        placeholder="example.com"
+                        required
+                        className="dark:bg-gray-800 dark:border-gray-700"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">The domain where the chat widget will be embedded</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Office Hours */}
+              {(isNew || activeTab === 'settings') && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Office Hours</h2>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">When enabled, the widget is forced offline outside these hours.</p>
+                    </div>
+                    <Switch
+                      checked={!!(formData.widget_config as any).office_hours?.enabled}
+                      onCheckedChange={(checked) => {
+                        const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                        setFormData({
+                          ...formData,
+                          widget_config: {
+                            ...formData.widget_config,
+                            office_hours: { ...current, enabled: checked },
+                          },
+                        })
+                      }}
+                    />
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Timezone</label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={String((formData.widget_config as any).office_hours?.timezone || '')}
+                          onChange={(e) => {
+                            const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                            setFormData({
+                              ...formData,
+                              widget_config: {
+                                ...formData.widget_config,
+                                office_hours: { ...current, timezone: e.target.value },
+                              },
+                            })
+                          }}
+                          placeholder="e.g. Europe/London"
+                          className="dark:bg-gray-800 dark:border-gray-700"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                            setFormData({
+                              ...formData,
+                              widget_config: {
+                                ...formData.widget_config,
+                                office_hours: { ...current, timezone: getBrowserTimeZone() },
+                              },
+                            })
+                          }}
+                        >
+                          Use browser
+                        </Button>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Uses IANA timezone names (must match your account timezone).</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(
+                        [
+                          { key: 'mon', label: 'Monday' },
+                          { key: 'tue', label: 'Tuesday' },
+                          { key: 'wed', label: 'Wednesday' },
+                          { key: 'thu', label: 'Thursday' },
+                          { key: 'fri', label: 'Friday' },
+                          { key: 'sat', label: 'Saturday' },
+                          { key: 'sun', label: 'Sunday' },
+                        ] as { key: DayKey; label: string }[]
+                      ).map((day) => {
+                        const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                        const intervals = current.schedule[day.key] || []
+                        const dayEnabled = intervals.length > 0
+                        const disabled = !current.enabled
+
+                        return (
+                          <div key={day.key} className="flex items-start gap-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                            <div className="w-24 shrink-0 pt-1">
+                              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</span>
+                            </div>
+                            <Switch
+                              checked={dayEnabled}
                               disabled={disabled}
-                              onClick={() => {
+                              onCheckedChange={(checked) => {
                                 const next = coerceOfficeHours((formData.widget_config as any).office_hours)
                                 const nextSchedule = { ...next.schedule }
-                                const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                nextIntervals.push({ start: '08:00', end: '17:00' })
-                                nextSchedule[day.key] = nextIntervals
+                                nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
                                 setFormData({
                                   ...formData,
                                   widget_config: {
@@ -2680,433 +2222,519 @@ export default function WebsiteDetail() {
                                   },
                                 })
                               }}
-                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                            >
-                              <Plus className="w-3 h-3" />
-                              Add interval
-                            </button>
+                            />
+                            <div className="flex-1">
+                              {dayEnabled ? (
+                                <div className="space-y-2">
+                                  {intervals.map((interval, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                      <input
+                                        type="time"
+                                        value={interval.start}
+                                        disabled={disabled}
+                                        onChange={(e) => {
+                                          const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                          const nextSchedule = { ...next.schedule }
+                                          const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                          nextIntervals[idx] = { ...nextIntervals[idx], start: e.target.value }
+                                          nextSchedule[day.key] = nextIntervals
+                                          setFormData({
+                                            ...formData,
+                                            widget_config: {
+                                              ...formData.widget_config,
+                                              office_hours: { ...next, schedule: nextSchedule },
+                                            },
+                                          })
+                                        }}
+                                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                      />
+                                      <span className="text-xs text-gray-400">–</span>
+                                      <input
+                                        type="time"
+                                        value={interval.end}
+                                        disabled={disabled}
+                                        onChange={(e) => {
+                                          const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                          const nextSchedule = { ...next.schedule }
+                                          const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                          nextIntervals[idx] = { ...nextIntervals[idx], end: e.target.value }
+                                          nextSchedule[day.key] = nextIntervals
+                                          setFormData({
+                                            ...formData,
+                                            widget_config: {
+                                              ...formData.widget_config,
+                                              office_hours: { ...next, schedule: nextSchedule },
+                                            },
+                                          })
+                                        }}
+                                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={disabled}
+                                        onClick={() => {
+                                          const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                          const nextSchedule = { ...next.schedule }
+                                          const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                          nextIntervals.splice(idx, 1)
+                                          nextSchedule[day.key] = nextIntervals
+                                          setFormData({
+                                            ...formData,
+                                            widget_config: {
+                                              ...formData.widget_config,
+                                              office_hours: { ...next, schedule: nextSchedule },
+                                            },
+                                          })
+                                        }}
+                                        className="text-gray-400 hover:text-red-500 transition-colors"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    disabled={disabled}
+                                    onClick={() => {
+                                      const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                      const nextSchedule = { ...next.schedule }
+                                      const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                      nextIntervals.push({ start: '08:00', end: '17:00' })
+                                      nextSchedule[day.key] = nextIntervals
+                                      setFormData({
+                                        ...formData,
+                                        widget_config: {
+                                          ...formData.widget_config,
+                                          office_hours: { ...next, schedule: nextSchedule },
+                                        },
+                                      })
+                                    }}
+                                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    Add interval
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-400 pt-1 inline-block">Closed</span>
+                              )}
+                            </div>
                           </div>
-                        ) : (
-                          <span className="text-xs text-gray-400 pt-1 inline-block">Closed</span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Widget Configuration Tab */}
-        {!isNew && activeTab === 'widget' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Widget Customization</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Customize the chat widget appearance and behavior.</p>
-            </div>
-
-            {/* Icon & Layout */}
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Icon &amp; Layout</p>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Icon</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center shrink-0">
-                    {formData.widget_config.header_icon_url ? (
-                      <img
-                        src={`${API_BASE}${formData.widget_config.header_icon_url}`}
-                        alt="Widget icon"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-[10px] text-gray-400">None</span>
-                    )}
-                  </div>
-                  {isAdmin(user) && (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) handleUploadWidgetIcon(file)
-                        e.currentTarget.value = ''
-                      }}
-                      className="text-sm text-gray-700 dark:text-gray-300"
-                      disabled={saving}
-                    />
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Shown as the header icon until an agent joins.</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Theme</label>
-                  <select
-                    value={formData.widget_config.theme}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, theme: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Position</label>
-                  <select
-                    value={formData.widget_config.position}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, position: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  >
-                    <option value="bottom-right">Bottom Right</option>
-                    <option value="bottom-left">Bottom Left</option>
-                    <option value="top-right">Top Right</option>
-                    <option value="top-left">Top Left</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Text & Messaging */}
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Text &amp; Messaging</p>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Title</label>
-                <Input
-                  value={formData.widget_config.header_title}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, header_title: e.target.value }
-                  })}
-                  placeholder="How can we help?"
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown in the widget header</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Online Status Text</label>
-                <Input
-                  value={formData.widget_config.online_status_text}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, online_status_text: e.target.value }
-                  })}
-                  placeholder="We reply immediately"
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Status message shown below header</p>
-              </div>
-
-              <p className="text-xs text-gray-400">Welcome automation is managed in the Automations tab.</p>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Bubble Text</label>
-                <Input
-                  value={formData.widget_config.bubble_text}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, bubble_text: e.target.value }
-                  })}
-                  placeholder="Chat"
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown on the minimized chat bubble</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Branding Text</label>
-                <Input
-                  value={formData.widget_config.branding_text || ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
-                  })}
-                  placeholder="Powered by Your Company"
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Optional branding text shown at bottom of widget</p>
-              </div>
-            </div>
-
-            {/* Colors */}
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Main Color</p>
-                <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, color_mode: 'gradient' }
-                    })}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'gradient'
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    Gradient
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, color_mode: 'solid' }
-                    })}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'solid'
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    Solid
-                  </button>
-                </div>
-              </div>
-
-              {/* Preset swatches */}
-              {(() => {
-                const presets = formData.widget_config.color_mode === 'gradient'
-                  ? [
-                    { start: '#3b82f6', end: '#2563eb' },
-                    { start: '#ef4444', end: '#dc2626' },
-                    { start: '#f97316', end: '#ea580c' },
-                    { start: '#22c55e', end: '#16a34a' },
-                    { start: '#0ea5e9', end: '#0284c7' },
-                    { start: '#8b5cf6', end: '#7c3aed' },
-                    { start: '#ec4899', end: '#db2777' },
-                    { start: '#14b8a6', end: '#0d9488' },
-                    { start: '#6366f1', end: '#4f46e5' },
-                    { start: '#111827', end: '#374151' },
-                  ]
-                  : [
-                    { color: '#3b82f6' },
-                    { color: '#ef4444' },
-                    { color: '#f97316' },
-                    { color: '#22c55e' },
-                    { color: '#0ea5e9' },
-                    { color: '#8b5cf6' },
-                    { color: '#ec4899' },
-                    { color: '#14b8a6' },
-                    { color: '#6366f1' },
-                    { color: '#111827' },
-                  ];
-                return (
-                  <div className="flex flex-wrap gap-2">
-                    {formData.widget_config.color_mode === 'gradient'
-                      ? (presets as { start: string; end: string }[]).map((p, i) => {
-                        const isSelected = formData.widget_config.gradient_start === p.start && formData.widget_config.gradient_end === p.end;
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setFormData({
-                              ...formData,
-                              widget_config: {
-                                ...formData.widget_config,
-                                gradient_start: p.start,
-                                gradient_end: p.end,
-                                primary_color: p.start,
-                              }
-                            })}
-                            className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
-                            style={{ background: `linear-gradient(135deg, ${p.start} 0%, ${p.end} 100%)` }}
-                            title={`${p.start} → ${p.end}`}
-                          />
-                        );
-                      })
-                      : (presets as { color: string }[]).map((p, i) => {
-                        const isSelected = formData.widget_config.primary_color === p.color;
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setFormData({
-                              ...formData,
-                              widget_config: {
-                                ...formData.widget_config,
-                                primary_color: p.color,
-                              }
-                            })}
-                            className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
-                            style={{ background: p.color }}
-                            title={p.color}
-                          />
-                        );
-                      })
-                    }
-                  </div>
-                );
-              })()}
-
-              {/* Custom color inputs */}
-              {formData.widget_config.color_mode === 'gradient' ? (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Color</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={formData.widget_config.gradient_start}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
-                          })}
-                          className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                        />
-                        <Input
-                          value={formData.widget_config.gradient_start}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
-                          })}
-                          placeholder="#3b82f6"
-                          className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">End Color</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={formData.widget_config.gradient_end}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            widget_config: { ...formData.widget_config, gradient_end: e.target.value }
-                          })}
-                          className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                        />
-                        <Input
-                          value={formData.widget_config.gradient_end}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            widget_config: { ...formData.widget_config, gradient_end: e.target.value }
-                          })}
-                          placeholder="#2563eb"
-                          className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
-                        />
-                      </div>
+                        )
+                      })}
                     </div>
                   </div>
-                  <div className="h-6 rounded-lg w-full" style={{ background: `linear-gradient(135deg, ${formData.widget_config.gradient_start} 0%, ${formData.widget_config.gradient_end} 100%)` }} />
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={formData.widget_config.primary_color}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
-                    })}
-                    className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                  />
-                  <Input
-                    value={formData.widget_config.primary_color}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
-                    })}
-                    placeholder="#3b82f6"
-                    className="flex-1 dark:bg-gray-800 dark:border-gray-700"
-                  />
                 </div>
               )}
-              <p className="text-xs text-gray-500 dark:text-gray-400">Main color for header, buttons, message bubbles, and chat bubble</p>
-            </div>
 
-            {/* Features */}
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Features</p>
-              <div className="flex items-center justify-between">
-                <label htmlFor="show_emoji_picker" className="text-sm text-gray-700 dark:text-gray-300">Emoji Picker</label>
-                <Switch
-                  id="show_emoji_picker"
-                  checked={formData.widget_config.show_emoji_picker}
-                  onCheckedChange={(checked) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, show_emoji_picker: checked }
-                  })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <label htmlFor="show_attachments" className="text-sm text-gray-700 dark:text-gray-300">File Attachments</label>
-                  <p className="text-xs text-gray-400">Coming Soon</p>
+              {/* Widget Configuration Tab */}
+              {!isNew && activeTab === 'widget' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">Widget Customization</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Customize the chat widget appearance and behavior.</p>
+                  </div>
+
+                  {/* Icon & Layout */}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Icon &amp; Layout</p>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Icon</label>
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center shrink-0">
+                          {formData.widget_config.header_icon_url ? (
+                            <img
+                              src={`${API_BASE}${formData.widget_config.header_icon_url}`}
+                              alt="Widget icon"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-[10px] text-gray-400">None</span>
+                          )}
+                        </div>
+                        {isAdmin(user) && (
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) handleUploadWidgetIcon(file)
+                              e.currentTarget.value = ''
+                            }}
+                            className="text-sm text-gray-700 dark:text-gray-300"
+                            disabled={saving}
+                          />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Shown as the header icon until an agent joins.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Theme</label>
+                        <select
+                          value={formData.widget_config.theme}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, theme: e.target.value }
+                          })}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        >
+                          <option value="dark">Dark</option>
+                          <option value="light">Light</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Position</label>
+                        <select
+                          value={formData.widget_config.position}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, position: e.target.value }
+                          })}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        >
+                          <option value="bottom-right">Bottom Right</option>
+                          <option value="bottom-left">Bottom Left</option>
+                          <option value="top-right">Top Right</option>
+                          <option value="top-left">Top Left</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Text & Messaging */}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Text &amp; Messaging</p>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Title</label>
+                      <Input
+                        value={formData.widget_config.header_title}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, header_title: e.target.value }
+                        })}
+                        placeholder="How can we help?"
+                        className="dark:bg-gray-800 dark:border-gray-700"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown in the widget header</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Online Status Text</label>
+                      <Input
+                        value={formData.widget_config.online_status_text}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, online_status_text: e.target.value }
+                        })}
+                        placeholder="We reply immediately"
+                        className="dark:bg-gray-800 dark:border-gray-700"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Status message shown below header</p>
+                    </div>
+
+                    <p className="text-xs text-gray-400">Welcome automation is managed in the Automations tab.</p>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Bubble Text</label>
+                      <Input
+                        value={formData.widget_config.bubble_text}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, bubble_text: e.target.value }
+                        })}
+                        placeholder="Chat"
+                        className="dark:bg-gray-800 dark:border-gray-700"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown on the minimized chat bubble</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Branding Text</label>
+                      <Input
+                        value={formData.widget_config.branding_text || ''}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
+                        })}
+                        placeholder="Powered by Your Company"
+                        className="dark:bg-gray-800 dark:border-gray-700"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Optional branding text shown at bottom of widget</p>
+                    </div>
+                  </div>
+
+                  {/* Colors */}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Main Color</p>
+                      <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, color_mode: 'gradient' }
+                          })}
+                          className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'gradient'
+                            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
+                        >
+                          Gradient
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, color_mode: 'solid' }
+                          })}
+                          className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'solid'
+                            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
+                        >
+                          Solid
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Preset swatches */}
+                    {(() => {
+                      const presets = formData.widget_config.color_mode === 'gradient'
+                        ? [
+                          { start: '#3b82f6', end: '#2563eb' },
+                          { start: '#ef4444', end: '#dc2626' },
+                          { start: '#f97316', end: '#ea580c' },
+                          { start: '#22c55e', end: '#16a34a' },
+                          { start: '#0ea5e9', end: '#0284c7' },
+                          { start: '#8b5cf6', end: '#7c3aed' },
+                          { start: '#ec4899', end: '#db2777' },
+                          { start: '#14b8a6', end: '#0d9488' },
+                          { start: '#6366f1', end: '#4f46e5' },
+                          { start: '#111827', end: '#374151' },
+                        ]
+                        : [
+                          { color: '#3b82f6' },
+                          { color: '#ef4444' },
+                          { color: '#f97316' },
+                          { color: '#22c55e' },
+                          { color: '#0ea5e9' },
+                          { color: '#8b5cf6' },
+                          { color: '#ec4899' },
+                          { color: '#14b8a6' },
+                          { color: '#6366f1' },
+                          { color: '#111827' },
+                        ];
+                      return (
+                        <div className="flex flex-wrap gap-2">
+                          {formData.widget_config.color_mode === 'gradient'
+                            ? (presets as { start: string; end: string }[]).map((p, i) => {
+                              const isSelected = formData.widget_config.gradient_start === p.start && formData.widget_config.gradient_end === p.end;
+                              return (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      gradient_start: p.start,
+                                      gradient_end: p.end,
+                                      primary_color: p.start,
+                                    }
+                                  })}
+                                  className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                                  style={{ background: `linear-gradient(135deg, ${p.start} 0%, ${p.end} 100%)` }}
+                                  title={`${p.start} → ${p.end}`}
+                                />
+                              );
+                            })
+                            : (presets as { color: string }[]).map((p, i) => {
+                              const isSelected = formData.widget_config.primary_color === p.color;
+                              return (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      primary_color: p.color,
+                                    }
+                                  })}
+                                  className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                                  style={{ background: p.color }}
+                                  title={p.color}
+                                />
+                              );
+                            })
+                          }
+                        </div>
+                      );
+                    })()}
+
+                    {/* Custom color inputs */}
+                    {formData.widget_config.color_mode === 'gradient' ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Color</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={formData.widget_config.gradient_start}
+                                onChange={(e) => setFormData({
+                                  ...formData,
+                                  widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
+                                })}
+                                className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                              />
+                              <Input
+                                value={formData.widget_config.gradient_start}
+                                onChange={(e) => setFormData({
+                                  ...formData,
+                                  widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
+                                })}
+                                placeholder="#3b82f6"
+                                className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">End Color</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={formData.widget_config.gradient_end}
+                                onChange={(e) => setFormData({
+                                  ...formData,
+                                  widget_config: { ...formData.widget_config, gradient_end: e.target.value }
+                                })}
+                                className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                              />
+                              <Input
+                                value={formData.widget_config.gradient_end}
+                                onChange={(e) => setFormData({
+                                  ...formData,
+                                  widget_config: { ...formData.widget_config, gradient_end: e.target.value }
+                                })}
+                                placeholder="#2563eb"
+                                className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="h-6 rounded-lg w-full" style={{ background: `linear-gradient(135deg, ${formData.widget_config.gradient_start} 0%, ${formData.widget_config.gradient_end} 100%)` }} />
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={formData.widget_config.primary_color}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                          })}
+                          className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                        />
+                        <Input
+                          value={formData.widget_config.primary_color}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                          })}
+                          placeholder="#3b82f6"
+                          className="flex-1 dark:bg-gray-800 dark:border-gray-700"
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Main color for header, buttons, message bubbles, and chat bubble</p>
+                  </div>
+
+                  {/* Features */}
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Features</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Emoji Picker</span>
+                      <Switch
+                        checked={formData.widget_config.show_emoji_picker}
+                        onCheckedChange={(checked) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, show_emoji_picker: checked }
+                        })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm text-gray-700 dark:text-gray-300">File Attachments</span>
+                        <p className="text-xs text-gray-400">Coming Soon</p>
+                      </div>
+                      <Switch
+                        checked={formData.widget_config.show_attachments}
+                        onCheckedChange={(checked) => setFormData({
+                          ...formData,
+                          widget_config: { ...formData.widget_config, show_attachments: checked }
+                        })}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <Switch
-                  id="show_attachments"
-                  checked={formData.widget_config.show_attachments}
-                  onCheckedChange={(checked) => setFormData({
-                    ...formData,
-                    widget_config: { ...formData.widget_config, show_attachments: checked }
-                  })}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+              )}
 
-        {/* Danger Zone Tab */}
-        {!isNew && activeTab === 'danger' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-red-600 dark:text-red-400">Danger Zone</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Irreversible actions for this website.</p>
-            </div>
+              {/* Danger Zone Tab */}
+              {!isNew && activeTab === 'danger' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-base font-semibold text-red-600 dark:text-red-400">Danger Zone</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Irreversible actions for this website.</p>
+                  </div>
 
-            <div className="flex items-center justify-between p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  Permanently removes the website, conversations, teams, tags, and automations.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={handleDelete}
-                disabled={saving}
-                className="gap-1 shrink-0 ml-4"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
-              </Button>
-            </div>
-          </div>
-        )}
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Permanently removes the website, conversations, teams, tags, and automations.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDelete}
+                      disabled={saving}
+                      className="gap-1 shrink-0 ml-4"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-        {/* Save / Cancel buttons (shown on tabs that have form data) */}
-        {(isNew || activeTab === 'settings' || activeTab === 'widget') && (
-          <div className="flex items-center gap-3 pt-2">
-            <Button type="submit" size="sm" disabled={saving} className="gap-2">
-              <Save className="w-4 h-4" />
-              {saving ? 'Saving...' : isNew ? 'Create Website' : 'Save Changes'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/dashboard/settings/websites')}
-            >
-              Cancel
-            </Button>
+              {/* Save / Cancel buttons (shown on tabs that have form data) */}
+              {(isNew || activeTab === 'settings' || activeTab === 'widget') && (
+                <div className="flex items-center gap-3 pt-2">
+                  <Button type="submit" size="sm" disabled={saving} className="gap-2">
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Saving...' : isNew ? 'Create Website' : 'Save Changes'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate('/dashboard/settings/websites')}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+            </form>
           </div>
-        )}
-      </form>
-      </div>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
