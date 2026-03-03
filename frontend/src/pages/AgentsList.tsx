@@ -41,32 +41,37 @@ export default function AgentsList() {
   const [avatarLoading, setAvatarLoading] = useState(false)
 
   // ─── Data ─────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await apiRequest<Agent[]>('/users')
-      setAgents(data)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load users')
-    } finally {
-      setLoading(false)
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve())
+
+  const refresh = async () => {
+    const data = await apiRequest<Agent[]>('/users')
+    setAgents(data)
+  }
+  refreshRef.current = refresh
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        await refresh()
+      } catch (err: any) {
+        if (cancelled) return
+        setError(err.message || 'Failed to load users')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
+    run()
+    return () => { cancelled = true }
   }, [])
 
-  useEffect(() => { load() }, [load])
-
-  // Listen for real-time availability changes
+  // Listen for real-time availability changes — silent re-fetch (no loading flicker)
   useEffect(() => {
     const removeHandler = addMessageHandler((data: any) => {
       if (data?.type === 'availability_changed') {
-        const agentId = data.agent_id
-        const isAvailable = data.is_available
-        if (typeof agentId === 'number') {
-          setAgents(prev => prev.map(a =>
-            a.id === agentId ? { ...a, is_available: isAvailable } : a
-          ))
-        }
+        refreshRef.current().catch(() => { })
       }
     })
     return removeHandler
@@ -221,7 +226,7 @@ export default function AgentsList() {
           method: 'POST',
           body: JSON.stringify({ name, email, password: formPassword, role: formRole }),
         })
-        await load()
+        await refresh()
         closePanel()
       } else if (panel.kind === 'edit') {
         const item = panel.item
@@ -242,7 +247,7 @@ export default function AgentsList() {
           })
         }
 
-        await load()
+        await refresh()
         closePanel()
       }
     } catch (e: any) {
@@ -270,7 +275,10 @@ export default function AgentsList() {
   }
 
   const panelOpen = panel.kind !== 'closed'
-  const editItem = panel.kind === 'edit' ? panel.item : null
+  // Derive editItem from live agents state so realtime updates are reflected
+  const editItem = panel.kind === 'edit'
+    ? agents.find(a => a.id === panel.item.id) ?? panel.item
+    : null
   const isAdminAccount = editItem?.role === 'system_manager'
 
   return (
@@ -330,7 +338,7 @@ export default function AgentsList() {
                 <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">User</th>
                   <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Email</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-32">Role</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-40">Role</th>
                   <th className="text-center px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-20">Active</th>
                 </tr>
               </thead>
@@ -356,20 +364,19 @@ export default function AgentsList() {
                                 {initials}
                               </div>
                             )}
-                            <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 border-2 border-white dark:border-gray-800 rounded-full ${agent.can_receive_chats ? 'bg-green-500' : 'bg-gray-400'}`} />
+                            <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 border-2 border-white dark:border-gray-800 rounded-full ${agent.can_receive_chats ? 'bg-emerald-500' : 'bg-red-500'}`} />
                           </div>
                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{agent.name}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{agent.email}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          isSysManager
-                            ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                            : agent.role === 'manager'
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                              : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
-                        }`}>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${isSysManager
+                          ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                          : agent.role === 'manager'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                            : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
+                          }`}>
                           {roleLabel(agent.role)}
                         </span>
                       </td>
@@ -490,16 +497,16 @@ export default function AgentsList() {
                 <div className="rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800/40">
                   <div className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${editItem.is_active ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${editItem.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${editItem.is_active ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${editItem.is_active ? 'bg-emerald-500' : 'bg-red-500'}`} />
                       {editItem.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Availability</span>
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${editItem.is_available ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${editItem.is_available ? 'bg-green-500' : 'bg-gray-400'}`} />
-                      {editItem.is_available ? 'Available' : 'Unavailable'}
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${editItem.can_receive_chats ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${editItem.can_receive_chats ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                      {editItem.can_receive_chats ? 'Available' : 'Not Available'}
                     </span>
                   </div>
                 </div>
