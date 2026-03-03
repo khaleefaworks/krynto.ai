@@ -40,7 +40,8 @@ import {
     Inbox,
     Users,
     Bot,
-    Plus
+    Plus,
+    X
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -670,72 +671,39 @@ export default function ConversationsView() {
         }
     }, [selectedChat])
 
-    // Setup WebSocket message handler for current chat
+    // Global WebSocket: connect once and handle list-level events (no chat selection required)
     useEffect(() => {
-        if (!selectedChat || !user?.id) return
+        if (!user?.id) return
 
-        // Single global agent socket (website_id=0). Server broadcasts website-scoped
-        // events to global sockets, and we filter by conversation_id in handlers.
         connectAgentSocket(0, user.id)
         connectedWebsiteIdRef.current = null
 
-        // Register message handler
         const removeHandler = addMessageHandler((data) => {
-            console.log('📩 WebSocket message received:', data)
-
             const dataConversationId = Number((data as any)?.conversation_id)
 
-            // Visitor message: either add to current chat UI, or increment unread badge.
-            if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
-                setVisitorTyping(false)
-                if (visitorTypingTimerRef.current) {
-                    clearTimeout(visitorTypingTimerRef.current)
-                    visitorTypingTimerRef.current = null
-                }
-                // Visitor sent a message - add to UI
-                const dto = (data as any)?.message_obj
-                if (dto && typeof dto === 'object') {
-                    console.log('👤 Adding visitor message DTO to UI')
-                    addMessage(dto)
-
-                    // Keep list preview + timestamp in sync (WhatsApp-like).
-                    const content = String((dto as any)?.content ?? '').trim()
-                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
-                    if (content) {
-                        const latest = activeChatsRef.current
-                        const idx = latest.findIndex(c => c.id === dataConversationId)
-                        if (idx >= 0) {
-                            const next = [...latest]
-                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
-                        }
-                    }
-                } else {
-                    console.warn('👤 Missing visitor message DTO; refreshing thread')
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-
-                // If the agent isn't pinned to the bottom, treat it as unread for UX.
-                if (!isAtBottomRef.current) {
-                    const dtoId = dto && typeof dto === 'object' ? Number((dto as any).id) : NaN
-                    if (!firstUnreadMessageId && Number.isFinite(dtoId) && dtoId > 0) {
-                        setFirstUnreadMessageId(dtoId)
-                    }
-                    incrementUnreadForConversation(selectedChat, 1)
-                } else if (!firstUnreadMessageId) {
-                    // Agent is actively viewing latest messages: keep server truth in sync.
-                    markChatRead(selectedChat).then(() => {
-                        setUnreadForConversation(selectedChat, 0)
-                    }).catch(() => { })
-                }
-            } else if (data.type === 'visitor_message' && dataConversationId && dataConversationId !== selectedChat) {
+            if (data.type === 'conversation_team_changed') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_assigned') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_closed') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'new_conversation') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'connected') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_left_website' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_message' && dataConversationId) {
+                // Update list preview for any visitor message (even if no chat is selected)
                 const dto = (data as any)?.message_obj
                 const content = (dto && typeof dto === 'object' ? (dto as any)?.content : null) ?? (data as any)?.message
                 const ts = (dto && typeof dto === 'object'
                     ? ((dto as any)?.timestamp || (dto as any)?.created_at)
                     : null) || new Date().toISOString()
-
-                // Best-effort: update preview without a full refresh.
                 if (typeof content === 'string' && content.trim()) {
                     const latest = activeChatsRef.current
                     const idx = latest.findIndex(c => c.id === dataConversationId)
@@ -749,44 +717,37 @@ export default function ConversationsView() {
                 const unreadCountRaw = (data as any)?.unread_count
                 const deltaRaw = (data as any)?.delta
 
-                // If the agent is viewing this chat, don't badge it.
-                if (selectedChat && dataConversationId === selectedChat) {
-                    return
-                }
-
                 if (typeof unreadCountRaw === 'number' && Number.isFinite(unreadCountRaw)) {
                     setUnreadForConversation(dataConversationId, unreadCountRaw)
                 } else {
                     const delta = typeof deltaRaw === 'number' && Number.isFinite(deltaRaw) ? deltaRaw : 1
                     incrementUnreadForConversation(dataConversationId, delta)
                 }
-
                 scheduleUnreadRefresh()
-            } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
-                stopAgentTyping(selectedChat)
+            }
+        })
 
-                // If the backend auto-enabled availability, reflect it immediately in UI.
-                const availabilityChanged = Boolean((data as any)?.availability_changed)
-                const agentIsAvailable = (data as any)?.agent_is_available
-                if (availabilityChanged && agentIsAvailable === true) {
-                    const current = useAppStore.getState().user
-                    if (current && current.is_available === false) {
-                        setUser({ ...current, is_available: true })
-                    }
+        return removeHandler
+    }, [user?.id])
+
+    // Chat-specific WebSocket handler: registered when a chat is selected
+    useEffect(() => {
+        if (!selectedChat || !user?.id) return
+
+        const removeHandler = addMessageHandler((data) => {
+            const dataConversationId = Number((data as any)?.conversation_id)
+
+            // Visitor message for the SELECTED chat — add to message thread
+            if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
+                setVisitorTyping(false)
+                if (visitorTypingTimerRef.current) {
+                    clearTimeout(visitorTypingTimerRef.current)
+                    visitorTypingTimerRef.current = null
                 }
-
-                // Our message was confirmed - add to UI
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
-                    console.log('✅ Agent message confirmed (DTO)')
-                    const clientId = String((data as any)?.client_message_id || '').trim()
-                    if (clientId) {
-                        reconcileOptimisticMessage(`tmp:${clientId}`, dto)
-                    } else {
-                        addMessage(dto)
-                    }
+                    addMessage(dto)
 
-                    // Keep list preview + timestamp in sync.
                     const content = String((dto as any)?.content ?? '').trim()
                     const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
                     if (content) {
@@ -799,49 +760,71 @@ export default function ConversationsView() {
                         }
                     }
                 } else {
-                    console.warn('✅ Missing agent message DTO; refreshing thread')
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
-            } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
+
+                if (!isAtBottomRef.current) {
+                    const dtoId = dto && typeof dto === 'object' ? Number((dto as any).id) : NaN
+                    if (!firstUnreadMessageId && Number.isFinite(dtoId) && dtoId > 0) {
+                        setFirstUnreadMessageId(dtoId)
+                    }
+                    incrementUnreadForConversation(selectedChat, 1)
+                } else if (!firstUnreadMessageId) {
+                    markChatRead(selectedChat).then(() => {
+                        setUnreadForConversation(selectedChat, 0)
+                    }).catch(() => { })
+                }
+            } else if (data.type === 'conversation_unread' && dataConversationId === selectedChat) {
+                // Agent is viewing this chat — suppress badge
+                return
+            } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
+                stopAgentTyping(selectedChat)
+
+                const availabilityChanged = Boolean((data as any)?.availability_changed)
+                const agentIsAvailable = (data as any)?.agent_is_available
+                if (availabilityChanged && agentIsAvailable === true) {
+                    const current = useAppStore.getState().user
+                    if (current && current.is_available === false) {
+                        setUser({ ...current, is_available: true })
+                    }
+                }
+
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    const clientId = String((data as any)?.client_message_id || '').trim()
+                    if (clientId) {
+                        reconcileOptimisticMessage(`tmp:${clientId}`, dto)
+                    } else {
+                        addMessage(dto)
+                    }
+
+                    const content = String((dto as any)?.content ?? '').trim()
+                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
+                    if (content) {
+                        const latest = activeChatsRef.current
+                        const idx = latest.findIndex(c => c.id === dataConversationId)
+                        if (idx >= 0) {
+                            const next = [...latest]
+                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                            setActiveChats(next)
+                        }
+                    }
+                } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
-            } else if (data.type === 'visitor_left_website' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-            } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-            } else if (data.type === 'conversation_team_changed') {
-                // Team assignment changed — refresh list (agent scope may differ)
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-            } else if (data.type === 'conversation_assigned') {
-                // Another agent (or us) claimed a conversation.
-                fetchActiveChats({ showSpinner: false })
-            } else if (data.type === 'conversation_closed') {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    setSelectedChat(null)
-                    navigate('/dashboard/chats')
-                }
-            } else if (data.type === 'new_conversation') {
-                // New conversation arrived - refresh chat list
-                console.log('📨 New conversation arrived, refreshing...')
-                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_team_changed' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'conversation_closed' && dataConversationId === selectedChat) {
+                setSelectedChat(null)
+                navigate('/dashboard/chats')
+            } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'connected') {
-                // Socket reconnected; refresh list and current thread for consistency.
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
                 const isTyping = Boolean((data as any)?.is_typing)
                 if (isTyping) {
@@ -861,14 +844,12 @@ export default function ConversationsView() {
                     }
                 }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
-                // Realtime browsing update: re-fetch history (capped)
                 getBrowsingHistory(selectedChat)
                     .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))
                     .catch(() => { })
             }
         })
 
-        // Cleanup: remove handler when chat changes or component unmounts
         return removeHandler
     }, [selectedChat, user?.id, (conversation as any)?.website_id, firstUnreadMessageId, incrementUnreadForConversation, setUnreadForConversation, stopAgentTyping])
 
@@ -1876,25 +1857,26 @@ export default function ConversationsView() {
                             {/* RIGHT — Assign team + team badge */}
                             <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
                                 {selectedTeam ? (
-                                    <Badge
-                                        variant="outline"
-                                        className={`gap-1${isAdmin(user) ? ' cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700' : ''}`}
+                                    <div
+                                        className={`inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300${isAdmin(user) ? ' cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors' : ''}`}
                                         onClick={isAdmin(user) ? () => setTeamPickerOpen(true) : undefined}
                                         title={isAdmin(user) ? 'Click to change team' : String((selectedTeam as any)?.name || '')}
                                     >
-                                        <span className="truncate max-w-40">{String((selectedTeam as any)?.name || '')}</span>
+                                        <Users className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span className="text-blue-500 dark:text-blue-400">Team:</span>
+                                        <span className="truncate max-w-32 font-semibold">{String((selectedTeam as any)?.name || '')}</span>
                                         {isAdmin(user) && (
                                             <button
                                                 type="button"
-                                                className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                                className="ml-0.5 rounded-full p-0.5 opacity-60 hover:opacity-100 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                                                 onClick={(e) => { e.stopPropagation(); handleSetTeam(null) }}
                                                 aria-label="Clear team"
-                                                title="Clear"
+                                                title="Remove team assignment"
                                             >
-                                                ×
+                                                <X className="h-3 w-3" />
                                             </button>
                                         )}
-                                    </Badge>
+                                    </div>
                                 ) : null}
 
                                 {isAdmin(user) && (
