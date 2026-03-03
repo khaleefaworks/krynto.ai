@@ -1878,12 +1878,17 @@ export default function ConversationsView() {
                             {/* RIGHT — Assign team + team badge */}
                             <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
                                 {selectedTeam ? (
-                                    <Badge variant="outline" className="gap-1">
+                                    <Badge
+                                        variant="outline"
+                                        className="gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        onClick={() => setTeamPickerOpen(true)}
+                                        title="Click to change team"
+                                    >
                                         <span className="truncate max-w-40">{String((selectedTeam as any)?.name || '')}</span>
                                         <button
                                             type="button"
                                             className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                                            onClick={() => handleSetTeam(null)}
+                                            onClick={(e) => { e.stopPropagation(); handleSetTeam(null) }}
                                             aria-label="Clear team"
                                             title="Clear"
                                         >
@@ -1893,8 +1898,8 @@ export default function ConversationsView() {
                                 ) : null}
 
                                 <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
-                                    <PopoverTrigger asChild>
-                                        {!selectedTeam ? (
+                                    {!selectedTeam ? (
+                                        <PopoverTrigger asChild>
                                             <Button
                                                 type="button"
                                                 variant="link"
@@ -1903,19 +1908,8 @@ export default function ConversationsView() {
                                                 <Users className="h-4 w-4" />
                                                 Assign team
                                             </Button>
-                                        ) : (
-                                            <Button
-                                                type="button"
-                                                size="icon"
-                                                variant="outline"
-                                                className="h-7 w-7 rounded-full"
-                                                aria-label="Change team"
-                                                title="Change team"
-                                            >
-                                                <Plus className="h-4 w-4" />
-                                            </Button>
-                                        )}
-                                    </PopoverTrigger>
+                                        </PopoverTrigger>
+                                    ) : null}
 
                                     <PopoverContent
                                         align="end"
