@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
@@ -12,7 +12,6 @@ import WebsiteManagement from './pages/WebsiteManagement'
 import WebsiteDetail from './pages/WebsiteDetail'
 import WebsitesList from './pages/WebsitesList'
 import AgentsList from './pages/AgentsList'
-import AgentDetail from './pages/AgentDetail'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
@@ -381,19 +380,15 @@ function App() {
                   element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
 
-                {/* Agents management - Admin only */}
+                {/* Users management - Admin only */}
                 <Route
                   path="users"
                   element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                <Route
-                  path="users/:id"
-                  element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
-                />
-
-                {/* Legacy settings routes (agents -> users) */}
+                {/* Legacy routes – detail page removed, redirect to list */}
+                <Route path="users/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
                 <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
-                <Route path="agents/:id" element={<LegacySettingsAgentsRedirect />} />
+                <Route path="agents/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
 
                 {/* Tags route removed – tags are now per-website inside WebsiteDetail */}
 
@@ -441,12 +436,6 @@ function App() {
       </Routes>
     </BrowserRouter>
   )
-}
-
-function LegacySettingsAgentsRedirect() {
-  const { id } = useParams<{ id?: string }>()
-  const target = id ? `/dashboard/settings/users/${id}` : '/dashboard/settings/users'
-  return <Navigate to={target} replace />
 }
 
 export default App
