@@ -212,7 +212,7 @@ async def agent_ws(
                     continue
                 if scope.team_ids is not None:
                     tid = getattr(conv, "team_id", None)
-                    if tid is not None and int(tid) not in set(scope.team_ids):
+                    if tid is None or int(tid) not in set(scope.team_ids):
                         await websocket.send_json({"type": "error", "message": "Chat not available"})
                         continue
 
@@ -249,7 +249,7 @@ async def agent_ws(
                     continue
                 if scope.team_ids is not None:
                     tid = getattr(conv, "team_id", None)
-                    if tid is not None and int(tid) not in set(scope.team_ids):
+                    if tid is None or int(tid) not in set(scope.team_ids):
                         await websocket.send_json({"type": "error", "message": "Chat not available"})
                         continue
 
@@ -301,7 +301,7 @@ async def agent_ws(
                     continue
                 if scope.team_ids is not None:
                     tid = getattr(conv, "team_id", None)
-                    if tid is not None and int(tid) not in set(scope.team_ids):
+                    if tid is None or int(tid) not in set(scope.team_ids):
                         await websocket.send_json({"type": "error", "message": "Chat not available"})
                         continue
 

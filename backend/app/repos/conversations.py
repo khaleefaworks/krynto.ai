@@ -94,9 +94,9 @@ def active_conversations_with_counts_and_last_message(
     if team_ids is not None:
         team_ids_norm = [int(t) for t in team_ids]
         if not team_ids_norm:
-            rows_query = rows_query.filter(Conversation.team_id.is_(None))
+            rows_query = rows_query.filter(sa.literal(False))
         else:
-            rows_query = rows_query.filter(sa.or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
+            rows_query = rows_query.filter(Conversation.team_id.in_(team_ids_norm))
 
     try:
         rows_query = rows_query.order_by(Conversation.updated_at.desc())
@@ -173,9 +173,9 @@ def resolved_conversations_with_counts_and_last_message(
     if team_ids is not None:
         team_ids_norm = [int(t) for t in team_ids]
         if not team_ids_norm:
-            rows_query = rows_query.filter(Conversation.team_id.is_(None))
+            rows_query = rows_query.filter(sa.literal(False))
         else:
-            rows_query = rows_query.filter(sa.or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
+            rows_query = rows_query.filter(Conversation.team_id.in_(team_ids_norm))
 
     if agent_id:
         rows_query = rows_query.filter(Conversation.assigned_agent_id == agent_id)

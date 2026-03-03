@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, case, func, or_, tuple_
+from sqlalchemy import and_, case, func, literal, or_, tuple_
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
@@ -452,9 +452,9 @@ def get_visitor_details(
     if team_ids is not None:
         team_ids_norm = [int(t) for t in team_ids]
         if not team_ids_norm:
-            conv_q = conv_q.filter(Conversation.team_id.is_(None))
+            conv_q = conv_q.filter(literal(False))
         else:
-            conv_q = conv_q.filter(or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
+            conv_q = conv_q.filter(Conversation.team_id.in_(team_ids_norm))
 
     conversations = conv_q.all()
 
@@ -576,9 +576,9 @@ def get_contact_details(
     if team_ids is not None:
         team_ids_norm = [int(t) for t in team_ids]
         if not team_ids_norm:
-            q = q.filter(Conversation.team_id.is_(None))
+            q = q.filter(literal(False))
         else:
-            q = q.filter(or_(Conversation.team_id.is_(None), Conversation.team_id.in_(team_ids_norm)))
+            q = q.filter(Conversation.team_id.in_(team_ids_norm))
 
     conversations = q.order_by(Conversation.created_at.desc()).all()
     if not conversations:

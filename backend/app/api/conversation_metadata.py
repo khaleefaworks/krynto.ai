@@ -34,7 +34,7 @@ def _ensure_visible(db: Session, *, current_user: User, conversation_id: int) ->
         raise HTTPException(status_code=403, detail="Chat not available")
     if scope.team_ids is not None:
         tid = getattr(conversation, "team_id", None)
-        if tid is not None and int(tid) not in set(scope.team_ids):
+        if tid is None or int(tid) not in set(scope.team_ids):
             raise HTTPException(status_code=403, detail="Chat not available")
     return conversation
 

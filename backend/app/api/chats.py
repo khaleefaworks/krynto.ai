@@ -29,7 +29,7 @@ def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> No
 
     if scope.team_ids is not None:
         tid = getattr(conv, "team_id", None)
-        if tid is not None and int(tid) not in set(scope.team_ids):
+        if tid is None or int(tid) not in set(scope.team_ids):
             raise HTTPException(status_code=403, detail="Chat not available")
 
 
