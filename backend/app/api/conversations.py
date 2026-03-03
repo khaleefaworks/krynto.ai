@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.api.deps import require_authenticated_user
 from app.models.user import User
 from app.models.conversation import Conversation
+from app.models.website_team import WebsiteTeam
 from app.services.conversation_service import ConversationService
 from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.visibility import compute_visibility_scope
@@ -45,6 +46,10 @@ class ClaimResponse(BaseModel):
 
 class TagActionRequest(BaseModel):
     tag_id: int
+
+
+class SetTeamRequest(BaseModel):
+    team_id: Optional[int] = None
 
 
 @router.post("/{conversation_id}/claim", response_model=ClaimResponse)
@@ -174,3 +179,32 @@ def untag_conversation(
     if not success:
         raise HTTPException(status_code=404, detail="Tag not found on conversation")
     return {"success": True}
+
+
+@router.put("/{conversation_id}/team")
+def set_conversation_team(
+    conversation_id: int,
+    payload: SetTeamRequest,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Assign (or clear) a single website team for a conversation."""
+    conv = _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
+
+    # Clear team assignment
+    if payload.team_id is None:
+        conv.team_id = None
+        db.commit()
+        return {"success": True, "conversation_id": conversation_id, "team_id": None}
+
+    team_id = int(payload.team_id)
+    team = db.query(WebsiteTeam).filter(WebsiteTeam.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    if int(getattr(team, "website_id", 0)) != int(getattr(conv, "website_id", 0)):
+        raise HTTPException(status_code=400, detail="Team does not belong to this website")
+
+    conv.team_id = team.id
+    db.commit()
+    return {"success": True, "conversation_id": conversation_id, "team_id": team.id}
