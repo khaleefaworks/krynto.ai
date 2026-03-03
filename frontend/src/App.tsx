@@ -376,6 +376,10 @@ function App() {
                   element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />}
                 />
                 <Route
+                  path="websites/new"
+                  element={<Navigate to="/dashboard/settings/websites" replace />}
+                />
+                <Route
                   path="websites/:id"
                   element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />

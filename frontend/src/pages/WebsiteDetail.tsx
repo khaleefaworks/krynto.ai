@@ -2,13 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { Save, Trash2, Globe, Code, Palette, Copy, Check, Bot, Plus, X, Users, Zap, Tag as TagIcon, AlertTriangle } from 'lucide-react'
+import { Save, Trash2, Globe, Copy, Check, Plus, X } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
@@ -1203,682 +1202,602 @@ export default function WebsiteDetail() {
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      {isNew ? (
-        <div className="h-14 flex items-center gap-3 border-b dark:border-gray-700 px-6">
-          <h1 className="text-base font-semibold text-gray-900 dark:text-white">
-            Add New Website
+      <div className="h-16 flex items-center gap-3 border-b dark:border-gray-700 px-6 flex-shrink-0">
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+          <Globe className="h-3.5 w-3.5 text-white" />
+        </div>
+        <div>
+          <h1 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">
+            {formData.name || 'Website'}
           </h1>
+          {formData.domain && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">{formData.domain}</p>
+          )}
         </div>
-      ) : (
-        <div className="h-16 flex items-center gap-3 border-b dark:border-gray-700 px-6">
-          <div>
-            <h1 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">
-              {formData.name || 'Website'}
-            </h1>
-            {formData.domain && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">{formData.domain}</p>
-            )}
-          </div>
-        </div>
-      )}
+      </div>
 
-      {error && (
-        <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
-        </div>
-      )}
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-4xl px-6 py-6 space-y-6">
+          {error && (
+            <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+              {error}
+            </div>
+          )}
 
-      {successMessage && (
-        <div className="mx-6 mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-          <p className="text-sm text-green-800 dark:text-green-300">{successMessage}</p>
-        </div>
-      )}
+          {successMessage && (
+            <div className="p-3 rounded-lg text-sm bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+              {successMessage}
+            </div>
+          )}
 
-      <form onSubmit={handleSave} className="space-y-4 max-w-4xl px-6 py-6">
+      <form onSubmit={handleSave} className="space-y-6">
         {/* Installation Tab */}
         {!isNew && activeTab === 'installation' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Code className="w-5 h-5" />
-                Installation
-              </CardTitle>
-              <CardDescription>Copy and paste this code into your website before the closing &lt;/body&gt; tag</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Website ID (internal)</p>
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Installation</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Copy and paste this code into your website before the closing &lt;/body&gt; tag</p>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 overflow-hidden">
+              <div className="flex">
+                <div className="flex-1 px-4 py-3 bg-white dark:bg-gray-800/40">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Website ID</p>
                   <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100">{websiteId ?? '—'}</p>
                 </div>
-                <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+                <div className="flex-1 px-4 py-3 bg-white dark:bg-gray-800/40 border-l border-gray-200 dark:border-gray-700">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Widget Key (public)</p>
-                    <Button
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Widget Key</p>
+                    <button
                       type="button"
                       onClick={copyWidgetKey}
-                      variant="outline"
-                      size="sm"
                       disabled={!widgetKey}
-                      className="h-7 px-2"
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-40 inline-flex items-center gap-1"
                     >
-                      {widgetKeyCopied ? (
-                        <>
-                          <Check className="w-3 h-3 mr-1" />
-                          Copied
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 mr-1" />
-                          Copy
-                        </>
-                      )}
-                    </Button>
+                      {widgetKeyCopied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
+                    </button>
                   </div>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">
-                    {widgetKey || '—'}
-                  </p>
+                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">{widgetKey || '—'}</p>
                 </div>
               </div>
-              <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 relative">
-                <Button
-                  type="button"
-                  onClick={copySnippet}
-                  className="absolute top-2 right-2"
-                  variant="outline"
-                  size="sm"
-                >
-                  {snippetCopied ? (
-                    <>
-                      <Check className="w-4 h-4 mr-1" />
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 mr-1" />
-                      Copy
-                    </>
-                  )}
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Embed Snippet</p>
+                <Button type="button" onClick={copySnippet} variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                  {snippetCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
                 </Button>
-                <pre className="text-sm overflow-x-auto text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap pr-24">
+              </div>
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-4">
+                <pre className="text-sm overflow-x-auto text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap">
                   {widgetSnippet || 'Loading...'}
                 </pre>
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
-                <p className="font-semibold">Installation Instructions:</p>
-                <ol className="list-decimal list-inside space-y-1 ml-2">
-                  <li>Copy the code above</li>
-                  <li>Paste it into your website's HTML before the closing &lt;/body&gt; tag</li>
-                  <li>The chat widget will automatically appear on your website</li>
-                  <li>Make sure at least one agent is assigned to this website</li>
-                </ol>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Installation Instructions</p>
+              <ol className="list-decimal list-inside space-y-1.5 text-sm text-gray-600 dark:text-gray-400 ml-1">
+                <li>Copy the embed snippet above</li>
+                <li>Paste it into your website's HTML before the closing &lt;/body&gt; tag</li>
+                <li>The chat widget will automatically appear on your website</li>
+                <li>Make sure at least one agent is assigned to this website</li>
+              </ol>
+            </div>
+          </div>
         )}
 
         {/* Teams Tab (admin-only) */}
         {!isNew && activeTab === 'teams' && isAdmin(user) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                Teams
-              </CardTitle>
-              <CardDescription>Create website-specific teams and assign members.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {teamsError && (
-                <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 text-sm">
-                  {teamsError}
-                </div>
-              )}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Teams</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create website-specific teams and assign members.</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => { loadWebsiteAgents(); loadAllAgents() }}
+              >
+                Refresh
+              </Button>
+            </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="md:col-span-1 space-y-3">
-                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                    <div className="font-medium text-gray-900 dark:text-gray-100 mb-2">New Team</div>
-                    <div className="space-y-2">
-                      <Input
-                        value={newTeamName}
-                        onChange={(e) => setNewTeamName(e.target.value)}
-                        placeholder="Team name"
-                      />
-                      <Textarea
-                        value={newTeamDescription}
-                        onChange={(e) => setNewTeamDescription(e.target.value)}
-                        placeholder="Description (optional)"
-                        rows={3}
-                      />
-                      <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} className="w-full gap-2">
-                        <Plus className="w-4 h-4" />
-                        {creatingTeam ? 'Creating...' : 'Create Team'}
-                      </Button>
-                    </div>
-                  </div>
+            {teamsError && (
+              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                {teamsError}
+              </div>
+            )}
 
-                  <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium text-gray-900 dark:text-gray-100">Teams</div>
-                      {teamsLoading && <div className="text-xs text-gray-500">Loading...</div>}
-                    </div>
-                    {teams.length === 0 && !teamsLoading ? (
-                      <div className="text-sm text-gray-600 dark:text-gray-400">No teams yet.</div>
-                    ) : (
-                      <div className="space-y-2">
-                        {teams.map((t) => (
-                          <div
-                            key={t.id}
-                            className={`p-2 rounded border transition-colors cursor-pointer ${selectedTeamId === t.id
-                              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20'
-                              : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900'
-                              }`}
-                            onClick={() => {
-                              setTeamsError(null)
-                              setSelectedTeamId(t.id)
-                              setSelectedTeamMemberIds([])
-                              loadTeamMembers(t.id)
-                            }}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.name}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</div>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteTeam(t.id)
-                                }}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Left column – Create & Team list */}
+              <div className="md:col-span-1 space-y-4">
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Team</p>
+                  <Input
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    placeholder="Team name"
+                    className="dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <Textarea
+                    value={newTeamDescription}
+                    onChange={(e) => setNewTeamDescription(e.target.value)}
+                    placeholder="Description (optional)"
+                    rows={2}
+                    className="dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <Button type="button" onClick={handleCreateTeam} disabled={creatingTeam} size="sm" className="w-full gap-1.5">
+                    <Plus className="w-3.5 h-3.5" />
+                    {creatingTeam ? 'Creating...' : 'Create Team'}
+                  </Button>
                 </div>
 
-                <div className="md:col-span-2">
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-medium text-gray-900 dark:text-gray-100">Website assignment</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Teams</p>
+                    {teamsLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                  </div>
+                  {teams.length === 0 && !teamsLoading ? (
+                    <div className="px-4 py-6 text-center text-sm text-gray-400">No teams yet.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {teams.map((t) => (
+                        <div
+                          key={t.id}
+                          className={`flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer transition-colors ${selectedTeamId === t.id
+                            ? 'bg-blue-50 dark:bg-blue-900/20'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                          }`}
                           onClick={() => {
-                            loadWebsiteAgents()
-                            loadAllAgents()
+                            setTeamsError(null)
+                            setSelectedTeamId(t.id)
+                            setSelectedTeamMemberIds([])
+                            loadTeamMembers(t.id)
                           }}
                         >
-                          Refresh
-                        </Button>
-                      </div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                        Assign agents to this website (website-wide access). Team membership is managed below.
-                      </div>
-
-                      {allAgentsError && (
-                        <div className="mt-2 text-sm text-red-700 dark:text-red-300">{allAgentsError}</div>
-                      )}
-
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div>
-                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Assigned ({websiteAgents.length})
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{t.member_count} members</p>
                           </div>
-                          {agentsError && (
-                            <div className="mb-2 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
-                          )}
-                          {agentsLoading ? (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
-                          ) : websiteAgents.length === 0 ? (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">No agents assigned yet.</div>
-                          ) : (
-                            <div className="space-y-2">
-                              {websiteAgents.map((a) => (
-                                <div key={a.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTeam(t.id) }}
+                            className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 flex-shrink-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right column – Agents & Members */}
+              <div className="md:col-span-2 space-y-4">
+                {/* Website agent assignment */}
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Website Assignment</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Assign agents to this website. Team membership is managed below.</p>
+                  </div>
+
+                  {allAgentsError && (
+                    <div className="text-sm text-red-600 dark:text-red-400">{allAgentsError}</div>
+                  )}
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                        Assigned ({websiteAgents.length})
+                      </p>
+                      {agentsError && <div className="mb-2 text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
+                      {agentsLoading ? (
+                        <div className="text-sm text-gray-400">Loading...</div>
+                      ) : websiteAgents.length === 0 ? (
+                        <div className="text-sm text-gray-400">No agents assigned yet.</div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {websiteAgents.map((a) => (
+                            <div key={a.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                              <div className="min-w-0">
+                                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
+                                {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={unassigningAgentId === a.id}
+                                onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                className="text-xs text-red-500 hover:text-red-600 disabled:opacity-50"
+                              >
+                                {unassigningAgentId === a.id ? '...' : <X className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Available</p>
+                      {allAgentsLoading ? (
+                        <div className="text-sm text-gray-400">Loading...</div>
+                      ) : (
+                        (() => {
+                          const assignedIds = new Set(websiteAgents.map((x) => x.id))
+                          const candidates = allAgents
+                            .filter((u) => !assignedIds.has(u.id))
+                            .filter((u) => {
+                              const role = String((u as any).role || '').toLowerCase()
+                              return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
+                            })
+                          if (candidates.length === 0) {
+                            return <div className="text-sm text-gray-400">No available agents.</div>
+                          }
+                          return (
+                            <div className="space-y-1.5">
+                              {candidates.map((u) => (
+                                <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
                                   <div className="min-w-0">
-                                    <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{a.email}</div>
-                                    {a.role && <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>}
+                                    <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</p>
+                                    {(u as any).role && <p className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</p>}
                                   </div>
                                   <Button
                                     type="button"
-                                    variant="outline"
                                     size="sm"
-                                    disabled={unassigningAgentId === a.id}
-                                    onClick={() => handleUnassignWebsiteAgent(a.id)}
+                                    disabled={assigningAgentId === u.id}
+                                    onClick={() => handleAssignWebsiteAgent(u.id)}
+                                    className="h-7 text-xs"
                                   >
-                                    {unassigningAgentId === a.id ? 'Unassigning…' : 'Unassign'}
+                                    {assigningAgentId === u.id ? '...' : 'Assign'}
                                   </Button>
                                 </div>
                               ))}
                             </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Available</div>
-                          {allAgentsLoading ? (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
-                          ) : (
-                            (() => {
-                              const assignedIds = new Set(websiteAgents.map((x) => x.id))
-                              const candidates = allAgents
-                                .filter((u) => !assignedIds.has(u.id))
-                                .filter((u) => {
-                                  const role = String((u as any).role || '').toLowerCase()
-                                  return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
-                                })
-
-                              if (candidates.length === 0) {
-                                return <div className="text-sm text-gray-600 dark:text-gray-400">No available agents.</div>
-                              }
-
-                              return (
-                                <div className="space-y-2">
-                                  {candidates.map((u) => (
-                                    <div key={u.id} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
-                                      <div className="min-w-0">
-                                        <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{u.email}</div>
-                                        {(u as any).role && <div className="text-xs text-gray-500 dark:text-gray-400">{String((u as any).role)}</div>}
-                                      </div>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        disabled={assigningAgentId === u.id}
-                                        onClick={() => handleAssignWebsiteAgent(u.id)}
-                                      >
-                                        {assigningAgentId === u.id ? 'Assigning…' : 'Assign'}
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )
-                            })()
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="font-medium text-gray-900 dark:text-gray-100">
-                          Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
-                        </div>
-                        {membersLoading && <div className="text-xs text-gray-500">Loading...</div>}
-                      </div>
-
-                      {!selectedTeamId ? (
-                        <div className="text-sm text-gray-600 dark:text-gray-400">Select a team to manage members.</div>
-                      ) : (
-                        <>
-                          {agentsError && (
-                            <div className="mb-3 text-sm text-red-700 dark:text-red-300">{agentsError}</div>
-                          )}
-                          {agentsLoading ? (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">Loading assigned agents...</div>
-                          ) : (
-                            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-                              {websiteAgents.length === 0 ? (
-                                <div className="text-sm text-gray-600 dark:text-gray-400">Assign agents above to enable member selection.</div>
-                              ) : (
-                                <>
-                                  <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                                    <div>Team membership (check agents who belong to this team)</div>
-                                    <div>Selected: {selectedTeamMemberIds.length}</div>
-                                  </div>
-                                  {websiteAgents.map((a) => {
-                                    const checked = selectedTeamMemberIds.includes(a.id)
-                                    const label = a.name ? `${a.name} (${a.email})` : a.email
-                                    return (
-                                      <label key={a.id} className="flex items-center gap-3 p-2 rounded border border-gray-200 dark:border-gray-800">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          disabled={membersLoading || membersSaving}
-                                          onChange={(e) => {
-                                            const next = e.target.checked
-                                              ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
-                                              : selectedTeamMemberIds.filter((id) => id !== a.id)
-                                            setSelectedTeamMemberIds(next)
-                                          }}
-                                        />
-                                        <div className="flex-1">
-                                          <div className="text-sm text-gray-900 dark:text-gray-100">{label}</div>
-                                          {a.role && (
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">{a.role}</div>
-                                          )}
-                                        </div>
-                                      </label>
-                                    )
-                                  })}
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="mt-4 flex justify-end">
-                            <Button
-                              type="button"
-                              onClick={handleSaveMembers}
-                              disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
-                              className="gap-2"
-                            >
-                              <Save className="w-4 h-4" />
-                              {membersSaving ? 'Saving...' : 'Save Members'}
-                            </Button>
-                          </div>
-                        </>
+                          )
+                        })()
                       )}
                     </div>
                   </div>
                 </div>
+
+                {/* Team members */}
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Members{selectedTeam?.name ? ` — ${selectedTeam.name}` : ''}
+                    </p>
+                    {membersLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                  </div>
+
+                  {!selectedTeamId ? (
+                    <div className="py-6 text-center text-sm text-gray-400">Select a team to manage members.</div>
+                  ) : (
+                    <>
+                      {agentsError && <div className="text-sm text-red-600 dark:text-red-400">{agentsError}</div>}
+                      {agentsLoading ? (
+                        <div className="text-sm text-gray-400">Loading assigned agents...</div>
+                      ) : websiteAgents.length === 0 ? (
+                        <div className="text-sm text-gray-400">Assign agents above to enable member selection.</div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-[400px] overflow-auto">
+                          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pb-1">
+                            <span>Check agents who belong to this team</span>
+                            <span>{selectedTeamMemberIds.length} selected</span>
+                          </div>
+                          {websiteAgents.map((a) => {
+                            const checked = selectedTeamMemberIds.includes(a.id)
+                            const label = a.name ? `${a.name} (${a.email})` : a.email
+                            return (
+                              <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-md border transition-colors cursor-pointer ${checked
+                                ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                              }`}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={membersLoading || membersSaving}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? Array.from(new Set([...selectedTeamMemberIds, a.id]))
+                                      : selectedTeamMemberIds.filter((mid) => mid !== a.id)
+                                    setSelectedTeamMemberIds(next)
+                                  }}
+                                  className="rounded border-gray-300 dark:border-gray-600"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm text-gray-900 dark:text-gray-100">{label}</p>
+                                  {a.role && <p className="text-xs text-gray-500 dark:text-gray-400">{a.role}</p>}
+                                </div>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div className="flex justify-end pt-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleSaveMembers}
+                          disabled={!selectedTeamId || membersSaving || membersLoading || agentsLoading}
+                          className="gap-1.5"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          {membersSaving ? 'Saving...' : 'Save Members'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
         {/* Shortcuts Tab (admin-only) */}
         {!isNew && activeTab === 'shortcuts' && isAdmin(user) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="w-5 h-5" />
-                Shortcuts
-              </CardTitle>
-              <CardDescription>
-                Create website-global shortcuts. Agents assigned to this website can use them in Chats.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {websiteShortcutsError && (
-                <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 text-sm">
-                  {websiteShortcutsError}
-                </div>
-              )}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Shortcuts</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Website-global shortcuts available to all assigned agents.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={loadWebsiteShortcuts} disabled={websiteShortcutsLoading}>
+                {websiteShortcutsLoading ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            </div>
 
-              <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="font-medium text-gray-900 dark:text-gray-100">Create shortcut</div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={loadWebsiteShortcuts}
-                    disabled={websiteShortcutsLoading}
-                  >
-                    {websiteShortcutsLoading ? 'Refreshing…' : 'Refresh'}
-                  </Button>
-                </div>
+            {websiteShortcutsError && (
+              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                {websiteShortcutsError}
+              </div>
+            )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Shortcut</label>
-                    <Input
-                      value={newWebsiteShortcut}
-                      onChange={(e) => setNewWebsiteShortcut(e.target.value)}
-                      placeholder="hello"
-                    />
-                  </div>
-                  <div className="flex items-end gap-3">
-                    <div className="flex items-center gap-2">
-                      <Switch checked={newWebsiteShortcutActive} onCheckedChange={setNewWebsiteShortcutActive} />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Message</label>
-                  <Textarea
-                    value={newWebsiteShortcutMessage}
-                    onChange={(e) => setNewWebsiteShortcutMessage(e.target.value)}
-                    placeholder="Hello! How can I help you today?"
+            {/* Create form */}
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Create Shortcut</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Shortcut</label>
+                  <Input
+                    value={newWebsiteShortcut}
+                    onChange={(e) => setNewWebsiteShortcut(e.target.value)}
+                    placeholder="hello"
+                    className="dark:bg-gray-800 dark:border-gray-700"
                   />
                 </div>
-
-                <div className="mt-4 flex justify-end">
-                  <Button type="button" onClick={handleCreateWebsiteShortcut} disabled={websiteShortcutsSaving}>
-                    {websiteShortcutsSaving ? 'Saving…' : 'Create'}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="font-medium text-gray-900 dark:text-gray-100">Website shortcuts</div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {websiteShortcutsLoading ? 'Loading…' : `${websiteShortcuts.length} total`}
+                <div className="flex items-end">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={newWebsiteShortcutActive} onCheckedChange={setNewWebsiteShortcutActive} />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
                   </div>
                 </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Message</label>
+                <Textarea
+                  value={newWebsiteShortcutMessage}
+                  onChange={(e) => setNewWebsiteShortcutMessage(e.target.value)}
+                  placeholder="Hello! How can I help you today?"
+                  className="dark:bg-gray-800 dark:border-gray-700"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button type="button" size="sm" onClick={handleCreateWebsiteShortcut} disabled={websiteShortcutsSaving}>
+                  {websiteShortcutsSaving ? 'Saving…' : 'Create'}
+                </Button>
+              </div>
+            </div>
 
-                {websiteShortcutsLoading ? (
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Loading shortcuts…</div>
-                ) : websiteShortcuts.length === 0 ? (
-                  <div className="text-sm text-gray-600 dark:text-gray-400">No shortcuts yet.</div>
-                ) : (
-                  <div className="space-y-3">
+            {/* Shortcuts list as table */}
+            {websiteShortcutsLoading ? (
+              <div className="py-8 text-center text-sm text-gray-400">Loading shortcuts…</div>
+            ) : websiteShortcuts.length === 0 ? (
+              <div className="py-8 text-center text-sm text-gray-400">No shortcuts yet.</div>
+            ) : (
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Shortcut</th>
+                      <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Message</th>
+                      <th className="text-center px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-20">Active</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {[...websiteShortcuts]
                       .sort((a, b) => String(a.shortcut || '').localeCompare(String(b.shortcut || '')))
                       .map((s) => (
-                        <div
-                          key={s.id}
-                          className="flex items-start justify-between gap-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-3"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-3">
-                              <div className="font-mono text-sm text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
-                              <div className="flex items-center gap-2">
-                                <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleWebsiteShortcutActive(s, v)} />
-                                <span className="text-xs text-gray-600 dark:text-gray-400">Active</span>
-                              </div>
-                            </div>
-                            <div className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
-                              {s.message}
-                            </div>
-                          </div>
-                          <div className="flex-shrink-0">
-                            <Button variant="ghost" size="sm" type="button" onClick={() => handleDeleteWebsiteShortcut(s)}>
-                              Delete
-                            </Button>
-                          </div>
-                        </div>
+                        <tr key={s.id} className="bg-white dark:bg-gray-800/30">
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-sm text-gray-900 dark:text-gray-100">/{s.shortcut}</span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-xs truncate">{s.message}</td>
+                          <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <Switch checked={s.is_active} onCheckedChange={(v) => handleToggleWebsiteShortcutActive(s, v)} />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteWebsiteShortcut(s)}
+                              className="text-gray-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
                       ))}
-                  </div>
-                )}
+                  </tbody>
+                </table>
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         )}
 
         {/* Tags Tab (admin-only) */}
         {!isNew && activeTab === 'tags' && isAdmin(user) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TagIcon className="w-5 h-5" />
-                  Tags
-                </CardTitle>
-                <CardDescription>
-                  {websiteTagsLoading ? 'Loading…' : `${websiteTags.length} total`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {websiteTagsError && (
-                  <div className="mb-4 rounded-md p-3 text-sm bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200">
-                    {websiteTagsError}
-                  </div>
-                )}
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Tags</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage conversation tags scoped to this website.</p>
+            </div>
 
+            {websiteTagsError && (
+              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                {websiteTagsError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              {/* Tag list (left, wider) */}
+              <div className="lg:col-span-3">
                 {websiteTagsLoading ? (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+                  <div className="py-8 text-center text-sm text-gray-400">Loading…</div>
                 ) : websiteTags.length === 0 ? (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">No tags yet.</div>
+                  <div className="py-8 text-center text-sm text-gray-400">No tags yet. Create one on the right.</div>
                 ) : (
-                  <div className="space-y-2">
-                    {[...websiteTags]
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .map((t) => (
-                        <div key={t.id} className="flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
-                          <button
-                            type="button"
-                            className="flex items-center gap-3 min-w-0 text-left"
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {[...websiteTags]
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map((t) => (
+                          <div
+                            key={t.id}
+                            className={`flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800/30 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors ${editingTag?.id === t.id ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                             onClick={() => setEditingTag({ ...t })}
-                            disabled={websiteTagsSaving}
-                            title="Edit"
                           >
-                            <span className="inline-flex h-5 w-5 rounded" style={{ backgroundColor: t.color }} />
-                            <span className="font-medium text-gray-900 dark:text-white truncate">{t.name}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                              {t.description || ''}
-                            </span>
-                          </button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteWebsiteTag(t.id)}
-                            disabled={websiteTagsSaving}
-                            className="text-red-600 hover:text-red-700"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="inline-flex h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                              <span className="font-medium text-sm text-gray-900 dark:text-white truncate">{t.name}</span>
+                              {t.description && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500 truncate hidden sm:inline">{t.description}</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); deleteWebsiteTag(t.id) }}
+                              disabled={websiteTagsSaving}
+                              className="text-gray-400 hover:text-red-500 transition-colors shrink-0 ml-3"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>{editingTag?.id ? 'Edit Tag' : 'Create Tag'}</CardTitle>
-                <CardDescription>Tags are scoped to this website.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-                  <Input
-                    value={String(editingTag?.name || '')}
-                    onChange={(e) => setEditingTag({ ...(editingTag || {}), name: e.target.value })}
-                    placeholder="e.g. Urgent"
-                    disabled={websiteTagsSaving}
-                  />
-                </div>
+              {/* Create / Edit form (right, narrower) */}
+              <div className="lg:col-span-2">
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {editingTag?.id ? 'Edit Tag' : 'Create Tag'}
+                  </p>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={String(editingTag?.color || '#000000')}
-                      onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
-                      className="w-10 h-10 p-0 border-0 rounded"
-                      disabled={websiteTagsSaving}
-                    />
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Name</label>
                     <Input
-                      value={String(editingTag?.color || '#000000')}
-                      onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
-                      placeholder="#000000"
+                      value={String(editingTag?.name || '')}
+                      onChange={(e) => setEditingTag({ ...(editingTag || {}), name: e.target.value })}
+                      placeholder="e.g. Urgent"
                       disabled={websiteTagsSaving}
+                      className="dark:bg-gray-800 dark:border-gray-700"
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>
-                  <Input
-                    value={String(editingTag?.description || '')}
-                    onChange={(e) => setEditingTag({ ...(editingTag || {}), description: e.target.value })}
-                    placeholder="What is this tag used for?"
-                    disabled={websiteTagsSaving}
-                  />
-                </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={String(editingTag?.color || '#000000')}
+                        onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
+                        className="w-9 h-9 p-0 border-0 rounded cursor-pointer"
+                        disabled={websiteTagsSaving}
+                      />
+                      <Input
+                        value={String(editingTag?.color || '#000000')}
+                        onChange={(e) => setEditingTag({ ...(editingTag || {}), color: e.target.value })}
+                        placeholder="#000000"
+                        disabled={websiteTagsSaving}
+                        className="flex-1 dark:bg-gray-800 dark:border-gray-700"
+                      />
+                    </div>
+                  </div>
 
-                <div className="flex items-center justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setEditingTag(null)}
-                    disabled={websiteTagsSaving}
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={saveWebsiteTag}
-                    disabled={websiteTagsSaving}
-                  >
-                    {websiteTagsSaving ? 'Saving…' : (editingTag?.id ? 'Save' : 'Create')}
-                  </Button>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Description</label>
+                    <Input
+                      value={String(editingTag?.description || '')}
+                      onChange={(e) => setEditingTag({ ...(editingTag || {}), description: e.target.value })}
+                      placeholder="What is this tag used for?"
+                      disabled={websiteTagsSaving}
+                      className="dark:bg-gray-800 dark:border-gray-700"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setEditingTag(null)} disabled={websiteTagsSaving}>
+                      Clear
+                    </Button>
+                    <Button type="button" size="sm" onClick={saveWebsiteTag} disabled={websiteTagsSaving}>
+                      {websiteTagsSaving ? 'Saving…' : (editingTag?.id ? 'Save' : 'Create')}
+                    </Button>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Automations Tab */}
         {!isNew && activeTab === 'automations' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bot className="w-5 h-5" />
-                Automations
-              </CardTitle>
-              <CardDescription>Configure per-website auto messages and triggers</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={automationsSubTab === 'templates' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setAutomationsSubTab('templates')}
-                  >
-                    Templates
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={automationsSubTab === 'auto_messages' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setAutomationsSubTab('auto_messages')}
-                  >
-                    Auto messages
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={automationsSubTab === 'chatbots' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setAutomationsSubTab('chatbots')}
-                  >
-                    Chatbots
-                  </Button>
-                </div>
-
-                <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
-                  <Plus className="w-4 h-4" />
-                  Build from scratch
-                </Button>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Automations</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure per-website auto messages and triggers.</p>
               </div>
+              <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
+                <Plus className="w-4 h-4" />
+                Build from scratch
+              </Button>
+            </div>
 
-              {automationsError && (
-                <div className="p-3 rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">
-                  {automationsError}
-                </div>
-              )}
+            {/* Sub-tab pills */}
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+              {(['templates', 'auto_messages', 'chatbots'] as const).map((tab) => {
+                const labels = { templates: 'Templates', auto_messages: 'Auto Messages', chatbots: 'Chatbots' }
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setAutomationsSubTab(tab)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${automationsSubTab === tab
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    {labels[tab]}
+                  </button>
+                )
+              })}
+            </div>
+
+            {automationsError && (
+              <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                {automationsError}
+              </div>
+            )}
 
               {automationsLoading ? (
                 <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
@@ -2155,8 +2074,7 @@ export default function WebsiteDetail() {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+          </div>
         )}
 
         {builderOpen && (
@@ -2541,80 +2459,66 @@ export default function WebsiteDetail() {
 
         {/* Basic Settings Tab */}
         {(isNew || activeTab === 'settings') && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Globe className="w-5 h-5" />
-                Basic Information
-              </CardTitle>
-              <CardDescription>Website identification and domain</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">General</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Website identification and domain settings.</p>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Website Name *
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Website Name *</label>
                 <Input
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="My Website"
                   required
+                  className="dark:bg-gray-800 dark:border-gray-700"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  A friendly name to identify this website
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">A friendly name to identify this website</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Domain *
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Domain *</label>
                 <Input
                   value={formData.domain}
                   onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
                   placeholder="example.com"
                   required
+                  className="dark:bg-gray-800 dark:border-gray-700"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  The domain where the chat widget will be embedded
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">The domain where the chat widget will be embedded</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
-        {/* Office Hours (Smartsupp-like) */}
+        {/* Office Hours */}
         {(isNew || activeTab === 'settings') && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Office Hours</CardTitle>
-              <CardDescription>
-                When enabled, the widget is forced offline outside these hours.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Office Hours</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Agent online status is ignored outside hours</div>
-                </div>
-                <Switch
-                  checked={!!(formData.widget_config as any).office_hours?.enabled}
-                  onCheckedChange={(checked) => {
-                    const current = coerceOfficeHours((formData.widget_config as any).office_hours)
-                    setFormData({
-                      ...formData,
-                      widget_config: {
-                        ...formData.widget_config,
-                        office_hours: { ...current, enabled: checked },
-                      },
-                    })
-                  }}
-                />
-              </div>
-
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timezone</label>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Office Hours</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">When enabled, the widget is forced offline outside these hours.</p>
+              </div>
+              <Switch
+                checked={!!(formData.widget_config as any).office_hours?.enabled}
+                onCheckedChange={(checked) => {
+                  const current = coerceOfficeHours((formData.widget_config as any).office_hours)
+                  setFormData({
+                    ...formData,
+                    widget_config: {
+                      ...formData.widget_config,
+                      office_hours: { ...current, enabled: checked },
+                    },
+                  })
+                }}
+              />
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Timezone</label>
                 <div className="flex items-center gap-2">
                   <Input
                     value={String((formData.widget_config as any).office_hours?.timezone || '')}
@@ -2629,10 +2533,12 @@ export default function WebsiteDetail() {
                       })
                     }}
                     placeholder="e.g. Europe/London"
+                    className="dark:bg-gray-800 dark:border-gray-700"
                   />
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={() => {
                       const current = coerceOfficeHours((formData.widget_config as any).office_hours)
                       setFormData({
@@ -2647,12 +2553,10 @@ export default function WebsiteDetail() {
                     Use browser
                   </Button>
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Uses IANA timezone names (must match your account timezone).
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Uses IANA timezone names (must match your account timezone).</p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {(
                   [
                     { key: 'mon', label: 'Monday' },
@@ -2670,147 +2574,146 @@ export default function WebsiteDetail() {
                   const disabled = !current.enabled
 
                   return (
-                    <div key={day.key} className="p-3 border border-gray-200 dark:border-gray-800 rounded-lg">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</div>
-                        <Switch
-                          checked={dayEnabled}
-                          disabled={disabled}
-                          onCheckedChange={(checked) => {
-                            const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                            const nextSchedule = { ...next.schedule }
-                            nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
-                            setFormData({
-                              ...formData,
-                              widget_config: {
-                                ...formData.widget_config,
-                                office_hours: { ...next, schedule: nextSchedule },
-                              },
-                            })
-                          }}
-                        />
+                    <div key={day.key} className="flex items-start gap-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                      <div className="w-24 shrink-0 pt-1">
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</span>
                       </div>
-
-                      {dayEnabled ? (
-                        <div className="mt-3 space-y-2">
-                          {intervals.map((interval, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <input
-                                type="time"
-                                value={interval.start}
-                                disabled={disabled}
-                                onChange={(e) => {
-                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                  const nextSchedule = { ...next.schedule }
-                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                  nextIntervals[idx] = { ...nextIntervals[idx], start: e.target.value }
-                                  nextSchedule[day.key] = nextIntervals
-                                  setFormData({
-                                    ...formData,
-                                    widget_config: {
-                                      ...formData.widget_config,
-                                      office_hours: { ...next, schedule: nextSchedule },
-                                    },
-                                  })
-                                }}
-                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                              />
-                              <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
-                              <input
-                                type="time"
-                                value={interval.end}
-                                disabled={disabled}
-                                onChange={(e) => {
-                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                  const nextSchedule = { ...next.schedule }
-                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                  nextIntervals[idx] = { ...nextIntervals[idx], end: e.target.value }
-                                  nextSchedule[day.key] = nextIntervals
-                                  setFormData({
-                                    ...formData,
-                                    widget_config: {
-                                      ...formData.widget_config,
-                                      office_hours: { ...next, schedule: nextSchedule },
-                                    },
-                                  })
-                                }}
-                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                disabled={disabled}
-                                onClick={() => {
-                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                  const nextSchedule = { ...next.schedule }
-                                  const nextIntervals = [...(nextSchedule[day.key] || [])]
-                                  nextIntervals.splice(idx, 1)
-                                  nextSchedule[day.key] = nextIntervals
-                                  setFormData({
-                                    ...formData,
-                                    widget_config: {
-                                      ...formData.widget_config,
-                                      office_hours: { ...next, schedule: nextSchedule },
-                                    },
-                                  })
-                                }}
-                                className="px-2"
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          ))}
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={disabled}
-                            onClick={() => {
-                              const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                              const nextSchedule = { ...next.schedule }
-                              const nextIntervals = [...(nextSchedule[day.key] || [])]
-                              nextIntervals.push({ start: '08:00', end: '17:00' })
-                              nextSchedule[day.key] = nextIntervals
-                              setFormData({
-                                ...formData,
-                                widget_config: {
-                                  ...formData.widget_config,
-                                  office_hours: { ...next, schedule: nextSchedule },
-                                },
-                              })
-                            }}
-                            className="gap-2"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Add interval
-                          </Button>
-                        </div>
-                      ) : null}
+                      <Switch
+                        checked={dayEnabled}
+                        disabled={disabled}
+                        onCheckedChange={(checked) => {
+                          const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                          const nextSchedule = { ...next.schedule }
+                          nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
+                          setFormData({
+                            ...formData,
+                            widget_config: {
+                              ...formData.widget_config,
+                              office_hours: { ...next, schedule: nextSchedule },
+                            },
+                          })
+                        }}
+                      />
+                      <div className="flex-1">
+                        {dayEnabled ? (
+                          <div className="space-y-2">
+                            {intervals.map((interval, idx) => (
+                              <div key={idx} className="flex items-center gap-2">
+                                <input
+                                  type="time"
+                                  value={interval.start}
+                                  disabled={disabled}
+                                  onChange={(e) => {
+                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                    const nextSchedule = { ...next.schedule }
+                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                    nextIntervals[idx] = { ...nextIntervals[idx], start: e.target.value }
+                                    nextSchedule[day.key] = nextIntervals
+                                    setFormData({
+                                      ...formData,
+                                      widget_config: {
+                                        ...formData.widget_config,
+                                        office_hours: { ...next, schedule: nextSchedule },
+                                      },
+                                    })
+                                  }}
+                                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                />
+                                <span className="text-xs text-gray-400">–</span>
+                                <input
+                                  type="time"
+                                  value={interval.end}
+                                  disabled={disabled}
+                                  onChange={(e) => {
+                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                    const nextSchedule = { ...next.schedule }
+                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                    nextIntervals[idx] = { ...nextIntervals[idx], end: e.target.value }
+                                    nextSchedule[day.key] = nextIntervals
+                                    setFormData({
+                                      ...formData,
+                                      widget_config: {
+                                        ...formData.widget_config,
+                                        office_hours: { ...next, schedule: nextSchedule },
+                                      },
+                                    })
+                                  }}
+                                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => {
+                                    const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                    const nextSchedule = { ...next.schedule }
+                                    const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                    nextIntervals.splice(idx, 1)
+                                    nextSchedule[day.key] = nextIntervals
+                                    setFormData({
+                                      ...formData,
+                                      widget_config: {
+                                        ...formData.widget_config,
+                                        office_hours: { ...next, schedule: nextSchedule },
+                                      },
+                                    })
+                                  }}
+                                  className="text-gray-400 hover:text-red-500 transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => {
+                                const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                const nextSchedule = { ...next.schedule }
+                                const nextIntervals = [...(nextSchedule[day.key] || [])]
+                                nextIntervals.push({ start: '08:00', end: '17:00' })
+                                nextSchedule[day.key] = nextIntervals
+                                setFormData({
+                                  ...formData,
+                                  widget_config: {
+                                    ...formData.widget_config,
+                                    office_hours: { ...next, schedule: nextSchedule },
+                                  },
+                                })
+                              }}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Add interval
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 pt-1 inline-block">Closed</span>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
         {/* Widget Configuration Tab */}
         {!isNew && activeTab === 'widget' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Palette className="w-5 h-5" />
-                Widget Customization
-              </CardTitle>
-              <CardDescription>Customize the chat widget appearance and behavior</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Header Icon (Optional)
-                </label>
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Widget Customization</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Customize the chat widget appearance and behavior.</p>
+            </div>
+
+            {/* Icon & Layout */}
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Icon &amp; Layout</p>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Icon</label>
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center shrink-0">
                     {formData.widget_config.header_icon_url ? (
                       <img
                         src={`${API_BASE}${formData.widget_config.header_icon_url}`}
@@ -2818,10 +2721,9 @@ export default function WebsiteDetail() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">None</span>
+                      <span className="text-[10px] text-gray-400">None</span>
                     )}
                   </div>
-
                   {isAdmin(user) && (
                     <input
                       type="file"
@@ -2836,40 +2738,33 @@ export default function WebsiteDetail() {
                     />
                   )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Shown as the single header icon until an agent joins (then agent avatar replaces it).
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Shown as the header icon until an agent joins.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Theme
-                  </label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Theme</label>
                   <select
                     value={formData.widget_config.theme}
                     onChange={(e) => setFormData({
                       ...formData,
                       widget_config: { ...formData.widget_config, theme: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   >
                     <option value="dark">Dark</option>
                     <option value="light">Light</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Position
-                  </label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Position</label>
                   <select
                     value={formData.widget_config.position}
                     onChange={(e) => setFormData({
                       ...formData,
                       widget_config: { ...formData.widget_config, position: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                   >
                     <option value="bottom-right">Bottom Right</option>
                     <option value="bottom-left">Bottom Left</option>
@@ -2878,11 +2773,14 @@ export default function WebsiteDetail() {
                   </select>
                 </div>
               </div>
+            </div>
+
+            {/* Text & Messaging */}
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Text &amp; Messaging</p>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Header Title
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Header Title</label>
                 <Input
                   value={formData.widget_config.header_title}
                   onChange={(e) => setFormData({
@@ -2890,16 +2788,13 @@ export default function WebsiteDetail() {
                     widget_config: { ...formData.widget_config, header_title: e.target.value }
                   })}
                   placeholder="How can we help?"
+                  className="dark:bg-gray-800 dark:border-gray-700"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Text shown in the widget header
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown in the widget header</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Online Status Text
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Online Status Text</label>
                 <Input
                   value={formData.widget_config.online_status_text}
                   onChange={(e) => setFormData({
@@ -2907,22 +2802,15 @@ export default function WebsiteDetail() {
                     widget_config: { ...formData.widget_config, online_status_text: e.target.value }
                   })}
                   placeholder="We reply immediately"
+                  className="dark:bg-gray-800 dark:border-gray-700"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Status message shown below header
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Status message shown below header</p>
               </div>
 
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Welcome automation is managed in the Automations tab.
-                </p>
-              </div>
+              <p className="text-xs text-gray-400">Welcome automation is managed in the Automations tab.</p>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Bubble Text
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Bubble Text</label>
                 <Input
                   value={formData.widget_config.bubble_text}
                   onChange={(e) => setFormData({
@@ -2930,29 +2818,41 @@ export default function WebsiteDetail() {
                     widget_config: { ...formData.widget_config, bubble_text: e.target.value }
                   })}
                   placeholder="Chat"
+                  className="dark:bg-gray-800 dark:border-gray-700"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Text shown on the minimized chat bubble
-                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Text shown on the minimized chat bubble</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Main Color
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Branding Text</label>
+                <Input
+                  value={formData.widget_config.branding_text || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
+                  })}
+                  placeholder="Powered by Your Company"
+                  className="dark:bg-gray-800 dark:border-gray-700"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Optional branding text shown at bottom of widget</p>
+              </div>
+            </div>
 
-                {/* Color mode toggle */}
-                <div className="flex items-center gap-1 mb-3 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+            {/* Colors */}
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Main Color</p>
+                <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
                   <button
                     type="button"
                     onClick={() => setFormData({
                       ...formData,
                       widget_config: { ...formData.widget_config, color_mode: 'gradient' }
                     })}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'gradient'
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'gradient'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                      }`}
+                    }`}
                   >
                     Gradient
                   </button>
@@ -2962,92 +2862,94 @@ export default function WebsiteDetail() {
                       ...formData,
                       widget_config: { ...formData.widget_config, color_mode: 'solid' }
                     })}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'solid'
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${formData.widget_config.color_mode === 'solid'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                      }`}
+                    }`}
                   >
                     Solid
                   </button>
                 </div>
+              </div>
 
-                {/* Preset color swatches */}
-                {(() => {
-                  const presets = formData.widget_config.color_mode === 'gradient'
-                    ? [
-                      { start: '#3b82f6', end: '#2563eb' },  // Blue
-                      { start: '#ef4444', end: '#dc2626' },  // Red
-                      { start: '#f97316', end: '#ea580c' },  // Orange
-                      { start: '#22c55e', end: '#16a34a' },  // Green
-                      { start: '#0ea5e9', end: '#0284c7' },  // Sky
-                      { start: '#8b5cf6', end: '#7c3aed' },  // Purple
-                      { start: '#ec4899', end: '#db2777' },  // Pink
-                      { start: '#14b8a6', end: '#0d9488' },  // Teal
-                      { start: '#6366f1', end: '#4f46e5' },  // Indigo
-                      { start: '#111827', end: '#374151' },  // Dark
-                    ]
-                    : [
-                      { color: '#3b82f6' },  // Blue
-                      { color: '#ef4444' },  // Red
-                      { color: '#f97316' },  // Orange
-                      { color: '#22c55e' },  // Green
-                      { color: '#0ea5e9' },  // Sky
-                      { color: '#8b5cf6' },  // Purple
-                      { color: '#ec4899' },  // Pink
-                      { color: '#14b8a6' },  // Teal
-                      { color: '#6366f1' },  // Indigo
-                      { color: '#111827' },  // Dark
-                    ];
-                  return (
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {formData.widget_config.color_mode === 'gradient'
-                        ? (presets as { start: string; end: string }[]).map((p, i) => {
-                          const isSelected = formData.widget_config.gradient_start === p.start && formData.widget_config.gradient_end === p.end;
-                          return (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => setFormData({
-                                ...formData,
-                                widget_config: {
-                                  ...formData.widget_config,
-                                  gradient_start: p.start,
-                                  gradient_end: p.end,
-                                  primary_color: p.start,
-                                }
-                              })}
-                              className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
-                              style={{ background: `linear-gradient(135deg, ${p.start} 0%, ${p.end} 100%)` }}
-                              title={`${p.start} → ${p.end}`}
-                            />
-                          );
-                        })
-                        : (presets as { color: string }[]).map((p, i) => {
-                          const isSelected = formData.widget_config.primary_color === p.color;
-                          return (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => setFormData({
-                                ...formData,
-                                widget_config: {
-                                  ...formData.widget_config,
-                                  primary_color: p.color,
-                                }
-                              })}
-                              className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
-                              style={{ background: p.color }}
-                              title={p.color}
-                            />
-                          );
-                        })
-                      }
-                    </div>
-                  );
-                })()}
+              {/* Preset swatches */}
+              {(() => {
+                const presets = formData.widget_config.color_mode === 'gradient'
+                  ? [
+                    { start: '#3b82f6', end: '#2563eb' },
+                    { start: '#ef4444', end: '#dc2626' },
+                    { start: '#f97316', end: '#ea580c' },
+                    { start: '#22c55e', end: '#16a34a' },
+                    { start: '#0ea5e9', end: '#0284c7' },
+                    { start: '#8b5cf6', end: '#7c3aed' },
+                    { start: '#ec4899', end: '#db2777' },
+                    { start: '#14b8a6', end: '#0d9488' },
+                    { start: '#6366f1', end: '#4f46e5' },
+                    { start: '#111827', end: '#374151' },
+                  ]
+                  : [
+                    { color: '#3b82f6' },
+                    { color: '#ef4444' },
+                    { color: '#f97316' },
+                    { color: '#22c55e' },
+                    { color: '#0ea5e9' },
+                    { color: '#8b5cf6' },
+                    { color: '#ec4899' },
+                    { color: '#14b8a6' },
+                    { color: '#6366f1' },
+                    { color: '#111827' },
+                  ];
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {formData.widget_config.color_mode === 'gradient'
+                      ? (presets as { start: string; end: string }[]).map((p, i) => {
+                        const isSelected = formData.widget_config.gradient_start === p.start && formData.widget_config.gradient_end === p.end;
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFormData({
+                              ...formData,
+                              widget_config: {
+                                ...formData.widget_config,
+                                gradient_start: p.start,
+                                gradient_end: p.end,
+                                primary_color: p.start,
+                              }
+                            })}
+                            className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                            style={{ background: `linear-gradient(135deg, ${p.start} 0%, ${p.end} 100%)` }}
+                            title={`${p.start} → ${p.end}`}
+                          />
+                        );
+                      })
+                      : (presets as { color: string }[]).map((p, i) => {
+                        const isSelected = formData.widget_config.primary_color === p.color;
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFormData({
+                              ...formData,
+                              widget_config: {
+                                ...formData.widget_config,
+                                primary_color: p.color,
+                              }
+                            })}
+                            className={`w-7 h-7 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-110 ring-2 ring-blue-200 dark:ring-blue-800' : 'border-gray-200 dark:border-gray-600 hover:scale-105'}`}
+                            style={{ background: p.color }}
+                            title={p.color}
+                          />
+                        );
+                      })
+                    }
+                  </div>
+                );
+              })()}
 
-                {/* Custom color inputs */}
-                {formData.widget_config.color_mode === 'gradient' ? (
+              {/* Custom color inputs */}
+              {formData.widget_config.color_mode === 'gradient' ? (
+                <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Color</label>
@@ -3059,7 +2961,7 @@ export default function WebsiteDetail() {
                             ...formData,
                             widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
                           })}
-                          className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                          className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
                         />
                         <Input
                           value={formData.widget_config.gradient_start}
@@ -3068,7 +2970,7 @@ export default function WebsiteDetail() {
                             widget_config: { ...formData.widget_config, gradient_start: e.target.value, primary_color: e.target.value }
                           })}
                           placeholder="#3b82f6"
-                          className="flex-1 text-xs"
+                          className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
                         />
                       </div>
                     </div>
@@ -3082,7 +2984,7 @@ export default function WebsiteDetail() {
                             ...formData,
                             widget_config: { ...formData.widget_config, gradient_end: e.target.value }
                           })}
-                          className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                          className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
                         />
                         <Input
                           value={formData.widget_config.gradient_end}
@@ -3091,131 +2993,98 @@ export default function WebsiteDetail() {
                             widget_config: { ...formData.widget_config, gradient_end: e.target.value }
                           })}
                           placeholder="#2563eb"
-                          className="flex-1 text-xs"
+                          className="flex-1 text-xs dark:bg-gray-800 dark:border-gray-700"
                         />
                       </div>
                     </div>
-                    <div className="col-span-2">
-                      <div className="h-8 rounded-lg w-full" style={{ background: `linear-gradient(135deg, ${formData.widget_config.gradient_start} 0%, ${formData.widget_config.gradient_end} 100%)` }} />
-                    </div>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={formData.widget_config.primary_color}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        widget_config: { ...formData.widget_config, primary_color: e.target.value }
-                      })}
-                      className="w-9 h-9 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                    />
-                    <Input
-                      value={formData.widget_config.primary_color}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        widget_config: { ...formData.widget_config, primary_color: e.target.value }
-                      })}
-                      placeholder="#3b82f6"
-                      className="flex-1"
-                    />
-                  </div>
-                )}
+                  <div className="h-6 rounded-lg w-full" style={{ background: `linear-gradient(135deg, ${formData.widget_config.gradient_start} 0%, ${formData.widget_config.gradient_end} 100%)` }} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={formData.widget_config.primary_color}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                    })}
+                    className="w-8 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
+                  />
+                  <Input
+                    value={formData.widget_config.primary_color}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      widget_config: { ...formData.widget_config, primary_color: e.target.value }
+                    })}
+                    placeholder="#3b82f6"
+                    className="flex-1 dark:bg-gray-800 dark:border-gray-700"
+                  />
+                </div>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400">Main color for header, buttons, message bubbles, and chat bubble</p>
+            </div>
 
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                  Main color for header, buttons, message bubbles, and chat bubble
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Branding Text (Optional)
-                </label>
-                <Input
-                  value={formData.widget_config.branding_text || ''}
-                  onChange={(e) => setFormData({
+            {/* Features */}
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 space-y-3">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Features</p>
+              <div className="flex items-center justify-between">
+                <label htmlFor="show_emoji_picker" className="text-sm text-gray-700 dark:text-gray-300">Emoji Picker</label>
+                <Switch
+                  id="show_emoji_picker"
+                  checked={formData.widget_config.show_emoji_picker}
+                  onCheckedChange={(checked) => setFormData({
                     ...formData,
-                    widget_config: { ...formData.widget_config, branding_text: e.target.value || null }
+                    widget_config: { ...formData.widget_config, show_emoji_picker: checked }
                   })}
-                  placeholder="Powered by Your Company"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Optional branding text shown at bottom of widget
-                </p>
               </div>
-
-              <div className="space-y-3 pt-2 border-t dark:border-gray-700">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="show_emoji_picker"
-                    checked={formData.widget_config.show_emoji_picker}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, show_emoji_picker: e.target.checked }
-                    })}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="show_emoji_picker" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Enable Emoji Picker
-                  </label>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label htmlFor="show_attachments" className="text-sm text-gray-700 dark:text-gray-300">File Attachments</label>
+                  <p className="text-xs text-gray-400">Coming Soon</p>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="show_attachments"
-                    checked={formData.widget_config.show_attachments}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      widget_config: { ...formData.widget_config, show_attachments: e.target.checked }
-                    })}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="show_attachments" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Enable File Attachments (Coming Soon)
-                  </label>
-                </div>
+                <Switch
+                  id="show_attachments"
+                  checked={formData.widget_config.show_attachments}
+                  onCheckedChange={(checked) => setFormData({
+                    ...formData,
+                    widget_config: { ...formData.widget_config, show_attachments: checked }
+                  })}
+                />
               </div>
-            </CardContent>
-          </Card>
-
+            </div>
+          </div>
         )}
 
         {/* Danger Zone Tab */}
         {!isNew && activeTab === 'danger' && (
-          <Card className="border-red-200 dark:border-red-800">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                <AlertTriangle className="w-5 h-5" />
-                Danger Zone
-              </CardTitle>
-              <CardDescription>
-                Irreversible actions for this website
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    This will permanently remove the website, all its conversations, teams, tags, and automations.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  onClick={handleDelete}
-                  disabled={saving}
-                  className="gap-1 shrink-0 ml-4"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Delete Website
-                </Button>
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-red-600 dark:text-red-400">Danger Zone</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Irreversible actions for this website.</p>
+            </div>
+
+            <div className="flex items-center justify-between p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Permanently removes the website, conversations, teams, tags, and automations.
+                </p>
               </div>
-            </CardContent>
-          </Card>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={saving}
+                className="gap-1 shrink-0 ml-4"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete
+              </Button>
+            </div>
+          </div>
         )}
 
         {/* Save / Cancel buttons (shown on tabs that have form data) */}
@@ -3236,6 +3105,8 @@ export default function WebsiteDetail() {
           </div>
         )}
       </form>
+      </div>
+      </div>
     </div>
   )
 }
