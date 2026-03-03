@@ -1,5 +1,6 @@
 import enum
 from sqlalchemy import Column, Integer, ForeignKey, Text, String, Enum as SQLEnum
+from sqlalchemy.orm import relationship
 
 from app.models.base import TimestampMixin
 from app.core.database import Base
@@ -16,7 +17,7 @@ class Message(Base, TimestampMixin):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True)
-    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     sender_type = Column(
         SQLEnum(MessageSenderType, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
@@ -26,3 +27,5 @@ class Message(Base, TimestampMixin):
     # Additional subtype for SYSTEM messages (e.g. automation_welcome, agent_join)
     event_type = Column(String(50), nullable=True)
     content = Column(Text, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="messages")

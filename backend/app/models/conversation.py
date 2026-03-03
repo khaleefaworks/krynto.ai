@@ -16,7 +16,7 @@ class Conversation(Base, TimestampMixin):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True)
-    website_id = Column(Integer, ForeignKey("websites.id"), nullable=False)
+    website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
     session_id = Column(String(255), nullable=False)
     status = Column(
         SQLEnum(ConversationStatus, values_callable=lambda x: [e.value for e in x]),
@@ -51,5 +51,9 @@ class Conversation(Base, TimestampMixin):
 
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)
     tags = relationship("ConversationTag", back_populates="conversation", cascade="all, delete-orphan")
+    notes = relationship("ConversationNote", cascade="all, delete-orphan", passive_deletes=True)
+    reads = relationship("ConversationRead", cascade="all, delete-orphan", passive_deletes=True)
+    page_views = relationship("ConversationPageView", cascade="all, delete-orphan", passive_deletes=True)
     assigned_agent = relationship("User", foreign_keys=[assigned_agent_id])

@@ -1,5 +1,5 @@
 import { useAppStore } from "@/store/appStore"
-import { isAdmin } from "@/lib/roles"
+import { isAdmin, isAdministrator } from "@/lib/roles"
 import { Link, useLocation, useSearchParams, Outlet } from "react-router-dom"
 import {
   Globe,
@@ -123,7 +123,7 @@ export default function Settings() {
             </nav>
 
             {/* Danger zone at bottom */}
-            {isAdmin(user) && (
+            {isAdministrator(user) && (
               <div className="p-3 border-t dark:border-gray-700">
                 <Link
                   to={`/dashboard/settings/websites/${websiteId}?tab=danger`}

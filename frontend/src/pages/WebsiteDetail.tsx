@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
-import { isAdmin } from '@/lib/roles'
-import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink } from 'lucide-react'
+import { isAdmin, isAdministrator } from '@/lib/roles'
+import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink, AlertTriangle } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import WebsiteShortcutsTab from './WebsiteShortcutsTab'
@@ -155,6 +155,19 @@ export default function WebsiteDetail() {
   const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
+
+  // Deletion modal state
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deletionImpact, setDeletionImpact] = useState<{
+    conversations: number
+    messages: number
+    automations: number
+    teams: number
+    tags: number
+    shortcuts: number
+  } | null>(null)
+  const [deletionImpactLoading, setDeletionImpactLoading] = useState(false)
 
   // Form data
   const [formData, setFormData] = useState({
@@ -767,19 +780,38 @@ export default function WebsiteDetail() {
   }
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this website? This action cannot be undone.')) {
-      return
-    }
-
     try {
       setSaving(true)
       await apiRequest(`/websites/${id}`, {
         method: 'DELETE',
       })
+      setDeleteModalOpen(false)
       navigate('/dashboard/settings/websites')
     } catch (err: any) {
       setError(err.message || 'Failed to delete website')
       setSaving(false)
+    }
+  }
+
+  const openDeleteModal = async () => {
+    setDeleteConfirmText('')
+    setDeleteModalOpen(true)
+    setDeletionImpact(null)
+    setDeletionImpactLoading(true)
+    try {
+      const data = await apiRequest<{
+        conversations: number
+        messages: number
+        automations: number
+        teams: number
+        tags: number
+        shortcuts: number
+      }>(`/websites/${id}/deletion-impact`)
+      setDeletionImpact(data)
+    } catch {
+      // Non-fatal — modal still works without counts
+    } finally {
+      setDeletionImpactLoading(false)
     }
   }
 
@@ -1911,7 +1943,7 @@ export default function WebsiteDetail() {
               )}
 
               {/* Danger Zone Tab */}
-              {!isNew && activeTab === 'danger' && (
+              {!isNew && activeTab === 'danger' && isAdministrator(user) && (
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-base font-semibold text-red-600 dark:text-red-400">Danger Zone</h2>
@@ -1922,14 +1954,14 @@ export default function WebsiteDetail() {
                     <div>
                       <p className="text-sm font-medium text-gray-900 dark:text-white">Delete this website</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Permanently removes the website, conversations, teams, tags, and automations.
+                        Permanently removes the website and all associated data.
                       </p>
                     </div>
                     <Button
                       type="button"
                       variant="destructive"
                       size="sm"
-                      onClick={handleDelete}
+                      onClick={openDeleteModal}
                       disabled={saving}
                       className="gap-1 shrink-0 ml-4"
                     >
@@ -1937,6 +1969,102 @@ export default function WebsiteDetail() {
                       Delete
                     </Button>
                   </div>
+
+                  {/* Delete Confirmation Modal */}
+                  {deleteModalOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 !mt-0"
+                        onClick={() => setDeleteModalOpen(false)}
+                      />
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 !mt-0">
+                        <div
+                          className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {/* Modal header */}
+                          <div className="px-6 pt-6 pb-4 flex items-start gap-4">
+                            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                              <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                                Delete &ldquo;{formData.name}&rdquo;?
+                              </h3>
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                This action is permanent and cannot be undone.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Impact counts */}
+                          <div className="px-6 pb-4">
+                            {deletionImpactLoading ? (
+                              <div className="text-sm text-gray-400 dark:text-gray-500 py-3">Loading impact data…</div>
+                            ) : deletionImpact ? (
+                              <div className="rounded-lg border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 p-4">
+                                <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-3 uppercase tracking-wider">The following will be permanently deleted</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                  {[
+                                    { label: 'Conversations', count: deletionImpact.conversations },
+                                    { label: 'Messages', count: deletionImpact.messages },
+                                    { label: 'Automations', count: deletionImpact.automations },
+                                    { label: 'Teams', count: deletionImpact.teams },
+                                    { label: 'Tags', count: deletionImpact.tags },
+                                    { label: 'Shortcuts', count: deletionImpact.shortcuts },
+                                  ].map(({ label, count }) => (
+                                    <div key={label} className="flex items-center justify-between">
+                                      <span className="text-sm text-gray-600 dark:text-gray-400">{label}</span>
+                                      <span className={`text-sm font-semibold ${count > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                                        {count.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {/* Confirm input */}
+                          <div className="px-6 pb-4">
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                              Type <span className="font-semibold text-red-600 dark:text-red-400">{formData.name}</span> to confirm
+                            </label>
+                            <Input
+                              value={deleteConfirmText}
+                              onChange={(e) => setDeleteConfirmText(e.target.value)}
+                              placeholder={formData.name}
+                              className="dark:bg-gray-800 dark:border-gray-700"
+                              autoFocus
+                            />
+                          </div>
+
+                          {/* Modal footer */}
+                          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setDeleteModalOpen(false)}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={deleteConfirmText !== formData.name || saving}
+                              onClick={handleDelete}
+                              className="gap-1"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              {saving ? 'Deleting…' : 'Delete Website'}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

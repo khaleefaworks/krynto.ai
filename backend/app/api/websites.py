@@ -1,10 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy import func
 from app.core.database import get_db
 from app.models.website import Website
 from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.user import User
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.automation import Automation
+from app.models.website_team import WebsiteTeam
+from app.models.tag import Tag
+from app.models.website_message_shortcut import WebsiteMessageShortcut
 from app.api.deps import require_admin, require_administrator, require_authenticated_user
 from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
@@ -167,6 +174,43 @@ def update_website(
     db.commit()
     db.refresh(website)
     return website
+
+
+@router.get("/{website_id}/deletion-impact")
+def get_deletion_impact(
+    website_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_administrator),
+):
+    """
+    Return counts of all records that will be deleted when this website is removed.
+    Requires Administrator (SYSTEM_MANAGER) access.
+    """
+    website = db.query(Website).filter_by(id=website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    conversations_count = db.query(func.count(Conversation.id)).filter_by(website_id=website_id).scalar() or 0
+    messages_count = (
+        db.query(func.count(Message.id))
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Conversation.website_id == website_id)
+        .scalar()
+    ) or 0
+    automations_count = db.query(func.count(Automation.id)).filter_by(website_id=website_id).scalar() or 0
+    teams_count = db.query(func.count(WebsiteTeam.id)).filter_by(website_id=website_id).scalar() or 0
+    tags_count = db.query(func.count(Tag.id)).filter_by(website_id=website_id).scalar() or 0
+    shortcuts_count = db.query(func.count(WebsiteMessageShortcut.id)).filter_by(website_id=website_id).scalar() or 0
+
+    return {
+        "website_name": website.name,
+        "conversations": conversations_count,
+        "messages": messages_count,
+        "automations": automations_count,
+        "teams": teams_count,
+        "tags": tags_count,
+        "shortcuts": shortcuts_count,
+    }
 
 
 @router.delete("/{website_id}")
