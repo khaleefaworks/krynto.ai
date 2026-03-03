@@ -4,6 +4,7 @@ import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, X, Globe, ExternalLink, Search } from 'lucide-react'
+import { API_BASE } from '@/config/endpoints'
 
 interface Website {
   id: number
@@ -12,6 +13,7 @@ interface Website {
   widget_config: {
     primary_color?: string
     position?: string
+    header_icon_url?: string | null
   } | null
   created_at: string
 }
@@ -188,8 +190,16 @@ export default function WebsitesList() {
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
-                          <Globe className="h-3.5 w-3.5 text-white" />
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center overflow-hidden">
+                          {website.widget_config?.header_icon_url ? (
+                            <img
+                              src={`${API_BASE}${website.widget_config.header_icon_url}`}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Globe className="h-3.5 w-3.5 text-white" />
+                          )}
                         </div>
                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{website.name}</span>
                       </div>

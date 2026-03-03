@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.models.website import Website
 from app.core.widget_origin import enforce_widget_domain_or_403
@@ -262,6 +263,7 @@ async def upload_widget_icon(
     public_url = f"/uploads/websites/{website_id}/{unique_filename}"
     existing_config["header_icon_url"] = public_url
     website.widget_config = existing_config
+    flag_modified(website, "widget_config")
     db.commit()
     db.refresh(website)
 
@@ -293,6 +295,7 @@ def update_widget_config(
     # Merge partial updates into the existing widget_config.
     existing.update(config)
     website.widget_config = existing
+    flag_modified(website, "widget_config")
     db.commit()
     db.refresh(website)
     
