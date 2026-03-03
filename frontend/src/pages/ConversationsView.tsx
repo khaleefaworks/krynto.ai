@@ -1764,24 +1764,10 @@ export default function ConversationsView() {
                             </div>
                         </div>
 
-                        {/* Meta row (badges left, actions right — under Resolve) */}
-                        <div className="mt-3 flex items-center justify-between gap-3">
+                        {/* Second row: Tag conversation (left) | Assign team (right) */}
+                        <div className="mt-2 flex items-start justify-between gap-4">
+                            {/* LEFT — Tag conversation + tag badges */}
                             <div className="flex flex-wrap items-center gap-2 min-w-0">
-                                {selectedTeam ? (
-                                    <Badge variant="outline" className="gap-1">
-                                        <span className="truncate max-w-40">{String((selectedTeam as any)?.name || '')}</span>
-                                        <button
-                                            type="button"
-                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                                            onClick={() => handleSetTeam(null)}
-                                            aria-label="Clear team"
-                                            title="Clear"
-                                        >
-                                            ×
-                                        </button>
-                                    </Badge>
-                                ) : null}
-
                                 {conversationTags
                                     .slice()
                                     .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
@@ -1808,9 +1794,104 @@ export default function ConversationsView() {
                                             </button>
                                         </Badge>
                                     ))}
+
+                                <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
+                                    <PopoverTrigger asChild>
+                                        {conversationTags.length === 0 ? (
+                                            <Button
+                                                type="button"
+                                                variant="link"
+                                                className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                            >
+                                                <TagIcon className="h-4 w-4" />
+                                                Tag conversation
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-7 w-7 rounded-full"
+                                                aria-label="Add tag"
+                                                title="Add tag"
+                                            >
+                                                <Plus className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                    </PopoverTrigger>
+
+                                    <PopoverContent
+                                        align="start"
+                                        className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
+                                    >
+                                        <div className="space-y-2">
+                                            <Input
+                                                value={tagPickerQuery}
+                                                onChange={(e) => setTagPickerQuery(e.target.value)}
+                                                placeholder="Search tags…"
+                                                className="h-9"
+                                                autoFocus
+                                            />
+
+                                            <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                                {filteredUnassignedTags.length === 0 ? (
+                                                    <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching tags</div>
+                                                ) : (
+                                                    <div className="p-1">
+                                                        {filteredUnassignedTags.map((t: any) => (
+                                                            <button
+                                                                key={t.id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    handleAddTag(Number(t.id))
+                                                                    setTagPickerOpen(false)
+                                                                    setTagPickerQuery('')
+                                                                }}
+                                                                className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                            >
+                                                                <span className="truncate">{t.name}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {isAdmin(user) ? (
+                                                <div className="pt-1 text-right">
+                                                    <Link
+                                                        to="/dashboard/settings/tags"
+                                                        className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                        onClick={() => {
+                                                            setTagPickerOpen(false)
+                                                            setTagPickerQuery('')
+                                                        }}
+                                                    >
+                                                        Manage tags
+                                                    </Link>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
                             </div>
 
-                            <div className="flex items-center gap-4 flex-shrink-0">
+                            {/* RIGHT — Assign team + team badge */}
+                            <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
+                                {selectedTeam ? (
+                                    <Badge variant="outline" className="gap-1">
+                                        <span className="truncate max-w-40">{String((selectedTeam as any)?.name || '')}</span>
+                                        <button
+                                            type="button"
+                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                            onClick={() => handleSetTeam(null)}
+                                            aria-label="Clear team"
+                                            title="Clear"
+                                        >
+                                            ×
+                                        </button>
+                                    </Badge>
+                                ) : null}
+
                                 <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
                                     <PopoverTrigger asChild>
                                         {!selectedTeam ? (
@@ -1873,85 +1954,6 @@ export default function ConversationsView() {
                                                     </div>
                                                 )}
                                             </div>
-                                        </div>
-                                    </PopoverContent>
-                                </Popover>
-
-                                <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
-                                    <PopoverTrigger asChild>
-                                        {conversationTags.length === 0 ? (
-                                            <Button
-                                                type="button"
-                                                variant="link"
-                                                className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                                            >
-                                                <TagIcon className="h-4 w-4" />
-                                                Tag conversation
-                                            </Button>
-                                        ) : (
-                                            <Button
-                                                type="button"
-                                                size="icon"
-                                                variant="outline"
-                                                className="h-7 w-7 rounded-full"
-                                                aria-label="Add tag"
-                                                title="Add tag"
-                                            >
-                                                <Plus className="h-4 w-4" />
-                                            </Button>
-                                        )}
-                                    </PopoverTrigger>
-
-                                    <PopoverContent
-                                        align="end"
-                                        className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
-                                    >
-                                        <div className="space-y-2">
-                                            <Input
-                                                value={tagPickerQuery}
-                                                onChange={(e) => setTagPickerQuery(e.target.value)}
-                                                placeholder="Search tags…"
-                                                className="h-9"
-                                                autoFocus
-                                            />
-
-                                            <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
-                                                {filteredUnassignedTags.length === 0 ? (
-                                                    <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching tags</div>
-                                                ) : (
-                                                    <div className="p-1">
-                                                        {filteredUnassignedTags.map((t: any) => (
-                                                            <button
-                                                                key={t.id}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    handleAddTag(Number(t.id))
-                                                                    setTagPickerOpen(false)
-                                                                    setTagPickerQuery('')
-                                                                }}
-                                                                className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                            >
-                                                                <span className="truncate">{t.name}</span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {isAdmin(user) ? (
-                                                <div className="pt-1 text-right">
-                                                    <Link
-                                                        to="/dashboard/settings/tags"
-                                                        className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
-                                                        onClick={() => {
-                                                            setTagPickerOpen(false)
-                                                            setTagPickerQuery('')
-                                                        }}
-                                                    >
-                                                        Manage tags
-                                                    </Link>
-                                                </div>
-                                            ) : null}
                                         </div>
                                     </PopoverContent>
                                 </Popover>
