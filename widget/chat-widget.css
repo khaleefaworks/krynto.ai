@@ -717,6 +717,55 @@
   animation: none;
 }
 
+/* --- Bot Prompt Buttons --- */
+.chatassist-prompt-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+.chatassist-prompt-btn {
+  display: inline-block;
+  padding: 9px 16px;
+  border: 1.5px solid #3b82f6;
+  border-radius: 20px;
+  background: #fff;
+  color: #3b82f6;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.chatassist-prompt-btn:hover:not(:disabled) {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.chatassist-prompt-btn:active:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.chatassist-prompt-btn-selected {
+  background: #3b82f6 !important;
+  color: #fff !important;
+  border-color: #3b82f6 !important;
+}
+
+.chatassist-prompt-btn-disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* --- Date separator --- */
 .chatassist-date-separator {
   display: flex;

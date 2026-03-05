@@ -140,6 +140,26 @@
 
   // --- UI Helpers ---
 
+  let _widgetStateRestored = false;
+
+  function _restoreWidgetState() {
+    if (_widgetStateRestored) return;
+    _widgetStateRestored = true;
+    try {
+      const saved = localStorage.getItem('ai_chatassist_widget_open_' + CONFIG.websiteId);
+      if (saved === '1') {
+        const bubble = document.getElementById('chatassist-bubble');
+        const win = document.getElementById('chatassist-window');
+        if (bubble && win && win.style.display === 'none') {
+          bubble.style.display = 'none';
+          win.style.display = 'flex';
+          win.classList.remove('chatassist-window-closing');
+          setTimeout(function () { scrollToBottom(false); }, 50);
+        }
+      }
+    } catch (e) { }
+  }
+
   function isWidgetOpen() {
     const win = document.getElementById('chatassist-window');
     return !!(win && win.style.display !== 'none');
@@ -237,8 +257,9 @@
 
     popup.classList.add('chatassist-popup-visible');
 
+    // No auto-dismiss — popup stays until visitor clicks the X button.
     if (msgPopupTimer) clearTimeout(msgPopupTimer);
-    msgPopupTimer = setTimeout(function () { hideMessagePopup(); }, 8000);
+    msgPopupTimer = null;
   }
 
   function hideMessagePopup(skipAnimation) {
@@ -484,6 +505,27 @@
           if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
           if (m.sender_name) updateAgentName(m.sender_name);
           appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
+        } else if (eventType === 'bot_prompt_buttons') {
+          // Parse enriched JSON content for buttons data.
+          var promptData = null;
+          try { promptData = JSON.parse(m.content); } catch (e) { /* plain text fallback */ }
+          var displayText = (promptData && promptData.message) ? promptData.message : m.content;
+          var pButtons = (promptData && Array.isArray(promptData.buttons)) ? promptData.buttons : [];
+          var pAutoId = promptData && promptData.automation_id;
+
+          // Check if visitor has already responded (any visitor message after this one).
+          var currentIdx = data.messages.indexOf(m);
+          var hasResponse = data.messages.slice(currentIdx + 1).some(function (s) {
+            return (s.sender_type || s.sender) === 'visitor';
+          });
+
+          if (!hasResponse && pButtons.length > 0) {
+            // Pending prompt: show interactive buttons + hide input.
+            appendBotPromptWithButtons(displayText, m.created_at, pButtons, pAutoId, m.id);
+          } else {
+            // Already responded: show as plain text.
+            appendMessage('ai', displayText, m.created_at, null, m.id);
+          }
         } else if (actor === 'bot' || (actor === 'system' && kind === 'chat') || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))) {
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
@@ -497,6 +539,13 @@
       updateEmptyState();
       isAtBottom = true;
       smartScroll();
+
+      // Restore widget open/minimized state from localStorage.
+      // If there are history messages, restore immediately.
+      // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
+      if (data.messages.length > 0) {
+        _restoreWidgetState();
+      }
       return;
     }
 
@@ -531,6 +580,24 @@
         showNewMsgIndicator();
       }
       smartScroll();
+      return;
+    }
+
+    // Bot prompt with interactive buttons (team routing chatbot).
+    if (data.type === 'bot_prompt') {
+      const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
+      const buttons = Array.isArray(data.buttons) ? data.buttons : [];
+      const automationId = data.automation_id;
+      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
+      if (!isWidgetOpen() || document.hidden) {
+        notifyNewMessage('Support', null, data.message);
+      } else if (isAtBottom) {
+        markRead();
+      }
+      showNewMsgIndicator();
+      smartScroll();
+      // Restore widget state after bot prompt arrives (new sessions).
+      _restoreWidgetState();
       return;
     }
 
@@ -1183,6 +1250,121 @@
     } catch (e) { }
   }
 
+  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId) {
+    const container = document.getElementById('chatassist-messages');
+    if (!container) return;
+
+    // Hide empty state
+    const emptyEl = document.getElementById('chatassist-empty-state');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    // Date separator
+    try {
+      const msgDate = createdAtIso ? new Date(createdAtIso) : new Date();
+      const dateKey = msgDate.toDateString();
+      if (dateKey !== lastAppendedDateStr) {
+        lastAppendedDateStr = dateKey;
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        let label = msgDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        if (msgDate.toDateString() === today.toDateString()) label = 'Today';
+        else if (msgDate.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+        const sep = document.createElement('div');
+        sep.className = 'chatassist-date-separator';
+        sep.innerHTML = '<span>' + label + '</span>';
+        container.appendChild(sep);
+      }
+    } catch (e) { }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'chatassist-message chatassist-message-ai';
+
+    const row = document.createElement('div');
+    row.className = 'chatassist-message-row chatassist-message-row-left';
+
+    // Bot avatar
+    const avatar = document.createElement('div');
+    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-ai';
+    avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M9 16h.01" /><path d="M15 16h.01" /></svg>';
+
+    const contentWrap = document.createElement('div');
+    contentWrap.className = 'chatassist-message-content';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'chatassist-message-bubble';
+    renderMarkdownInto(bubble, content);
+
+    const timestamp = document.createElement('div');
+    timestamp.className = 'chatassist-message-timestamp';
+    timestamp.textContent = formatTimestamp(createdAtIso ? new Date(createdAtIso) : new Date());
+
+    contentWrap.appendChild(bubble);
+    contentWrap.appendChild(timestamp);
+
+    // Buttons container
+    if (Array.isArray(buttons) && buttons.length > 0) {
+      const buttonsWrap = document.createElement('div');
+      buttonsWrap.className = 'chatassist-prompt-buttons';
+
+      buttons.forEach(function (btn, idx) {
+        const btnEl = document.createElement('button');
+        btnEl.className = 'chatassist-prompt-btn';
+        btnEl.textContent = btn.label || 'Option ' + (idx + 1);
+        btnEl.type = 'button';
+        btnEl.addEventListener('click', function () {
+          // Disable all buttons after click
+          const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
+          allBtns.forEach(function (b) {
+            b.disabled = true;
+            b.classList.add('chatassist-prompt-btn-disabled');
+          });
+          // Highlight selected
+          btnEl.classList.add('chatassist-prompt-btn-selected');
+
+          // Show the input area now that user has made a selection
+          const inputCont = document.getElementById('chatassist-input-container');
+          if (inputCont) inputCont.style.display = '';
+          const inputEl = document.getElementById('chatassist-input');
+          if (inputEl) inputEl.focus();
+
+          // Optimistically append the visitor's selection as a visitor message
+          appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
+          isAtBottom = true;
+          smartScroll();
+
+          sendBotButtonClick(automationId, idx);
+        });
+        buttonsWrap.appendChild(btnEl);
+      });
+
+      contentWrap.appendChild(buttonsWrap);
+    }
+
+    row.appendChild(avatar);
+    row.appendChild(contentWrap);
+    messageDiv.appendChild(row);
+    container.appendChild(messageDiv);
+
+    // Hide input area until visitor selects an option
+    if (Array.isArray(buttons) && buttons.length > 0) {
+      const inputCont = document.getElementById('chatassist-input-container');
+      if (inputCont) inputCont.style.display = 'none';
+    }
+  }
+
+  function sendBotButtonClick(automationId, buttonIndex) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('Not connected. Please wait...');
+      return;
+    }
+    ws.send(JSON.stringify({
+      type: 'bot_button_click',
+      automation_id: automationId,
+      button_index: buttonIndex,
+    }));
+  }
+
   function showSystemMessage(content) {
     const container = document.getElementById('chatassist-messages');
     if (!container) return;
@@ -1513,6 +1695,8 @@
       hideNewMsgIndicator();
       setTimeout(function () { scrollToBottom(false); }, 50);
       if (endChatDisabled) setEndChatDisabled(true);
+      // Persist open state
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '1'); } catch (e) { }
     }
 
     function closeWidget(restoreOverlay) {
@@ -1523,6 +1707,8 @@
         win.style.display = 'none';
         bubble.style.display = 'inline-flex';
       }, { once: true });
+      // Persist minimized state
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '0'); } catch (e) { }
       if (restoreOverlay) hideContactOverlay(true);
       hideEndOverlay();
     }

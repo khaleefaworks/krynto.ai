@@ -156,6 +156,17 @@ export default function WebsiteDetail() {
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
 
+  // Team routing chatbot state
+  const [chatbotTeams, setChatbotTeams] = useState<{ id: number; name: string }[]>([])
+  const [chatbotBuilderOpen, setChatbotBuilderOpen] = useState(false)
+  const [chatbotSaving, setChatbotSaving] = useState(false)
+  const [chatbotDraft, setChatbotDraft] = useState<{
+    id?: number
+    enabled: boolean
+    message: string
+    buttons: { label: string; team_id: number | null; reply: string }[]
+  } | null>(null)
+
   // Deletion modal state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
@@ -203,6 +214,10 @@ export default function WebsiteDetail() {
     if (!websiteId) return
     if (activeTab !== 'automations') return
     loadAutomations()
+    // Load teams for the chatbot builder
+    apiRequest<{ id: number; name: string }[]>(`/websites/${websiteId}/teams`)
+      .then((data) => setChatbotTeams(Array.isArray(data) ? data : []))
+      .catch(() => setChatbotTeams([]))
   }, [activeTab, websiteId])
 
   useEffect(() => {
@@ -608,6 +623,95 @@ export default function WebsiteDetail() {
       setAutomationsError(err?.message || 'Failed to delete automation')
     } finally {
       setDeletingAutomationId(null)
+    }
+  }
+
+  // ──── Team Routing Chatbot helpers ────────────────────────
+  const getTeamRoutingAutomation = (): Automation | null => {
+    return automations.find(
+      (a) => a.trigger === 'conversation_created' &&
+        Array.isArray(a.actions) &&
+        (a.actions as any[]).some((act: any) => act?.type === 'bot_prompt_buttons')
+    ) || null
+  }
+
+  const openChatbotBuilder = (existing?: Automation | null) => {
+    if (existing) {
+      const actions = Array.isArray(existing.actions) ? existing.actions : []
+      const promptAction = (actions as any[]).find((a: any) => a?.type === 'bot_prompt_buttons')
+      setChatbotDraft({
+        id: existing.id,
+        enabled: existing.enabled,
+        message: promptAction?.message || 'Welcome! What are you looking for?',
+        buttons: Array.isArray(promptAction?.buttons)
+          ? promptAction.buttons.map((b: any) => ({
+            label: b.label || '',
+            team_id: b.team_id ?? null,
+            reply: b.reply || '',
+          }))
+          : [],
+      })
+    } else {
+      setChatbotDraft({
+        enabled: true,
+        message: 'Welcome! What are you looking for?',
+        buttons: [{ label: '', team_id: null, reply: '' }],
+      })
+    }
+    setChatbotBuilderOpen(true)
+  }
+
+  const closeChatbotBuilder = () => {
+    setChatbotBuilderOpen(false)
+    setChatbotDraft(null)
+    setChatbotSaving(false)
+  }
+
+  const saveChatbotDraft = async () => {
+    if (!websiteId || !chatbotDraft) return
+
+    if (!chatbotDraft.message.trim()) {
+      setAutomationsError('Prompt message cannot be empty')
+      return
+    }
+
+    const validButtons = chatbotDraft.buttons.filter((b) => b.label.trim())
+    if (validButtons.length === 0) {
+      setAutomationsError('Add at least one button with a label')
+      return
+    }
+
+    const payload = {
+      name: 'Team routing chatbot',
+      trigger: 'conversation_created',
+      enabled: chatbotDraft.enabled,
+      conditions: {},
+      actions: [
+        {
+          type: 'bot_prompt_buttons',
+          message: chatbotDraft.message.trim(),
+          buttons: validButtons.map((b) => ({
+            label: b.label.trim(),
+            team_id: b.team_id,
+            reply: b.reply.trim(),
+          })),
+        },
+      ],
+    }
+
+    try {
+      setChatbotSaving(true)
+      if (chatbotDraft.id) {
+        await automationsApi.update(chatbotDraft.id, payload)
+      } else {
+        await automationsApi.create({ website_id: websiteId, ...payload })
+      }
+      await loadAutomations()
+      closeChatbotBuilder()
+    } catch (err: any) {
+      setAutomationsError(err?.message || 'Failed to save chatbot')
+    } finally {
+      setChatbotSaving(false)
     }
   }
 
@@ -1300,10 +1404,90 @@ export default function WebsiteDetail() {
                       </div>
                     )
                   ) : (
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
-                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chatbots</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                        Chatbot builder will be added later. For now, use Auto messages.
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Team Routing Chatbot</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Show interactive buttons when a visitor starts a chat. Route conversations to the right team based on their selection.
+                            </div>
+                          </div>
+                        </div>
+                        {(() => {
+                          const existing = getTeamRoutingAutomation()
+                          if (existing) {
+                            const actions = Array.isArray(existing.actions) ? existing.actions : []
+                            const promptAction = (actions as any[]).find((a: any) => a?.type === 'bot_prompt_buttons')
+                            const buttons = Array.isArray(promptAction?.buttons) ? promptAction.buttons : []
+                            return (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Switch
+                                      checked={existing.enabled}
+                                      onCheckedChange={async (checked) => {
+                                        try {
+                                          setSavingAutomationId(existing.id)
+                                          await automationsApi.update(existing.id, { enabled: checked })
+                                          updateAutomationLocal(existing.id, { enabled: checked })
+                                        } catch (err: any) {
+                                          setAutomationsError(err?.message || 'Failed to toggle')
+                                        } finally {
+                                          setSavingAutomationId(null)
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {existing.enabled ? 'Active' : 'Disabled'}
+                                    </span>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openChatbotBuilder(existing)}
+                                  >
+                                    Edit
+                                  </Button>
+                                </div>
+                                <div className="rounded-md bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                                  <div className="text-xs text-gray-600 dark:text-gray-400">{promptAction?.message || '—'}</div>
+                                  {buttons.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                      {buttons.map((btn: any, i: number) => {
+                                        const teamName = chatbotTeams.find((t) => t.id === btn.team_id)?.name
+                                        return (
+                                          <span
+                                            key={i}
+                                            className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300"
+                                          >
+                                            {btn.label || `Button ${i + 1}`}
+                                            {teamName && (
+                                              <span className="text-[10px] text-gray-500 dark:text-gray-400">→ {teamName}</span>
+                                            )}
+                                          </span>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          }
+                          return (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openChatbotBuilder(null)}
+                              className="gap-2"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Set up team routing
+                            </Button>
+                          )
+                        })()}
                       </div>
                     </div>
                   )}
@@ -1684,6 +1868,204 @@ export default function WebsiteDetail() {
                         ) : (
                           <Button type="button" onClick={closeBuilder}>Done</Button>
                         )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Team Routing Chatbot Builder */}
+              {chatbotBuilderOpen && chatbotDraft && (
+                <div className="!mt-0 fixed inset-0 z-50">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={closeChatbotBuilder}
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Close chatbot builder"
+                  />
+                  <div className="absolute inset-y-0 right-0 w-full max-w-xl bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 shadow-md">
+                    <div className="h-full flex flex-col">
+                      <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {chatbotDraft.id ? 'Edit Team Routing Chatbot' : 'Set Up Team Routing Chatbot'}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Ask visitors what they need, then route to the right team.
+                          </div>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" onClick={closeChatbotBuilder}>
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                        {/* Enable/disable */}
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Enabled</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Activate this chatbot for new conversations.</div>
+                            </div>
+                            <Switch
+                              checked={chatbotDraft.enabled}
+                              onCheckedChange={(checked) => setChatbotDraft({ ...chatbotDraft, enabled: checked })}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Prompt message */}
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Bot Message</div>
+                          <Textarea
+                            value={chatbotDraft.message}
+                            onChange={(e) => setChatbotDraft({ ...chatbotDraft, message: e.target.value })}
+                            placeholder="Welcome! What are you looking for?"
+                            rows={2}
+                          />
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                            This message is shown to the visitor along with the buttons below.
+                          </div>
+                        </div>
+
+                        {/* Buttons */}
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Buttons</div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setChatbotDraft({
+                                  ...chatbotDraft,
+                                  buttons: [...chatbotDraft.buttons, { label: '', team_id: null, reply: '' }],
+                                })
+                              }
+                              className="gap-1 text-xs"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Add button
+                            </Button>
+                          </div>
+
+                          {chatbotDraft.buttons.length === 0 && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400">No buttons yet. Add at least one.</div>
+                          )}
+
+                          {chatbotDraft.buttons.map((btn, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-3 space-y-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                  Button {idx + 1}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const next = chatbotDraft.buttons.filter((_, i) => i !== idx)
+                                    setChatbotDraft({ ...chatbotDraft, buttons: next })
+                                  }}
+                                  className="h-6 w-6 p-0"
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Label (what visitor sees)</label>
+                                <Input
+                                  value={btn.label}
+                                  onChange={(e) => {
+                                    const next = [...chatbotDraft.buttons]
+                                    next[idx] = { ...next[idx], label: e.target.value }
+                                    setChatbotDraft({ ...chatbotDraft, buttons: next })
+                                  }}
+                                  placeholder="e.g. Office Space 🏢"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Assign to team</label>
+                                <select
+                                  value={btn.team_id ?? ''}
+                                  onChange={(e) => {
+                                    const next = [...chatbotDraft.buttons]
+                                    next[idx] = {
+                                      ...next[idx],
+                                      team_id: e.target.value ? parseInt(e.target.value) : null,
+                                    }
+                                    setChatbotDraft({ ...chatbotDraft, buttons: next })
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                                >
+                                  <option value="">No team (don't assign)</option>
+                                  {chatbotTeams.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {chatbotTeams.length === 0 && (
+                                  <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                    No teams found. Create teams in the Teams tab first.
+                                  </div>
+                                )}
+                              </div>
+
+                              <div>
+                                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Reply after click (optional)</label>
+                                <Input
+                                  value={btn.reply}
+                                  onChange={(e) => {
+                                    const next = [...chatbotDraft.buttons]
+                                    next[idx] = { ...next[idx], reply: e.target.value }
+                                    setChatbotDraft({ ...chatbotDraft, buttons: next })
+                                  }}
+                                  placeholder="e.g. Connecting you with our Office Space team..."
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Button type="button" variant="outline" onClick={closeChatbotBuilder}>
+                            Cancel
+                          </Button>
+                          {chatbotDraft.id && (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              onClick={async () => {
+                                if (!chatbotDraft.id) return
+                                if (!confirm('Delete this chatbot? This cannot be undone.')) return
+                                try {
+                                  await automationsApi.remove(chatbotDraft.id)
+                                  await loadAutomations()
+                                  closeChatbotBuilder()
+                                } catch (err: any) {
+                                  setAutomationsError(err?.message || 'Failed to delete')
+                                }
+                              }}
+                              className="gap-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </Button>
+                          )}
+                        </div>
+                        <Button type="button" onClick={saveChatbotDraft} disabled={chatbotSaving} className="gap-2">
+                          <Save className="w-4 h-4" />
+                          {chatbotSaving ? 'Saving…' : 'Save chatbot'}
+                        </Button>
                       </div>
                     </div>
                   </div>

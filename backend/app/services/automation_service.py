@@ -115,6 +115,42 @@ class AutomationService:
             pass
         return default_seconds
 
+    def get_actions_by_type(
+        self, *, website_id: int, trigger: str, action_type: str
+    ) -> List[dict]:
+        """Return raw action dicts of a specific type for a trigger.
+
+        Generic accessor that works for any action type stored in the JSON
+        actions column.  Each returned dict includes the originating
+        ``automation_id`` for traceability.
+        """
+        actions: List[dict] = []
+        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
+
+        for automation in automations:
+            raw_actions = automation.actions or {}
+            if isinstance(raw_actions, str):
+                try:
+                    raw_actions = json.loads(raw_actions)
+                except Exception:
+                    raw_actions = {}
+
+            normalized: Iterable[dict]
+            if isinstance(raw_actions, list):
+                normalized = [a for a in raw_actions if isinstance(a, dict)]
+            elif isinstance(raw_actions, dict):
+                normalized = [raw_actions]
+            else:
+                normalized = []
+
+            for action in normalized:
+                if str(action.get("type") or "").lower() == action_type.lower():
+                    action_copy = dict(action)
+                    action_copy["automation_id"] = getattr(automation, "id", None)
+                    actions.append(action_copy)
+
+        return actions
+
     def get_first_bot_message_action(self, *, website_id: int, trigger: str) -> dict | None:
         actions = self.get_bot_message_actions(website_id=website_id, trigger=trigger)
         return actions[0] if actions else None
@@ -256,6 +292,19 @@ class AutomationService:
                         "type": "emit_system_event",
                         "content": "Visitor left website.",
                         "event_type": "visitor_left_website",
+                    }
+                ],
+            },
+            {
+                "name": "Team routing chatbot",
+                "trigger": "conversation_created",
+                "enabled": False,
+                "conditions": {},
+                "actions": [
+                    {
+                        "type": "bot_prompt_buttons",
+                        "message": "Welcome! What are you looking for?",
+                        "buttons": [],
                     }
                 ],
             },
