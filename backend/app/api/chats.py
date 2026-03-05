@@ -29,7 +29,7 @@ def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> No
 
     if scope.team_ids is not None:
         tid = getattr(conv, "team_id", None)
-        if tid is not None and int(tid) not in set(scope.team_ids):
+        if tid is None or int(tid) not in set(scope.team_ids):
             raise HTTPException(status_code=403, detail="Chat not available")
 
 
@@ -152,6 +152,7 @@ def get_active_chats(
                 "website_id": conv.website_id,
                 "website_name": website_name_val,
                 "session_id": conv.session_id,
+                "team_id": getattr(conv, "team_id", None),
                 "visitor_name": conv.visitor_name,
                 "visitor_email": conv.visitor_email,
                 "visitor_phone": conv.visitor_phone,
@@ -201,6 +202,7 @@ def get_chat_summary(
         "website_id": int(conv.website_id),
         "website_name": website_name,
         "session_id": str(conv.session_id),
+        "team_id": getattr(conv, "team_id", None),
         "visitor_name": getattr(conv, "visitor_name", None),
         "visitor_email": getattr(conv, "visitor_email", None),
         "visitor_phone": getattr(conv, "visitor_phone", None),
@@ -286,6 +288,7 @@ def get_resolved_conversations(
                 "website_id": conv.website_id,
                 "website_name": website_name_val,
                 "session_id": conv.session_id,
+                "team_id": getattr(conv, "team_id", None),
                 "visitor_name": conv.visitor_name,
                 "visitor_email": conv.visitor_email,
                 "visitor_phone": conv.visitor_phone,

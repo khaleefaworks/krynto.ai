@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 
 import { API_BASE } from '@/config/endpoints'
@@ -6,6 +6,7 @@ import UserAvatar from '@/components/UserAvatar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { AgentAvailability, TeamOverview, WebsiteTeamsOverview } from '@/services/teams'
 import { teamsApi } from '@/services/teams'
+import { addMessageHandler } from '@/services/agentSocket'
 
 function toFullAvatarUrl(raw: string | null | undefined): string | null {
     const v = String(raw || '').trim()
@@ -103,11 +104,13 @@ export default function Teams() {
     const [error, setError] = useState<string | null>(null)
     const [rows, setRows] = useState<WebsiteTeamsOverview[]>([])
     const [selectedWebsiteId, setSelectedWebsiteId] = useState<number | null>(null)
+    const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve())
 
     const refresh = async () => {
         const data = await teamsApi.overview()
         setRows(Array.isArray(data) ? data : [])
     }
+    refreshRef.current = refresh
 
     useEffect(() => {
         let cancelled = false
@@ -129,6 +132,16 @@ export default function Teams() {
         }
     }, [])
 
+    // Listen for real-time availability changes via agent WebSocket
+    useEffect(() => {
+        const removeHandler = addMessageHandler((data: any) => {
+            if (data?.type === 'availability_changed') {
+                refreshRef.current().catch(() => { })
+            }
+        })
+        return removeHandler
+    }, [])
+
     const sorted = useMemo(() => {
         return [...rows].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
     }, [rows])
@@ -146,11 +159,11 @@ export default function Teams() {
     }, [sorted, selectedWebsiteId])
 
     return (
-        <div className="p-6 bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
+        <div className="bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden">
+            <div className="flex items-center justify-between mb-4 h-16 border-b dark:border-gray-700 px-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Teams</h1>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Agent availability by website</p>
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Teams</h1>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Agent availability by website</p>
                 </div>
             </div>
 
@@ -180,7 +193,7 @@ export default function Teams() {
             ) : null}
 
             {!loading && !error && sorted.length ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-7rem)]">
+                <div className="mx-4 grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-6rem)]">
                     <Card className="lg:col-span-4 xl:col-span-3 dark:bg-gray-800 dark:border-gray-700 overflow-hidden">
                         <CardHeader className="pb-3">
                             <CardTitle className="text-base">Websites</CardTitle>

@@ -9,11 +9,11 @@ class ConversationPageView(Base, TimestampMixin):
 
     id = Column(Integer, primary_key=True)
 
-    website_id = Column(Integer, ForeignKey("websites.id"), nullable=False)
+    website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
     session_id = Column(String(255), nullable=False)
 
     # Nullable so we can store events before the conversation is created.
-    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
 
     title = Column(String(255), nullable=True)
     url = Column(Text, nullable=False)

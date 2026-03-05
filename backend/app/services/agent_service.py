@@ -93,11 +93,11 @@ class AgentService:
             except Exception:
                 pass
         
-        # Compute website visibility for this socket (admins unrestricted).
+        # Compute website visibility for this socket (only administrator unrestricted).
         visible_website_ids: list[int] | None
         try:
             user = self.db.query(User).filter(User.id == int(agent_id)).first()
-            if user and user.is_admin():
+            if user and user.is_administrator():
                 visible_website_ids = None
             else:
                 rows = (

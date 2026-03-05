@@ -127,11 +127,17 @@ async def _send_delayed_welcome(
     session_id: str,
     welcome_message: str,
     delay_seconds: float = 4.0,
+    chatbot_buttons: list | None = None,
+    chatbot_automation_id: int | None = None,
 ) -> None:
     """Send the welcome automation message after a short delay.
 
     Delaying the welcome creates a more natural "someone is messaging you"
     feel and gives the widget time to arm notification sounds via user gesture.
+
+    When ``chatbot_buttons`` is provided the welcome is sent as a ``bot_prompt``
+    frame with interactive buttons (team routing chatbot) instead of a plain bot
+    message.
     """
     try:
         await asyncio.sleep(delay_seconds)
@@ -158,18 +164,42 @@ async def _send_delayed_welcome(
                 conversation.visit_count = int(conversation.visit_count or 0) or 1
                 db2.commit()
 
-            saved = service.add_bot_message(
-                conversation.id,
-                welcome_message,
-                event_type="automation_welcome",
-            )
-            await websocket.send_json(
-                {
-                    "type": "bot",
+            if chatbot_buttons:
+                # Team routing chatbot: send as interactive bot_prompt with buttons.
+                import json as _json2
+                enriched_content = _json2.dumps({
                     "message": welcome_message,
-                    "message_obj": serialize_message(db2, saved),
-                }
-            )
+                    "automation_id": chatbot_automation_id,
+                    "buttons": chatbot_buttons,
+                })
+                saved = service.add_bot_message(
+                    conversation.id,
+                    enriched_content,
+                    event_type="bot_prompt_buttons",
+                )
+                await websocket.send_json(
+                    {
+                        "type": "bot_prompt",
+                        "message": welcome_message,
+                        "conversation_id": conversation.id,
+                        "automation_id": chatbot_automation_id,
+                        "buttons": chatbot_buttons,
+                        "message_obj": serialize_message(db2, saved),
+                    }
+                )
+            else:
+                saved = service.add_bot_message(
+                    conversation.id,
+                    welcome_message,
+                    event_type="automation_welcome",
+                )
+                await websocket.send_json(
+                    {
+                        "type": "bot",
+                        "message": welcome_message,
+                        "message_obj": serialize_message(db2, saved),
+                    }
+                )
         finally:
             db2.close()
     except Exception as e:
@@ -393,6 +423,37 @@ async def chat_ws(
 
             should_send = bool(isinstance(welcome_message, str) and welcome_message.strip())
 
+            # Check for team routing chatbot (overrides welcome if active).
+            chatbot_buttons = None
+            chatbot_automation_id = None
+            try:
+                chatbot_actions = automation_service.get_actions_by_type(
+                    website_id=website_id,
+                    trigger="conversation_created",
+                    action_type="bot_prompt_buttons",
+                )
+                if chatbot_actions:
+                    _ca = chatbot_actions[0]
+                    _cb_msg = (_ca.get("message") or "").strip()
+                    _cb_raw = _ca.get("buttons") or []
+                    _cb_auto_id = _ca.get("automation_id")
+                    if _cb_msg and isinstance(_cb_raw, list) and _cb_raw:
+                        _validated = []
+                        for _btn in _cb_raw:
+                            if isinstance(_btn, dict) and (_btn.get("label") or "").strip():
+                                _validated.append({
+                                    "label": _btn["label"].strip(),
+                                    "team_id": _btn.get("team_id"),
+                                    "reply": _btn.get("reply", ""),
+                                })
+                        if _validated:
+                            welcome_message = _cb_msg
+                            chatbot_buttons = _validated
+                            chatbot_automation_id = _cb_auto_id
+                            should_send = True
+            except Exception:
+                pass
+
             # Update last_seen_at for existing conversations on every connect.
             if conversation:
                 prev_seen_at = _to_naive_utc(conversation.last_seen_at)
@@ -403,6 +464,11 @@ async def chat_ws(
 
             if should_send and conversation:
                 last_welcome = messages_repo.get_last_welcome_message(db, conversation.id)
+                # Also check bot_prompt_buttons (chatbot replaces welcome).
+                if not last_welcome:
+                    last_welcome = messages_repo.get_last_event_message(
+                        db, conversation.id, "bot_prompt_buttons"
+                    )
 
                 if last_welcome and last_welcome.created_at:
                     last_welcome_at = _to_naive_utc(last_welcome.created_at)
@@ -445,6 +511,8 @@ async def chat_ws(
                         session_id=session_id,
                         welcome_message=str(welcome_message).strip(),
                         delay_seconds=welcome_delay,
+                        chatbot_buttons=chatbot_buttons,
+                        chatbot_automation_id=chatbot_automation_id,
                     )
                 )
         except Exception as e:
@@ -618,6 +686,43 @@ async def chat_ws(
 
                 continue
 
+            # Bot button click: visitor tapped a button from a bot_prompt_buttons message.
+            if message_type == "bot_button_click":
+                btn_automation_id = payload.get("automation_id")
+                btn_button_index = payload.get("button_index")
+
+                if btn_automation_id is None or btn_button_index is None:
+                    continue
+
+                # Resolve conversation
+                btn_conversation_id: int | None = registered_conversation_id
+                if btn_conversation_id is None:
+                    try:
+                        btn_conv = conversations_repo.get_conversation_by_session(
+                            db,
+                            website_id=website_id,
+                            session_id=session_id,
+                        )
+                        if btn_conv:
+                            btn_conversation_id = btn_conv.id
+                    except Exception:
+                        pass
+
+                if btn_conversation_id is None:
+                    continue
+
+                try:
+                    await orchestrator.handle_bot_button_click(
+                        conversation_id=btn_conversation_id,
+                        automation_id=int(btn_automation_id),
+                        button_index=int(btn_button_index),
+                        visitor_ws=websocket,
+                    )
+                except Exception as e:
+                    logger.warning("bot_button_click_failed", error=str(e))
+
+                continue
+
             # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
             # IMPORTANT: this should NOT mark the conversation as resolved.
             # The agent is the only one who should resolve conversations.
@@ -656,6 +761,52 @@ async def chat_ws(
                 except Exception:
                     pass
 
+                continue
+
+            # Handle visitor rating submission
+            if message_type == "submit_rating":
+                rating_val = payload.get("rating")
+                conv_id = payload.get("conversation_id")
+                if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
+                    try:
+                        from app.models.conversation_rating import ConversationRating
+
+                        # Find conversation if conv_id not provided
+                        if not conv_id:
+                            conv = conversations_repo.get_conversation_by_session(
+                                db, website_id=website_id, session_id=session_id
+                            )
+                            if conv:
+                                conv_id = conv.id
+
+                        if conv_id:
+                            existing = (
+                                db.query(ConversationRating)
+                                .filter(ConversationRating.conversation_id == conv_id)
+                                .first()
+                            )
+                            if existing:
+                                existing.rating = rating_val
+                                db.commit()
+                            else:
+                                new_rating = ConversationRating(
+                                    conversation_id=conv_id,
+                                    rating=rating_val,
+                                    session_id=session_id,
+                                )
+                                db.add(new_rating)
+                                db.commit()
+                            logger.info(
+                                "rating_submitted_ws",
+                                conversation_id=conv_id,
+                                rating=rating_val,
+                            )
+                    except Exception as e:
+                        logger.warning("rating_submit_failed", error=str(e))
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                 continue
 
             if message_type == "typing":

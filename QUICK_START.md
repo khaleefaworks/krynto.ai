@@ -3,14 +3,16 @@
 ## Run Backend
 ```bash
 cd /home/frappe/Applications/ai-chatassist/backend
-source .venv/bin/activate
+source ../.venv/bin/activate
 # Ensure backend/.env exists (DATABASE_URL, VAPID keys, etc.)
 # Development requires PostgreSQL.
 
-# Run migrations (required):
-alembic upgrade head
+# Option A (recommended): run migrations automatically on start
+RUN_MIGRATIONS=1 ./start_server.sh
 
-./start_server.sh
+# Option B: run migrations manually, then start the server
+# alembic upgrade head
+# ./start_server.sh
 ```
 
 **Open:** http://localhost:8000/docs

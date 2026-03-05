@@ -12,6 +12,9 @@ from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_ima
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
 from app.services.presence_service import PresenceService
+from app.services.agent_service import AgentService
+from app.services.agent_resolver import is_agent_eligible
+from app.repos import users as users_repo
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -25,6 +28,9 @@ def list_users(
     """List all users (admin only)."""
 
     users = db.query(User).all()
+    connected_ids = users_repo.recently_heartbeat_user_ids(
+        db, ttl_seconds=AgentService.heartbeat_ttl_seconds,
+    )
     return [
         {
             "id": u.id,
@@ -33,6 +39,8 @@ def list_users(
             "role": u.role.value if hasattr(u.role, "value") else u.role,
             "is_available": bool(getattr(u, "is_available", False)),
             "is_active": bool(getattr(u, "is_active", False)),
+            "is_connected": int(u.id) in connected_ids,
+            "can_receive_chats": is_agent_eligible(u, int(u.id) in connected_ids),
             "avatar_url": getattr(u, "avatar_url", None),
         }
         for u in users
@@ -161,6 +169,21 @@ async def update_availability(
         await PresenceService.broadcast_all()
     except Exception:
         # Never fail the availability toggle because of a best-effort broadcast.
+        pass
+
+    # Notify all connected agent dashboards so Teams/Users pages can update in real-time.
+    try:
+        agent_svc = AgentService(db)
+        await agent_svc.broadcast_to_active_agents(
+            website_id=None,
+            message_data={
+                "type": "availability_changed",
+                "agent_id": current_user.id,
+                "is_available": current_user.is_available,
+            },
+            include_global=True,
+        )
+    except Exception:
         pass
     
     return AvailabilityResponse(is_available=current_user.is_available)

@@ -9,11 +9,13 @@ Handles:
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import require_authenticated_user
+from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 from app.models.conversation import Conversation
+from app.models.website_team import WebsiteTeam
 from app.services.conversation_service import ConversationService
 from app.services.conversation_orchestrator import ConversationOrchestrator
+from app.services.agent_service import AgentService
 from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
 from typing import Optional
@@ -31,7 +33,7 @@ def _ensure_visible(db: Session, *, current_user: User, conversation_id: int) ->
         raise HTTPException(status_code=403, detail="Chat not available")
     if scope.team_ids is not None:
         tid = getattr(conv, "team_id", None)
-        if tid is not None and int(tid) not in set(scope.team_ids):
+        if tid is None or int(tid) not in set(scope.team_ids):
             raise HTTPException(status_code=403, detail="Chat not available")
 
     return conv
@@ -45,6 +47,10 @@ class ClaimResponse(BaseModel):
 
 class TagActionRequest(BaseModel):
     tag_id: int
+
+
+class SetTeamRequest(BaseModel):
+    team_id: Optional[int] = None
 
 
 @router.post("/{conversation_id}/claim", response_model=ClaimResponse)
@@ -174,3 +180,61 @@ def untag_conversation(
     if not success:
         raise HTTPException(status_code=404, detail="Tag not found on conversation")
     return {"success": True}
+
+
+@router.put("/{conversation_id}/team")
+async def set_conversation_team(
+    conversation_id: int,
+    payload: SetTeamRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Assign (or clear) a single website team for a conversation.
+
+    Restricted to managers and system managers only.
+    Agents cannot assign or remove teams.
+    """
+    conv = _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
+
+    # Clear team assignment
+    if payload.team_id is None:
+        conv.team_id = None
+        db.commit()
+        await _broadcast_team_changed(db, conversation_id, int(conv.website_id), None)
+        return {"success": True, "conversation_id": conversation_id, "team_id": None}
+
+    team_id = int(payload.team_id)
+    team = db.query(WebsiteTeam).filter(WebsiteTeam.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    if int(getattr(team, "website_id", 0)) != int(getattr(conv, "website_id", 0)):
+        raise HTTPException(status_code=400, detail="Team does not belong to this website")
+
+    conv.team_id = team.id
+    db.commit()
+    await _broadcast_team_changed(db, conversation_id, int(conv.website_id), team.id)
+    return {"success": True, "conversation_id": conversation_id, "team_id": team.id}
+
+
+async def _broadcast_team_changed(
+    db: Session,
+    conversation_id: int,
+    website_id: int,
+    team_id: int | None,
+) -> None:
+    """Notify active agent sockets so they can refresh their chat lists."""
+    try:
+        agent_service = AgentService(db)
+        await agent_service.broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "conversation_team_changed",
+                "conversation_id": conversation_id,
+                "website_id": website_id,
+                "team_id": team_id,
+            },
+            include_global=True,
+        )
+    except Exception:
+        pass  # Best-effort; the manager's own UI updates optimistically

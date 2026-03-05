@@ -28,7 +28,7 @@ import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import Logo from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { isAdmin } from '@/lib/roles'
+import { isAdmin, isAgent } from '@/lib/roles'
 import {
     Check,
     MessageCircle,
@@ -40,7 +40,8 @@ import {
     Inbox,
     Users,
     Bot,
-    Plus
+    Plus,
+    X
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -180,6 +181,7 @@ function TagIcon({ className }: { className?: string }) {
 
 interface ConversationDetails {
     id: number
+    website_id?: number
     session_id: string
     visitor_name?: string
     visitor_email?: string
@@ -192,6 +194,7 @@ interface ConversationDetails {
     created_at?: string
     last_message_at?: string
     status?: string
+    team_id?: number | null
 }
 
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
@@ -276,8 +279,13 @@ export default function ConversationsView() {
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
+    const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
+
+    const [availableTeams, setAvailableTeams] = useState<any[]>([])
+    const [teamPickerOpen, setTeamPickerOpen] = useState(false)
+    const [teamPickerQuery, setTeamPickerQuery] = useState('')
 
     const [tagPickerOpen, setTagPickerOpen] = useState(false)
     const [tagPickerQuery, setTagPickerQuery] = useState('')
@@ -295,6 +303,21 @@ export default function ConversationsView() {
         if (!q) return unassignedTags
         return unassignedTags.filter((t: any) => String(t?.name || '').toLowerCase().includes(q))
     }, [unassignedTags, tagPickerQuery])
+
+    const selectedTeam = useMemo(() => {
+        const teamId = Number((conversation as any)?.team_id)
+        if (!Number.isFinite(teamId) || teamId <= 0) return null
+        return availableTeams.find((t: any) => Number(t?.id) === teamId) || null
+    }, [availableTeams, conversation])
+
+    const filteredTeams = useMemo(() => {
+        const q = String(teamPickerQuery || '').trim().toLowerCase()
+        const base = (Array.isArray(availableTeams) ? availableTeams : [])
+            .slice()
+            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+        if (!q) return base
+        return base.filter((t: any) => String(t?.name || '').toLowerCase().includes(q))
+    }, [availableTeams, teamPickerQuery])
 
     // Sidebar collapse state
     const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
@@ -649,72 +672,39 @@ export default function ConversationsView() {
         }
     }, [selectedChat])
 
-    // Setup WebSocket message handler for current chat
+    // Global WebSocket: connect once and handle list-level events (no chat selection required)
     useEffect(() => {
-        if (!selectedChat || !user?.id) return
+        if (!user?.id) return
 
-        // Single global agent socket (website_id=0). Server broadcasts website-scoped
-        // events to global sockets, and we filter by conversation_id in handlers.
         connectAgentSocket(0, user.id)
         connectedWebsiteIdRef.current = null
 
-        // Register message handler
         const removeHandler = addMessageHandler((data) => {
-            console.log('📩 WebSocket message received:', data)
-
             const dataConversationId = Number((data as any)?.conversation_id)
 
-            // Visitor message: either add to current chat UI, or increment unread badge.
-            if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
-                setVisitorTyping(false)
-                if (visitorTypingTimerRef.current) {
-                    clearTimeout(visitorTypingTimerRef.current)
-                    visitorTypingTimerRef.current = null
-                }
-                // Visitor sent a message - add to UI
-                const dto = (data as any)?.message_obj
-                if (dto && typeof dto === 'object') {
-                    console.log('👤 Adding visitor message DTO to UI')
-                    addMessage(dto)
-
-                    // Keep list preview + timestamp in sync (WhatsApp-like).
-                    const content = String((dto as any)?.content ?? '').trim()
-                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
-                    if (content) {
-                        const latest = activeChatsRef.current
-                        const idx = latest.findIndex(c => c.id === dataConversationId)
-                        if (idx >= 0) {
-                            const next = [...latest]
-                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
-                        }
-                    }
-                } else {
-                    console.warn('👤 Missing visitor message DTO; refreshing thread')
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-
-                // If the agent isn't pinned to the bottom, treat it as unread for UX.
-                if (!isAtBottomRef.current) {
-                    const dtoId = dto && typeof dto === 'object' ? Number((dto as any).id) : NaN
-                    if (!firstUnreadMessageId && Number.isFinite(dtoId) && dtoId > 0) {
-                        setFirstUnreadMessageId(dtoId)
-                    }
-                    incrementUnreadForConversation(selectedChat, 1)
-                } else if (!firstUnreadMessageId) {
-                    // Agent is actively viewing latest messages: keep server truth in sync.
-                    markChatRead(selectedChat).then(() => {
-                        setUnreadForConversation(selectedChat, 0)
-                    }).catch(() => { })
-                }
-            } else if (data.type === 'visitor_message' && dataConversationId && dataConversationId !== selectedChat) {
+            if (data.type === 'conversation_team_changed') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_assigned') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_closed') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'new_conversation') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'connected') {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_left_website' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
+                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'visitor_message' && dataConversationId) {
+                // Update list preview for any visitor message (even if no chat is selected)
                 const dto = (data as any)?.message_obj
                 const content = (dto && typeof dto === 'object' ? (dto as any)?.content : null) ?? (data as any)?.message
                 const ts = (dto && typeof dto === 'object'
                     ? ((dto as any)?.timestamp || (dto as any)?.created_at)
                     : null) || new Date().toISOString()
-
-                // Best-effort: update preview without a full refresh.
                 if (typeof content === 'string' && content.trim()) {
                     const latest = activeChatsRef.current
                     const idx = latest.findIndex(c => c.id === dataConversationId)
@@ -728,44 +718,37 @@ export default function ConversationsView() {
                 const unreadCountRaw = (data as any)?.unread_count
                 const deltaRaw = (data as any)?.delta
 
-                // If the agent is viewing this chat, don't badge it.
-                if (selectedChat && dataConversationId === selectedChat) {
-                    return
-                }
-
                 if (typeof unreadCountRaw === 'number' && Number.isFinite(unreadCountRaw)) {
                     setUnreadForConversation(dataConversationId, unreadCountRaw)
                 } else {
                     const delta = typeof deltaRaw === 'number' && Number.isFinite(deltaRaw) ? deltaRaw : 1
                     incrementUnreadForConversation(dataConversationId, delta)
                 }
-
                 scheduleUnreadRefresh()
-            } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
-                stopAgentTyping(selectedChat)
+            }
+        })
 
-                // If the backend auto-enabled availability, reflect it immediately in UI.
-                const availabilityChanged = Boolean((data as any)?.availability_changed)
-                const agentIsAvailable = (data as any)?.agent_is_available
-                if (availabilityChanged && agentIsAvailable === true) {
-                    const current = useAppStore.getState().user
-                    if (current && current.is_available === false) {
-                        setUser({ ...current, is_available: true })
-                    }
+        return removeHandler
+    }, [user?.id])
+
+    // Chat-specific WebSocket handler: registered when a chat is selected
+    useEffect(() => {
+        if (!selectedChat || !user?.id) return
+
+        const removeHandler = addMessageHandler((data) => {
+            const dataConversationId = Number((data as any)?.conversation_id)
+
+            // Visitor message for the SELECTED chat — add to message thread
+            if (data.type === 'visitor_message' && dataConversationId === selectedChat) {
+                setVisitorTyping(false)
+                if (visitorTypingTimerRef.current) {
+                    clearTimeout(visitorTypingTimerRef.current)
+                    visitorTypingTimerRef.current = null
                 }
-
-                // Our message was confirmed - add to UI
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
-                    console.log('✅ Agent message confirmed (DTO)')
-                    const clientId = String((data as any)?.client_message_id || '').trim()
-                    if (clientId) {
-                        reconcileOptimisticMessage(`tmp:${clientId}`, dto)
-                    } else {
-                        addMessage(dto)
-                    }
+                    addMessage(dto)
 
-                    // Keep list preview + timestamp in sync.
                     const content = String((dto as any)?.content ?? '').trim()
                     const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
                     if (content) {
@@ -778,43 +761,71 @@ export default function ConversationsView() {
                         }
                     }
                 } else {
-                    console.warn('✅ Missing agent message DTO; refreshing thread')
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
-            } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
+
+                if (!isAtBottomRef.current) {
+                    const dtoId = dto && typeof dto === 'object' ? Number((dto as any).id) : NaN
+                    if (!firstUnreadMessageId && Number.isFinite(dtoId) && dtoId > 0) {
+                        setFirstUnreadMessageId(dtoId)
+                    }
+                    incrementUnreadForConversation(selectedChat, 1)
+                } else if (!firstUnreadMessageId) {
+                    markChatRead(selectedChat).then(() => {
+                        setUnreadForConversation(selectedChat, 0)
+                    }).catch(() => { })
+                }
+            } else if (data.type === 'conversation_unread' && dataConversationId === selectedChat) {
+                // Agent is viewing this chat — suppress badge
+                return
+            } else if (data.type === 'message_sent' && dataConversationId === selectedChat) {
+                stopAgentTyping(selectedChat)
+
+                const availabilityChanged = Boolean((data as any)?.availability_changed)
+                const agentIsAvailable = (data as any)?.agent_is_available
+                if (availabilityChanged && agentIsAvailable === true) {
+                    const current = useAppStore.getState().user
+                    if (current && current.is_available === false) {
+                        setUser({ ...current, is_available: true })
+                    }
+                }
+
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    const clientId = String((data as any)?.client_message_id || '').trim()
+                    if (clientId) {
+                        reconcileOptimisticMessage(`tmp:${clientId}`, dto)
+                    } else {
+                        addMessage(dto)
+                    }
+
+                    const content = String((dto as any)?.content ?? '').trim()
+                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
+                    if (content) {
+                        const latest = activeChatsRef.current
+                        const idx = latest.findIndex(c => c.id === dataConversationId)
+                        if (idx >= 0) {
+                            const next = [...latest]
+                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                            setActiveChats(next)
+                        }
+                    }
+                } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
-            } else if (data.type === 'visitor_left_website' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-            } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
-            } else if (data.type === 'conversation_assigned') {
-                // Another agent (or us) claimed a conversation.
-                fetchActiveChats({ showSpinner: false })
-            } else if (data.type === 'conversation_closed') {
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat && dataConversationId === selectedChat) {
-                    setSelectedChat(null)
-                    navigate('/dashboard/chats')
-                }
-            } else if (data.type === 'new_conversation') {
-                // New conversation arrived - refresh chat list
-                console.log('📨 New conversation arrived, refreshing...')
-                fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'conversation_team_changed' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'conversation_closed' && dataConversationId === selectedChat) {
+                setSelectedChat(null)
+                navigate('/dashboard/chats')
+            } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'connected') {
-                // Socket reconnected; refresh list and current thread for consistency.
-                fetchActiveChats({ showSpinner: false })
-                if (selectedChat) {
-                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-                }
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
                 const isTyping = Boolean((data as any)?.is_typing)
                 if (isTyping) {
@@ -834,14 +845,12 @@ export default function ConversationsView() {
                     }
                 }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
-                // Realtime browsing update: re-fetch history (capped)
                 getBrowsingHistory(selectedChat)
                     .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))
                     .catch(() => { })
             }
         })
 
-        // Cleanup: remove handler when chat changes or component unmounts
         return removeHandler
     }, [selectedChat, user?.id, (conversation as any)?.website_id, firstUnreadMessageId, incrementUnreadForConversation, setUnreadForConversation, stopAgentTyping])
 
@@ -1026,25 +1035,10 @@ export default function ConversationsView() {
                 setConversation(chatData as any)
                 setConversationTags((chatData as any).tags || [])
 
-                // Tags are global (not website-scoped)
-                apiRequest<any[]>(`/tags`).then(tags => {
-                    if (loadDetailsTokenRef.current === token) {
-                        setAvailableTags(Array.isArray(tags) ? tags : [])
-                    }
-                }).catch(() => {
-                    if (loadDetailsTokenRef.current === token) {
-                        setAvailableTags([])
-                    }
-                })
-            } else {
-                try {
-                    const summary = await fetchChatSummary(chatId)
-                    if (loadDetailsTokenRef.current === token) {
-                        setConversation(summary as any)
-                        setConversationTags(((summary as any).tags || []) as any)
-                    }
-
-                    apiRequest<any[]>(`/tags`).then(tags => {
+                // Fetch tags scoped to the conversation's website
+                const wid = (chatData as any).website_id
+                if (wid) {
+                    apiRequest<any[]>(`/websites/${wid}/tags`).then(tags => {
                         if (loadDetailsTokenRef.current === token) {
                             setAvailableTags(Array.isArray(tags) ? tags : [])
                         }
@@ -1053,6 +1047,48 @@ export default function ConversationsView() {
                             setAvailableTags([])
                         }
                     })
+
+                    // Fetch teams scoped to the conversation's website
+                    apiRequest<any[]>(`/websites/${wid}/teams`).then(teams => {
+                        if (loadDetailsTokenRef.current === token) {
+                            setAvailableTeams(Array.isArray(teams) ? teams : [])
+                        }
+                    }).catch(() => {
+                        if (loadDetailsTokenRef.current === token) {
+                            setAvailableTeams([])
+                        }
+                    })
+                }
+            } else {
+                try {
+                    const summary = await fetchChatSummary(chatId)
+                    if (loadDetailsTokenRef.current === token) {
+                        setConversation(summary as any)
+                        setConversationTags(((summary as any).tags || []) as any)
+                    }
+
+                    const wid = (summary as any).website_id
+                    if (wid) {
+                        apiRequest<any[]>(`/websites/${wid}/tags`).then(tags => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTags(Array.isArray(tags) ? tags : [])
+                            }
+                        }).catch(() => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTags([])
+                            }
+                        })
+
+                        apiRequest<any[]>(`/websites/${wid}/teams`).then(teams => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTeams(Array.isArray(teams) ? teams : [])
+                            }
+                        }).catch(() => {
+                            if (loadDetailsTokenRef.current === token) {
+                                setAvailableTeams([])
+                            }
+                        })
+                    }
                 } catch {
                     // ignore
                 }
@@ -1067,11 +1103,19 @@ export default function ConversationsView() {
                 fetchedHistory = []
             }
 
+            let fetchedRating: { rating: number; feedback?: string } | null = null
+            try {
+                fetchedRating = await apiRequest<{ rating: number; feedback?: string }>(`/ratings/${chatId}`)
+            } catch {
+                fetchedRating = null
+            }
+
             if (loadDetailsTokenRef.current !== token) {
                 return
             }
             setNotes(fetchedNotes)
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
+            setConversationRating(fetchedRating)
         } catch (error) {
             console.error("Failed to load conversation details:", error)
         }
@@ -1120,6 +1164,23 @@ export default function ConversationsView() {
             ))
         } catch (error) {
             console.error("Failed to remove tag:", error)
+        }
+    }
+
+    const handleSetTeam = async (teamId: number | null) => {
+        if (!selectedChat) return
+        try {
+            await apiRequest(`/conversations/${selectedChat}/team`, {
+                method: 'PUT',
+                body: JSON.stringify({ team_id: teamId })
+            })
+
+            setConversation((prev) => (prev ? ({ ...(prev as any), team_id: teamId } as any) : prev))
+
+            // Re-fetch from server so visibility / team-scope filtering is applied
+            await fetchActiveChats({ showSpinner: false })
+        } catch (error) {
+            console.error('Failed to set team:', error)
         }
     }
 
@@ -1691,122 +1752,199 @@ export default function ConversationsView() {
                             </div>
                         </div>
 
-                        {/* Tags Row (below header) */}
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                            {conversationTags
-                                .slice()
-                                .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                .map((t: any) => (
-                                    <Badge
-                                        key={t.id}
-                                        variant="outline"
-                                        className="gap-1"
-                                        style={{
-                                            borderColor: String(t?.color || ''),
-                                            color: String(t?.color || ''),
-                                            backgroundColor: getTagPillBackground(t?.color),
-                                        }}
-                                    >
-                                        <span className="truncate max-w-40">{t.name}</span>
-                                        <button
-                                            type="button"
-                                            className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                                            onClick={() => handleRemoveTag(Number(t.id))}
-                                            aria-label={`Remove tag ${String(t.name || '')}`}
-                                            title="Remove"
-                                        >
-                                            ×
-                                        </button>
-                                    </Badge>
-                                ))}
-
-                            <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
-                                <PopoverTrigger asChild>
-                                    {conversationTags.length === 0 ? (
-                                        <Button
-                                            type="button"
-                                            variant="link"
-                                            className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                                        >
-                                            <TagIcon className="h-4 w-4" />
-                                            Tag conversation
-                                        </Button>
-                                    ) : (
-                                        <Button
-                                            type="button"
-                                            size="icon"
+                        {/* Second row: Tag conversation (left) | Assign team (right) */}
+                        <div className="mt-2 flex items-start justify-between gap-4">
+                            {/* LEFT — Tag conversation + tag badges */}
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                {conversationTags
+                                    .slice()
+                                    .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                                    .map((t: any) => (
+                                        <Badge
+                                            key={t.id}
                                             variant="outline"
-                                            className="h-7 w-7 rounded-full"
-                                            aria-label="Add tag"
-                                            title="Add tag"
+                                            className="gap-1"
+                                            style={{
+                                                borderColor: String(t?.color || ''),
+                                                color: String(t?.color || ''),
+                                                backgroundColor: getTagPillBackground(t?.color),
+                                            }}
                                         >
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    )}
-                                </PopoverTrigger>
+                                            <span className="truncate max-w-40">{t.name}</span>
+                                            <button
+                                                type="button"
+                                                className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                                onClick={() => handleRemoveTag(Number(t.id))}
+                                                aria-label={`Remove tag ${String(t.name || '')}`}
+                                                title="Remove"
+                                            >
+                                                ×
+                                            </button>
+                                        </Badge>
+                                    ))}
 
-                                <PopoverContent align="start" className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg">
-                                    <div className="space-y-2">
-                                        <Input
-                                            value={tagPickerQuery}
-                                            onChange={(e) => setTagPickerQuery(e.target.value)}
-                                            placeholder="Search tags…"
-                                            className="h-9"
-                                            autoFocus
-                                        />
+                                <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
+                                    <PopoverTrigger asChild>
+                                        {conversationTags.length === 0 ? (
+                                            <Button
+                                                type="button"
+                                                variant="link"
+                                                className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                            >
+                                                <TagIcon className="h-4 w-4" />
+                                                Tag conversation
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-7 w-7 rounded-full"
+                                                aria-label="Add tag"
+                                                title="Add tag"
+                                            >
+                                                <Plus className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                    </PopoverTrigger>
 
-                                        <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
-                                            {filteredUnassignedTags.length === 0 ? (
-                                                <div className="p-2 text-xs text-gray-500 dark:text-gray-400">
-                                                    No matching tags
-                                                </div>
-                                            ) : (
-                                                <div className="p-1">
-                                                    {filteredUnassignedTags.map((t: any) => (
-                                                        <button
-                                                            key={t.id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                const id = Number(t?.id)
-                                                                if (!Number.isFinite(id) || id <= 0) return
-                                                                handleAddTag(id)
-                                                                setTagPickerOpen(false)
-                                                                setTagPickerQuery('')
-                                                            }}
-                                                            className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                        >
-                                                            <span className="truncate">{String(t?.name || '')}</span>
-                                                            <span
-                                                                className="inline-flex h-2.5 w-2.5 rounded-full border"
-                                                                style={{
-                                                                    borderColor: String(t?.color || ''),
-                                                                    backgroundColor: String(t?.color || ''),
+                                    <PopoverContent
+                                        align="start"
+                                        className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
+                                    >
+                                        <div className="space-y-2">
+                                            <Input
+                                                value={tagPickerQuery}
+                                                onChange={(e) => setTagPickerQuery(e.target.value)}
+                                                placeholder="Search tags…"
+                                                className="h-9"
+                                                autoFocus
+                                            />
+
+                                            <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                                {filteredUnassignedTags.length === 0 ? (
+                                                    <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching tags</div>
+                                                ) : (
+                                                    <div className="p-1">
+                                                        {filteredUnassignedTags.map((t: any) => (
+                                                            <button
+                                                                key={t.id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    handleAddTag(Number(t.id))
+                                                                    setTagPickerOpen(false)
+                                                                    setTagPickerQuery('')
                                                                 }}
-                                                                aria-hidden="true"
-                                                            />
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {isAdmin(user) ? (
-                                            <div className="pt-1 text-right">
-                                                <Link
-                                                    to="/dashboard/settings/tags"
-                                                    className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
-                                                    onClick={() => {
-                                                        setTagPickerOpen(false)
-                                                        setTagPickerQuery('')
-                                                    }}
-                                                >
-                                                    Manage tags
-                                                </Link>
+                                                                className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                            >
+                                                                <span className="truncate">{t.name}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
-                                        ) : null}
+
+                                            {isAdmin(user) ? (
+                                                <div className="pt-1 text-right">
+                                                    <Link
+                                                        to="/dashboard/settings/tags"
+                                                        className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                        onClick={() => {
+                                                            setTagPickerOpen(false)
+                                                            setTagPickerQuery('')
+                                                        }}
+                                                    >
+                                                        Manage tags
+                                                    </Link>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+
+                            {/* RIGHT — Assign team + team badge */}
+                            <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
+                                {selectedTeam ? (
+                                    <div
+                                        className={`inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300${isAdmin(user) ? ' cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors' : ''}`}
+                                        onClick={isAdmin(user) ? () => setTeamPickerOpen(true) : undefined}
+                                        title={isAdmin(user) ? 'Click to change team' : String((selectedTeam as any)?.name || '')}
+                                    >
+                                        <Users className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span className="text-blue-500 dark:text-blue-400">Team:</span>
+                                        <span className="truncate max-w-32 font-semibold">{String((selectedTeam as any)?.name || '')}</span>
+                                        {isAdmin(user) && (
+                                            <button
+                                                type="button"
+                                                className="ml-0.5 rounded-full p-0.5 opacity-60 hover:opacity-100 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                                onClick={(e) => { e.stopPropagation(); handleSetTeam(null) }}
+                                                aria-label="Clear team"
+                                                title="Remove team assignment"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        )}
                                     </div>
-                                </PopoverContent>
-                            </Popover>
+                                ) : null}
+
+                                {isAdmin(user) && (
+                                    <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
+                                        {!selectedTeam ? (
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="link"
+                                                    className="h-auto p-0 gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                                >
+                                                    <Users className="h-4 w-4" />
+                                                    Assign team
+                                                </Button>
+                                            </PopoverTrigger>
+                                        ) : null}
+
+                                        <PopoverContent
+                                            align="end"
+                                            className="w-80 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
+                                        >
+                                            <div className="space-y-2">
+                                                <Input
+                                                    value={teamPickerQuery}
+                                                    onChange={(e) => setTeamPickerQuery(e.target.value)}
+                                                    placeholder="Search teams…"
+                                                    className="h-9"
+                                                    autoFocus
+                                                />
+
+                                                <div className="max-h-56 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                                    {filteredTeams.length === 0 ? (
+                                                        <div className="p-2 text-xs text-gray-500 dark:text-gray-400">No matching teams</div>
+                                                    ) : (
+                                                        <div className="p-1">
+                                                            {filteredTeams.map((t: any) => (
+                                                                <button
+                                                                    key={t.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const id = Number(t?.id)
+                                                                        if (!Number.isFinite(id) || id <= 0) return
+                                                                        handleSetTeam(id)
+                                                                        setTeamPickerOpen(false)
+                                                                        setTeamPickerQuery('')
+                                                                    }}
+                                                                    className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                                >
+                                                                    <span className="truncate">{String(t?.name || '')}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+                                )}
+                            </div>
                         </div>
 
                     </div>
@@ -1981,7 +2119,7 @@ export default function ConversationsView() {
                 <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
                     <div className="text-center max-w-2xl px-8">
                         <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
-                            <Logo size={56} />
+                            <Logo size={56} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
                         </div>
                         <h2 className="text-2xl font-semibold mb-3 text-gray-900 dark:text-white">Select a conversation</h2>
                         <p className="text-gray-600 dark:text-gray-400">
@@ -2037,6 +2175,7 @@ export default function ConversationsView() {
                                         creator_name: note.creator_name || 'Unknown'
                                     }))}
                                     browsingHistory={browsingHistory}
+                                    rating={conversationRating}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {

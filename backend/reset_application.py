@@ -20,12 +20,7 @@ from pathlib import Path
 import shutil
 from app.core.database import SessionLocal, engine
 from app.models.base import Base
-from app.models.user import User
-from app.models.website import Website
-from app.models.conversation import Conversation
-from app.models.message import Message
 from app.models.system_settings import SystemSettings
-from app.models.agent_website_assignment import AgentWebsiteAssignment
 from seed_data import seed_database
 
 # Ensure all models are imported so Base.metadata knows about every table.
@@ -59,9 +54,8 @@ def _get_existing_table_names(db_session) -> set[str]:
     return table_names
 
 
-def delete_uploaded_files():
-    """Delete uploaded files from backend/uploads (keeps the folder itself)."""
-    uploads_dir = Path(__file__).resolve().parent / "uploads"
+def _clean_uploads_dir(uploads_dir: Path) -> None:
+    """Remove all files/folders inside *uploads_dir*, keeping the directory itself."""
     if not uploads_dir.exists() or not uploads_dir.is_dir():
         return
 
@@ -76,6 +70,22 @@ def delete_uploaded_files():
                 child.unlink(missing_ok=True)
         except Exception as e:
             print(f"  ⚠️  Failed to delete uploaded file(s) at {child}: {e}")
+
+
+def delete_uploaded_files():
+    """Delete uploaded files from all upload directories.
+
+    The canonical uploads root lives at <repo-root>/uploads (matches
+    app.core.uploads.get_uploads_root).  A legacy backend/uploads may
+    also contain files, so we clean both.
+    """
+    repo_root = Path(__file__).resolve().parent.parent  # backend/ -> repo root
+    primary_uploads = repo_root / "uploads"
+    legacy_uploads = Path(__file__).resolve().parent / "uploads"  # backend/uploads
+
+    _clean_uploads_dir(primary_uploads)
+    if legacy_uploads.resolve() != primary_uploads.resolve():
+        _clean_uploads_dir(legacy_uploads)
 
 def confirm_reset(with_seed):
     """Ask for confirmation before resetting"""

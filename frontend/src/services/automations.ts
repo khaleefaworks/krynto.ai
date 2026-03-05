@@ -9,12 +9,20 @@ export type AutomationTrigger =
   | 'visitor_left_website'
   | 'conversation_resolved'
   | 'conversation_reopened'
+  | 'conversation_created'
+
+export interface BotPromptButton {
+  label: string
+  team_id?: number | null
+  reply?: string
+}
 
 export interface AutomationAction {
-  type: 'send_bot_message' | 'emit_system_event'
+  type: 'send_bot_message' | 'emit_system_event' | 'bot_prompt_buttons'
   message?: string
   content?: string
   event_type?: string
+  buttons?: BotPromptButton[]
 }
 
 export interface Automation {

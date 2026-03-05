@@ -119,6 +119,19 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
     except Exception:
         created_at_iso = None
 
+    # For bot_prompt_buttons, the DB content is enriched JSON with buttons metadata.
+    # Extract just the human-readable message for display.
+    raw_content = getattr(msg, "content", None)
+    display_content = raw_content
+    if event_type == "bot_prompt_buttons" and raw_content:
+        try:
+            import json as _json
+            parsed = _json.loads(raw_content)
+            if isinstance(parsed, dict) and "message" in parsed:
+                display_content = parsed["message"]
+        except (ValueError, TypeError):
+            pass
+
     return {
         "id": getattr(msg, "id", None),
         "conversation_id": getattr(msg, "conversation_id", None),
@@ -129,6 +142,6 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         "kind": kind,
         "sender_name": sender_name,
         "sender_avatar_url": sender_avatar_url,
-        "content": getattr(msg, "content", None),
+        "content": display_content,
         "created_at": created_at_iso,
     }

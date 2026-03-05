@@ -15,8 +15,9 @@ class VisibilityScope:
     """Computed visibility scope for a user.
 
     - website_ids: None means unrestricted (admins). Otherwise explicit allowed website ids.
-    - team_ids: For agents, team-scoped conversations are visible only for these team ids.
-      Conversations with team_id NULL are considered visible (backwards compatible).
+    - team_ids: None means unrestricted (admins, or users with no team memberships).
+      When set, only conversations assigned to one of these teams are visible.
+      Conversations with team_id NULL are NOT visible to team-scoped users.
     """
 
     website_ids: Optional[list[int]]
@@ -28,8 +29,9 @@ def _unique_sorted_ints(values: Iterable[int]) -> list[int]:
 
 
 def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
-    # Admins are unrestricted by website/team.
-    if user.is_admin():
+    # Only system_manager (Administrator) is unrestricted.
+    # Managers are scoped to their assigned websites, same as agents.
+    if user.is_administrator():
         return VisibilityScope(website_ids=None, team_ids=None)
 
     website_rows = (
@@ -51,6 +53,11 @@ def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
     )
     team_ids = _unique_sorted_ints([int(r[0]) for r in team_rows])
 
+    # If the user is not a member of any team, they can see all chats
+    # for their assigned websites (team_ids=None means unrestricted).
+    if not team_ids:
+        return VisibilityScope(website_ids=website_ids, team_ids=None)
+
     return VisibilityScope(website_ids=website_ids, team_ids=team_ids)
 
 
@@ -64,14 +71,15 @@ def ensure_website_visible(scope: VisibilityScope, *, website_id: int) -> None:
 def conversation_team_filter_clause(sa, ConversationModel, *, scope: VisibilityScope):
     """Build a SQLAlchemy boolean clause for team visibility.
 
-    - Admins: no clause (returns True literal)
-    - Agents: allow team_id NULL, plus team_id IN scope.team_ids
+    - Admins / users with no team memberships: no clause (returns True literal)
+    - Users with team memberships: only team_id IN their teams (excludes unassigned)
     """
     if scope.team_ids is None:
         return sa.true()
 
     allowed_team_ids = [int(t) for t in (scope.team_ids or [])]
     if not allowed_team_ids:
-        return ConversationModel.team_id.is_(None)
+        # Edge case: empty list means see nothing team-scoped
+        return sa.literal(False)
 
-    return sa.or_(ConversationModel.team_id.is_(None), ConversationModel.team_id.in_(allowed_team_ids))
+    return ConversationModel.team_id.in_(allowed_team_ids)

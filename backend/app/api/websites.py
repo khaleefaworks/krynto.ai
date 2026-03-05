@@ -1,10 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy import func
 from app.core.database import get_db
 from app.models.website import Website
 from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.user import User
-from app.api.deps import require_admin, require_authenticated_user
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.automation import Automation
+from app.models.website_team import WebsiteTeam
+from app.models.tag import Tag
+from app.models.website_message_shortcut import WebsiteMessageShortcut
+from app.api.deps import require_admin, require_administrator, require_authenticated_user
+from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -64,23 +73,26 @@ def list_websites(
     current_user: User = Depends(require_authenticated_user)
 ):
     """
-    List all websites.
-    Available to all authenticated users (admins and agents).
+    List websites visible to the current user.
+    - Administrator: all websites
+    - Manager/Agent: only assigned websites
     """
-    websites = db.query(Website).all()
-    return websites
+    scope = compute_visibility_scope(db, user=current_user)
+    query = db.query(Website)
+    if scope.website_ids is not None:
+        query = query.filter(Website.id.in_(scope.website_ids))
+    return query.all()
 
 
 @router.post("", response_model=WebsiteResponse, status_code=201)
 def create_website(
     website_data: WebsiteCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin)
+    admin: User = Depends(require_administrator)
 ):
     """
     Create a new website.
-    Requires admin access (SYSTEM_MANAGER or MANAGER role).
-    Widget key is automatically generated.
+    Requires Administrator (SYSTEM_MANAGER) access.
     """
     # Check if domain already exists
     existing = db.query(Website).filter_by(domain=website_data.domain).first()
@@ -118,11 +130,14 @@ def get_website(
 ):
     """
     Get a specific website by ID.
-    Available to all authenticated users.
+    Respects visibility scope — managers/agents can only access assigned websites.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+    scope = compute_visibility_scope(db, user=current_user)
+    if scope.website_ids is not None and website.id not in set(scope.website_ids):
+        raise HTTPException(status_code=403, detail="Website not assigned")
     return website
 
 
@@ -161,15 +176,52 @@ def update_website(
     return website
 
 
+@router.get("/{website_id}/deletion-impact")
+def get_deletion_impact(
+    website_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_administrator),
+):
+    """
+    Return counts of all records that will be deleted when this website is removed.
+    Requires Administrator (SYSTEM_MANAGER) access.
+    """
+    website = db.query(Website).filter_by(id=website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    conversations_count = db.query(func.count(Conversation.id)).filter_by(website_id=website_id).scalar() or 0
+    messages_count = (
+        db.query(func.count(Message.id))
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Conversation.website_id == website_id)
+        .scalar()
+    ) or 0
+    automations_count = db.query(func.count(Automation.id)).filter_by(website_id=website_id).scalar() or 0
+    teams_count = db.query(func.count(WebsiteTeam.id)).filter_by(website_id=website_id).scalar() or 0
+    tags_count = db.query(func.count(Tag.id)).filter_by(website_id=website_id).scalar() or 0
+    shortcuts_count = db.query(func.count(WebsiteMessageShortcut.id)).filter_by(website_id=website_id).scalar() or 0
+
+    return {
+        "website_name": website.name,
+        "conversations": conversations_count,
+        "messages": messages_count,
+        "automations": automations_count,
+        "teams": teams_count,
+        "tags": tags_count,
+        "shortcuts": shortcuts_count,
+    }
+
+
 @router.delete("/{website_id}")
 def delete_website(
     website_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin)
+    admin: User = Depends(require_administrator)
 ):
     """
     Delete a website.
-    Requires admin access (SYSTEM_MANAGER or MANAGER role).
+    Requires Administrator (SYSTEM_MANAGER) access.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
@@ -255,6 +307,7 @@ async def upload_widget_icon(
     public_url = f"/uploads/websites/{website_id}/{unique_filename}"
     existing_config["header_icon_url"] = public_url
     website.widget_config = existing_config
+    flag_modified(website, "widget_config")
     db.commit()
     db.refresh(website)
 
@@ -286,6 +339,7 @@ def update_widget_config(
     # Merge partial updates into the existing widget_config.
     existing.update(config)
     website.widget_config = existing
+    flag_modified(website, "widget_config")
     db.commit()
     db.refresh(website)
     

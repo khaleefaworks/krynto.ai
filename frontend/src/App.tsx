@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
@@ -12,7 +12,6 @@ import WebsiteManagement from './pages/WebsiteManagement'
 import WebsiteDetail from './pages/WebsiteDetail'
 import WebsitesList from './pages/WebsitesList'
 import AgentsList from './pages/AgentsList'
-import AgentDetail from './pages/AgentDetail'
 import ConversationHistory from './pages/ConversationHistory'
 import ClosedChatView from './pages/ClosedChatView'
 import Settings from './pages/Settings'
@@ -21,10 +20,10 @@ import CustomersVisitors from './pages/CustomersVisitors'
 import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
-import TagsSettings from './pages/TagsSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
 import ResetApplication from './pages/ResetApplication'
+import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
 import NotificationToasts from './components/NotificationToasts'
@@ -284,8 +283,8 @@ function App() {
 
         try {
           const chats = await fetchActiveChats()
-          const openChats = chats.filter((c) => c.status === 'open')
-          setUnreadChatsCount(openChats.length)
+          const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
+          setUnreadChatsCount(unreadChats.length)
         } catch (error) {
           console.error('Failed to update chat count:', error)
         }
@@ -296,8 +295,8 @@ function App() {
     const updateChatCount = async () => {
       try {
         const chats = await fetchActiveChats()
-        const openChats = chats.filter(c => c.status === 'open')
-        setUnreadChatsCount(openChats.length)
+        const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
+        setUnreadChatsCount(unreadChats.length)
       } catch (error) {
         console.error('Failed to update chat count:', error)
       }
@@ -377,39 +376,38 @@ function App() {
                   element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />}
                 />
                 <Route
+                  path="websites/new"
+                  element={<Navigate to="/dashboard/settings/websites" replace />}
+                />
+                <Route
                   path="websites/:id"
                   element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
                 />
 
-                {/* Agents management - Admin only */}
+                {/* Users management - Admin only */}
                 <Route
                   path="users"
                   element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
                 />
-                <Route
-                  path="users/:id"
-                  element={isAdmin(user) ? <AgentDetail /> : <Navigate to="/dashboard/chats" replace />}
-                />
-
-                {/* Legacy settings routes (agents -> users) */}
+                {/* Legacy routes – detail page removed, redirect to list */}
+                <Route path="users/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
                 <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
-                <Route path="agents/:id" element={<LegacySettingsAgentsRedirect />} />
+                <Route path="agents/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
 
-                {/* Tags management - Admin only */}
-                <Route
-                  path="tags"
-                  element={isAdmin(user) ? <TagsSettings /> : <Navigate to="/dashboard/chats" replace />}
-                />
+                {/* Tags route removed – tags are now per-website inside WebsiteDetail */}
 
                 {/* Personal settings - All users */}
                 <Route path="personal" element={<PersonalSettings />} />
                 <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
                 <Route index element={
-                  <div className="p-8">
-                    <div className="max-w-4xl">
-                      <div className="text-center text-gray-500 dark:text-gray-400 py-12">
-                        Select a settings section from the sidebar
+                  <div className="flex-1 flex items-center justify-center h-full">
+                    <div className="text-center max-w-md px-8">
+                      <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                        <Logo size={50} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
                       </div>
+                      <p className="text-base text-gray-500 dark:text-gray-400">
+                        Select a section from the sidebar.
+                      </p>
                     </div>
                   </div>
                 } />
@@ -442,12 +440,6 @@ function App() {
       </Routes>
     </BrowserRouter>
   )
-}
-
-function LegacySettingsAgentsRedirect() {
-  const { id } = useParams<{ id?: string }>()
-  const target = id ? `/dashboard/settings/users/${id}` : '/dashboard/settings/users'
-  return <Navigate to={target} replace />
 }
 
 export default App

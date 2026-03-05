@@ -13,6 +13,7 @@ Scope:
 
 from typing import Optional, Any
 import asyncio
+import json
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from app.services.chat_service import ChatService
 from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message
+from app.models.automation import Automation
 from app.core.logging import get_logger
 from app.services.website_resolver import is_website_online
 
@@ -505,6 +507,16 @@ class ConversationOrchestrator:
         if prior_message_count == 0:
             await self._broadcast_new_chat_to_agents(conversation)
 
+            # Fire "conversation_created" automations (e.g., team routing chatbot).
+            try:
+                await self._fire_conversation_created_automations(
+                    conversation=conversation,
+                    website_id=website_id,
+                    visitor_ws=visitor_ws,
+                )
+            except Exception as e:
+                logger.warning("conversation_created_automation_failed", error=str(e))
+
         # Schedule a single waiting bot message after 60s if still unassigned.
         if conversation.id not in _waiting_bot_message_scheduled:
             _waiting_bot_message_scheduled.add(conversation.id)
@@ -588,6 +600,258 @@ class ConversationOrchestrator:
                 )
         except Exception:
             pass
+
+    async def _fire_conversation_created_automations(
+        self,
+        *,
+        conversation: Conversation,
+        website_id: int,
+        visitor_ws: Any | None = None,
+    ) -> None:
+        """Fire 'conversation_created' automations such as bot_prompt_buttons.
+
+        If a bot_prompt_buttons action is found, send the prompt + buttons to
+        the visitor via WebSocket so the widget can render interactive buttons.
+        The prompt message is also persisted as a bot message for history replay.
+
+        Skipped when the bot prompt was already sent during the welcome flow
+        (``_send_delayed_welcome`` with ``chatbot_buttons``).
+        """
+        from app.repos import messages as messages_repo
+
+        # Guard: skip if bot prompt buttons already sent (e.g. during welcome).
+        existing = messages_repo.get_last_event_message(
+            self.db, conversation.id, "bot_prompt_buttons"
+        )
+        if existing:
+            return
+
+        automation_service = AutomationService(self.db)
+        prompt_actions = automation_service.get_actions_by_type(
+            website_id=website_id,
+            trigger="conversation_created",
+            action_type="bot_prompt_buttons",
+        )
+
+        if not prompt_actions:
+            return
+
+        action = prompt_actions[0]  # Only first prompt for now
+        message_text = action.get("message", "")
+        buttons = action.get("buttons") or []
+        automation_id = action.get("automation_id")
+
+        if not message_text or not isinstance(message_text, str):
+            return
+
+        # Validate buttons — each needs a label; team_id is optional
+        validated_buttons = []
+        for i, btn in enumerate(buttons):
+            if not isinstance(btn, dict):
+                continue
+            label = btn.get("label", "").strip()
+            if not label:
+                continue
+            validated_buttons.append({
+                "label": label,
+                "team_id": btn.get("team_id"),
+                "reply": btn.get("reply", ""),
+            })
+
+        # Persist with enriched JSON content for history replay
+        enriched_content = json.dumps({
+            "message": message_text.strip(),
+            "automation_id": automation_id,
+            "buttons": validated_buttons,
+        })
+        saved = self.conversation_service.add_bot_message(
+            conversation.id,
+            enriched_content,
+            event_type="bot_prompt_buttons",
+        )
+
+        # Build the WS payload with buttons metadata
+        ws_payload = {
+            "type": "bot_prompt",
+            "message": message_text.strip(),
+            "conversation_id": conversation.id,
+            "automation_id": automation_id,
+            "buttons": validated_buttons,
+            "message_obj": serialize_message(self.db, saved),
+        }
+
+        # Send to visitor
+        if visitor_ws is not None:
+            try:
+                await visitor_ws.send_json(ws_payload)
+            except Exception:
+                pass
+        else:
+            await ChatService.send_to_visitor(conversation.id, ws_payload)
+
+    async def handle_bot_button_click(
+        self,
+        *,
+        conversation_id: int,
+        automation_id: int,
+        button_index: int,
+        visitor_ws: Any | None = None,
+    ) -> dict | None:
+        """Handle a visitor clicking on a bot prompt button.
+
+        Looks up the automation, finds the button at the given index, assigns the
+        team (if configured), and sends a confirmation reply to the visitor.
+
+        Returns a dict with result info, or None on error.
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            logger.warning("bot_button_click_no_conversation", conversation_id=conversation_id)
+            return None
+
+        automation = self.db.query(Automation).filter_by(id=automation_id).first()
+        if not automation:
+            logger.warning("bot_button_click_no_automation", automation_id=automation_id)
+            return None
+
+        # Extract the button from the automation's actions
+        raw_actions = automation.actions or {}
+        if isinstance(raw_actions, str):
+            try:
+                raw_actions = json.loads(raw_actions)
+            except Exception:
+                return None
+
+        if isinstance(raw_actions, dict):
+            raw_actions = [raw_actions]
+        elif not isinstance(raw_actions, list):
+            return None
+
+        # Find the bot_prompt_buttons action
+        prompt_action = None
+        for act in raw_actions:
+            if isinstance(act, dict) and str(act.get("type", "")).lower() == "bot_prompt_buttons":
+                prompt_action = act
+                break
+
+        if not prompt_action:
+            logger.warning("bot_button_click_no_prompt_action", automation_id=automation_id)
+            return None
+
+        buttons = prompt_action.get("buttons") or []
+        if not isinstance(buttons, list) or button_index < 0 or button_index >= len(buttons):
+            logger.warning("bot_button_click_invalid_index", automation_id=automation_id, button_index=button_index)
+            return None
+
+        button = buttons[button_index]
+        if not isinstance(button, dict):
+            return None
+
+        label = button.get("label", "")
+        team_id = button.get("team_id")
+        reply = button.get("reply", "")
+
+        result = {
+            "label": label,
+            "team_id": None,
+            "team_name": None,
+        }
+
+        # Persist the visitor's button selection as a visitor message
+        visitor_selection_msg = self.conversation_service.add_visitor_message(
+            conversation_id=conversation.id,
+            content=str(label),
+        )
+
+        # Broadcast the visitor's button click to agents
+        if visitor_selection_msg:
+            if conversation.assigned_agent_id:
+                await self.agent_service.send_to_agent(
+                    conversation.assigned_agent_id,
+                    {
+                        "type": "visitor_message",
+                        "conversation_id": conversation.id,
+                        "message": str(label),
+                        "message_obj": serialize_message(self.db, visitor_selection_msg),
+                    },
+                )
+            else:
+                await self.agent_service.broadcast_to_active_agents(
+                    website_id=int(conversation.website_id),
+                    message_data={
+                        "type": "visitor_message",
+                        "conversation_id": conversation.id,
+                        "website_id": int(conversation.website_id),
+                        "message": str(label),
+                        "message_obj": serialize_message(self.db, visitor_selection_msg),
+                    },
+                    include_global=True,
+                )
+
+        # Assign team if configured
+        if team_id is not None:
+            try:
+                team_id = int(team_id)
+                from app.models.website_team import WebsiteTeam
+
+                team = self.db.query(WebsiteTeam).filter_by(id=team_id).first()
+                if team and int(team.website_id) == int(conversation.website_id):
+                    conversation.team_id = team.id
+                    self.db.commit()
+                    result["team_id"] = team.id
+                    result["team_name"] = team.name
+
+                    # Broadcast team change to agents
+                    await self.agent_service.broadcast_to_active_agents(
+                        website_id=int(conversation.website_id),
+                        message_data={
+                            "type": "conversation_team_changed",
+                            "conversation_id": conversation.id,
+                            "website_id": int(conversation.website_id),
+                            "team_id": team.id,
+                        },
+                        include_global=True,
+                    )
+
+                    logger.info(
+                        "bot_button_team_assigned",
+                        conversation_id=conversation.id,
+                        team_id=team.id,
+                        team_name=team.name,
+                        button_label=label,
+                    )
+                else:
+                    logger.warning(
+                        "bot_button_team_not_found",
+                        team_id=team_id,
+                        website_id=conversation.website_id,
+                    )
+            except Exception as e:
+                logger.error("bot_button_team_assign_failed", error=str(e))
+
+        # Send reply message to visitor
+        if reply and isinstance(reply, str) and reply.strip():
+            saved_reply = self.conversation_service.add_bot_message(
+                conversation.id,
+                reply.strip(),
+                event_type="bot_button_reply",
+            )
+
+            reply_payload = {
+                "type": "bot",
+                "message": reply.strip(),
+                "message_obj": serialize_message(self.db, saved_reply),
+            }
+
+            if visitor_ws is not None:
+                try:
+                    await visitor_ws.send_json(reply_payload)
+                except Exception:
+                    pass
+            else:
+                await ChatService.send_to_visitor(conversation.id, reply_payload)
+
+        return result
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
         """Handle agent claiming/joining a conversation."""
