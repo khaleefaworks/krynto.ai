@@ -1,27 +1,508 @@
-export default function Analytics() {
+import { useEffect, useState, useCallback } from 'react'
+import { apiRequest } from '@/services/api'
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
+} from 'recharts'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Website {
+  id: number
+  name: string
+  domain: string
+}
+
+interface KpiMetric {
+  value: number | null
+  previous: number | null
+  change_pct: number | null
+}
+
+interface OverviewData {
+  period: { start: string; end: string }
+  previous_period: { start: string; end: string }
+  new_conversations: KpiMetric
+  resolved_conversations: KpiMetric
+  avg_first_response_seconds: KpiMetric
+}
+
+interface ChartPoint {
+  date: string
+  value: number
+}
+
+interface AgentStat {
+  id: number
+  name: string
+  email: string
+  role: string
+  conversations_handled: number
+  messages_sent: number
+  avg_first_response_seconds: number | null
+}
+
+interface TagStat {
+  id: number
+  name: string
+  color: string
+  usage_count: number
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '—'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  return `${h}h ${m}m`
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function dateNDaysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+const PRESET_RANGES = [
+  { label: 'Last 7 days', days: 7 },
+  { label: 'Last 14 days', days: 14 },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+]
+
+const TAG_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1',
+]
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function KpiCard({ title, value, previous, changePct, format = 'number' }: {
+  title: string
+  value: number | null
+  previous: number | null
+  changePct: number | null
+  format?: 'number' | 'duration'
+}) {
+  const display = format === 'duration' ? formatDuration(value) : (value ?? 0).toLocaleString()
+  const prevDisplay = format === 'duration' ? formatDuration(previous) : (previous ?? 0).toLocaleString()
+
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
-      <div className="text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-full mb-4">
-          <svg
-            className="w-8 h-8 text-gray-400 dark:text-gray-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">{title}</p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-white">{display}</p>
+      <div className="flex items-center gap-2 mt-2">
+        {changePct !== null && (
+          <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${
+            changePct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+              : changePct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+          }`}>
+            {changePct > 0 ? '↑' : changePct < 0 ? '↓' : '→'} {Math.abs(changePct)}%
+          </span>
+        )}
+        <span className="text-xs text-gray-400 dark:text-gray-500">
+          vs prev: {prevDisplay}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">{title}</h3>
+      <div className="h-64">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ConversationChart({ data, color, label }: { data: ChartPoint[]; color: string; label: string }) {
+  const chartData = data.map(d => ({ date: formatDate(d.date), value: d.value }))
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <defs>
+          <linearGradient id={`gradient-${label}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="95%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
+        <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+        <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" allowDecimals={false} />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: '#1f2937',
+            border: '1px solid #374151',
+            borderRadius: '8px',
+            color: '#f9fafb',
+            fontSize: '12px',
+          }}
+        />
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke={color}
+          strokeWidth={2}
+          fill={`url(#gradient-${label})`}
+          name={label}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+}
+
+function ResponseTimeChart({ data }: { data: ChartPoint[] }) {
+  const chartData = data.map(d => ({
+    date: formatDate(d.date),
+    value: Math.round(d.value),
+  }))
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
+        <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+        <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" unit="s" />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: '#1f2937',
+            border: '1px solid #374151',
+            borderRadius: '8px',
+            color: '#f9fafb',
+            fontSize: '12px',
+          }}
+          formatter={(val: number) => [formatDuration(val), 'Response Time']}
+        />
+        <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Median Response Time" />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
+
+export default function Analytics() {
+  const [websites, setWebsites] = useState<Website[]>([])
+  const [selectedWebsite, setSelectedWebsite] = useState<number | ''>('')
+  const [dateRange, setDateRange] = useState(30)
+  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags'>('conversations')
+
+  // Data
+  const [overview, setOverview] = useState<OverviewData | null>(null)
+  const [newChart, setNewChart] = useState<ChartPoint[]>([])
+  const [resolvedChart, setResolvedChart] = useState<ChartPoint[]>([])
+  const [repliedChart, setRepliedChart] = useState<ChartPoint[]>([])
+  const [responseChart, setResponseChart] = useState<ChartPoint[]>([])
+  const [agents, setAgents] = useState<AgentStat[]>([])
+  const [tags, setTags] = useState<TagStat[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const startDate = dateNDaysAgo(dateRange - 1)
+  const endDate = todayStr()
+
+  // Load websites list
+  useEffect(() => {
+    apiRequest<Website[]>('/websites').then(setWebsites).catch(() => {})
+  }, [])
+
+  // Build query string
+  const qs = useCallback(() => {
+    const params = new URLSearchParams()
+    params.set('start', startDate)
+    params.set('end', endDate)
+    if (selectedWebsite) params.set('website_id', String(selectedWebsite))
+    return params.toString()
+  }, [startDate, endDate, selectedWebsite])
+
+  // Load data on filter change
+  useEffect(() => {
+    setLoading(true)
+    const q = qs()
+
+    Promise.all([
+      apiRequest<OverviewData>(`/analytics/overview?${q}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/new?${q}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/resolved?${q}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/replied?${q}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/response-time?${q}`),
+      apiRequest<{ agents: AgentStat[] }>(`/analytics/agents/summary?${q}`),
+      apiRequest<{ tags: TagStat[] }>(`/analytics/tags/summary?${q}`),
+    ])
+      .then(([ov, nc, rc, rpc, rt, ag, tg]) => {
+        setOverview(ov)
+        setNewChart(nc.series)
+        setResolvedChart(rc.series)
+        setRepliedChart(rpc.series)
+        setResponseChart(rt.series)
+        setAgents(ag.agents)
+        setTags(tg.tags)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [qs])
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 overflow-auto">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Monitor conversations, agent performance, and tag usage
+              </p>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Website filter */}
+              <select
+                value={selectedWebsite}
+                onChange={e => setSelectedWebsite(e.target.value ? Number(e.target.value) : '')}
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">All Websites</option>
+                {websites.map(w => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+              {/* Date range */}
+              <select
+                value={dateRange}
+                onChange={e => setDateRange(Number(e.target.value))}
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {PRESET_RANGES.map(r => (
+                  <option key={r.days} value={r.days}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Analytics</h2>
-        <p className="text-gray-500 dark:text-gray-400">Coming Soon</p>
-        <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
-          Analytics and reporting features will be available in a future update
-        </p>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {loading && !overview ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+          </div>
+        ) : (
+          <>
+            {/* KPI Cards */}
+            {overview && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <KpiCard
+                  title="New Conversations"
+                  value={overview.new_conversations.value}
+                  previous={overview.new_conversations.previous}
+                  changePct={overview.new_conversations.change_pct}
+                />
+                <KpiCard
+                  title="Resolved Conversations"
+                  value={overview.resolved_conversations.value}
+                  previous={overview.resolved_conversations.previous}
+                  changePct={overview.resolved_conversations.change_pct}
+                />
+                <KpiCard
+                  title="Avg. First Response"
+                  value={overview.avg_first_response_seconds.value}
+                  previous={overview.avg_first_response_seconds.previous}
+                  changePct={overview.avg_first_response_seconds.change_pct}
+                  format="duration"
+                />
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit">
+              {(['conversations', 'agents', 'tags'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                    activeTab === tab
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Conversations Tab */}
+            {activeTab === 'conversations' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <ChartCard title="New Conversations">
+                  <ConversationChart data={newChart} color="#3b82f6" label="New" />
+                </ChartCard>
+                <ChartCard title="Resolved Conversations">
+                  <ConversationChart data={resolvedChart} color="#10b981" label="Resolved" />
+                </ChartCard>
+                <ChartCard title="Replied Conversations">
+                  <ConversationChart data={repliedChart} color="#f59e0b" label="Replied" />
+                </ChartCard>
+                <ChartCard title="Response Time (Median)">
+                  <ResponseTimeChart data={responseChart} />
+                </ChartCard>
+              </div>
+            )}
+
+            {/* Agents Tab */}
+            {activeTab === 'agents' && (
+              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Agent Performance</h3>
+                </div>
+                {agents.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-gray-400 dark:text-gray-500">
+                    No agent data available for this period.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-5 py-3">Agent</th>
+                          <th className="px-5 py-3">Role</th>
+                          <th className="px-5 py-3 text-right">Conversations</th>
+                          <th className="px-5 py-3 text-right">Messages Sent</th>
+                          <th className="px-5 py-3 text-right">Avg. Response</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {agents.map(agent => (
+                          <tr key={agent.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td className="px-5 py-3">
+                              <div>
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">{agent.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">{agent.email}</p>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3">
+                              <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${
+                                agent.role === 'system_manager' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                                  : agent.role === 'manager' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                              }`}>
+                                {agent.role === 'system_manager' ? 'Admin' : agent.role === 'manager' ? 'Manager' : 'Agent'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white font-medium">
+                              {agent.conversations_handled}
+                            </td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">
+                              {agent.messages_sent}
+                            </td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">
+                              {formatDuration(agent.avg_first_response_seconds)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tags Tab */}
+            {activeTab === 'tags' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Tags table */}
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Tag Usage</h3>
+                  </div>
+                  {tags.length === 0 ? (
+                    <div className="px-5 py-12 text-center text-gray-400 dark:text-gray-500">
+                      No tag data available for this period.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {tags.map((tag, i) => (
+                        <div key={tag.id} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-gray-400 dark:text-gray-500 w-5 text-right">{i + 1}</span>
+                            <span
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: tag.color || '#6b7280' }}
+                            />
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{tag.name}</span>
+                          </div>
+                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            {tag.usage_count}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Tags pie chart */}
+                <ChartCard title="Tag Distribution">
+                  {tags.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+                      No tag data available
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={tags.slice(0, 10).map(t => ({ name: t.name, value: t.usage_count }))}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={90}
+                          paddingAngle={2}
+                          dataKey="value"
+                          label={({ name, percent }: { name: string; percent: number }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          labelLine={false}
+                        >
+                          {tags.slice(0, 10).map((t, i) => (
+                            <Cell key={t.id} fill={t.color || TAG_COLORS[i % TAG_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: '#1f2937',
+                            border: '1px solid #374151',
+                            borderRadius: '8px',
+                            color: '#f9fafb',
+                            fontSize: '12px',
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </ChartCard>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
