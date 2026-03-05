@@ -165,11 +165,10 @@ export default function VisitorDetailsPanel({
               {rating.rating === 1 ? '😊' : rating.rating === 0 ? '😐' : '😞'}
             </span>
             <div>
-              <span className={`text-sm font-medium ${
-                rating.rating === 1 ? 'text-green-600 dark:text-green-400' :
-                rating.rating === 0 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-red-600 dark:text-red-400'
-              }`}>
+              <span className={`text-sm font-medium ${rating.rating === 1 ? 'text-green-600 dark:text-green-400' :
+                  rating.rating === 0 ? 'text-yellow-600 dark:text-yellow-400' :
+                    'text-red-600 dark:text-red-400'
+                }`}>
                 {rating.rating === 1 ? 'Good' : rating.rating === 0 ? 'Neutral' : 'Bad'}
               </span>
               {rating.feedback && (

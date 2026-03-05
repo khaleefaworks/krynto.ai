@@ -122,8 +122,8 @@ function KpiCard({ title, value, previous, changePct, format = 'number' }: {
       <div className="flex items-center gap-2 mt-2">
         {changePct !== null && (
           <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${changePct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-              : changePct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+            : changePct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
             }`}>
             {changePct > 0 ? '↑' : changePct < 0 ? '↓' : '→'} {Math.abs(changePct)}%
           </span>
@@ -355,8 +355,8 @@ export default function Analytics() {
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === tab
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                     }`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -415,8 +415,8 @@ export default function Analytics() {
                             </td>
                             <td className="px-5 py-3">
                               <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${agent.role === 'system_manager' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                                  : agent.role === 'manager' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                                    : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                                : agent.role === 'manager' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                                 }`}>
                                 {agent.role === 'system_manager' ? 'Admin' : agent.role === 'manager' ? 'Manager' : 'Agent'}
                               </span>
