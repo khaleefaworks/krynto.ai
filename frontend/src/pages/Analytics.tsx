@@ -51,6 +51,16 @@ interface TagStat {
   usage_count: number
 }
 
+interface RatingSummary {
+  total: number
+  good: number
+  neutral: number
+  bad: number
+  good_pct: number
+  neutral_pct: number
+  bad_pct: number
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -111,11 +121,10 @@ function KpiCard({ title, value, previous, changePct, format = 'number' }: {
       <p className="text-2xl font-bold text-gray-900 dark:text-white">{display}</p>
       <div className="flex items-center gap-2 mt-2">
         {changePct !== null && (
-          <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${
-            changePct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+          <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${changePct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
               : changePct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-          }`}>
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+            }`}>
             {changePct > 0 ? '↑' : changePct < 0 ? '↓' : '→'} {Math.abs(changePct)}%
           </span>
         )}
@@ -193,7 +202,7 @@ function ResponseTimeChart({ data }: { data: ChartPoint[] }) {
             color: '#f9fafb',
             fontSize: '12px',
           }}
-          formatter={(val: number) => [formatDuration(val), 'Response Time']}
+          formatter={(val) => [formatDuration(val as number), 'Response Time']}
         />
         <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Median Response Time" />
       </BarChart>
@@ -209,7 +218,7 @@ export default function Analytics() {
   const [websites, setWebsites] = useState<Website[]>([])
   const [selectedWebsite, setSelectedWebsite] = useState<number | ''>('')
   const [dateRange, setDateRange] = useState(30)
-  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags'>('conversations')
+  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings'>('conversations')
 
   // Data
   const [overview, setOverview] = useState<OverviewData | null>(null)
@@ -219,6 +228,7 @@ export default function Analytics() {
   const [responseChart, setResponseChart] = useState<ChartPoint[]>([])
   const [agents, setAgents] = useState<AgentStat[]>([])
   const [tags, setTags] = useState<TagStat[]>([])
+  const [ratings, setRatings] = useState<RatingSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   const startDate = dateNDaysAgo(dateRange - 1)
@@ -226,7 +236,7 @@ export default function Analytics() {
 
   // Load websites list
   useEffect(() => {
-    apiRequest<Website[]>('/websites').then(setWebsites).catch(() => {})
+    apiRequest<Website[]>('/websites').then(setWebsites).catch(() => { })
   }, [])
 
   // Build query string
@@ -251,8 +261,9 @@ export default function Analytics() {
       apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/response-time?${q}`),
       apiRequest<{ agents: AgentStat[] }>(`/analytics/agents/summary?${q}`),
       apiRequest<{ tags: TagStat[] }>(`/analytics/tags/summary?${q}`),
+      apiRequest<RatingSummary>(`/analytics/ratings/summary?${q}`),
     ])
-      .then(([ov, nc, rc, rpc, rt, ag, tg]) => {
+      .then(([ov, nc, rc, rpc, rt, ag, tg, rs]) => {
         setOverview(ov)
         setNewChart(nc.series)
         setResolvedChart(rc.series)
@@ -260,13 +271,14 @@ export default function Analytics() {
         setResponseChart(rt.series)
         setAgents(ag.agents)
         setTags(tg.tags)
+        setRatings(rs)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [qs])
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 overflow-auto">
+    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
@@ -338,15 +350,14 @@ export default function Analytics() {
 
             {/* Tabs */}
             <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit">
-              {(['conversations', 'agents', 'tags'] as const).map(tab => (
+              {(['conversations', 'agents', 'tags', 'ratings'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
-                    activeTab === tab
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === tab
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
@@ -403,11 +414,10 @@ export default function Analytics() {
                               </div>
                             </td>
                             <td className="px-5 py-3">
-                              <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${
-                                agent.role === 'system_manager' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                              <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${agent.role === 'system_manager' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                                   : agent.role === 'manager' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                              }`}>
+                                    : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                                }`}>
                                 {agent.role === 'system_manager' ? 'Admin' : agent.role === 'manager' ? 'Manager' : 'Agent'}
                               </span>
                             </td>
@@ -479,7 +489,7 @@ export default function Analytics() {
                           outerRadius={90}
                           paddingAngle={2}
                           dataKey="value"
-                          label={({ name, percent }: { name: string; percent: number }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          label={({ name, percent }) => `${name ?? ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                           labelLine={false}
                         >
                           {tags.slice(0, 10).map((t, i) => (
@@ -499,6 +509,77 @@ export default function Analytics() {
                     </ResponsiveContainer>
                   )}
                 </ChartCard>
+              </div>
+            )}
+
+            {/* Ratings Tab */}
+            {activeTab === 'ratings' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Rating Summary Cards */}
+                <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Total Ratings</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-white">{ratings?.total ?? 0}</p>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
+                    <p className="text-2xl mb-1">&#x1F60A;</p>
+                    <p className="text-xl font-bold text-green-600 dark:text-green-400">{ratings?.good ?? 0}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Good ({ratings?.good_pct ?? 0}%)</p>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
+                    <p className="text-2xl mb-1">&#x1F610;</p>
+                    <p className="text-xl font-bold text-yellow-600 dark:text-yellow-400">{ratings?.neutral ?? 0}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Neutral ({ratings?.neutral_pct ?? 0}%)</p>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
+                    <p className="text-2xl mb-1">&#x1F61E;</p>
+                    <p className="text-xl font-bold text-red-600 dark:text-red-400">{ratings?.bad ?? 0}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Bad ({ratings?.bad_pct ?? 0}%)</p>
+                  </div>
+                </div>
+
+                {/* Satisfaction bar */}
+                {ratings && ratings.total > 0 && (
+                  <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Satisfaction Distribution</h3>
+                    <div className="flex rounded-full overflow-hidden h-8">
+                      {ratings.good > 0 && (
+                        <div
+                          className="bg-green-500 flex items-center justify-center text-white text-xs font-semibold transition-all"
+                          style={{ width: `${ratings.good_pct}%` }}
+                        >
+                          {ratings.good_pct}%
+                        </div>
+                      )}
+                      {ratings.neutral > 0 && (
+                        <div
+                          className="bg-yellow-400 flex items-center justify-center text-gray-800 text-xs font-semibold transition-all"
+                          style={{ width: `${ratings.neutral_pct}%` }}
+                        >
+                          {ratings.neutral_pct}%
+                        </div>
+                      )}
+                      {ratings.bad > 0 && (
+                        <div
+                          className="bg-red-500 flex items-center justify-center text-white text-xs font-semibold transition-all"
+                          style={{ width: `${ratings.bad_pct}%` }}
+                        >
+                          {ratings.bad_pct}%
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-center gap-6 mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500 inline-block" /> Good</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-400 inline-block" /> Neutral</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500 inline-block" /> Bad</span>
+                    </div>
+                  </div>
+                )}
+                {(!ratings || ratings.total === 0) && (
+                  <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-12 text-center text-gray-400 dark:text-gray-500">
+                    No ratings received for this period.
+                  </div>
+                )}
               </div>
             )}
           </>

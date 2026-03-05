@@ -322,6 +322,84 @@
     }
   }
 
+  // --- Rating ---
+
+  let ratingConversationId = null;
+  let hasRatedSession = false;
+
+  function _ratedStorageKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_rated_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function showRatingOverlay(conversationId) {
+    if (hasRatedSession) return;
+    try {
+      const key = _ratedStorageKey();
+      if (key && sessionStorage.getItem(key) === '1') { hasRatedSession = true; return; }
+    } catch (e) { }
+
+    ratingConversationId = conversationId || null;
+    const el = document.getElementById('chatassist-rating-overlay');
+    if (!el) return;
+    // Reset state
+    const thanks = document.getElementById('chatassist-rating-thanks');
+    if (thanks) thanks.style.display = 'none';
+    const emojis = el.querySelector('.chatassist-rating-emojis');
+    if (emojis) emojis.style.display = 'flex';
+    el.querySelectorAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
+    el.style.display = 'flex';
+    el.classList.add('chatassist-rating-overlay-visible');
+  }
+
+  function hideRatingOverlay() {
+    const el = document.getElementById('chatassist-rating-overlay');
+    if (el) {
+      el.classList.remove('chatassist-rating-overlay-visible');
+      el.style.display = 'none';
+    }
+  }
+
+  function submitRating(ratingValue) {
+    hasRatedSession = true;
+    try {
+      const key = _ratedStorageKey();
+      if (key) sessionStorage.setItem(key, '1');
+    } catch (e) { }
+
+    // Submit via WebSocket if connected
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({
+          type: 'submit_rating',
+          rating: ratingValue,
+          conversation_id: ratingConversationId,
+        }));
+      } catch (e) { }
+    } else {
+      // Fallback: HTTP POST
+      try {
+        const apiBase = CONFIG.serverUrl.replace(/\/widget\/.*$/, '').replace(/\/ws\/.*$/, '');
+        fetch(apiBase + '/ratings/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: ratingConversationId,
+            rating: ratingValue,
+            session_id: CONFIG.sessionId,
+          }),
+        }).catch(() => { });
+      } catch (e) { }
+    }
+
+    // Show thank you & auto-close
+    const thanks = document.getElementById('chatassist-rating-thanks');
+    const emojis = document.querySelector('.chatassist-rating-emojis');
+    if (thanks) thanks.style.display = 'block';
+    if (emojis) emojis.style.display = 'none';
+    setTimeout(() => hideRatingOverlay(), 1500);
+  }
+
   // --- Audio ---
 
   function enableNotificationSound() {
@@ -569,6 +647,11 @@
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
         else showSystemMessage(data.message);
+        // When conversation is resolved by agent, show rating overlay
+        if (eventType === 'conversation_resolved') {
+          const convId = (dto && dto.conversation_id) || (data && data.conversation_id) || ratingConversationId;
+          showRatingOverlay(convId);
+        }
       } else {
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
@@ -1611,6 +1694,27 @@
             </div>
           </div>
         </div>
+        <div id="chatassist-rating-overlay" class="chatassist-rating-overlay" style="display:none;">
+          <div class="chatassist-rating-overlay-backdrop"></div>
+          <div class="chatassist-rating-overlay-panel">
+            <button id="chatassist-rating-close" class="chatassist-rating-close">&times;</button>
+            <div class="chatassist-rating-title">How would you rate our support?</div>
+            <div class="chatassist-rating-emojis">
+              <button class="chatassist-rating-btn" data-rating="1" title="Good">
+                <span class="chatassist-rating-emoji">&#x1F60A;</span>
+              </button>
+              <button class="chatassist-rating-btn" data-rating="0" title="Neutral">
+                <span class="chatassist-rating-emoji">&#x1F610;</span>
+              </button>
+              <button class="chatassist-rating-btn" data-rating="-1" title="Bad">
+                <span class="chatassist-rating-emoji">&#x1F61E;</span>
+              </button>
+            </div>
+            <div id="chatassist-rating-thanks" class="chatassist-rating-thanks" style="display:none;">
+              Thank you for your feedback!
+            </div>
+          </div>
+        </div>
         <div id="chatassist-header">
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
@@ -1739,7 +1843,21 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      closeWidget(true);
+      // Show rating overlay instead of immediately closing
+      showRatingOverlay(CONFIG.conversationId || null);
+    });
+
+    // Rating overlay buttons
+    document.getElementById('chatassist-rating-close').addEventListener('click', () => {
+      hideRatingOverlay();
+    });
+    document.querySelectorAll('.chatassist-rating-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        const val = parseInt(btn.getAttribute('data-rating'), 10);
+        submitRating(val);
+      });
     });
 
     document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));

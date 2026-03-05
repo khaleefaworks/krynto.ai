@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.conversation_tag import ConversationTag
+from app.models.conversation_rating import ConversationRating
 from app.models.tag import Tag
 from app.models.user import User, UserRole
 from app.api.deps import get_current_user
@@ -571,4 +572,49 @@ def analytics_overview(
             "previous": prev_response,
             "change_pct": _pct_change(current_response, prev_response),
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ratings summary
+# ---------------------------------------------------------------------------
+
+@router.get("/ratings/summary")
+def ratings_summary(
+    website_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """Satisfaction rating breakdown for the period."""
+    start_dt, end_dt = _date_range(start, end)
+
+    q = (
+        db.query(
+            ConversationRating.rating,
+            func.count(ConversationRating.id).label("cnt"),
+        )
+        .join(Conversation, Conversation.id == ConversationRating.conversation_id)
+        .filter(ConversationRating.created_at >= start_dt)
+        .filter(ConversationRating.created_at <= end_dt)
+    )
+    if website_id:
+        q = q.filter(Conversation.website_id == website_id)
+
+    rows = q.group_by(ConversationRating.rating).all()
+
+    counts = {1: 0, 0: 0, -1: 0}
+    for rating_val, cnt in rows:
+        counts[rating_val] = cnt
+
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "good": counts[1],
+        "neutral": counts[0],
+        "bad": counts[-1],
+        "good_pct": round(counts[1] / total * 100, 1) if total else 0,
+        "neutral_pct": round(counts[0] / total * 100, 1) if total else 0,
+        "bad_pct": round(counts[-1] / total * 100, 1) if total else 0,
     }

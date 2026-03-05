@@ -279,6 +279,7 @@ export default function ConversationsView() {
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
+    const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
 
@@ -1102,11 +1103,19 @@ export default function ConversationsView() {
                 fetchedHistory = []
             }
 
+            let fetchedRating: { rating: number; feedback?: string } | null = null
+            try {
+                fetchedRating = await apiRequest<{ rating: number; feedback?: string }>(`/ratings/${chatId}`)
+            } catch {
+                fetchedRating = null
+            }
+
             if (loadDetailsTokenRef.current !== token) {
                 return
             }
             setNotes(fetchedNotes)
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
+            setConversationRating(fetchedRating)
         } catch (error) {
             console.error("Failed to load conversation details:", error)
         }
@@ -2166,6 +2175,7 @@ export default function ConversationsView() {
                                         creator_name: note.creator_name || 'Unknown'
                                     }))}
                                     browsingHistory={browsingHistory}
+                                    rating={conversationRating}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {

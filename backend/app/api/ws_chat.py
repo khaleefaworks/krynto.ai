@@ -763,6 +763,52 @@ async def chat_ws(
 
                 continue
 
+            # Handle visitor rating submission
+            if message_type == "submit_rating":
+                rating_val = payload.get("rating")
+                conv_id = payload.get("conversation_id")
+                if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
+                    try:
+                        from app.models.conversation_rating import ConversationRating
+
+                        # Find conversation if conv_id not provided
+                        if not conv_id:
+                            conv = conversations_repo.get_conversation_by_session(
+                                db, website_id=website_id, session_id=session_id
+                            )
+                            if conv:
+                                conv_id = conv.id
+
+                        if conv_id:
+                            existing = (
+                                db.query(ConversationRating)
+                                .filter(ConversationRating.conversation_id == conv_id)
+                                .first()
+                            )
+                            if existing:
+                                existing.rating = rating_val
+                                db.commit()
+                            else:
+                                new_rating = ConversationRating(
+                                    conversation_id=conv_id,
+                                    rating=rating_val,
+                                    session_id=session_id,
+                                )
+                                db.add(new_rating)
+                                db.commit()
+                            logger.info(
+                                "rating_submitted_ws",
+                                conversation_id=conv_id,
+                                rating=rating_val,
+                            )
+                    except Exception as e:
+                        logger.warning("rating_submit_failed", error=str(e))
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                continue
+
             if message_type == "typing":
                 is_typing = bool(payload.get("is_typing"))
 

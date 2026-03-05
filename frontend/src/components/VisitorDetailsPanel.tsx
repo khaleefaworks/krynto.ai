@@ -53,6 +53,8 @@ interface VisitorDetailsPanelProps {
     referrer: string | null
     created_at: string
   }>
+
+  rating?: { rating: number; feedback?: string } | null
 }
 
 export default function VisitorDetailsPanel({
@@ -62,6 +64,7 @@ export default function VisitorDetailsPanel({
   onAddNote,
   onDeleteNote,
   browsingHistory = [],
+  rating,
 }: VisitorDetailsPanelProps) {
   const [editingName, setEditingName] = useState(false)
   const [editingEmail, setEditingEmail] = useState(false)
@@ -152,6 +155,30 @@ export default function VisitorDetailsPanel({
           </span>
         </div>
       </div>
+
+      {/* Visitor Rating */}
+      {rating && (
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Visitor Rating</h4>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">
+              {rating.rating === 1 ? '😊' : rating.rating === 0 ? '😐' : '😞'}
+            </span>
+            <div>
+              <span className={`text-sm font-medium ${
+                rating.rating === 1 ? 'text-green-600 dark:text-green-400' :
+                rating.rating === 0 ? 'text-yellow-600 dark:text-yellow-400' :
+                'text-red-600 dark:text-red-400'
+              }`}>
+                {rating.rating === 1 ? 'Good' : rating.rating === 0 ? 'Neutral' : 'Bad'}
+              </span>
+              {rating.feedback && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{rating.feedback}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Contact Information */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
