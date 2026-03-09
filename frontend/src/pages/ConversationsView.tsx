@@ -1835,8 +1835,12 @@ export default function ConversationsView() {
                                                                     setTagPickerOpen(false)
                                                                     setTagPickerQuery('')
                                                                 }}
-                                                                className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                                className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                                             >
+                                                                <span
+                                                                    className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                                                                    style={{ backgroundColor: String(t?.color || '#6b7280') }}
+                                                                />
                                                                 <span className="truncate">{t.name}</span>
                                                             </button>
                                                         ))}
@@ -1847,7 +1851,7 @@ export default function ConversationsView() {
                                             {isAdmin(user) ? (
                                                 <div className="pt-1 text-right">
                                                     <Link
-                                                        to="/dashboard/settings/tags"
+                                                        to={`/dashboard/settings/websites/${(conversation as any)?.website_id ?? ''}?tab=tags`}
                                                         className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
                                                         onClick={() => {
                                                             setTagPickerOpen(false)

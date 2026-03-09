@@ -416,8 +416,8 @@ function App() {
               {/* Teams - All users (placeholder) */}
               <Route path="teams" element={<Teams />} />
 
-              {/* Analytics - All users (placeholder) */}
-              <Route path="analytics" element={<Analytics />} />
+              {/* Analytics - Admins & Managers only */}
+              <Route path="analytics" element={isAdmin(user) ? <Analytics /> : <Navigate to="/dashboard/chats" replace />} />
 
               {/* Reset Application - Administrator only */}
               <Route

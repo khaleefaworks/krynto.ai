@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
+import { isAdmin } from '@/lib/roles'
 import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
@@ -124,16 +125,18 @@ export default function DashboardLayout() {
         <span className="md:hidden lg:block">Settings</span>
       </Link>
 
-      <Link
-        to="/dashboard/analytics"
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-      >
-        <BarChart3 className="h-5 w-5" />
-        <span className="md:hidden lg:block">Analytics</span>
-      </Link>
+      {isAdmin(user) && (
+        <Link
+          to="/dashboard/analytics"
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+        >
+          <BarChart3 className="h-5 w-5" />
+          <span className="md:hidden lg:block">Analytics</span>
+        </Link>
+      )}
 
     </>
   )
@@ -314,22 +317,24 @@ export default function DashboardLayout() {
               </TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link
-                  to="/dashboard/analytics"
-                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                >
-                  <BarChart3 className="h-5 w-5" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Analytics</p>
-              </TooltipContent>
-            </Tooltip>
+            {isAdmin(user) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    to="/dashboard/analytics"
+                    className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                  >
+                    <BarChart3 className="h-5 w-5" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Analytics</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
           </nav>
 
           {/* Desktop Bottom Actions */}
