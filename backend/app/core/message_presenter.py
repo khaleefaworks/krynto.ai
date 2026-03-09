@@ -120,7 +120,8 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         created_at_iso = None
 
     # For bot_prompt_buttons, the DB content is enriched JSON with buttons metadata.
-    # Extract just the human-readable message for display.
+    # Extract just the human-readable message for display, but preserve the raw
+    # content so the widget can re-parse buttons from history on page reload.
     raw_content = getattr(msg, "content", None)
     display_content = raw_content
     if event_type == "bot_prompt_buttons" and raw_content:
@@ -132,7 +133,7 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         except (ValueError, TypeError):
             pass
 
-    return {
+    result = {
         "id": getattr(msg, "id", None),
         "conversation_id": getattr(msg, "conversation_id", None),
         "sender": getattr(msg, "sender", None),
@@ -145,3 +146,10 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         "content": display_content,
         "created_at": created_at_iso,
     }
+
+    # Include raw enriched JSON for bot_prompt_buttons so the widget can
+    # re-parse buttons when rendering history on page reload/navigation.
+    if event_type == "bot_prompt_buttons" and raw_content and raw_content != display_content:
+        result["raw_content"] = raw_content
+
+    return result

@@ -585,8 +585,10 @@
           appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
         } else if (eventType === 'bot_prompt_buttons') {
           // Parse enriched JSON content for buttons data.
+          // Prefer raw_content (full enriched JSON) over content (display text only).
+          var rawSource = m.raw_content || m.content;
           var promptData = null;
-          try { promptData = JSON.parse(m.content); } catch (e) { /* plain text fallback */ }
+          try { promptData = JSON.parse(rawSource); } catch (e) { /* plain text fallback */ }
           var displayText = (promptData && promptData.message) ? promptData.message : m.content;
           var pButtons = (promptData && Array.isArray(promptData.buttons)) ? promptData.buttons : [];
           var pAutoId = promptData && promptData.automation_id;
@@ -2152,7 +2154,11 @@
           themeStyle.id = 'chatassist-theme-style';
           document.head.appendChild(themeStyle);
         }
-        themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }`;
+        themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }
+.chatassist-prompt-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
+.chatassist-prompt-btn:hover:not(:disabled) { background: ${CONFIG.primaryColor} !important; color: #fff !important; }
+.chatassist-prompt-btn:active:not(:disabled) { background: ${CONFIG.primaryColor} !important; border-color: ${CONFIG.primaryColor} !important; color: #fff !important; }
+.chatassist-prompt-btn-selected { background: ${CONFIG.primaryColor} !important; color: #fff !important; border-color: ${CONFIG.primaryColor} !important; }`;
       } catch (e) { }
 
       await fetchReadState();
