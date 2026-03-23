@@ -1845,8 +1845,13 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      // Show rating overlay instead of immediately closing
-      showRatingOverlay(CONFIG.conversationId || null);
+      // Defer to next frame so the browser paints the end overlay hidden first.
+      // Without this, both the display change and the CSS class are applied in the
+      // same paint frame, which skips the translateY transition on the rating panel,
+      // leaving it clipped below the window's overflow:hidden boundary.
+      requestAnimationFrame(() => {
+        showRatingOverlay(CONFIG.conversationId || null);
+      });
     });
 
     // Rating overlay buttons
