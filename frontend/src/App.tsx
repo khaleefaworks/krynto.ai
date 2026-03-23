@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
-import { isAdmin, isAdministrator } from './lib/roles'
+import { isAdmin } from './lib/roles'
 import { fetchActiveChats } from './services/chats'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
@@ -22,7 +22,6 @@ import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
-import ResetApplication from './pages/ResetApplication'
 import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
@@ -419,12 +418,6 @@ function App() {
               {/* Analytics - Admins & Managers only */}
               <Route path="analytics" element={isAdmin(user) ? <Analytics /> : <Navigate to="/dashboard/chats" replace />} />
 
-              {/* Reset Application - Administrator only */}
-              <Route
-                path="reset"
-                element={isAdministrator(user) ? <ResetApplication /> : <Navigate to="/dashboard/chats" replace />}
-              />
-
               {/* Legacy routes - kept for backwards compatibility */}
               <Route path="websites" element={<WebsiteManagement />} />
 
@@ -432,6 +425,8 @@ function App() {
               <Route index element={<Navigate to="/dashboard/chats" replace />} />
             </Route>
             <Route path="/" element={<Navigate to="/dashboard/chats" replace />} />
+            {/* Catch-all: redirect any unknown route to the main dashboard */}
+            <Route path="*" element={<Navigate to="/dashboard/chats" replace />} />
           </>
         ) : (
           // Not authenticated - redirect everything to login
