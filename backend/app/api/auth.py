@@ -219,6 +219,30 @@ async def register(
     # Check if user already exists
     existing_user = db.query(User).filter_by(email=register_request.email).first()
     if existing_user:
+        if existing_user.is_deleted:
+            # Re-enable the previously deleted account instead of rejecting.
+            if register_request.role == UserRole.SYSTEM_MANAGER:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="System Manager role can only be created during initial bootstrap",
+                )
+            existing_user.is_deleted = False
+            existing_user.is_active = True
+            existing_user.is_available = False
+            existing_user.name = register_request.name
+            existing_user.password_hash = get_password_hash(register_request.password)
+            existing_user.role = register_request.role
+            db.commit()
+            db.refresh(existing_user)
+            return {
+                "message": "User re-enabled successfully",
+                "user": {
+                    "id": existing_user.id,
+                    "name": existing_user.name,
+                    "email": existing_user.email,
+                    "role": existing_user.role.value,
+                }
+            }
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"

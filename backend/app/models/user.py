@@ -41,6 +41,7 @@ class User(Base):
     # Presence & availability
     is_available = Column(Boolean, default=False, nullable=False)  # Can receive chats
     is_active = Column(Boolean, default=True, nullable=False)      # Account enabled
+    is_deleted = Column(Boolean, default=False, nullable=False)    # Soft-deleted (hidden from UI)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

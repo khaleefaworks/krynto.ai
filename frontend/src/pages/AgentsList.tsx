@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2 } from 'lucide-react'
+import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2, Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { addMessageHandler } from '@/services/agentSocket'
 
@@ -33,6 +33,11 @@ export default function AgentsList() {
   const [formEmail, setFormEmail] = useState('')
   const [formPassword, setFormPassword] = useState('')
   const [formRole, setFormRole] = useState<'system_manager' | 'manager' | 'agent'>('agent')
+
+  // Password reveal toggles
+  const [showCreatePassword, setShowCreatePassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -101,29 +106,38 @@ export default function AgentsList() {
   }
 
   // ─── Panel helpers ────────────────────────────────────
+  const resetPasswordState = () => {
+    setFormPassword('')
+    setShowCreatePassword(false)
+    setShowNewPassword(false)
+  }
+
   const openCreate = () => {
     setFormName('')
     setFormEmail('')
-    setFormPassword('')
     setFormRole('agent')
     setAvatarPreview(null)
     setError(null)
+    resetPasswordState()
     setPanel({ kind: 'create' })
   }
 
   const openEdit = (item: Agent) => {
     setFormName(item.name)
     setFormEmail(item.email)
-    setFormPassword('')
     setFormRole(item.role as 'system_manager' | 'manager' | 'agent')
     setAvatarPreview(getFullAvatarUrl(item.avatar_url))
     setError(null)
+    resetPasswordState()
     setPanel({ kind: 'edit', item })
   }
 
-  const closePanel = () => setPanel({ kind: 'closed' })
+  const closePanel = () => {
+    resetPasswordState()
+    setPanel({ kind: 'closed' })
+  }
 
-  // Close on Escape
+  // Escape closes panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && panel.kind !== 'closed') closePanel()
@@ -240,10 +254,18 @@ export default function AgentsList() {
         }
 
         const emailChanged = (item.email || '').trim() !== email
-        if (emailChanged) {
+        const nameChanged = (item.name || '').trim() !== name
+        if (emailChanged || nameChanged) {
           await apiRequest(`/users/${item.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ email, ...(nameChanged && { name }) }),
+          })
+        }
+
+        if (formPassword.trim()) {
+          await apiRequest(`/users/${item.id}/password`, {
+            method: 'PATCH',
+            body: JSON.stringify({ new_password: formPassword.trim() }),
           })
         }
 
@@ -520,12 +542,8 @@ export default function AgentsList() {
                   onChange={e => setFormName(e.target.value)}
                   placeholder="John Doe"
                   className="dark:bg-gray-800 dark:border-gray-700"
-                  disabled={panel.kind === 'edit' && Boolean(editItem?.name?.trim())}
                   autoFocus={panel.kind === 'create'}
                 />
-                {panel.kind === 'edit' && Boolean(editItem?.name?.trim()) && (
-                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Name cannot be changed after creation.</p>
-                )}
               </div>
 
               {/* Email */}
@@ -543,21 +561,60 @@ export default function AgentsList() {
                 />
               </div>
 
-              {/* Password (create only) */}
-              {panel.kind === 'create' && (
+              {/* Password (create: required; edit: optional reset) */}
+              {panel.kind === 'create' ? (
                 <div>
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                     <Lock className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
                     Password
                   </label>
-                  <Input
-                    type="password"
-                    value={formPassword}
-                    onChange={e => setFormPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showCreatePassword ? 'text' : 'password'}
+                      value={formPassword}
+                      onChange={e => setFormPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="pr-10 dark:bg-gray-800 dark:border-gray-700"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCreatePassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      tabIndex={-1}
+                    >
+                      {showCreatePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Minimum 6 characters.</p>
+                </div>
+              ) : (
+                <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Reset Password</p>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
+                      New Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={formPassword}
+                        onChange={e => setFormPassword(e.target.value)}
+                        placeholder="Leave blank to keep current password"
+                        className="pr-10 dark:bg-gray-800 dark:border-gray-700"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        tabIndex={-1}
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Min. 6 characters. Leave blank to keep the current password.</p>
+                  </div>
                 </div>
               )}
 

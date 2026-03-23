@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 import os
 import uuid
@@ -9,8 +9,10 @@ from pathlib import Path
 
 from app.core.database import get_db
 from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
+from app.core.security import get_password_hash, verify_password
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User, UserRole
+from app.models.conversation import Conversation, ConversationStatus
 from app.services.presence_service import PresenceService
 from app.services.agent_service import AgentService
 from app.services.agent_resolver import is_agent_eligible
@@ -27,7 +29,7 @@ def list_users(
 ):
     """List all users (admin only)."""
 
-    users = db.query(User).all()
+    users = db.query(User).filter(User.is_deleted == False).all()
     connected_ids = users_repo.recently_heartbeat_user_ids(
         db, ttl_seconds=AgentService.heartbeat_ttl_seconds,
     )
@@ -90,12 +92,9 @@ def update_user(
         if not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty")
 
-        current_name = str(getattr(user, "name", "") or "").strip()
-        if current_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be changed after creation")
-
-        user.name = name
-        changed = True
+        if user.name != name:
+            user.name = name
+            changed = True
 
     if changed:
         db.commit()
@@ -520,14 +519,100 @@ def delete_user(
     if user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Administrator account cannot be disabled",
+            detail="Administrator account cannot be deleted",
         )
     
-    # Soft delete
+    # Soft delete: mark as deleted and deactivate
+    user.is_deleted = True
     user.is_active = False
+    user.is_available = False
+
+    # Unassign any open conversations still held by this agent so they
+    # can be re-assigned without the deleted user blocking the queue.
+    db.query(Conversation).filter(
+        Conversation.assigned_agent_id == user_id,
+        Conversation.status == ConversationStatus.OPEN,
+    ).update({"assigned_agent_id": None}, synchronize_session=False)
+
     db.commit()
     
     return {
         "message": "User deleted successfully",
         "user_id": user_id
     }
+
+
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
+@router.post("/me/verify-password")
+def verify_my_password(
+    payload: VerifyPasswordRequest,
+    current_user: User = Depends(require_authenticated_user),
+):
+    """
+    Check whether the calling user's own password is correct.
+    Always returns HTTP 200 with { valid: bool } — never a 4xx — so the
+    client can give inline feedback without confusing error states.
+    """
+    valid = verify_password(payload.password, current_user.password_hash)
+    return {"valid": valid}
+
+
+class SelfPasswordChangeRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
+
+
+@router.patch("/me/password")
+def change_my_password(
+    payload: SelfPasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """
+    Self-service password change — any authenticated user can change their own password.
+    Requires the current password for re-verification.
+    """
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    current_user.password_hash = get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
+    return {"message": "Password changed successfully"}
+
+
+class PasswordChangeRequest(BaseModel):
+    new_password: str = Field(..., min_length=6)
+
+
+@router.patch("/{user_id}/password")
+def change_user_password(
+    user_id: int,
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
+):
+    """
+    Set a new password for any user (admin only).
+    Admins are already authenticated via JWT — no inline re-auth required.
+    System managers can change any password.
+    Managers can change passwords for agents/managers only.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managers cannot change an administrator's password",
+        )
+
+    user.password_hash = get_password_hash(payload.new_password)
+    db.commit()
+    return {"message": "Password updated successfully"}
