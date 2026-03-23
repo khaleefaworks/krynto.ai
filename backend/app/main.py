@@ -89,9 +89,12 @@ async def lifespan(app: FastAPI):
         await ChatService.deliver_bus_event(event)
 
     await realtime_bus.start(_handle_event)
+    from app.services.auto_close_scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     try:
         yield
     finally:
+        stop_scheduler()
         await realtime_bus.stop()
 
 

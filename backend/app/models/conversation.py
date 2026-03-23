@@ -49,6 +49,9 @@ class Conversation(Base, TimestampMixin):
     # Read state for visitor
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
 
+    # How the conversation was closed: 'agent' | 'visitor' | 'inactivity' | NULL (still open)
+    closed_by = Column(String(20), nullable=True)
+
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)

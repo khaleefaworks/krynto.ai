@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, Enum as SQLEnum, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, Enum as SQLEnum, DateTime, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 import enum
 
 from app.core.database import Base
@@ -7,8 +8,9 @@ from app.core.database import Base
 
 class UserRole(str, enum.Enum):
     """User role enumeration for access control"""
-    SYSTEM_MANAGER = "system_manager"  # Administrator - full system access including reset
-    MANAGER = "manager"                # Manager - all access except reset application
+    SYSTEM_MANAGER = "system_manager"  # Platform-wide super-admin; organization_id = NULL
+    OWNER = "owner"                    # Org owner; full control within their org
+    MANAGER = "manager"                # Org manager; all admin features except org deletion
     AGENT = "agent"                    # Agent - only chat handling and personal settings
 
 
@@ -47,13 +49,33 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Multi-tenant: NULL for SYSTEM_MANAGER (platform-wide), set for all other roles.
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Session invalidation: tokens issued before this timestamp are rejected.
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
+
     # Heartbeat (presence)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
+    organization = relationship(
+        "Organization",
+        back_populates="users",
+        foreign_keys=[organization_id],
+    )
+
+    def is_superadmin(self) -> bool:
+        """Check if user is the platform-wide super-admin."""
+        return self.role == UserRole.SYSTEM_MANAGER
+
+    def is_org_owner(self) -> bool:
+        """Check if user is the owner of their organisation."""
+        return self.role == UserRole.OWNER
+
     def is_admin(self) -> bool:
-        """Check if user has admin privileges (system manager or manager)"""
-        return self.role in [UserRole.SYSTEM_MANAGER, UserRole.MANAGER]
-    
+        """Check if user has admin privileges (SYSTEM_MANAGER, OWNER, or MANAGER)."""
+        return self.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER, UserRole.MANAGER]
+
     def is_administrator(self) -> bool:
-        """Check if user is system manager with full access including reset"""
+        """Check if user is the platform-wide SYSTEM_MANAGER."""
         return self.role == UserRole.SYSTEM_MANAGER

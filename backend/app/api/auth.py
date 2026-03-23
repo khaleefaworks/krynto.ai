@@ -187,13 +187,14 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             detail="User account is inactive"
         )
     
-    # Generate JWT token with user_id and role
+    # Generate JWT token with user_id, role, and organization_id
     access_token = create_access_token(
         data={
             "sub": "user",
             "user_id": user.id,
             "email": user.email,
-            "role": user.role.value
+            "role": user.role.value,
+            "organization_id": user.organization_id,  # None for SYSTEM_MANAGER
         }
     )
     

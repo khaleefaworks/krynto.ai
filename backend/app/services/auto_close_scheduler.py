@@ -1,0 +1,97 @@
+"""
+Auto-close Scheduler — resolves inactive conversations after 24 hours.
+
+Runs as a background APScheduler job inside the FastAPI process.
+Uses a separate DB session per run (not the request-scoped session).
+"""
+
+from datetime import datetime, timedelta, timezone
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from app.core.database import SessionLocal
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+_scheduler: AsyncIOScheduler | None = None
+
+
+def _run_auto_close() -> None:
+    """
+    Find all OPEN conversations with no activity for >= 24 hours and resolve them.
+    Sets closed_by = 'inactivity'. No rating prompt is triggered (visitor is offline).
+    """
+    from app.models.conversation import Conversation, ConversationStatus
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # Build a query for OPEN conversations where the latest activity is older than cutoff.
+        # last_activity = max(last_visitor_message_at, last_agent_message_at, created_at)
+        conversations = (
+            db.query(Conversation)
+            .filter(Conversation.status == ConversationStatus.OPEN)
+            .all()
+        )
+
+        closed_count = 0
+        for conv in conversations:
+            # Determine the most recent activity timestamp.
+            timestamps = [t for t in [
+                conv.last_visitor_message_at,
+                conv.last_agent_message_at,
+                conv.created_at,
+            ] if t is not None]
+
+            if not timestamps:
+                continue
+
+            # Normalise to UTC-aware for comparison.
+            def _to_utc(dt: datetime) -> datetime:
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=timezone.utc)
+                return dt
+
+            last_activity = max(_to_utc(t) for t in timestamps)
+
+            if last_activity < cutoff:
+                conv.status = ConversationStatus.RESOLVED
+                conv.closed_by = "inactivity"
+                closed_count += 1
+
+        if closed_count:
+            db.commit()
+            logger.info("auto_close_conversations", closed=closed_count)
+    except Exception:
+        logger.exception("auto_close_job_error")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def start_scheduler() -> None:
+    """Start the APScheduler background job. Call once at app startup."""
+    global _scheduler
+    if _scheduler is not None:
+        return  # Already running (e.g. reload in dev mode).
+
+    _scheduler = AsyncIOScheduler(timezone="UTC")
+    _scheduler.add_job(
+        _run_auto_close,
+        trigger="interval",
+        hours=1,
+        id="auto_close_conversations",
+        replace_existing=True,
+    )
+    _scheduler.start()
+    logger.info("auto_close_scheduler_started")
+
+
+def stop_scheduler() -> None:
+    """Stop the scheduler gracefully. Call at app shutdown."""
+    global _scheduler
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
+        logger.info("auto_close_scheduler_stopped")

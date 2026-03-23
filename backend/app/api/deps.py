@@ -70,7 +70,29 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
-    
+
+    # Reject tokens issued before the user's last password change.
+    if token_iat and user.password_changed_at:
+        pwd_changed = user.password_changed_at
+        if pwd_changed.tzinfo is None:
+            pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+        token_datetime = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        if token_datetime < pwd_changed:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token invalidated due to password change",
+            )
+
+    # Reject tokens for users whose organisation has been deactivated.
+    if user.organization_id is not None:
+        from app.models.organization import Organization
+        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+        if org and not org.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organisation is inactive",
+            )
+
     return user
 
 

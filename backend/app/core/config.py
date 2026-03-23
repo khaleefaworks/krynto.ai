@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # Agent inactivity timeout (seconds)
     AGENT_INACTIVITY_TIMEOUT_SECONDS: int = 15 * 60  # 15 minutes
 
+    # Email (Resend)
+    RESEND_API_KEY: str = ""
+    FROM_EMAIL: str = "AI ChatAssist <noreply@example.com>"
+    # Public frontend URL used to build password-reset links.
+    FRONTEND_URL: str = ""
+
     def is_production(self) -> bool:
         env = (self.ENV or "").strip().lower()
         return env in {"production", "prod"} or env.startswith("prod")
