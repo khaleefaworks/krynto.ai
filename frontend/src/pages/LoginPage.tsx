@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { login as loginApi } from '@/services/auth'
 import { saveToken } from '@/services/api'
@@ -24,7 +24,7 @@ export default function LoginPage() {
   const { setUser, setToken } = useAppStore()
   const [error, setError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
-  
+
   const {
     register,
     handleSubmit,
@@ -37,14 +37,14 @@ export default function LoginPage() {
     try {
       setError(null)
       const response = await loginApi(data)
-      
+
       // Save token to localStorage
       saveToken(response.access_token)
-      
+
       // Update store
       setUser(response.user)
       setToken(response.access_token)
-      
+
       navigate('/dashboard/chats')
     } catch (err: any) {
       setError(err.message || 'Login failed')
@@ -71,7 +71,7 @@ export default function LoginPage() {
                 {error}
               </div>
             )}
-            
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
                 Email / Username
@@ -113,6 +113,11 @@ export default function LoginPage() {
               {errors.password && (
                 <p className="text-sm text-red-600 mt-1">{errors.password.message}</p>
               )}
+              <div className="text-right">
+                <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={isSubmitting}>

@@ -6,6 +6,8 @@ import { isAdmin } from './lib/roles'
 import { fetchActiveChats } from './services/chats'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import DashboardLayout from './pages/DashboardLayout'
 import ConversationsView from './pages/ConversationsView'
 import WebsiteManagement from './pages/WebsiteManagement'
@@ -347,6 +349,15 @@ function App() {
         <Route
           path="/login"
           element={token ? <Navigate to="/dashboard/chats" replace /> : <LoginPage />}
+        />
+        {/* Public auth routes */}
+        <Route
+          path="/forgot-password"
+          element={token ? <Navigate to="/dashboard/chats" replace /> : <ForgotPasswordPage />}
+        />
+        <Route
+          path="/reset-password"
+          element={token ? <Navigate to="/dashboard/chats" replace /> : <ResetPasswordPage />}
         />
 
         {/* Protected routes - require authentication */}

@@ -48,10 +48,12 @@ class ConversationService:
         Returns:
             Conversation object with status=OPEN
         """
-        # Check if conversation already exists
+        # Only resume an OPEN conversation — never route back into a resolved one.
+        # This is the core fix for the session/conversation refactor: a returning
+        # visitor whose previous conversation is RESOLVED gets a fresh start.
         conversation = (
             self.db.query(Conversation)
-            .filter_by(session_id=session_id, website_id=website_id)
+            .filter_by(session_id=session_id, website_id=website_id, status=ConversationStatus.OPEN)
             .first()
         )
         

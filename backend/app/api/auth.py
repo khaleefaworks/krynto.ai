@@ -2,9 +2,15 @@ from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
+import secrets
+import hashlib
+import re
+from datetime import datetime, timedelta, timezone
 
 from app.core.database import get_db, SessionLocal
 from app.models.user import User, UserRole
+from app.models.organization import Organization
+from app.models.password_reset_token import PasswordResetToken
 from app.models.system_settings import SystemSettings
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
@@ -14,6 +20,27 @@ from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
+
+
+def _slugify(text: str) -> str:
+    """Convert a string to a URL-safe slug."""
+    slug = text.lower().strip()
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[\s_-]+', '-', slug)
+    slug = re.sub(r'^-+|-+$', '', slug)
+    return slug or "org"
+
+
+def _unique_slug(db: Session, base: str) -> str:
+    """Ensure the slug is unique in the organizations table."""
+    slug = base[:90]  # leave room for suffix
+    if not db.query(Organization).filter_by(slug=slug).first():
+        return slug
+    for i in range(2, 10000):
+        candidate = f"{slug}-{i}"
+        if not db.query(Organization).filter_by(slug=candidate).first():
+            return candidate
+    return f"{slug}-{secrets.token_hex(4)}"
 
 
 class LoginRequest(BaseModel):
@@ -33,6 +60,23 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     role: UserRole = UserRole.AGENT
+
+
+class SignupRequest(BaseModel):
+    """Public self-service signup — creates an org + OWNER user atomically."""
+    name: str
+    email: EmailStr
+    password: str
+    organization_name: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 
 class UserResponse(BaseModel):
@@ -205,8 +249,172 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
     )
 
 
-@router.post("/register")
+@router.post("/signup", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(settings.RATE_LIMIT_AUTH)
+async def signup(request: Request, signup_request: SignupRequest, db: Session = Depends(get_db)):
+    """
+    Public self-service signup.
+    Atomically creates an Organisation + OWNER user.
+    Returns a JWT so the user is logged in immediately.
+    """
+    if not is_system_initialized():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System not initialized. Create admin first via /auth/bootstrap",
+        )
+
+    existing = db.query(User).filter_by(email=signup_request.email).first()
+    if existing and not existing.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+
+    try:
+        # Create org first (owner_id set after user creation)
+        slug = _unique_slug(db, _slugify(signup_request.organization_name))
+        org = Organization(
+            name=signup_request.organization_name,
+            slug=slug,
+            plan="free",
+            is_active=True,
+        )
+        db.add(org)
+        db.flush()  # get org.id without committing
+
+        user = User(
+            name=signup_request.name,
+            email=signup_request.email,
+            password_hash=get_password_hash(signup_request.password),
+            role=UserRole.OWNER,
+            organization_id=org.id,
+            is_active=True,
+            is_available=True,
+        )
+        db.add(user)
+        db.flush()  # get user.id
+
+        org.owner_id = user.id
+        db.commit()
+        db.refresh(user)
+
+        # Send welcome email (best-effort, non-blocking)
+        try:
+            from app.services.email_service import EmailService
+            EmailService().send_welcome(
+                to_email=user.email,
+                name=user.name,
+                org_name=org.name,
+            )
+        except Exception:
+            pass
+
+    except Exception:
+        db.rollback()
+        raise
+
+    access_token = create_access_token(
+        data={
+            "sub": "user",
+            "user_id": user.id,
+            "email": user.email,
+            "role": user.role.value,
+            "organization_id": user.organization_id,
+        }
+    )
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=UserResponse.from_orm(user),
+    )
+
+
+@router.post("/forgot-password")
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Request a password-reset email.
+    Always returns HTTP 200 regardless of whether the email exists
+    — prevents email enumeration attacks.
+    """
+    user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
+    if user and user.is_active:
+        # Invalidate any existing unused tokens for this user.
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).delete(synchronize_session=False)
+
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(reset_token)
+        db.commit()
+
+        frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        reset_url = f"{frontend_url}/reset-password?token={raw_token}"
+
+        try:
+            from app.services.email_service import EmailService
+            EmailService().send_password_reset(
+                to_email=user.email,
+                name=user.name,
+                reset_url=reset_url,
+            )
+        except Exception:
+            pass  # Never expose email errors to the caller
+
+    # Always 200 — do not reveal whether the email exists.
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Consume a password-reset token and update the user's password.
+    Token is single-use and expires after 1 hour.
+    """
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    reset_token = db.query(PasswordResetToken).filter_by(token_hash=token_hash).first()
+
+    now = datetime.now(timezone.utc)
+
+    if not reset_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    if reset_token.used_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token has already been used")
+
+    expires = reset_token.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token has expired")
+
+    user = db.query(User).filter_by(id=reset_token.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    user.password_hash = get_password_hash(body.new_password)
+    user.password_changed_at = now  # Invalidates all existing sessions
+    reset_token.used_at = now
+    db.commit()
+
+    return {"message": "Password updated successfully. Please log in again."}
+
+
+
 async def register(
     request: Request,
     register_request: RegisterRequest,
@@ -222,10 +430,10 @@ async def register(
     if existing_user:
         if existing_user.is_deleted:
             # Re-enable the previously deleted account instead of rejecting.
-            if register_request.role == UserRole.SYSTEM_MANAGER:
+            if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="System Manager role can only be created during initial bootstrap",
+                    detail="System Manager and Owner roles cannot be assigned via this endpoint",
                 )
             existing_user.is_deleted = False
             existing_user.is_active = True
@@ -249,22 +457,31 @@ async def register(
             detail="Email already registered"
         )
 
-    # System Manager accounts can only be created during the one-time bootstrap.
-    # This keeps the deployment model simple: exactly one default Administrator.
-    if register_request.role == UserRole.SYSTEM_MANAGER:
+    # System Manager and OWNER accounts cannot be created via this endpoint.
+    if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="System Manager role can only be created during initial bootstrap",
+            detail="System Manager and Owner roles cannot be assigned via this endpoint",
         )
-    
+
+    # New users automatically inherit the calling admin's organisation.
+    # A SYSTEM_MANAGER (organization_id=None) must be handled by /auth/signup instead.
+    calling_admin: User = _admin
+    if calling_admin.organization_id is None and not calling_admin.is_superadmin():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot determine organisation — use /auth/signup to create an org first",
+        )
+
     # Create new user
     user = User(
         name=register_request.name,
         email=register_request.email,
         password_hash=get_password_hash(register_request.password),
         role=register_request.role,
+        organization_id=calling_admin.organization_id,  # inherits caller's org (None for superadmin)
         is_active=True,
-        is_available=False
+        is_available=False,
     )
     
     db.add(user)
