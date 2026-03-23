@@ -1,148 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI ChatAssist - Widget Demo</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/widget/favicon-32x32.png">
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      margin: 0;
-      padding: 40px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-    }
-    .demo-container {
-      max-width: 800px;
-      margin: 0 auto;
-      background: white;
-      padding: 40px;
-      border-radius: 12px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-    }
-    h1 {
-      margin-top: 0;
-      color: #1f2937;
-    }
-    p {
-      line-height: 1.6;
-      color: #4b5563;
-    }
-    .config-info {
-      background: #f3f4f6;
-      padding: 20px;
-      border-radius: 8px;
-      margin: 20px 0;
-      font-family: 'Courier New', monospace;
-      font-size: 14px;
-    }
-    .config-info strong {
-      display: block;
-      margin-bottom: 8px;
-      color: #1f2937;
-    }
-  </style>
-  
-  <!-- Chat Widget Styles -->
-  <link rel="stylesheet" href="chat-widget.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="icon" href="https://noveloffice.in/wp-content/uploads/2023/08/cropped-novel-favicon-192x192.webp"
+        sizes="192x192">
 </head>
+
 <body>
-  <div class="demo-container">
-    <h1>🤖 AI ChatAssist - Demo Page</h1>
-    
-    <!-- Warning Box -->
-    <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
-      <h3 style="margin-top: 0; color: #92400e;">⚠️ Important: Setup Required</h3>
-      <p style="color: #92400e; margin-bottom: 10px;"><strong>Before the chat widget will work, you must:</strong></p>
-      <ol style="color: #92400e; margin: 0; padding-left: 20px;">
-        <li>Run <code>./reset_application.py</code> or <code>python seed_data.py</code> to create test data</li>
-        <li>Or complete onboarding at <a href="http://localhost:5173" target="_blank" style="color: #1e40af;">localhost:5173</a></li>
-        <li>Get your website's embed snippet from Dashboard → Settings → Websites</li>
-        <li>The widget uses a unique widget_key for security</li>
-      </ol>
-      <p style="color: #92400e; margin-top: 10px; margin-bottom: 0;">
-        <strong>This demo page uses a test widget_key that works with seed_data.py</strong><br>
-        If you haven't run the seed script, the widget won't load.
-      </p>
-    </div>
-    
-    <p>
-      This is a demo page showing the AI ChatAssist visitor chat widget in action.
-      The chat bubble should appear in the bottom-right corner of the page <strong>only after proper setup</strong>.
-    </p>
-    
-    <div class="config-info">
-      <strong>Configuration:</strong>
-      Using widget loader with unique widget_key<br>
-      Backend: <span id="demo-api-base">(set in code)</span><br>
-      WebSocket: <span id="demo-ws-base">(derived from backend)</span>
-    </div>
-    
-    <h2>How to Test:</h2>
-    <ol>
-      <li>Ensure backend server is running: <code>cd backend && ./start_server.sh</code></li>
-      <li>Ensure database has a website and the widget key below matches that website</li>
-      <li>Click the chat bubble in the bottom-right corner</li>
-      <li>Send a message to test bot/agent flows</li>
-      <li>Test agent handoff functionality</li>
-    </ol>
-    
-    <h2>Features Implemented:</h2>
-    <ul>
-      <li>✅ WebSocket connection to backend</li>
-      <li>✅ Session persistence (localStorage)</li>
-      <li>✅ Auto-reconnect on disconnect</li>
-      <li>✅ Message display (visitor, bot, agent)</li>
-      <li>✅ Real-time bidirectional messaging</li>
-      <li>✅ Dynamic configuration via loader.js</li>
-      <li>✅ Customizable theme, position, and colors</li>
-      <li>✅ Responsive design</li>
-    </ul>
-    
-    <h2>Widget Configuration:</h2>
-    <p>
-      The widget loader embeds website configuration server-side:
-      <code>GET /widget/loader.js?key=YOUR_WIDGET_KEY</code>
-    </p>
-    <p>
-      If the API is unavailable, it falls back to sensible defaults:
-      <ul>
-        <li><strong>Theme:</strong> dark</li>
-        <li><strong>Position:</strong> bottom-right</li>
-        <li><strong>Primary Color:</strong> #000000</li>
-        <li><strong>Welcome Message:</strong> "Hi! How can we help you today?"</li>
-      </ul>
-    </p>
-  </div>
-
-  <!-- Chat Widget Script -->
-  <!-- Demo widget loader - uses the test website created by seed_data.py -->
-  <script>
-    (function() {
-      // This is the widget_key from the seeded Example Website (domain: example.com)
-      // If you reset the database, run this to get the new key:
-      // cd backend && python -c "from app.core.database import SessionLocal; from app.models.website import Website; db = SessionLocal(); w = db.query(Website).first(); print(w.widget_key); db.close()"
-      
-      var DEMO_WIDGET_KEY = 'f6b2115d1e3b9158ff953b71951fddd93fffae41142c74c2409f8c5f7342dca9';
-      
-      // Load the widget
-      var script = document.createElement('script');
-      // NOTE: Set API_BASE to your deployed backend URL (no trailing slash)
-      const API_BASE = window.DEMO_API_BASE || 'http://localhost:8000';
-      document.getElementById('demo-api-base').textContent = API_BASE;
-      document.getElementById('demo-ws-base').textContent = API_BASE.replace(/^http(s?):\/\//, (_, s) => (s ? 'wss://' : 'ws://'));
-
-      script.src = API_BASE + '/widget/loader.js?key=' + DEMO_WIDGET_KEY;
-      script.async = true;
-      script.onerror = function() {
-        console.error('Failed to load widget. Make sure:');
-        console.error('1. Backend is running (./start_server.sh)');
-        console.error('2. Database is seeded (./reset_application.py or python seed_data.py)');
-        console.error('3. Widget key matches the database value');
-      };
-      document.body.appendChild(script);
-    })();
-  </script>
+    <!-- AI ChatAssist Live Chat script -->
+    <script type="text/javascript">
+        var _aichatassist = _aichatassist || {};
+        _aichatassist.key = 'd2349dce69f74632cfeb9c85417f19bf84f30686337b52be09f2e835189c31f6';
+        window.aichatassist || (function (d) {
+            var s, c, o = aichatassist = function () { o._.push(arguments) }; o._ = [];
+            s = d.getElementsByTagName('script')[0]; c = d.createElement('script');
+            c.type = 'text/javascript'; c.charset = 'utf-8'; c.async = true;
+            // Ensure the loader request includes a Referer on sites that set Referrer-Policy: no-referrer
+            // (required for server-side domain lock verification).
+            c.referrerPolicy = 'origin';
+            c.src = 'http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
+            s.parentNode.insertBefore(c, s);
+        })(document);
+    </script>
+    <noscript> Powered by <a href="#" target="_blank">AI ChatAssist</a></noscript>
 </body>
+
 </html>
