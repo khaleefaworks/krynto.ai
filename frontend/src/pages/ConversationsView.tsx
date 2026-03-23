@@ -1105,7 +1105,8 @@ export default function ConversationsView() {
 
             let fetchedRating: { rating: number; feedback?: string } | null = null
             try {
-                fetchedRating = await apiRequest<{ rating: number; feedback?: string }>(`/ratings/${chatId}`)
+                const ratingResp = await apiRequest<{ rating: { rating: number; feedback?: string } | null }>(`/ratings/${chatId}`)
+                fetchedRating = ratingResp?.rating ?? null
             } catch {
                 fetchedRating = null
             }

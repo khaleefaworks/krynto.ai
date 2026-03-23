@@ -1007,7 +1007,7 @@ class ConversationOrchestrator:
         saved = self.conversation_service.add_agent_message(
             conversation_id=conversation_id,
             agent_id=agent_id,
-            agent_email=str(agent_id),
+            agent_email=agent.email,
             content=content,
         )
         if not saved:
