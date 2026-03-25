@@ -265,12 +265,14 @@ def compute_visibility_scope(db, user) -> VisibilityScope:
 
 | Page | Route | Who | Purpose |
 |------|-------|-----|---------|
-| `SignupPage` | `/signup` | Public | Name, email, password, org name |
+| `SignupPage` | `/signup` | Public | Name, email, password, org name. CTA: "Create a free account". Login link: "Sign up for free". **V2: Add Google OAuth button** (deferred — no social login in V1) |
 | `SuperAdminLayout` | `/superadmin` | SYSTEM_MANAGER only | Shell; completely separate from `/dashboard` |
 | `SuperAdminOrgs` | `/superadmin/organizations` | SYSTEM_MANAGER | Org list: name, plan, user count, website count, status |
 | `SuperAdminOrgDetail` | `/superadmin/organizations/:id` | SYSTEM_MANAGER | Deep org view + impersonate button |
 | `SuperAdminStats` | `/superadmin/stats` | SYSTEM_MANAGER | Platform-wide metrics |
 | `OrgSettings` | `/dashboard/settings/organization` | OWNER only | Edit org name, view plan |
+
+> **V2 Note — Google OAuth on Signup:** Add a "Continue with Google" button to `SignupPage` and `LoginPage`. Backend: add `google_id` column to `User`, implement OAuth2 callback endpoint using Google's identity API. This is intentionally deferred from V1 to keep the auth surface minimal and auditable.
 
 #### Store changes (`appStore.ts`)
 
