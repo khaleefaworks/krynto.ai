@@ -44,6 +44,23 @@ class EmailService:
             logger.exception("password_reset_email_failed", to=to_email)
             return False
 
+    def send_admin_setup_confirmation(self, to_email: str, name: str) -> bool:
+        """Sent to the platform administrator after initial bootstrap."""
+        try:
+            r = self._client()
+            from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
+            r.Emails.send({
+                "from": from_email,
+                "to": [to_email],
+                "subject": "AI ChatAssist platform setup complete",
+                "html": _admin_setup_html(name=name),
+            })
+            logger.info("admin_setup_email_sent", to=to_email)
+            return True
+        except Exception:
+            logger.exception("admin_setup_email_failed", to=to_email)
+            return False
+
     def send_welcome(self, to_email: str, name: str, org_name: str) -> bool:
         """Send a welcome email after org signup. Returns True on success."""
         try:
@@ -65,6 +82,26 @@ class EmailService:
 # ---------------------------------------------------------------------------
 # Email templates (minimal, inline-CSS safe for most clients)
 # ---------------------------------------------------------------------------
+
+def _admin_setup_html(*, name: str) -> str:
+    frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+    login_url = f"{frontend_url}/login" if frontend_url else ""
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:480px;margin:40px auto;color:#1a1a1a">
+  <h2>Platform setup complete</h2>
+  <p>Hi {name},</p>
+  <p>The AI ChatAssist platform has been successfully initialised. Your administrator account is ready.</p>
+  <p>You now have full access to the Super Admin portal, where you can monitor organisations,
+     users, and platform-wide statistics.</p>
+  {"<p style='margin:32px 0'><a href='" + login_url + "' style='background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block'>Go to Super Admin portal →</a></p>" if login_url else ""}
+  <p style="color:#6b7280;font-size:13px">Keep your credentials safe — this account controls the entire platform.</p>
+  <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
+</body>
+</html>
+"""
+
 
 def _password_reset_html(*, name: str, reset_url: str) -> str:
     return f"""

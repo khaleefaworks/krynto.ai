@@ -53,6 +53,7 @@ class BootstrapRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
+    setup_secret: str  # Must match SECRET_KEY from server .env
 
 
 class RegisterRequest(BaseModel):
@@ -136,6 +137,13 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
                 detail="System already initialized. Use /auth/login instead."
             )
         
+        # Validate setup secret — must match SECRET_KEY in server .env
+        if bootstrap_request.setup_secret != settings.SECRET_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid setup key."
+            )
+
         # Ensure no users exist (extra safety check)
         user_count = db.query(User).count()
         if user_count > 0:
@@ -143,15 +151,9 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Users already exist. System may be corrupted."
             )
-        
-        # Create first admin user (Administrator)
-        # Use fixed email if creating Administrator account
+
         admin_email = bootstrap_request.email
         admin_name = bootstrap_request.name or "Administrator"
-        
-        # If name is Administrator, use system email
-        if admin_name == "Administrator":
-            admin_email = "administrator@chatassist.system"
         
         admin = User(
             name=admin_name,
@@ -169,7 +171,19 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
         
         db.commit()
         db.refresh(admin)
-        
+
+        # Send a welcome / account-created email so the admin knows their credentials.
+        # Non-blocking — a failure here does not roll back the bootstrap.
+        try:
+            from app.services.email_service import EmailService
+            frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+            EmailService().send_admin_setup_confirmation(
+                to_email=admin.email,
+                name=admin.name,
+            )
+        except Exception:
+            pass  # email failure must never prevent a successful bootstrap
+
         return {
             "message": "Admin created successfully. System initialized.",
             "admin": {
@@ -414,7 +428,7 @@ async def reset_password(
     return {"message": "Password updated successfully. Please log in again."}
 
 
-
+@router.post("/register", response_model=UserResponse)
 async def register(
     request: Request,
     register_request: RegisterRequest,
@@ -433,7 +447,7 @@ async def register(
             if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="System Manager and Owner roles cannot be assigned via this endpoint",
+                    detail="System Manager role can only be set during bootstrap",
                 )
             existing_user.is_deleted = False
             existing_user.is_active = True
@@ -461,7 +475,7 @@ async def register(
     if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="System Manager and Owner roles cannot be assigned via this endpoint",
+            detail="System Manager role can only be set during bootstrap",
         )
 
     # New users automatically inherit the calling admin's organisation.

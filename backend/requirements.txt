@@ -18,4 +18,5 @@ beautifulsoup4
 requests
 slowapi
 redis
-pywebpushresend==2.26.0
+pywebpush
+resend
