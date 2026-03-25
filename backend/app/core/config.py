@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Email (Resend)
     RESEND_API_KEY: str = ""
     FROM_EMAIL: str = "AI ChatAssist <noreply@example.com>"
+    # When set, ALL outgoing emails are redirected to this address.
+    # Required when using Resend's shared onboarding@resend.dev domain (test mode).
+    # Remove once a custom domain is verified in Resend.
+    RESEND_OVERRIDE_TO_EMAIL: str = ""
     # Public frontend URL used to build password-reset links.
     FRONTEND_URL: str = ""
 

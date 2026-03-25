@@ -372,7 +372,10 @@ function App() {
       <Routes>
         {/* System bootstrap — shown when backend is not yet initialized */}
         {needsSetup && !token ? (
-          <Route path="*" element={<OnboardingPage />} />
+          <>
+            <Route path="/setup" element={<OnboardingPage />} />
+            <Route path="*" element={<Navigate to="/setup" replace />} />
+          </>
         ) : (
           <>
             {/* Login route - redirect to dashboard if already authenticated */}

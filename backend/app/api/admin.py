@@ -28,6 +28,7 @@ class OrgStats(BaseModel):
     plan: str
     is_active: bool
     owner_id: Optional[int] = None
+    owner_verified: bool = True  # False = owner hasn't verified their email yet
     member_count: int
     website_count: int
     conversation_count: int
@@ -92,6 +93,12 @@ def _build_org_stats(db: Session, org: Organization) -> OrgStats:
         plan=org.plan,
         is_active=org.is_active,
         owner_id=org.owner_id,
+        owner_verified=(
+            db.query(User.is_email_verified)
+            .filter(User.id == org.owner_id)
+            .scalar()
+            if org.owner_id else True
+        ),
         member_count=member_count,
         website_count=website_count,
         conversation_count=conversation_count,

@@ -32,7 +32,7 @@ export default function AgentsList() {
   const [formName, setFormName] = useState('')
   const [formEmail, setFormEmail] = useState('')
   const [formPassword, setFormPassword] = useState('')
-  const [formRole, setFormRole] = useState<'system_manager' | 'manager' | 'agent'>('agent')
+  const [formRole, setFormRole] = useState<'owner' | 'manager' | 'agent' | 'system_manager'>('agent')
 
   // Password reveal toggles
   const [showCreatePassword, setShowCreatePassword] = useState(false)
@@ -101,6 +101,7 @@ export default function AgentsList() {
 
   const roleLabel = (role: string) => {
     if (role === 'system_manager') return 'System Manager'
+    if (role === 'owner') return 'Owner'
     if (role === 'manager') return 'Manager'
     return 'Agent'
   }
@@ -125,7 +126,7 @@ export default function AgentsList() {
   const openEdit = (item: Agent) => {
     setFormName(item.name)
     setFormEmail(item.email)
-    setFormRole(item.role as 'system_manager' | 'manager' | 'agent')
+    setFormRole(item.role as 'owner' | 'manager' | 'agent' | 'system_manager')
     setAvatarPreview(getFullAvatarUrl(item.avatar_url))
     setError(null)
     resetPasswordState()
@@ -395,9 +396,11 @@ export default function AgentsList() {
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${isSysManager
                           ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                          : agent.role === 'manager'
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                            : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
+                          : agent.role === 'owner'
+                            ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                            : agent.role === 'manager'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                              : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
                           }`}>
                           {roleLabel(agent.role)}
                         </span>
@@ -623,7 +626,7 @@ export default function AgentsList() {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Role</label>
                 <select
                   value={formRole}
-                  onChange={e => setFormRole(e.target.value as 'system_manager' | 'manager' | 'agent')}
+                  onChange={e => setFormRole(e.target.value as 'owner' | 'manager' | 'agent' | 'system_manager')}
                   className="w-full h-10 px-3 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                   disabled={saving || isAdminAccount}
                 >
@@ -631,8 +634,9 @@ export default function AgentsList() {
                     <option value="system_manager">System Manager – Full system access</option>
                   ) : (
                     <>
+                      <option value="owner">Owner – Full org control</option>
+                      <option value="manager">Manager – Full access except ownership</option>
                       <option value="agent">Agent – Chat handling only</option>
-                      <option value="manager">Manager – Full access except reset</option>
                     </>
                   )}
                 </select>

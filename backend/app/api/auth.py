@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Request
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 import secrets
 import hashlib
+import random
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -11,6 +13,7 @@ from app.core.database import get_db, SessionLocal
 from app.models.user import User, UserRole
 from app.models.organization import Organization
 from app.models.password_reset_token import PasswordResetToken
+from app.models.email_otp import EmailOTP
 from app.models.system_settings import SystemSettings
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
@@ -78,6 +81,15 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+class ResendOTPRequest(BaseModel):
+    email: EmailStr
 
 
 class UserResponse(BaseModel):
@@ -244,7 +256,27 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
-    
+
+    # Block login if the user's organization is deactivated
+    if user.organization_id is not None:
+        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+        if org and not org.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your organization has been deactivated. Please contact your platform administrator."
+            )
+
+    # Block login if email not yet verified (OTP flow)
+    if not user.is_email_verified:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "needs_verification": True,
+                "email": user.email,
+                "message": "Please verify your email address before logging in.",
+            }
+        )
+
     # Generate JWT token with user_id, role, and organization_id
     access_token = create_access_token(
         data={
@@ -263,13 +295,16 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
     )
 
 
-@router.post("/signup", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def signup(request: Request, signup_request: SignupRequest, db: Session = Depends(get_db)):
     """
     Public self-service signup.
-    Atomically creates an Organisation + OWNER user.
-    Returns a JWT so the user is logged in immediately.
+    Atomically creates an Organisation + OWNER user with is_email_verified=False,
+    then sends a 6-digit OTP to the user's email address.
+
+    Returns { needs_verification: true, email: "..." } — the frontend must
+    show an OTP entry step and call POST /auth/verify-otp to receive the JWT.
     """
     if not is_system_initialized():
         raise HTTPException(
@@ -304,21 +339,32 @@ async def signup(request: Request, signup_request: SignupRequest, db: Session = 
             organization_id=org.id,
             is_active=True,
             is_available=True,
+            is_email_verified=False,
         )
         db.add(user)
         db.flush()  # get user.id
 
         org.owner_id = user.id
+
+        # Generate and store OTP
+        raw_otp = f"{random.randint(0, 999999):06d}"
+        otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+        otp_record = EmailOTP(
+            user_id=user.id,
+            otp_hash=otp_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
+        db.add(otp_record)
         db.commit()
         db.refresh(user)
 
-        # Send welcome email (best-effort, non-blocking)
+        # Send OTP email (best-effort)
         try:
             from app.services.email_service import EmailService
-            EmailService().send_welcome(
+            EmailService().send_otp_verification(
                 to_email=user.email,
                 name=user.name,
-                org_name=org.name,
+                otp=raw_otp,
             )
         except Exception:
             pass
@@ -327,20 +373,111 @@ async def signup(request: Request, signup_request: SignupRequest, db: Session = 
         db.rollback()
         raise
 
-    access_token = create_access_token(
-        data={
+    return {
+        "needs_verification": True,
+        "email": user.email,
+        "message": "Account created. Check your email for the verification code.",
+    }
+
+
+@router.post("/verify-otp", response_model=LoginResponse)
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def verify_otp(request: Request, body: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """
+    Verify a signup OTP and issue a JWT.
+
+    Consumes the one-time code sent to the user's email during signup.
+    On success, marks the user as email-verified and returns a JWT exactly
+    like the login endpoint does.
+    """
+    user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
+    # Avoid leaking whether the email exists
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+
+    if user.is_email_verified:
+        # Already verified — just issue a token (handles double-submit gracefully)
+        access_token = create_access_token(data={
             "sub": "user",
             "user_id": user.id,
             "email": user.email,
             "role": user.role.value,
             "organization_id": user.organization_id,
-        }
+        })
+        return LoginResponse(access_token=access_token, token_type="bearer", user=UserResponse.from_orm(user))
+
+    now = datetime.now(timezone.utc)
+    otp_hash = hashlib.sha256(body.otp.strip().encode()).hexdigest()
+
+    otp_record = (
+        db.query(EmailOTP)
+        .filter(
+            EmailOTP.user_id == user.id,
+            EmailOTP.otp_hash == otp_hash,
+            EmailOTP.used_at.is_(None),
+        )
+        .first()
     )
-    return LoginResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user=UserResponse.from_orm(user),
-    )
+    if not otp_record:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+
+    expires = otp_record.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code has expired. Request a new one.")
+
+    otp_record.used_at = now
+    user.is_email_verified = True
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(data={
+        "sub": "user",
+        "user_id": user.id,
+        "email": user.email,
+        "role": user.role.value,
+        "organization_id": user.organization_id,
+    })
+    return LoginResponse(access_token=access_token, token_type="bearer", user=UserResponse.from_orm(user))
+
+
+@router.post("/resend-otp")
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def resend_otp(request: Request, body: ResendOTPRequest, db: Session = Depends(get_db)):
+    """
+    Re-send the signup OTP.  Always returns 200 to prevent email enumeration.
+    Invalidates any existing unused OTP records for this user first.
+    """
+    user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
+    if user and user.is_active and not user.is_email_verified:
+        # Invalidate previous unused OTPs
+        db.query(EmailOTP).filter(
+            EmailOTP.user_id == user.id,
+            EmailOTP.used_at.is_(None),
+        ).delete(synchronize_session=False)
+
+        raw_otp = f"{random.randint(0, 999999):06d}"
+        otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+        otp_record = EmailOTP(
+            user_id=user.id,
+            otp_hash=otp_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
+        db.add(otp_record)
+        db.commit()
+
+        try:
+            from app.services.email_service import EmailService
+            EmailService().send_otp_verification(
+                to_email=user.email,
+                name=user.name,
+                otp=raw_otp,
+            )
+        except Exception:
+            pass
+
+    return {"message": "If that email is pending verification, a new code has been sent."}
 
 
 @router.post("/forgot-password")

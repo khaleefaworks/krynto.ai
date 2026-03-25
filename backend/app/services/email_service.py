@@ -27,6 +27,35 @@ class EmailService:
         resend.api_key = api_key
         return resend
 
+    def _to(self, email: str) -> str:
+        """
+        Resolve the actual recipient address.
+
+        When RESEND_OVERRIDE_TO_EMAIL is set (e.g. novelwebdevelopers@gmail.com),
+        ALL outgoing mail is redirected there regardless of the intended recipient.
+        This lets the app work on Resend's shared test domain which can only deliver
+        to the verified account email.  Remove the var once a custom domain is set up.
+        """
+        override = getattr(settings, "RESEND_OVERRIDE_TO_EMAIL", "").strip()
+        return override if override else email
+
+    def send_otp_verification(self, to_email: str, name: str, otp: str) -> bool:
+        """Send a 6-digit OTP verification email. Returns True on success."""
+        try:
+            r = self._client()
+            from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
+            r.Emails.send({
+                "from": from_email,
+                "to": [self._to(to_email)],
+                "subject": "Your AI ChatAssist verification code",
+                "html": _otp_html(name=name, otp=otp),
+            })
+            logger.info("otp_email_sent", to=to_email, override=self._to(to_email) != to_email)
+            return True
+        except Exception:
+            logger.exception("otp_email_failed", to=to_email)
+            return False
+
     def send_password_reset(self, to_email: str, name: str, reset_url: str) -> bool:
         """Send a password-reset email. Returns True on success."""
         try:
@@ -34,7 +63,7 @@ class EmailService:
             from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
             r.Emails.send({
                 "from": from_email,
-                "to": [to_email],
+                "to": [self._to(to_email)],
                 "subject": "Reset your AI ChatAssist password",
                 "html": _password_reset_html(name=name, reset_url=reset_url),
             })
@@ -51,7 +80,7 @@ class EmailService:
             from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
             r.Emails.send({
                 "from": from_email,
-                "to": [to_email],
+                "to": [self._to(to_email)],
                 "subject": "AI ChatAssist platform setup complete",
                 "html": _admin_setup_html(name=name),
             })
@@ -68,7 +97,7 @@ class EmailService:
             from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
             r.Emails.send({
                 "from": from_email,
-                "to": [to_email],
+                "to": [self._to(to_email)],
                 "subject": f"Welcome to AI ChatAssist — {org_name}",
                 "html": _welcome_html(name=name, org_name=org_name),
             })
@@ -142,6 +171,31 @@ def _welcome_html(*, name: str, org_name: str) -> str:
   <p>Your organisation <strong>{org_name}</strong> is ready. You can start adding websites
      and inviting team members right away.</p>
   {"<p><a href='" + frontend_url + "/dashboard/chats' style='color:#2563eb'>Go to dashboard →</a></p>" if frontend_url else ""}
+  <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
+</body>
+</html>
+"""
+
+
+def _otp_html(*, name: str, otp: str) -> str:
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:480px;margin:40px auto;color:#1a1a1a">
+  <h2>Verify your email address</h2>
+  <p>Hi {name},</p>
+  <p>Use the code below to complete your AI ChatAssist signup.
+     It expires in <strong>15 minutes</strong>.</p>
+  <div style="margin:32px 0;text-align:center">
+    <span style="display:inline-block;background:#f3f4f6;border:1px solid #e5e7eb;
+                 border-radius:8px;padding:16px 32px;font-size:32px;font-weight:700;
+                 letter-spacing:8px;color:#111827;font-family:monospace">
+      {otp}
+    </span>
+  </div>
+  <p style="color:#6b7280;font-size:13px">
+    If you did not sign up for AI ChatAssist, please ignore this email.
+  </p>
   <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
 </body>
 </html>

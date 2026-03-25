@@ -5,8 +5,8 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.models.website import Website
 from app.core.widget_origin import enforce_widget_domain_or_403
-from app.models.user import User
-from app.models.conversation import Conversation
+from app.models.user import User, UserRole
+from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.message import Message
 from app.models.automation import Automation
 from app.models.website_team import WebsiteTeam
@@ -165,6 +165,13 @@ def update_website(
     # Org boundary
     if admin.organization_id is not None and website.organization_id != admin.organization_id:
         raise HTTPException(status_code=404, detail="Website not found")
+    # MANAGERs can only edit websites they are explicitly assigned to
+    if admin.role == UserRole.MANAGER:
+        assigned = db.query(AgentWebsiteAssignment).filter_by(
+            agent_id=admin.id, website_id=website_id
+        ).first()
+        if not assigned:
+            raise HTTPException(status_code=403, detail="Not assigned to this website")
     
     # Update only provided fields
     if website_data.name is not None:

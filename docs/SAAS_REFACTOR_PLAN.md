@@ -170,6 +170,40 @@ if org_id is not None:
     query = query.filter(Website.organization_id == org_id)
 ```
 
+### B5a. Security Features
+
+> **Email OTP Verification on Signup (V1 — implement now):** After signup, user must enter a 6-digit OTP to verify their email before the JWT is issued. Flow: signup form → `{ needs_verification: true }` response → OTP entry step → `POST /auth/verify-otp` → JWT issued → `/dashboard/chats`.
+>
+> **Resend test-mode override:** Resend's shared domain (`onboarding@resend.dev`) can only deliver to the verified Resend account email. Set env var `RESEND_OVERRIDE_TO_EMAIL=novelwebdevelopers@gmail.com`. When this var is set, all outgoing emails (OTP, password reset, welcome) are redirected to that address regardless of actual recipient. When a custom domain is verified in Resend, remove this env var and emails go to real addresses.
+>
+> **New model: `EmailOTP`** — stores `user_id`, `otp_hash` (SHA-256 of 6-digit code), `expires_at` (15 min), `used_at`. Never store the raw OTP. Single-use.
+>
+> **New endpoint:** `POST /auth/verify-otp` — body: `{ email, otp }`. Hashes OTP, looks up unused/unexpired token, marks used, sets `user.is_email_verified = True`, returns JWT.
+>
+> **`is_email_verified` column on `User`** (default `False`). `get_current_user` does NOT block unverified users (they can only call `/auth/verify-otp` and `/auth/logout`). JWT is only issued after OTP is verified.
+>
+> **User Invite Email Verification (V2):** When an Owner adds a new user to their org, the system should send a verification email. Deferred — invited users can log in immediately for now.
+
+> **Multiple Owners per Org:** Allowed. An org can have more than one OWNER — this prevents lockout if a sole owner leaves. The OWNER role grants full control within the org (create/delete users and websites, org settings). Only an existing OWNER (or SYSTEM_MANAGER) can grant or revoke the OWNER role. Managers cannot promote to OWNER.
+
+### B5b. Role Management UI Rules
+
+The `SYSTEM_MANAGER` role is a platform-level bootstrap account, not an org-level role. It must **never** appear in the dashboard role dropdown or any org user management UI:
+- `AgentsList.tsx` role dropdown: `owner | manager | agent` only
+- `PATCH /users/{id}/role` must reject any attempt to assign `system_manager` to an existing non-system-manager user
+- `POST /auth/register` must reject `role=system_manager` unconditionally (SYSTEM_MANAGER is only created via bootstrap)
+
+### B5c. Known Gaps To Fix
+
+| Gap | Description | Severity | Location |
+|-----|-------------|----------|----------|
+| E | OWNER receives no WS chat notifications (treated as AGENT — gets empty `visible_website_ids` from assignment table, which is empty for owners) | **Critical** | `agent_service.py` `register_agent()` |
+| B | MANAGER can promote any user to OWNER via `PATCH /users/{id}/role` | High | `users.py` |
+| C | MANAGER can create OWNER-role users via `POST /auth/register` | High | `auth.py` |
+| D | `system_manager` appears in AgentsList role dropdown; `owner` does not | Medium | `AgentsList.tsx` |
+| F | Push notification URL uses `session_id` instead of `conversation_id` | Medium | `conversation_orchestrator.py` |
+| A | MANAGER can update websites they are not assigned to | Medium | `websites.py` |
+
 ### B6. Onboarding Flow
 
 #### Public Signup (new)
@@ -343,6 +377,22 @@ Super-admin gets an entirely separate route tree that `OWNER/MANAGER/AGENT` cann
 After login, check role:
 - `SYSTEM_MANAGER` → redirect to `/superadmin/organizations`
 - Everyone else → redirect to `/dashboard/chats`
+
+### B9a. Onboarding Wizard (New)
+
+After signup (and optionally after any login with no prior dismissal), show an **Onboarding Wizard popup** to guide new org owners through initial setup. Requirement from user: 
+
+- Modal/drawer popup appears automatically after the first login post-signup (localStorage flag `onboarding_dismissed_{org_id}`)
+- Steps: 1. Create first website → 2. Install widget snippet → 3. Invite first team member → 4. Done
+- Each step is individually completable and skippable
+- "Skip all" / "I'll do this later" dismisses entirely
+- A persistent icon in the **left sidebar above the user profile avatar** (e.g., a rocket/checklist icon) reopens the wizard at any time even after dismissal
+- Wizard tracks completion state per-step in localStorage (or a backend `onboarding_completed_steps` field in `Organization.settings` JSON, V2)
+
+Implementation location:
+- `frontend/src/components/OnboardingWizard.tsx` — the modal component
+- `frontend/src/pages/DashboardLayout.tsx` — render the sidebar icon + mount the wizard
+- No backend changes required for V1 (use localStorage for state)
 
 ### B10. Widget — No Changes
 
@@ -882,45 +932,59 @@ Both new pages are public (no auth required). No dashboard wrapper.
 These phases assume the app is reset to a clean DB state before any coding begins.
 
 ### Phase 0 — Cleanup (Do First)
-- [ ] Delete `ResetApplication.tsx` and its route
-- [ ] Remove `POST /system/reset` API endpoint and router registration
+- [x] Delete `ResetApplication.tsx` and its route
+- [x] Remove `POST /system/reset` API endpoint and router registration
 
 ### Phase 1 — Backend Data Model
-- [ ] Add `OWNER` to `UserRole` enum
-- [ ] Create `Organization` model
-- [ ] Add `organization_id` FK to `User` and `Website`
-- [ ] Add `show_conversation_history` column to `Website`
-- [ ] Add `closed_by` column to `Conversation` (`'agent' | 'visitor' | 'inactivity'`)
-- [ ] Add `password_changed_at` column to `User` (for session invalidation after password reset)
-- [ ] Create `PasswordResetToken` model
-- [ ] Write Alembic migration (all above in one migration since DB is being reset)
-- [ ] Update `create_access_token` to include `organization_id`
-- [ ] Update `get_current_user` to decode `organization_id` and check `password_changed_at` against token `iat`
-- [ ] Add APScheduler (or equivalent) for auto-close background job (24h inactivity → RESOLVED, closed_by='inactivity')
-- [ ] Add `EmailService` class wrapping Resend SDK
-- [ ] Add `RESEND_API_KEY`, `FROM_EMAIL`, `FRONTEND_URL` to settings/config
+- [x] Add `OWNER` to `UserRole` enum
+- [x] Create `Organization` model
+- [x] Add `organization_id` FK to `User` and `Website`
+- [x] Add `show_conversation_history` column to `Website`
+- [x] Add `closed_by` column to `Conversation` (`'agent'`,`'visitor'`,`'inactivity'`)
+- [x] Add `password_changed_at` column to `User` (for session invalidation after password reset)
+- [x] Create `PasswordResetToken` model
+- [x] Write Alembic migration (all above in one migration since DB is being reset)
+- [x] Update `create_access_token` to include `organization_id`
+- [x] Update `get_current_user` to decode `organization_id` and check `password_changed_at` against token `iat`
+- [x] Add APScheduler (or equivalent) for auto-close background job (24h inactivity → RESOLVED, closed_by='inactivity')
+- [x] Add `EmailService` class wrapping Resend SDK
+- [x] Add `RESEND_API_KEY`, `FROM_EMAIL`, `FRONTEND_URL` to settings/config
+- [x] Add `is_email_verified` column to `User` (default `True` for existing users, `False` for new signups)
+- [x] Create `EmailOTP` model (`user_id`, `otp_hash`, `expires_at`, `used_at`)
+- [x] Add `RESEND_OVERRIDE_TO_EMAIL` env var to settings/config and `.env`
+- [x] Add migration for the above (d11f4a7ff2bd, applied)
 
 ### Phase 2 — Auth, Onboarding & Email
-- [ ] **Fix `get_or_create_conversation`** to filter by `status=OPEN` (the core bug of the session refactor)
-- [ ] Add `POST /auth/signup` (atomic org + user creation)
-- [ ] Update `POST /auth/register` (auto-assign org from calling user)
-- [ ] Add `POST /auth/forgot-password` (rate-limited, always 200, sends reset email)
-- [ ] Add `POST /auth/reset-password` (validates token hash, updates password, invalidates token)
-- [ ] Add `ForgotPasswordPage` (`/forgot-password`) and `ResetPasswordPage` (`/reset-password`)
-- [ ] Add "Forgot password?" link to `LoginPage`
-- [ ] Add new dep functions (`require_org_admin`, `require_org_owner`, `get_org_scope`)
-- [ ] Update `compute_visibility_scope()` with org boundary layer
-- [ ] Add `GET /widget/conversations` (active + history list, paginated)
-- [ ] Add `POST /widget/conversations/new` (409 guard if OPEN conv exists)
-- [ ] Add `GET /widget/conversations/{id}/rating`
-- [ ] Update WebSocket path to `/ws/chat/{website_id}/{session_id}/{conversation_id}`
-- [ ] Add `conversation_created` WebSocket message type (for auto-create flow)
-- [ ] Fix push notification payload to include `conversation_id` for agent deep-linking
+- [x] **Fix `get_or_create_conversation`** to filter by `status=OPEN` (the core bug of the session refactor)
+- [x] Add `POST /auth/signup` (atomic org + user creation)
+- [x] Update `POST /auth/register` (auto-assign org from calling user)
+- [x] Add `POST /auth/forgot-password` (rate-limited, always 200, sends reset email)
+- [x] Add `POST /auth/reset-password` (validates token hash, updates password, invalidates token)
+- [x] Add `ForgotPasswordPage` (`/forgot-password`) and `ResetPasswordPage` (`/reset-password`)
+- [x] Add "Forgot password?" link to `LoginPage`
+- [x] Add new dep functions (`require_org_admin`, `require_org_owner`, `get_org_scope`)
+- [x] Update `compute_visibility_scope()` with org boundary layer
+- [x] Add `GET /widget/conversations` (active + history list, paginated)
+- [x] Add `POST /widget/conversations/new` (409 guard if OPEN conv exists)
+- [x] Add `GET /widget/conversations/{id}/rating`
+- [x] Update WebSocket path to `/ws/chat/{website_id}/{session_id}/{conversation_id}`
+- [x] Add `conversation_created` WebSocket message type (for auto-create flow)
+- [x] Fix push notification payload to include `conversation_id` for agent deep-linking (Gap F)
+- [x] **Email OTP:** Update `POST /auth/signup` to not return JWT; return `{ needs_verification: true, email }` instead
+- [x] **Email OTP:** Add `POST /auth/verify-otp` endpoint (hash OTP, validate, mark used, set `is_email_verified=True`, return JWT)
+- [x] **Email OTP:** Add `EmailService.send_otp_verification()` method (routes to `RESEND_OVERRIDE_TO_EMAIL` when set)
+- [x] **Email OTP:** Add `POST /auth/resend-otp` endpoint
 
-### Phase 3 — API Scoping & Widget
-- [ ] Add `organization_id` filter to all existing endpoints (websites, users, chats, analytics, customers, tags, automations, teams)
-- [ ] Add `/organization` CRUD endpoints
-- [ ] Add `/admin/*` super-admin endpoints
+### Phase 3 — API Scoping, Gap Fixes & Widget
+- [x] Add `organization_id` filter to all existing endpoints (websites, users, chats, analytics, customers, tags, automations, teams)
+- [x] Add `/organization` CRUD endpoints
+- [x] Add `/admin/*` super-admin endpoints
+- [x] **Gap E:** Fix OWNER/MANAGER `visible_website_ids` in `agent_service.py` — OWNER sees all org websites; MANAGER sees assigned websites
+- [x] **Gap B:** Block MANAGER from promoting to OWNER in `PATCH /users/{id}/role`
+- [x] **Gap C:** Block `role=system_manager` and `role=owner` from non-owner callers in `POST /auth/register` (was already guarded; confirmed)
+- [x] **Gap D:** Fix AgentsList UI — remove `system_manager` from role dropdown; add `owner`
+- [x] **Gap F:** Fix push URL — use `conversation_id` not `session_id`
+- [x] **Gap A:** Add website assignment check for MANAGER on `PUT /websites/{id}`
 - [ ] Widget: on-open routing (check OPEN conv → enter thread, else list/start screen)
 - [ ] Widget: list view — active thread header + resolved conversation history
 - [ ] Widget: "New Conversation" card (hidden when OPEN conv exists)
@@ -931,15 +995,17 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [ ] Backend: auto-generate conversation title from first visitor message (truncate 60 chars)
 
 ### Phase 4 — Frontend
-- [ ] `SignupPage` + `/signup` route
-- [ ] Login redirect by role (super-admin → `/superadmin`, others → `/dashboard/chats`)
-- [ ] `SuperAdminLayout` + `SuperAdminOrgs` + `SuperAdminOrgDetail` + `SuperAdminStats`
-- [ ] `OrgSettings` page
-- [ ] `organization` state in `appStore`
-- [ ] Update role helpers and all routing guards
+- [x] `SignupPage` + `/signup` route
+- [x] Login redirect by role (super-admin → `/superadmin`, others → `/dashboard/chats`)
+- [x] `SuperAdminLayout` + `SuperAdminOrgs` + `SuperAdminOrgDetail` + `SuperAdminStats`
+- [x] `OrgSettings` page
+- [x] `organization` state in `appStore`
+- [x] Update role helpers and all routing guards
+- [x] **Email OTP:** Add OTP entry step to `SignupPage` (inline step-2 after form submission)
 - [ ] `show_conversation_history` toggle in WebsiteDetail settings tab
 - [ ] "Other conversations from this visitor" section in agent conversation detail sidebar
 - [ ] `closed_by` label in agent conversation detail view
+- [ ] Onboarding wizard component + sidebar icon (see B9a)
 
 ### Phase 5 — Testing & Security Audit
 - [ ] Cross-org isolation tests (agent from Org A cannot access Org B's data)

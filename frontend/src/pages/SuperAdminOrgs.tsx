@@ -10,6 +10,7 @@ interface OrgStats {
     slug: string
     plan: string
     is_active: boolean
+    owner_verified: boolean
     owner_id: number | null
     member_count: number
     website_count: number
@@ -77,8 +78,14 @@ export default function SuperAdminOrgs() {
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                     <span className="font-medium text-slate-800 dark:text-slate-100 truncate">{org.name}</span>
-                                    <Badge variant={org.is_active ? 'default' : 'secondary'} className="shrink-0 text-xs">
-                                        {org.is_active ? 'Active' : 'Inactive'}
+                                    <Badge
+                                        variant={!org.is_active ? 'secondary' : !org.owner_verified ? 'outline' : 'default'}
+                                        className={`shrink-0 text-xs ${!org.is_active ? '' :
+                                                !org.owner_verified ? 'border-amber-400 text-amber-600 dark:text-amber-400' :
+                                                    ''
+                                            }`}
+                                    >
+                                        {!org.is_active ? 'Inactive' : !org.owner_verified ? 'Pending Verification' : 'Active'}
                                     </Badge>
                                     <Badge variant="outline" className="shrink-0 text-xs capitalize">{org.plan}</Badge>
                                 </div>

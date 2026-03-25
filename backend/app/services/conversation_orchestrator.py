@@ -396,7 +396,7 @@ class ConversationOrchestrator:
                             subscriptions=subs,
                             title=f"New message in conversation #{conversation.id}",
                             body=(message or "New message")[:120],
-                            url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                            url=f"/dashboard/chats?conversationId={conversation.id}",
                         ),
                     )
             except Exception as e:
@@ -429,7 +429,7 @@ class ConversationOrchestrator:
                 .filter(
                     User.is_active == True,  # noqa: E712
                     User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
                 )
                 .all()
             )
@@ -443,7 +443,7 @@ class ConversationOrchestrator:
                         subscriptions=subs,
                         title=f"Unassigned message - Website {website_id}",
                         body=(message or "New message")[:120],
-                        url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                        url=f"/dashboard/chats?conversationId={conversation.id}",
                     ),
                 )
         except Exception:
@@ -583,7 +583,7 @@ class ConversationOrchestrator:
                 .filter(
                     User.is_active == True,  # noqa: E712
                     User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
                 )
                 .all()
             )

@@ -3,7 +3,6 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { login as loginApi } from '@/services/auth'
 import { saveToken } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,7 +39,25 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     try {
       setError(null)
-      const response = await loginApi(data)
+      // Use raw fetch so we can detect needs_verification before it reaches loginApi's
+      // type-narrowing (which expects access_token to always be present).
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        throw new Error(result.detail || 'Login failed')
+      }
+
+      // Email not yet verified — send to OTP step on the signup page
+      if (result.needs_verification) {
+        navigate('/signup', { state: { step: 'verify', email: result.email }, replace: true })
+        return
+      }
+
+      const response = result
 
       // Save token to localStorage
       saveToken(response.access_token)

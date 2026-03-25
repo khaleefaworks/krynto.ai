@@ -55,6 +55,10 @@ class User(Base):
     # Session invalidation: tokens issued before this timestamp are rejected.
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Email verification: set True after OTP confirmed on signup.
+    # Existing users and admin-invited users default to True (no OTP required).
+    is_email_verified = Column(Boolean, default=True, nullable=False, server_default="true")
+
     # Heartbeat (presence)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
 

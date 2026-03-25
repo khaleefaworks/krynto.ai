@@ -457,6 +457,18 @@ def update_user_role(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators can modify administrator accounts"
             )
+        # Cannot grant OWNER role — only an OWNER or SYSTEM_MANAGER can do that
+        if payload.role == UserRole.OWNER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners can grant Owner role",
+            )
+        # Cannot modify OWNER accounts at all
+        if user.role == UserRole.OWNER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners can modify Owner accounts",
+            )
     
     # Prevent removing the last administrator
     if user.role == UserRole.SYSTEM_MANAGER and payload.role != UserRole.SYSTEM_MANAGER:
