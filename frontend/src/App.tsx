@@ -2,12 +2,13 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
-import { isAdmin } from './lib/roles'
+import { isAdmin, isSuperAdmin, isOrgOwner } from './lib/roles'
 import { fetchActiveChats } from './services/chats'
 import OnboardingPage from './pages/OnboardingPage'
 import LoginPage from './pages/LoginPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import SignupPage from './pages/SignupPage'
 import DashboardLayout from './pages/DashboardLayout'
 import ConversationsView from './pages/ConversationsView'
 import WebsiteManagement from './pages/WebsiteManagement'
@@ -24,6 +25,11 @@ import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
+import OrgSettings from './pages/OrgSettings'
+import SuperAdminLayout from './pages/SuperAdminLayout'
+import SuperAdminOrgs from './pages/SuperAdminOrgs'
+import SuperAdminOrgDetail from './pages/SuperAdminOrgDetail'
+import SuperAdminStats from './pages/SuperAdminStats'
 import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
@@ -52,6 +58,7 @@ function App() {
     user,
     setToken,
     setUser,
+    setOrganization,
     setUnreadChatsCount,
     bumpChatEventsVersion,
     pushNotification,
@@ -59,6 +66,8 @@ function App() {
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isSuper = isSuperAdmin(user)
+  const authedHome = isSuper ? '/superadmin/organizations' : '/dashboard/chats'
 
   // Arm notification audio on first user gesture (required by browsers).
   useEffect(() => {
@@ -99,47 +108,74 @@ function App() {
     }
   }, [pushNotification])
 
-  // Check if system needs initial setup
+  // Single initialization effect: check setup status, then restore session.
+  // Merging these three concerns prevents the race where the stale-token-clear
+  // fires right after onboarding sets a fresh token (needsSetup was still true).
   useEffect(() => {
-    const checkSetup = async () => {
+    const initialize = async () => {
       try {
         const response = await fetch(`${API_BASE}/auth/setup/status`)
         const data = await response.json()
-        setNeedsSetup(data.needs_setup)
-      } catch (error) {
-        console.error('Failed to check setup status:', error)
-      }
-    }
+        const setupNeeded: boolean = !!data.needs_setup
+        setNeedsSetup(setupNeeded)
 
-    checkSetup()
-  }, [])
-
-  // Restore auth from localStorage on mount
-  useEffect(() => {
-    const initAuth = async () => {
-      const storedToken = localStorage.getItem('auth_token')
-      if (storedToken && !token) {
-        setToken(storedToken)
-        try {
-          // Fetch user details using the stored token
-          const userData = await getCurrentUser()
-          setUser(userData)
-        } catch (error) {
-          // Token invalid, clear it
-          console.error('Invalid token, clearing:', error)
+        if (setupNeeded) {
+          // Backend not yet initialized — clear any stale token from a previous session.
           localStorage.removeItem('auth_token')
           setToken(null)
+          setUser(null)
+          setOrganization(null)
+        } else {
+          // System initialized — try to restore session from localStorage.
+          const storedToken = localStorage.getItem('auth_token')
+          if (storedToken) {
+            setToken(storedToken)
+            try {
+              const userData = await getCurrentUser()
+              setUser(userData)
+              // Populate org state for non-super-admin users.
+              if (userData.role !== 'system_manager' && userData.organization_id) {
+                try {
+                  const orgRes = await fetch(`${API_BASE}/organization`, {
+                    headers: { Authorization: `Bearer ${storedToken}` },
+                  })
+                  if (orgRes.ok) setOrganization(await orgRes.json())
+                } catch { /* non-critical */ }
+              }
+            } catch {
+              // Token expired or invalid.
+              localStorage.removeItem('auth_token')
+              setToken(null)
+            }
+          }
+        }
+      } catch {
+        // Server unreachable — try restoring session anyway.
+        const storedToken = localStorage.getItem('auth_token')
+        if (storedToken) {
+          setToken(storedToken)
+          try {
+            const userData = await getCurrentUser()
+            setUser(userData)
+          } catch {
+            localStorage.removeItem('auth_token')
+            setToken(null)
+          }
         }
       }
+
       setInitializing(false)
     }
 
-    initAuth()
+    initialize()
   }, [])
 
   // Global notification system - runs when user is authenticated
   useEffect(() => {
     if (!user?.id || !token) return
+
+    // Super-admin doesn't use the agent socket or chat dashboard.
+    if (isSuperAdmin(user)) return
 
     // Best-effort push subscription registration.
     // Do NOT auto-prompt permission here; browsers often require a user gesture.
@@ -329,119 +365,140 @@ function App() {
     )
   }
 
-  // Show onboarding if system needs setup
-  if (needsSetup && !token) {
-    return (
-      <BrowserRouter>
-        <Routes>
-          <Route path="*" element={<OnboardingPage />} />
-        </Routes>
-      </BrowserRouter>
-    )
-  }
-
   return (
     <BrowserRouter>
       <NotificationToasts />
       {token ? <NotificationPermissionPrompt /> : null}
       <Routes>
-        {/* Login route - redirect to dashboard if already authenticated */}
-        <Route
-          path="/login"
-          element={token ? <Navigate to="/dashboard/chats" replace /> : <LoginPage />}
-        />
-        {/* Public auth routes */}
-        <Route
-          path="/forgot-password"
-          element={token ? <Navigate to="/dashboard/chats" replace /> : <ForgotPasswordPage />}
-        />
-        <Route
-          path="/reset-password"
-          element={token ? <Navigate to="/dashboard/chats" replace /> : <ResetPasswordPage />}
-        />
-
-        {/* Protected routes - require authentication */}
-        {token ? (
-          <>
-            <Route path="/dashboard" element={<DashboardLayout />}>
-              {/* Chats - Unified 3-column view */}
-              <Route path="chats" element={<ConversationsView />} />
-              <Route path="chats/conversation/:conversationId" element={<ConversationsView />} />
-              <Route path="chats/:sessionId" element={<ConversationsView />} />
-              <Route path="history" element={<ConversationHistory />} />
-              <Route path="history/:conversationId" element={<ClosedChatView />} />
-
-              {/* Customers */}
-              <Route path="customers" element={<Customers />}>
-                <Route path="visitors" element={<CustomersVisitors />} />
-                <Route path="contacts" element={<CustomersContacts />} />
-                <Route index element={<Navigate to="/dashboard/customers/visitors" replace />} />
-              </Route>
-
-              {/* Settings - All users */}
-              <Route path="settings" element={<Settings />}>
-                {/* Websites management - Admin only */}
-                <Route
-                  path="websites"
-                  element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />}
-                />
-                <Route
-                  path="websites/new"
-                  element={<Navigate to="/dashboard/settings/websites" replace />}
-                />
-                <Route
-                  path="websites/:id"
-                  element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
-                />
-
-                {/* Users management - Admin only */}
-                <Route
-                  path="users"
-                  element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
-                />
-                {/* Legacy routes – detail page removed, redirect to list */}
-                <Route path="users/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
-                <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
-                <Route path="agents/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
-
-                {/* Tags route removed – tags are now per-website inside WebsiteDetail */}
-
-                {/* Personal settings - All users */}
-                <Route path="personal" element={<PersonalSettings />} />
-                <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
-                <Route index element={
-                  <div className="flex-1 flex items-center justify-center h-full">
-                    <div className="text-center max-w-md px-8">
-                      <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
-                        <Logo size={50} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
-                      </div>
-                      <p className="text-base text-gray-500 dark:text-gray-400">
-                        Select a section from the sidebar.
-                      </p>
-                    </div>
-                  </div>
-                } />
-              </Route>
-
-              {/* Teams - All users (placeholder) */}
-              <Route path="teams" element={<Teams />} />
-
-              {/* Analytics - Admins & Managers only */}
-              <Route path="analytics" element={isAdmin(user) ? <Analytics /> : <Navigate to="/dashboard/chats" replace />} />
-
-              {/* Legacy routes - kept for backwards compatibility */}
-              <Route path="websites" element={<WebsiteManagement />} />
-
-              {/* Default route */}
-              <Route index element={<Navigate to="/dashboard/chats" replace />} />
-            </Route>
-            <Route path="/" element={<Navigate to="/dashboard/chats" replace />} />
-            {/* Catch-all: redirect any unknown route to the main dashboard */}
-            <Route path="*" element={<Navigate to="/dashboard/chats" replace />} />
-          </>
+        {/* System bootstrap — shown when backend is not yet initialized */}
+        {needsSetup && !token ? (
+          <Route path="*" element={<OnboardingPage />} />
         ) : (
-          // Not authenticated - redirect everything to login
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <>
+            {/* Login route - redirect to dashboard if already authenticated */}
+            <Route
+              path="/login"
+              element={token ? <Navigate to={authedHome} replace /> : <LoginPage />}
+            />
+            {/* Public auth routes */}
+            <Route
+              path="/signup"
+              element={token ? <Navigate to={authedHome} replace /> : <SignupPage />}
+            />
+            <Route
+              path="/forgot-password"
+              element={token ? <Navigate to={authedHome} replace /> : <ForgotPasswordPage />}
+            />
+            <Route
+              path="/reset-password"
+              element={token ? <Navigate to={authedHome} replace /> : <ResetPasswordPage />}
+            />
+
+            {/* Protected routes - require authentication */}
+            {token ? (
+              <>
+                {/* Super-admin portal — SYSTEM_MANAGER only */}
+                <Route
+                  path="/superadmin"
+                  element={isSuper ? <SuperAdminLayout /> : <Navigate to="/dashboard/chats" replace />}
+                >
+                  <Route path="organizations" element={<SuperAdminOrgs />} />
+                  <Route path="organizations/:id" element={<SuperAdminOrgDetail />} />
+                  <Route path="stats" element={<SuperAdminStats />} />
+                  <Route index element={<Navigate to="/superadmin/organizations" replace />} />
+                </Route>
+                <Route
+                  path="/dashboard"
+                  element={!isSuper ? <DashboardLayout /> : <Navigate to="/superadmin/organizations" replace />}
+                >
+                  {/* Chats - Unified 3-column view */}
+                  <Route path="chats" element={<ConversationsView />} />
+                  <Route path="chats/conversation/:conversationId" element={<ConversationsView />} />
+                  <Route path="chats/:sessionId" element={<ConversationsView />} />
+                  <Route path="history" element={<ConversationHistory />} />
+                  <Route path="history/:conversationId" element={<ClosedChatView />} />
+
+                  {/* Customers */}
+                  <Route path="customers" element={<Customers />}>
+                    <Route path="visitors" element={<CustomersVisitors />} />
+                    <Route path="contacts" element={<CustomersContacts />} />
+                    <Route index element={<Navigate to="/dashboard/customers/visitors" replace />} />
+                  </Route>
+
+                  {/* Settings - All users */}
+                  <Route path="settings" element={<Settings />}>
+                    {/* Organization settings - OWNER only */}
+                    <Route
+                      path="organization"
+                      element={isOrgOwner(user) ? <OrgSettings /> : <Navigate to="/dashboard/chats" replace />}
+                    />
+                    {/* Websites management - Admin only */}
+                    <Route
+                      path="websites"
+                      element={isAdmin(user) ? <WebsitesList /> : <Navigate to="/dashboard/chats" replace />}
+                    />
+                    <Route
+                      path="websites/new"
+                      element={<Navigate to="/dashboard/settings/websites" replace />}
+                    />
+                    <Route
+                      path="websites/:id"
+                      element={isAdmin(user) ? <WebsiteDetail /> : <Navigate to="/dashboard/chats" replace />}
+                    />
+
+                    {/* Users management - Admin only */}
+                    <Route
+                      path="users"
+                      element={isAdmin(user) ? <AgentsList /> : <Navigate to="/dashboard/chats" replace />}
+                    />
+                    {/* Legacy routes – detail page removed, redirect to list */}
+                    <Route path="users/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
+                    <Route path="agents" element={<Navigate to="/dashboard/settings/users" replace />} />
+                    <Route path="agents/:id" element={<Navigate to="/dashboard/settings/users" replace />} />
+
+                    {/* Tags route removed – tags are now per-website inside WebsiteDetail */}
+
+                    {/* Personal settings - All users */}
+                    <Route path="personal" element={<PersonalSettings />} />
+                    <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
+                    <Route index element={
+                      <div className="flex-1 flex items-center justify-center h-full">
+                        <div className="text-center max-w-md px-8">
+                          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                            <Logo size={50} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
+                          </div>
+                          <p className="text-base text-gray-500 dark:text-gray-400">
+                            Select a section from the sidebar.
+                          </p>
+                        </div>
+                      </div>
+                    } />
+                  </Route>
+
+                  {/* Teams - All users (placeholder) */}
+                  <Route path="teams" element={<Teams />} />
+
+                  {/* Analytics - Admins & Managers only */}
+                  <Route path="analytics" element={isAdmin(user) ? <Analytics /> : <Navigate to="/dashboard/chats" replace />} />
+
+                  {/* Legacy routes - kept for backwards compatibility */}
+                  <Route path="websites" element={<WebsiteManagement />} />
+
+                  {/* Default route */}
+                  <Route index element={<Navigate to="/dashboard/chats" replace />} />
+                </Route>
+                <Route
+                  path="/"
+                  element={<Navigate to={authedHome} replace />}
+                />
+                {/* Catch-all: redirect any unknown route to the main dashboard */}
+                <Route path="*" element={<Navigate to={authedHome} replace />} />
+              </>
+            ) : (
+              // Not authenticated - redirect everything to login
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            )}
+          </>
         )}
       </Routes>
     </BrowserRouter>

@@ -1,4 +1,14 @@
-export type UserRole = "system_manager" | "manager" | "agent"
+export type UserRole = "system_manager" | "owner" | "manager" | "agent"
+
+export interface Organization {
+  id: number
+  name: string
+  slug: string
+  plan: string
+  is_active: boolean
+  owner_id: number | null
+  settings?: Record<string, unknown> | null
+}
 
 export interface User {
   id: number
@@ -8,6 +18,7 @@ export interface User {
   is_available: boolean
   is_active: boolean
   avatar_url?: string | null
+  organization_id: number | null
 }
 
 export interface Conversation {

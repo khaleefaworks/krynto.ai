@@ -1,5 +1,5 @@
 import { useAppStore } from "@/store/appStore"
-import { isAdmin, isAdministrator } from "@/lib/roles"
+import { isAdmin, isAdministrator, isOrgOwner } from "@/lib/roles"
 import { Link, useLocation, useSearchParams, Outlet } from "react-router-dom"
 import {
   Globe,
@@ -13,6 +13,7 @@ import {
   Bot,
   Tag as TagIcon,
   Trash2,
+  Building2,
 } from "lucide-react"
 
 
@@ -171,6 +172,17 @@ export default function Settings() {
                     <Users className="h-4 w-4 shrink-0" />
                     Users
                   </Link>
+                  {isOrgOwner(user) && (
+                    <Link
+                      to="/dashboard/settings/organization"
+                      className={navLinkClass(
+                        isActive("/dashboard/settings/organization")
+                      )}
+                    >
+                      <Building2 className="h-4 w-4 shrink-0" />
+                      Organization
+                    </Link>
+                  )}
                   <div className="h-3" />
                 </>
               )}

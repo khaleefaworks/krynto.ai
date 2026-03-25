@@ -3,10 +3,11 @@ import type { User } from "@/types/index"
 /**
  * Role Helper Utilities
  * 
- * Three roles:
- * - system_manager (Administrator): Full system access including reset
- * - manager: All admin features except reset application  
- * - agent: Only chat handling and personal settings
+ * Four roles:
+ * - system_manager (Administrator): Platform-wide super-admin
+ * - owner: Organization owner
+ * - manager: Organization admin
+ * - agent: Chat handling and personal settings
  */
 
 /**
@@ -17,10 +18,17 @@ export const isAdministrator = (user?: User | null): boolean => {
 }
 
 /**
+ * Alias used by SaaS route tree.
+ */
+export const isSuperAdmin = (user?: User | null): boolean => {
+  return user?.role === "system_manager"
+}
+
+/**
  * Check if user has admin privileges (System Manager or Manager)
  */
 export const isAdmin = (user?: User | null): boolean => {
-  return user?.role === "system_manager" || user?.role === "manager"
+  return user?.role === "system_manager" || user?.role === "owner" || user?.role === "manager"
 }
 
 /**
@@ -28,6 +36,13 @@ export const isAdmin = (user?: User | null): boolean => {
  */
 export const isManager = (user?: User | null): boolean => {
   return user?.role === "manager"
+}
+
+/**
+ * Check if user is the Organisation Owner
+ */
+export const isOrgOwner = (user?: User | null): boolean => {
+  return user?.role === "owner"
 }
 
 /**
