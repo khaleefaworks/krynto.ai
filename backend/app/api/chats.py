@@ -23,6 +23,13 @@ router = APIRouter(prefix="/chats", tags=["chats"])
 def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> None:
     scope = compute_visibility_scope(db, user=current_user)
 
+    if scope.organization_id is not None:
+        conv_website_id = getattr(conv, "website_id", None)
+        if conv_website_id is not None:
+            w = db.query(Website.organization_id).filter(Website.id == conv_website_id).first()
+            if w is None or w[0] != scope.organization_id:
+                raise HTTPException(status_code=403, detail="Chat not available")
+
     if scope.website_ids is not None:
         if int(getattr(conv, "website_id", 0)) not in set(scope.website_ids):
             raise HTTPException(status_code=403, detail="Chat not available")

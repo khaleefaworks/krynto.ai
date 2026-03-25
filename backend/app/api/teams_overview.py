@@ -92,6 +92,8 @@ def get_teams_overview(
     scope = compute_visibility_scope(db, user=current_user)
 
     websites_q = db.query(Website)
+    if scope.organization_id is not None:
+        websites_q = websites_q.filter(Website.organization_id == scope.organization_id)
     if scope.website_ids is not None:
         website_ids = [int(w) for w in (scope.website_ids or [])]
         if not website_ids:
@@ -125,7 +127,7 @@ def get_teams_overview(
         agents = (
             db.query(User)
             .filter(User.id.in_(sorted(all_agent_ids)))
-            .filter(User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]))
+            .filter(User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]))
             .order_by(User.name.asc(), User.id.asc())
             .all()
         )

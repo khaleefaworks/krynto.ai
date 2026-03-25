@@ -56,6 +56,16 @@ class ConversationService:
             .filter_by(session_id=session_id, website_id=website_id, status=ConversationStatus.OPEN)
             .first()
         )
+
+        if not conversation:
+            # Fall back to the most recent conversation for this session (may be RESOLVED).
+            # The orchestrator will handle reopening if needed.
+            conversation = (
+                self.db.query(Conversation)
+                .filter_by(session_id=session_id, website_id=website_id)
+                .order_by(Conversation.id.desc())
+                .first()
+            )
         
         if conversation:
             logger.info(

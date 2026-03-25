@@ -26,11 +26,49 @@ from app.models.conversation_tag import ConversationTag
 from app.models.conversation_rating import ConversationRating
 from app.models.tag import Tag
 from app.models.user import User, UserRole
+from app.models.website import Website
 from app.api.deps import get_current_user
+from app.services.visibility import compute_visibility_scope
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _allowed_website_ids(
+    db: Session,
+    *,
+    current_user: User,
+    requested_website_id: int | None,
+) -> list[int] | None:
+    """Return the list of website IDs the user is allowed to query for analytics.
+
+    Returns None when unrestricted (SYSTEM_MANAGER with no explicit website filter).
+    Returns an empty list when the user has no accessible websites.
+    Returns a list with one item when a specific website_id was requested (after org check).
+    """
+    scope = compute_visibility_scope(db, user=current_user)
+
+    if requested_website_id is not None:
+        # Verify the requested website belongs to the user's org.
+        if scope.organization_id is not None:
+            w = db.query(Website.id).filter_by(
+                id=requested_website_id, organization_id=scope.organization_id
+            ).first()
+            if not w:
+                return []  # No accessible websites → empty results
+        return [requested_website_id]
+
+    # No specific website requested → use org scope.
+    if scope.organization_id is None:
+        return None  # SYSTEM_MANAGER: unrestricted
+
+    rows = db.query(Website.id).filter_by(organization_id=scope.organization_id).all()
+    return [r[0] for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +121,20 @@ def conversation_summary(
     """High-level conversation KPIs for the selected period."""
     start_dt, end_dt = _date_range(start, end)
 
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
     base = db.query(Conversation).filter(
         Conversation.created_at >= start_dt,
         Conversation.created_at <= end_dt,
     )
-    if website_id:
-        base = base.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        if not allowed_ids:
+            return {
+                "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+                "total_new": 0, "total_replied": 0, "total_resolved": 0,
+                "avg_first_response_seconds": None,
+            }
+        base = base.filter(Conversation.website_id.in_(allowed_ids))
 
     total_new = base.count()
 
@@ -134,10 +180,14 @@ def conversation_summary(
             Conversation.created_at <= end_dt,
         )
     )
-    if website_id:
-        response_rows = response_rows.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        if allowed_ids:
+            response_rows = response_rows.filter(Conversation.website_id.in_(allowed_ids))
+        else:
+            avg_response_seconds = None
+            response_rows = None
 
-    avg_response_seconds = response_rows.scalar()
+    avg_response_seconds = response_rows.scalar() if response_rows is not None else None
 
     return {
         "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
@@ -160,6 +210,10 @@ def new_conversations_chart(
     start_dt, end_dt = _date_range(start, end)
     series = _date_series(start_dt, end_dt)
 
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"series": _fill_series({}, series)}
+
     q = (
         db.query(
             func.date(Conversation.created_at).label("day"),
@@ -171,8 +225,8 @@ def new_conversations_chart(
         )
         .group_by(func.date(Conversation.created_at))
     )
-    if website_id:
-        q = q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        q = q.filter(Conversation.website_id.in_(allowed_ids))
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -194,6 +248,10 @@ def resolved_conversations_chart(
     start_dt, end_dt = _date_range(start, end)
     series = _date_series(start_dt, end_dt)
 
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"series": _fill_series({}, series)}
+
     q = (
         db.query(
             func.date(Conversation.updated_at).label("day"),
@@ -206,8 +264,8 @@ def resolved_conversations_chart(
         )
         .group_by(func.date(Conversation.updated_at))
     )
-    if website_id:
-        q = q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        q = q.filter(Conversation.website_id.in_(allowed_ids))
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -227,6 +285,10 @@ def replied_conversations_chart(
     """
     start_dt, end_dt = _date_range(start, end)
     series = _date_series(start_dt, end_dt)
+
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"series": _fill_series({}, series)}
 
     first_reply = (
         db.query(
@@ -250,8 +312,8 @@ def replied_conversations_chart(
         )
         .group_by(func.date(first_reply.c.first_reply_at))
     )
-    if website_id:
-        q = q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        q = q.filter(Conversation.website_id.in_(allowed_ids))
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -271,6 +333,10 @@ def response_time_chart(
     """
     start_dt, end_dt = _date_range(start, end)
     series = _date_series(start_dt, end_dt)
+
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"series": _fill_series({}, series, default=0)}
 
     first_agent_msg = (
         db.query(
@@ -296,8 +362,8 @@ def response_time_chart(
             Conversation.created_at <= end_dt,
         )
     )
-    if website_id:
-        rows = rows.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        rows = rows.filter(Conversation.website_id.in_(allowed_ids))
 
     all_rows = rows.all()
 
@@ -333,12 +399,20 @@ def agents_summary(
     """Per-agent breakdown: conversations handled, messages sent, avg response time."""
     start_dt, end_dt = _date_range(start, end)
 
-    # All agent-role users
-    agents = (
-        db.query(User)
-        .filter(User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]))
-        .all()
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    # Org-scoped agents only
+    from app.services.visibility import compute_visibility_scope
+    scope = compute_visibility_scope(db, user=current_user)
+    agents_q = db.query(User).filter(
+        User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER])
     )
+    if scope.organization_id is not None:
+        agents_q = agents_q.filter(User.organization_id == scope.organization_id)
+    agents = agents_q.all()
+
+    if allowed_ids is not None and not allowed_ids:
+        return {"agents": []}
 
     # Conversations assigned per agent in period
     assigned_q = (
@@ -352,8 +426,8 @@ def agents_summary(
             Conversation.created_at <= end_dt,
         )
     )
-    if website_id:
-        assigned_q = assigned_q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        assigned_q = assigned_q.filter(Conversation.website_id.in_(allowed_ids))
     assigned_q = assigned_q.group_by(Conversation.assigned_agent_id)
     assigned_map = {row[0]: row[1] for row in assigned_q.all()}
 
@@ -369,9 +443,9 @@ def agents_summary(
             Message.created_at <= end_dt,
         )
     )
-    if website_id:
+    if allowed_ids is not None:
         msgs_q = msgs_q.join(Conversation, Conversation.id == Message.conversation_id).filter(
-            Conversation.website_id == website_id
+            Conversation.website_id.in_(allowed_ids)
         )
     msgs_q = msgs_q.group_by(Message.sender)
     msgs_map = {row[0]: row[1] for row in msgs_q.all()}
@@ -402,8 +476,8 @@ def agents_summary(
             Conversation.created_at <= end_dt,
         )
     )
-    if website_id:
-        resp_q = resp_q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        resp_q = resp_q.filter(Conversation.website_id.in_(allowed_ids))
     resp_q = resp_q.group_by(first_agent_msg.c.agent_email)
     resp_map = {row[0]: round(row[1], 1) if row[1] else None for row in resp_q.all()}
 

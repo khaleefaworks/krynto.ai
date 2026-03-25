@@ -10,7 +10,7 @@ from pathlib import Path
 from app.core.database import get_db
 from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
 from app.core.security import get_password_hash, verify_password
-from app.api.deps import require_authenticated_user, require_admin
+from app.api.deps import require_authenticated_user, require_admin, get_org_scope
 from app.models.user import User, UserRole
 from app.models.conversation import Conversation, ConversationStatus
 from app.services.presence_service import PresenceService
@@ -27,9 +27,12 @@ def list_users(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """List all users (admin only)."""
-
-    users = db.query(User).filter(User.is_deleted == False).all()
+    """List all users (admin only). Scoped to the calling user's organization."""
+    org_id = get_org_scope(_admin)
+    q = db.query(User).filter(User.is_deleted == False)
+    if org_id is not None:
+        q = q.filter(User.organization_id == org_id)
+    users = q.all()
     connected_ids = users_repo.recently_heartbeat_user_ids(
         db, ttl_seconds=AgentService.heartbeat_ttl_seconds,
     )
@@ -68,9 +71,14 @@ def update_user(
     - Name can only be set once: allowed only if currently empty
     """
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.is_deleted == False).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Org boundary: non-superadmin admins can only update users in their own org.
+    org_id = get_org_scope(_admin)
+    if org_id is not None and user.organization_id != org_id:
+        raise HTTPException(status_code=403, detail="User not found")
 
     changed = False
 

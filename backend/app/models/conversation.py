@@ -52,6 +52,9 @@ class Conversation(Base, TimestampMixin):
     # How the conversation was closed: 'agent' | 'visitor' | 'inactivity' | NULL (still open)
     closed_by = Column(String(20), nullable=True)
 
+    # Auto-generated title from the first visitor message (up to 60 chars)
+    title = Column(String(120), nullable=True)
+
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)

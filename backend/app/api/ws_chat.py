@@ -922,6 +922,29 @@ async def chat_ws(
                     )
                     if conv:
                         registered_conversation_id = conv.id
+                        ChatService.register_visitor(conv.id, websocket)
+
+                        # Set conversation title from the first visitor message.
+                        if not conv.title:
+                            try:
+                                conv.title = user_message[:60].strip()
+                                db.commit()
+                            except Exception:
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+
+                        # Notify the widget so it can store the new conversation_id.
+                        try:
+                            await websocket.send_json(
+                                {
+                                    "type": "conversation_created",
+                                    "conversation_id": conv.id,
+                                }
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -1023,6 +1046,182 @@ async def chat_ws(
             pass
         db.close()
 
+        try:
+            structlog.contextvars.clear_contextvars()
+        except Exception:
+            pass
+
+
+@router.websocket("/ws/chat/{website_id}/{session_id}/{conversation_id}")
+async def chat_ws_with_conversation(
+    websocket: WebSocket,
+    website_id: int,
+    session_id: str,
+    conversation_id: int,
+):
+    """WebSocket route with an explicit conversation_id.
+
+    Used by the widget when reconnecting to a known conversation (e.g. from the
+    conversation list view). For OPEN conversations, messages are processed
+    normally. For RESOLVED conversations, only the history is delivered and
+    further visitor messages are rejected with an informational notice.
+    """
+    connection_id = str(uuid.uuid4())
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        connection_id=connection_id,
+        ws_kind="chat",
+        website_id=website_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+    )
+
+    await websocket.accept()
+    try:
+        ws_connect(kind="chat")
+    except Exception:
+        pass
+
+    db = SessionLocal()
+    try:
+        # Validate website exists.
+        from app.models.website import Website
+        from app.models.conversation import Conversation, ConversationStatus
+
+        website = db.query(Website).filter_by(id=website_id).first()
+        if not website:
+            await websocket.close(code=1008, reason=_ws_close_reason("Website not found"))
+            return
+
+        # Validate conversation belongs to this website.
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+        ).first()
+        if not conv:
+            await websocket.close(code=1008, reason=_ws_close_reason("Conversation not found"))
+            return
+
+        # Register visitor presence only for OPEN conversations.
+        is_open = conv.status not in (ConversationStatus.RESOLVED,)
+        if is_open and str(conv.session_id) == str(session_id):
+            ChatService.register_visitor(conv.id, websocket)
+            ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+
+        # Send conversation history.
+        try:
+            messages = messages_repo.list_messages_for_conversation(db, conv.id)
+            await websocket.send_json(
+                {
+                    "type": "history",
+                    "conversation_id": conv.id,
+                    "status": conv.status.value if hasattr(conv.status, "value") else str(conv.status),
+                    "messages": [serialize_message(db, m) for m in messages],
+                }
+            )
+        except Exception as e:
+            logger.error("conversation_history_failed", conversation_id=conversation_id, error=str(e))
+
+        db.close()
+        db = SessionLocal()
+        orchestrator = ConversationOrchestrator(db)
+        agent_service = AgentService(db)
+
+        # For resolved conversations only deliver history; reject further messages.
+        if not is_open:
+            try:
+                await websocket.send_json(
+                    {"type": "resolved", "message": "This conversation is closed."}
+                )
+            except Exception:
+                pass
+            # Hold the socket open until the client disconnects.
+            try:
+                while True:
+                    await websocket.receive_text()
+                    await websocket.send_json(
+                        {"type": "error", "message": "This conversation is closed. Start a new one."}
+                    )
+            except WebSocketDisconnect:
+                pass
+            return
+
+        # OPEN conversation — process messages the same as the main route.
+        try:
+            while True:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+                message_type = payload.get("type")
+
+                if message_type == "typing":
+                    is_typing = bool(payload.get("is_typing"))
+                    event = {
+                        "type": "visitor_typing",
+                        "conversation_id": conv.id,
+                        "website_id": website_id,
+                        "session_id": session_id,
+                        "is_typing": is_typing,
+                    }
+                    if conv.assigned_agent_id:
+                        await agent_service.send_to_agent(conv.assigned_agent_id, event)
+                    else:
+                        await agent_service.broadcast_to_active_agents(
+                            website_id=website_id, message_data=event, include_global=True
+                        )
+                    continue
+
+                user_message = payload.get("message")
+                if not user_message:
+                    continue
+
+                exceeded = False
+                try:
+                    exceeded = await is_chat_rate_limited(
+                        website_id=website_id,
+                        session_id=session_id,
+                        limit=settings.RATE_LIMIT_CHAT_MESSAGE,
+                    )
+                except Exception:
+                    pass
+                if exceeded:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Rate limit exceeded. Please slow down."}
+                    )
+                    continue
+
+                response = await orchestrator.handle_visitor_message(
+                    website_id=website_id,
+                    session_id=session_id,
+                    message=user_message,
+                    visitor_ws=websocket,
+                    visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
+                )
+                if response:
+                    await websocket.send_json({"type": "system", "message": response})
+
+        except WebSocketDisconnect:
+            pass
+
+    except Exception as e:
+        logger.error("chat_ws_with_conversation_error", error=str(e), exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=_ws_close_reason(str(e)))
+        except Exception:
+            pass
+    finally:
+        try:
+            ws_disconnect(kind="chat")
+        except Exception:
+            pass
+        try:
+            ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+        try:
+            ChatService.unregister_session_socket(websocket)
+        except Exception:
+            pass
+        db.close()
         try:
             structlog.contextvars.clear_contextvars()
         except Exception:

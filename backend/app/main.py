@@ -33,6 +33,8 @@ from app.api.website_shortcuts import router as website_shortcuts_router
 from app.api.teams_overview import router as teams_overview_router
 from app.api.analytics import router as analytics_router
 from app.api.ratings import router as ratings_router
+from app.api.organization import router as organization_router
+from app.api.admin import router as admin_router
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
@@ -164,6 +166,8 @@ app.include_router(website_shortcuts_router)
 app.include_router(teams_overview_router)
 app.include_router(analytics_router)
 app.include_router(ratings_router)
+app.include_router(organization_router)
+app.include_router(admin_router)
 
 # Serve widget files statically
 project_root = Path(__file__).resolve().parents[2]

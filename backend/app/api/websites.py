@@ -12,7 +12,7 @@ from app.models.automation import Automation
 from app.models.website_team import WebsiteTeam
 from app.models.tag import Tag
 from app.models.website_message_shortcut import WebsiteMessageShortcut
-from app.api.deps import require_admin, require_administrator, require_authenticated_user
+from app.api.deps import require_admin, require_administrator, require_authenticated_user, require_org_admin, require_org_owner, get_org_scope
 from app.services.visibility import compute_visibility_scope
 from pydantic import BaseModel
 from typing import Optional, List
@@ -74,11 +74,14 @@ def list_websites(
 ):
     """
     List websites visible to the current user.
-    - Administrator: all websites
-    - Manager/Agent: only assigned websites
+    - SYSTEM_MANAGER: all websites
+    - OWNER/MANAGER: all websites in their org
+    - AGENT: only assigned websites within their org
     """
     scope = compute_visibility_scope(db, user=current_user)
     query = db.query(Website)
+    if scope.organization_id is not None:
+        query = query.filter(Website.organization_id == scope.organization_id)
     if scope.website_ids is not None:
         query = query.filter(Website.id.in_(scope.website_ids))
     return query.all()
@@ -88,21 +91,22 @@ def list_websites(
 def create_website(
     website_data: WebsiteCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_administrator)
+    admin: User = Depends(require_org_admin)
 ):
     """
     Create a new website.
-    Requires Administrator (SYSTEM_MANAGER) access.
+    Requires OWNER, MANAGER (within their org) or SYSTEM_MANAGER access.
     """
     # Check if domain already exists
     existing = db.query(Website).filter_by(domain=website_data.domain).first()
     if existing:
         raise HTTPException(status_code=400, detail="Domain already registered")
-    
+
     website = Website(
         name=website_data.name,
         domain=website_data.domain,
         widget_config=website_data.widget_config or {},
+        organization_id=admin.organization_id,
     )
     db.add(website)
     db.commit()
@@ -136,6 +140,9 @@ def get_website(
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     scope = compute_visibility_scope(db, user=current_user)
+    # Org boundary: non-superadmin users can only access their org's websites.
+    if scope.organization_id is not None and website.organization_id != scope.organization_id:
+        raise HTTPException(status_code=404, detail="Website not found")
     if scope.website_ids is not None and website.id not in set(scope.website_ids):
         raise HTTPException(status_code=403, detail="Website not assigned")
     return website
@@ -146,14 +153,17 @@ def update_website(
     website_id: int,
     website_data: WebsiteUpdate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin)
+    admin: User = Depends(require_org_admin)
 ):
     """
     Update a website.
-    Requires admin access (SYSTEM_MANAGER or MANAGER role).
+    Requires OWNER, MANAGER (within their org) or SYSTEM_MANAGER access.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    # Org boundary
+    if admin.organization_id is not None and website.organization_id != admin.organization_id:
         raise HTTPException(status_code=404, detail="Website not found")
     
     # Update only provided fields
@@ -180,14 +190,16 @@ def update_website(
 def get_deletion_impact(
     website_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_administrator),
+    admin: User = Depends(require_org_owner),
 ):
     """
     Return counts of all records that will be deleted when this website is removed.
-    Requires Administrator (SYSTEM_MANAGER) access.
+    Requires OWNER or SYSTEM_MANAGER access.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    if admin.organization_id is not None and website.organization_id != admin.organization_id:
         raise HTTPException(status_code=404, detail="Website not found")
 
     conversations_count = db.query(func.count(Conversation.id)).filter_by(website_id=website_id).scalar() or 0
@@ -217,14 +229,16 @@ def get_deletion_impact(
 def delete_website(
     website_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_administrator)
+    admin: User = Depends(require_org_owner)
 ):
     """
     Delete a website.
-    Requires Administrator (SYSTEM_MANAGER) access.
+    Requires OWNER or SYSTEM_MANAGER access.
     """
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    if admin.organization_id is not None and website.organization_id != admin.organization_id:
         raise HTTPException(status_code=404, detail="Website not found")
     
     db.delete(website)
