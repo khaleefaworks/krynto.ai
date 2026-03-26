@@ -340,13 +340,14 @@
 #chatassist-header {
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #fff;
-  padding: 16px 16px 16px 20px;
+  padding: 12px 12px 12px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-weight: 600;
   font-size: 16px;
   flex-shrink: 0;
+  gap: 4px;
 }
 
 .chatassist-header-content {
@@ -598,7 +599,8 @@
   object-fit: cover;
 }
 
-.chatassist-message-avatar-bot {
+.chatassist-message-avatar-bot,
+.chatassist-message-avatar-ai {
   background: #e5e7eb;
   color: #111827;
 }
@@ -1514,4 +1516,126 @@
   font-size: 14px;
   font-weight: 600;
   color: #10b981;
+}
+
+/* --- Conversation List View --- */
+
+.chatassist-conv-list {
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+}
+
+.chatassist-theme-dark .chatassist-conv-list {
+  background: #1e293b;
+}
+
+.chatassist-conv-list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 0 8px;
+}
+
+.chatassist-conv-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 12px 16px;
+  border: 2px solid #3b82f6;
+  border-radius: 10px;
+  background: transparent;
+  color: #3b82f6;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  text-align: left;
+}
+
+.chatassist-conv-new-btn:hover {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.chatassist-conv-list-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.chatassist-conv-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.12s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chatassist-conv-item:last-child {
+  border-bottom: none;
+}
+
+.chatassist-conv-item:hover {
+  background: #f8fafc;
+}
+
+.chatassist-theme-dark .chatassist-conv-item {
+  border-bottom-color: #334155;
+}
+
+.chatassist-theme-dark .chatassist-conv-item:hover {
+  background: #0f172a;
+}
+
+.chatassist-conv-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatassist-theme-dark .chatassist-conv-item-title {
+  color: #e2e8f0;
+}
+
+.chatassist-conv-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatassist-conv-item-date {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.chatassist-conv-item-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.chatassist-conv-item-badge-active {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+/* Back button — left of the avatar, outside chatassist-header-content */
+#chatassist-back {
+  flex-shrink: 0;
+  margin-right: 0;
 }

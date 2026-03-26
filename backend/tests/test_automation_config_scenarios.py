@@ -171,12 +171,12 @@ def _seed_resolve_automations(
 
 
 @pytest.mark.parametrize(
-    "enable_bot,enable_system,expect_bot,expect_system",
+    "enable_bot,enable_system,expect_bot",
     [
-        (True, True, True, True),
-        (False, True, False, True),
-        (True, False, True, False),
-        (False, False, False, False),
+        (True, True, True),
+        (False, True, False),
+        (True, False, True),
+        (False, False, False),
     ],
 )
 def test_resolve_emits_only_configured_actions(
@@ -185,7 +185,6 @@ def test_resolve_emits_only_configured_actions(
     enable_bot,
     enable_system,
     expect_bot,
-    expect_system,
 ):
     """Proves resolve behavior is entirely driven by enabled automations.
 
@@ -237,14 +236,17 @@ def test_resolve_emits_only_configured_actions(
         )
         assert resp.status_code == 200
 
-        # Reconnect visitor: history should include only what was configured.
-        with client.websocket_connect(f"/ws/chat/1/{session_id}") as visitor_ws2:
+        # Reconnect visitor: use the explicit conversation route to view
+        # resolved history (the generic route only shows OPEN conversations).
+        with client.websocket_connect(f"/ws/chat/1/{session_id}/{conversation_id}") as visitor_ws2:
             history = _recv_until(visitor_ws2, want_type="history")
             msgs = history.get("messages") or []
             event_types = {str((m or {}).get("event_type") or "") for m in msgs}
 
             assert ("bot_closing" in event_types) is bool(expect_bot)
-            assert ("conversation_resolved" in event_types) is bool(expect_system)
+            # conversation_resolved is always emitted as a canonical lifecycle
+            # event (ensure_system_event=True), regardless of automation config.
+            assert "conversation_resolved" in event_types
 
 
 def test_config_mismatch_is_explained_by_history_not_current_settings(client_and_seeded_db, monkeypatch):
@@ -317,13 +319,14 @@ def test_config_mismatch_is_explained_by_history_not_current_settings(client_and
         assert resp2.status_code == 200
 
         # Verify A history still has bot_closing, B does not.
-        with client.websocket_connect(f"/ws/chat/1/{session_a}") as vws_a2:
+        # Use explicit conversation routes since generic route only shows OPEN conversations.
+        with client.websocket_connect(f"/ws/chat/1/{session_a}/{conv_a}") as vws_a2:
             history_a = _recv_until(vws_a2, want_type="history")
             event_types_a = {str((m or {}).get("event_type") or "") for m in (history_a.get("messages") or [])}
             assert "bot_closing" in event_types_a
             assert "conversation_resolved" in event_types_a
 
-        with client.websocket_connect(f"/ws/chat/1/{session_b}") as vws_b2:
+        with client.websocket_connect(f"/ws/chat/1/{session_b}/{conv_b}") as vws_b2:
             history_b = _recv_until(vws_b2, want_type="history")
             event_types_b = {str((m or {}).get("event_type") or "") for m in (history_b.get("messages") or [])}
             assert "bot_closing" not in event_types_b
@@ -450,7 +453,7 @@ def test_automations_rest_api_matches_dashboard_behavior(client_and_seeded_db, m
         resp = client.post(f"/chats/{conv_a}/close", headers=_auth_headers(agent_token))
         assert resp.status_code == 200
 
-        with client.websocket_connect(f"/ws/chat/1/{session_a}") as vws_a2:
+        with client.websocket_connect(f"/ws/chat/1/{session_a}/{conv_a}") as vws_a2:
             history_a = _recv_until(vws_a2, want_type="history")
             event_types_a = {str((m or {}).get("event_type") or "") for m in (history_a.get("messages") or [])}
             assert "bot_closing" in event_types_a
@@ -469,14 +472,14 @@ def test_automations_rest_api_matches_dashboard_behavior(client_and_seeded_db, m
         resp2 = client.post(f"/chats/{conv_b}/close", headers=_auth_headers(agent_token))
         assert resp2.status_code == 200
 
-        with client.websocket_connect(f"/ws/chat/1/{session_b}") as vws_b2:
+        with client.websocket_connect(f"/ws/chat/1/{session_b}/{conv_b}") as vws_b2:
             history_b = _recv_until(vws_b2, want_type="history")
             event_types_b = {str((m or {}).get("event_type") or "") for m in (history_b.get("messages") or [])}
             assert "bot_closing" not in event_types_b
             assert "conversation_resolved" in event_types_b
 
         # A remains unchanged.
-        with client.websocket_connect(f"/ws/chat/1/{session_a}") as vws_a3:
+        with client.websocket_connect(f"/ws/chat/1/{session_a}/{conv_a}") as vws_a3:
             history_a3 = _recv_until(vws_a3, want_type="history")
             event_types_a3 = {str((m or {}).get("event_type") or "") for m in (history_a3.get("messages") or [])}
             assert "bot_closing" in event_types_a3
@@ -495,17 +498,21 @@ def test_automations_rest_api_matches_dashboard_behavior(client_and_seeded_db, m
         resp3 = client.post(f"/chats/{conv_c}/close", headers=_auth_headers(agent_token))
         assert resp3.status_code == 200
 
-        with client.websocket_connect(f"/ws/chat/1/{session_c}") as vws_c2:
+        with client.websocket_connect(f"/ws/chat/1/{session_c}/{conv_c}") as vws_c2:
             history_c = _recv_until(vws_c2, want_type="history")
             event_types_c = {str((m or {}).get("event_type") or "") for m in (history_c.get("messages") or [])}
             assert "bot_closing" not in event_types_c
-            assert "conversation_resolved" not in event_types_c
+            # conversation_resolved is always emitted as a canonical lifecycle event.
+            assert "conversation_resolved" in event_types_c
 
 
-def test_repeat_always_allows_multiple_resolve_reopen_cycles_via_rest_api(client_and_seeded_db, monkeypatch):
-    """When repeat=always, resolved/reopened automations can fire multiple times in one day.
+def test_repeat_always_allows_multiple_resolve_cycles_via_rest_api(client_and_seeded_db, monkeypatch):
+    """When repeat=always, resolved automations fire on every new conversation resolve.
 
-    This matches the desired behavior for triggers like conversation_resolved/conversation_reopened.
+    After the session/conversation refactor, conversations are never reopened;
+    a new visitor message after resolution creates a fresh OPEN conversation.
+    This test verifies that each fresh conversation's resolve cycle independently
+    fires the configured automations.
     """
 
     from app.core.security import create_access_token
@@ -567,60 +574,47 @@ def test_repeat_always_allows_multiple_resolve_reopen_cycles_via_rest_api(client
         },
     )
 
-    _api_create_automation(
-        client,
-        token=admin_token,
-        payload={
-            "website_id": 1,
-            "name": "Reopened event",
-            "trigger": "conversation_reopened",
-            "enabled": True,
-            "conditions": {"repeat": "always"},
-            "actions": [
-                {
-                    "type": "emit_system_event",
-                    "content": "This conversation has been reopened.",
-                    "event_type": "conversation_reopened",
-                }
-            ],
-        },
-    )
-
     with client.websocket_connect(f"/ws/agent/1?token={agent_token}") as agent_ws:
         _recv_until(agent_ws, want_type="connected")
 
         session_id = "sess-repeat-always"
 
-        # Create conversation.
+        # Cycle 1: Create conversation and resolve.
         with client.websocket_connect(f"/ws/chat/1/{session_id}") as vws:
             _recv_until(vws, want_type="history")
             vws.send_text(json.dumps({"message": "hello"}))
             visitor_msg = _recv_until(agent_ws, want_type="visitor_message")
-            conversation_id = int(visitor_msg["conversation_id"])
+            conv_1 = int(visitor_msg["conversation_id"])
 
-        # Cycle 1: resolve
-        resp1 = client.post(f"/chats/{conversation_id}/close", headers=_auth_headers(agent_token))
+        resp1 = client.post(f"/chats/{conv_1}/close", headers=_auth_headers(agent_token))
         assert resp1.status_code == 200
 
-        # Reopen: visitor reconnect + message
-        with client.websocket_connect(f"/ws/chat/1/{session_id}") as vws2:
-            _recv_until(vws2, want_type="history")
-            vws2.send_text(json.dumps({"message": "back"}))
-            reopened_frame = _recv_until(vws2, want_type="system")
-            assert reopened_frame.get("message_obj", {}).get("event_type") == "conversation_reopened"
-
-        # Cycle 2: resolve again
-        resp2 = client.post(f"/chats/{conversation_id}/close", headers=_auth_headers(agent_token))
-        assert resp2.status_code == 200
-
-        # History should now include two of each resolve event.
-        with client.websocket_connect(f"/ws/chat/1/{session_id}") as vws3:
-            history = _recv_until(vws3, want_type="history")
+        # Check conv_1 history has both events.
+        with client.websocket_connect(f"/ws/chat/1/{session_id}/{conv_1}") as vws2:
+            history = _recv_until(vws2, want_type="history")
             msgs = history.get("messages") or []
             resolved_count = sum(1 for m in msgs if (m or {}).get("event_type") == "conversation_resolved")
             closing_count = sum(1 for m in msgs if (m or {}).get("event_type") == "bot_closing")
-            reopened_count = sum(1 for m in msgs if (m or {}).get("event_type") == "conversation_reopened")
+            assert resolved_count >= 1
+            assert closing_count >= 1
 
-            assert resolved_count >= 2
-            assert closing_count >= 2
-            assert reopened_count >= 1
+        # Cycle 2: Visitor sends new message → gets a new OPEN conversation.
+        with client.websocket_connect(f"/ws/chat/1/{session_id}") as vws3:
+            _recv_until(vws3, want_type="history")
+            vws3.send_text(json.dumps({"message": "back again"}))
+            visitor_msg_2 = _recv_until(agent_ws, want_type="visitor_message")
+            conv_2 = int(visitor_msg_2["conversation_id"])
+            assert conv_2 != conv_1  # Must be a new conversation
+
+        # Resolve conversation 2.
+        resp2 = client.post(f"/chats/{conv_2}/close", headers=_auth_headers(agent_token))
+        assert resp2.status_code == 200
+
+        # Check conv_2 also got its own resolve events.
+        with client.websocket_connect(f"/ws/chat/1/{session_id}/{conv_2}") as vws4:
+            history_2 = _recv_until(vws4, want_type="history")
+            msgs_2 = history_2.get("messages") or []
+            resolved_count_2 = sum(1 for m in msgs_2 if (m or {}).get("event_type") == "conversation_resolved")
+            closing_count_2 = sum(1 for m in msgs_2 if (m or {}).get("event_type") == "bot_closing")
+            assert resolved_count_2 >= 1
+            assert closing_count_2 >= 1

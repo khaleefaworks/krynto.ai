@@ -54,18 +54,9 @@ class ConversationService:
         conversation = (
             self.db.query(Conversation)
             .filter_by(session_id=session_id, website_id=website_id, status=ConversationStatus.OPEN)
+            .order_by(Conversation.id.desc())
             .first()
         )
-
-        if not conversation:
-            # Fall back to the most recent conversation for this session (may be RESOLVED).
-            # The orchestrator will handle reopening if needed.
-            conversation = (
-                self.db.query(Conversation)
-                .filter_by(session_id=session_id, website_id=website_id)
-                .order_by(Conversation.id.desc())
-                .first()
-            )
         
         if conversation:
             logger.info(
@@ -205,7 +196,7 @@ class ConversationService:
     
 
     
-    def close_conversation(self, conversation_id: int) -> Optional[Conversation]:
+    def close_conversation(self, conversation_id: int, *, closed_by: str | None = "agent") -> Optional[Conversation]:
         """
         Resolve a conversation (OPEN → RESOLVED).
         
@@ -222,12 +213,20 @@ class ConversationService:
             return None
         
         if conversation.status == ConversationStatus.RESOLVED:
+            if closed_by and not getattr(conversation, "closed_by", None):
+                conversation.closed_by = str(closed_by)
+                self.db.commit()
+                try:
+                    self.db.refresh(conversation)
+                except Exception:
+                    pass
             logger.warning("conversation_already_resolved", conversation_id=conversation_id)
             return conversation
         
         # Update status
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
+        conversation.closed_by = str(closed_by).strip() if closed_by else None
         self.db.commit()
         try:
             self.db.refresh(conversation)
@@ -237,7 +236,8 @@ class ConversationService:
         logger.info(
             "conversation_resolved",
             conversation_id=conversation_id,
-            previous_status=old_status.value
+            previous_status=old_status.value,
+            closed_by=conversation.closed_by,
         )
 
         return conversation

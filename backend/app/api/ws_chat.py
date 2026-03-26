@@ -332,12 +332,14 @@ async def chat_ws(
         except Exception:
             pass
 
-        # Load history if a conversation already exists for this session.
+        # Load history only for an OPEN conversation tied to this session.
         # IMPORTANT: Do NOT create a new conversation just because the widget connected.
-        # We only create the conversation on the first visitor message.
+        # If all prior conversations are resolved, the generic widget route must
+        # start empty; resolved history is opened explicitly via the
+        # /ws/chat/{website_id}/{session_id}/{conversation_id} route.
         conversation = None
         try:
-            conversation = conversations_repo.get_conversation_by_session(
+            conversation = conversations_repo.get_open_conversation_by_session(
                 db,
                 website_id=website_id,
                 session_id=session_id,
@@ -608,7 +610,7 @@ async def chat_ws(
                 conversation = None
                 if conversation_id is None:
                     try:
-                        conversation = conversations_repo.get_conversation_by_session(
+                        conversation = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -698,7 +700,7 @@ async def chat_ws(
                 btn_conversation_id: int | None = registered_conversation_id
                 if btn_conversation_id is None:
                     try:
-                        btn_conv = conversations_repo.get_conversation_by_session(
+                        btn_conv = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -724,12 +726,11 @@ async def chat_ws(
                 continue
 
             # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
-            # IMPORTANT: this should NOT mark the conversation as resolved.
-            # The agent is the only one who should resolve conversations.
+            # This resolves the current open conversation and records closed_by=visitor.
             if message_type == "end_chat":
                 conversation = None
                 try:
-                    conversation = conversations_repo.get_conversation_by_session(
+                    conversation = conversations_repo.get_open_conversation_by_session(
                         db,
                         website_id=website_id,
                         session_id=session_id,
@@ -741,8 +742,6 @@ async def chat_ws(
                     # Nothing to close.
                     continue
 
-                # Trigger automation-driven bot/system messages for this event.
-                # This does not change conversation.status.
                 try:
                     await orchestrator.visitor_closed_chat(conversation_id=int(conversation.id))
                 except Exception:
@@ -756,6 +755,7 @@ async def chat_ws(
                             "type": "end_chat_ok",
                             "conversation_id": int(conversation.id),
                             "website_id": website_id,
+                            "closed_by": "visitor",
                         }
                     )
                 except Exception:
@@ -816,7 +816,7 @@ async def chat_ws(
                 conversation = None
                 if conversation_id is None:
                     try:
-                        conversation = conversations_repo.get_conversation_by_session(
+                        conversation = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -913,12 +913,10 @@ async def chat_ws(
             # Conversation may have been created on first message; register for cleanup.
             if registered_conversation_id is None:
                 try:
-                    from app.models.conversation import Conversation
-
-                    conv = (
-                        db.query(Conversation)
-                        .filter_by(session_id=session_id, website_id=website_id)
-                        .first()
+                    conv = conversations_repo.get_open_conversation_by_session(
+                        db,
+                        website_id=website_id,
+                        session_id=session_id,
                     )
                     if conv:
                         registered_conversation_id = conv.id
@@ -951,11 +949,10 @@ async def chat_ws(
             # Store visitor contact info if provided (conversation exists now after first message)
             if visitor_name or visitor_email:
                 try:
-                    from app.models.conversation import Conversation
-                    conv = (
-                        db.query(Conversation)
-                        .filter_by(session_id=session_id, website_id=website_id)
-                        .first()
+                    conv = conversations_repo.get_open_conversation_by_session(
+                        db,
+                        website_id=website_id,
+                        session_id=session_id,
                     )
                     if conv:
                         changed = False
@@ -1170,6 +1167,89 @@ async def chat_ws_with_conversation(
                         )
                     continue
 
+                if message_type == "heartbeat":
+                    continue
+
+                if message_type == "page_view":
+                    try:
+                        page_views_repo.create_page_view(
+                            db,
+                            website_id=website_id,
+                            session_id=session_id,
+                            conversation_id=conv.id,
+                            url=str(payload.get("url", ""))[:2048],
+                            title=str(payload.get("title", ""))[:500] if payload.get("title") else None,
+                            referrer=str(payload.get("referrer", ""))[:2048] if payload.get("referrer") else None,
+                            device_info=str(payload.get("device_info", ""))[:255] if payload.get("device_info") else None,
+                            browser_info=str(payload.get("browser_info", ""))[:255] if payload.get("browser_info") else None,
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+                if message_type == "end_chat":
+                    try:
+                        db.expire_all()
+                        fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
+                        if fresh_conv and fresh_conv.status == ConversationStatus.OPEN:
+                            await orchestrator.visitor_closed_chat(conversation_id=int(conv.id))
+                            await websocket.send_json(
+                                {
+                                    "type": "end_chat_ok",
+                                    "conversation_id": int(conv.id),
+                                    "website_id": website_id,
+                                    "closed_by": "visitor",
+                                }
+                            )
+                    except Exception:
+                        pass
+                    continue
+
+                if message_type == "bot_button_click":
+                    btn_automation_id = payload.get("automation_id")
+                    btn_button_index = payload.get("button_index")
+                    if btn_automation_id is not None and btn_button_index is not None:
+                        try:
+                            await orchestrator.handle_bot_button_click(
+                                conversation_id=int(conv.id),
+                                automation_id=int(btn_automation_id),
+                                button_index=int(btn_button_index),
+                                visitor_ws=websocket,
+                            )
+                        except Exception as e:
+                            logger.warning("bot_button_click_failed", error=str(e))
+                    continue
+
+                if message_type == "submit_rating":
+                    rating_val = payload.get("rating")
+                    if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
+                        try:
+                            from app.models.conversation_rating import ConversationRating
+
+                            existing = (
+                                db.query(ConversationRating)
+                                .filter(ConversationRating.conversation_id == conv.id)
+                                .first()
+                            )
+                            if existing:
+                                existing.rating = rating_val
+                                db.commit()
+                            else:
+                                new_rating = ConversationRating(
+                                    conversation_id=conv.id,
+                                    rating=rating_val,
+                                    session_id=session_id,
+                                )
+                                db.add(new_rating)
+                                db.commit()
+                        except Exception as e:
+                            logger.warning("rating_submit_failed", error=str(e))
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                    continue
+
                 user_message = payload.get("message")
                 if not user_message:
                     continue
@@ -1219,6 +1299,18 @@ async def chat_ws_with_conversation(
             pass
         try:
             ChatService.unregister_session_socket(websocket)
+        except Exception:
+            pass
+        # Best-effort: schedule visitor_left_website event for OPEN conversations.
+        try:
+            if is_open and conv and conv.id not in _visitor_left_scheduled:
+                _visitor_left_scheduled.add(conv.id)
+                asyncio.create_task(
+                    _send_delayed_visitor_left_event(
+                        conversation_id=int(conv.id),
+                        delay_seconds=VISITOR_LEFT_DELAY_SECONDS,
+                    )
+                )
         except Exception:
             pass
         db.close()
