@@ -161,7 +161,7 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
             .filter(u => !ids.has(u.id))
             .filter(u => {
                 const role = String((u as any).role || '').toLowerCase()
-                return !role || role === 'agent' || role === 'manager' || role === 'system_manager'
+                return !role || role === 'agent' || role === 'manager' || role === 'owner' || role === 'system_manager'
             })
             .filter(u => {
                 if (!agentSearch.trim()) return true
@@ -265,8 +265,9 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
         const r = role.toLowerCase()
         const colors =
             r === 'system_manager' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
-                r === 'manager' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
-                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                r === 'owner' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' :
+                    r === 'manager' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                        'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
         return (
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${colors}`}>
                 {role.replace('_', ' ')}

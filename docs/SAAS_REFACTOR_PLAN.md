@@ -4,7 +4,7 @@ Single source of truth for the two parallel tracks of major work:
 1. **Multi-Tenant SaaS** — converting the single-tenant app into a proper SaaS product
 2. **Conversation/Session Refactor** — decoupling session identity from conversations so a visitor can have multiple conversations, with a tawk.to-style history list in the widget
 
-Nothing here is implemented yet. This document is the architecture reference before coding begins.
+**Status (as of March 2026):** Phases 0–4 are substantially complete, but the conversation/session refactor is not lifecycle-correct yet. The main remaining work is in Phase 3: backend/widget conversation lifecycle, close semantics, rating event wiring, and history UX polish. See the phase checklists and verified gaps below for the current state.
 
 ---
 
@@ -195,14 +195,16 @@ The `SYSTEM_MANAGER` role is a platform-level bootstrap account, not an org-leve
 
 ### B5c. Known Gaps To Fix
 
-| Gap | Description | Severity | Location |
-|-----|-------------|----------|----------|
-| E | OWNER receives no WS chat notifications (treated as AGENT — gets empty `visible_website_ids` from assignment table, which is empty for owners) | **Critical** | `agent_service.py` `register_agent()` |
-| B | MANAGER can promote any user to OWNER via `PATCH /users/{id}/role` | High | `users.py` |
-| C | MANAGER can create OWNER-role users via `POST /auth/register` | High | `auth.py` |
-| D | `system_manager` appears in AgentsList role dropdown; `owner` does not | Medium | `AgentsList.tsx` |
-| F | Push notification URL uses `session_id` instead of `conversation_id` | Medium | `conversation_orchestrator.py` |
-| A | MANAGER can update websites they are not assigned to | Medium | `websites.py` |
+> **All gaps below are fixed and committed.**
+
+| Gap | Description | Severity | Status |
+|-----|-------------|----------|--------|
+| E | OWNER receives no WS chat notifications (treated as AGENT — gets empty `visible_website_ids` from assignment table, which is empty for owners) | **Critical** | ✅ Fixed — `agent_service.py`: OWNER/MANAGER get all org website IDs; WS allowed roles updated |
+| B | MANAGER can promote any user to OWNER via `PATCH /users/{id}/role` | High | ✅ Fixed — `users.py`: MANAGER blocked from setting role ≥ own level |
+| C | MANAGER can create OWNER-role users via `POST /auth/register` | High | ✅ Fixed — `auth.py`: non-owner callers cannot assign `owner` or `system_manager` role |
+| D | `system_manager` appears in AgentsList role dropdown; `owner` does not | Medium | ✅ Fixed — `AgentsList.tsx`: dropdown is `owner / manager / agent` only |
+| F | Push notification URL uses `session_id` instead of `conversation_id` | Medium | ✅ Fixed — `conversation_orchestrator.py`: payload uses `conversationId` |
+| A | MANAGER can update websites they are not assigned to | Medium | ✅ Fixed — `websites.py`: assignment check enforced for MANAGER role |
 
 ### B6. Onboarding Flow
 
@@ -477,6 +479,28 @@ New conversation begins. Loop repeats.
 3. Same domain, new tab/page = same `session_id` = same active conversation continues
 4. Incognito window = new `session_id` = treated as a new visitor entirely
 5. "New Conversation" is only available when there is NO current OPEN conversation
+
+### C2a. Verified Current Gaps (March 2026 Audit)
+
+The codebase has partial implementation of the session/conversation refactor, but the following gaps are still confirmed in code and must be fixed before this work can be considered complete:
+
+1. **Resolved conversation fallback still exists in backend flow.**
+  `ConversationService.get_or_create_conversation()` first checks for an OPEN conversation, but if none exists it still falls back to the latest conversation for the same `session_id` and `website_id`, even if that conversation is already `RESOLVED`. The orchestrator then reopens it. This violates the intended lifecycle: after a conversation is resolved, the next visitor message must create a **new** conversation, not reopen the old one.
+
+2. **Visitor End Chat does not currently resolve the conversation.**
+  The current `visitor_closed_chat` path is treated as an informational/timeline event only. Per the intended lifecycle, when the visitor ends the chat from the widget the conversation must transition to `RESOLVED`, set `closed_by='visitor'`, and then show the rating popup.
+
+3. **Agent-resolve rating depends on optional automation wiring.**
+  The widget currently shows the rating popup when it receives a `conversation_resolved` system event. That event is presently tied to automation configuration rather than being a canonical backend close event. Rating after agent resolution must work even when no closing automation is enabled.
+
+4. **Welcome/conversation creation semantics are internally inconsistent.**
+  The intended lifecycle says the welcome bot message can create the initial conversation, but some backend comments and branches still describe the conversation as being created only on first visitor message. The code and comments must be reconciled so there is one clear rule.
+
+5. **Widget list/history UX is only partially correct.**
+  The widget now has list/start/thread modes, but the history flow still needs cleanup so it consistently reflects the true backend state, keeps exactly one active conversation per session, and cleanly returns to list/start after close.
+
+6. **Local storage design is correct; backend lifecycle is the real gap.**
+  Only one persistent `session_id` key is expected in `localStorage`. Multiple conversations for that session should live in the database and be returned via `GET /widget/conversations`. No separate permanent localStorage key per conversation is required.
 
 ### C3. Data Model Changes
 
@@ -955,7 +979,7 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] Add migration for the above (d11f4a7ff2bd, applied)
 
 ### Phase 2 — Auth, Onboarding & Email
-- [x] **Fix `get_or_create_conversation`** to filter by `status=OPEN` (the core bug of the session refactor)
+- [ ] **Finish `get_or_create_conversation` refactor**: use only `status=OPEN`; remove fallback to latest resolved conversation; do not reopen resolved conversations on visitor reply
 - [x] Add `POST /auth/signup` (atomic org + user creation)
 - [x] Update `POST /auth/register` (auto-assign org from calling user)
 - [x] Add `POST /auth/forgot-password` (rate-limited, always 200, sends reset email)
@@ -974,6 +998,8 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] **Email OTP:** Add `POST /auth/verify-otp` endpoint (hash OTP, validate, mark used, set `is_email_verified=True`, return JWT)
 - [x] **Email OTP:** Add `EmailService.send_otp_verification()` method (routes to `RESEND_OVERRIDE_TO_EMAIL` when set)
 - [x] **Email OTP:** Add `POST /auth/resend-otp` endpoint
+- [x] Login endpoint: reject if `org.is_active = False` → HTTP 403 "Organisation is inactive" (B11 security)
+- [x] Login endpoint: reject if `is_email_verified = False` → return `{ needs_verification: true, email }` (no JWT issued)
 
 ### Phase 3 — API Scoping, Gap Fixes & Widget
 - [x] Add `organization_id` filter to all existing endpoints (websites, users, chats, analytics, customers, tags, automations, teams)
@@ -985,14 +1011,19 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] **Gap D:** Fix AgentsList UI — remove `system_manager` from role dropdown; add `owner`
 - [x] **Gap F:** Fix push URL — use `conversation_id` not `session_id`
 - [x] **Gap A:** Add website assignment check for MANAGER on `PUT /websites/{id}`
+- [ ] Backend: canonical close lifecycle — visitor end chat resolves conversation with `closed_by='visitor'`
+- [ ] Backend: canonical close lifecycle — agent resolve emits `conversation_resolved` event without depending on optional automation
+- [ ] Backend: remove/retire `conversation_reopened` lifecycle path from visitor flow
+- [ ] Backend: reconcile welcome/conversation creation semantics (welcome-created vs first-message-created) and update comments/code to one rule
 - [ ] Widget: on-open routing (check OPEN conv → enter thread, else list/start screen)
-- [ ] Widget: list view — active thread header + resolved conversation history
+- [ ] Widget: list view — polished resolved conversation history with active-thread handling consistent with backend state
 - [ ] Widget: "New Conversation" card (hidden when OPEN conv exists)
 - [ ] Widget: back navigation (thread → list)
 - [ ] Widget: read-only view for resolved conversations from history
-- [ ] Widget: rating popup guards (localStorage flag, skip for inactivity-closed)
+- [ ] Widget: rating popup guards (localStorage flag, skip for inactivity-closed, work after agent resolve without automation dependency)
+- [ ] Widget: post-close transitions (visitor close / agent resolve / inactivity) return to correct list/start state
 - [ ] Widget: draft preservation keyed by `conversation_id`
-- [ ] Backend: auto-generate conversation title from first visitor message (truncate 60 chars)
+- [x] Backend: auto-generate conversation title from first visitor message (truncate 60 chars)
 
 ### Phase 4 — Frontend
 - [x] `SignupPage` + `/signup` route
@@ -1002,15 +1033,23 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] `organization` state in `appStore`
 - [x] Update role helpers and all routing guards
 - [x] **Email OTP:** Add OTP entry step to `SignupPage` (inline step-2 after form submission)
-- [ ] `show_conversation_history` toggle in WebsiteDetail settings tab
-- [ ] "Other conversations from this visitor" section in agent conversation detail sidebar
-- [ ] `closed_by` label in agent conversation detail view
-- [ ] Onboarding wizard component + sidebar icon (see B9a)
+- [x] `LoginPage`: detect `needs_verification` response → redirect to `/signup` with OTP step pre-filled
+- [x] `LoginPage`: detect org inactive 403 → show "Organisation has been deactivated" error (no crash/redirect loop)
+- [x] `SignupPage`: read `location.state` on mount to restore OTP step when redirected from login
+- [x] `App.tsx`: proper `/setup` URL redirect — browser URL changes to `/setup` (not just renders setup component at wrong URL)
+- [x] `SuperAdminOrgs`: three-state badge — Active (green) / Pending Verification (yellow, owner not yet email-verified) / Inactive (gray)
+- [x] `show_conversation_history` toggle in WebsiteDetail settings tab
+- [x] "Other conversations from this visitor" section in agent conversation detail sidebar
+- [x] `closed_by` label in agent conversation detail view
+- [x] Onboarding wizard component + sidebar icon (see B9a)
 
 ### Phase 5 — Testing & Security Audit
 - [ ] Cross-org isolation tests (agent from Org A cannot access Org B's data)
 - [ ] Super-admin bypass tests
 - [ ] Multi-conversation widget flow tests (new conversation, rating guard, unread aggregate)
+- [ ] Multi-conversation lifecycle regression tests: resolved conversation must never reopen on next visitor reply
+- [ ] Multi-conversation lifecycle regression tests: visitor end chat resolves conversation with `closed_by='visitor'`
+- [ ] Multi-conversation lifecycle regression tests: agent resolve shows rating popup without requiring closing automation to be enabled
 - [ ] Signup → dashboard happy path
 - [ ] JWT `organization_id` tampering test
 - [ ] Org deactivation test (all org member logins rejected)

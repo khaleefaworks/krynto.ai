@@ -29,12 +29,14 @@ class WebsiteCreate(BaseModel):
     name: str
     domain: str
     widget_config: Optional[dict] = None
+    show_conversation_history: bool = False
 
 
 class WebsiteUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
     widget_config: Optional[dict] = None
+    show_conversation_history: Optional[bool] = None
 
 
 class WebsiteResponse(BaseModel):
@@ -43,6 +45,7 @@ class WebsiteResponse(BaseModel):
     domain: str
     widget_key: str
     widget_config: Optional[dict]
+    show_conversation_history: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -106,6 +109,7 @@ def create_website(
         name=website_data.name,
         domain=website_data.domain,
         widget_config=website_data.widget_config or {},
+        show_conversation_history=website_data.show_conversation_history,
         organization_id=admin.organization_id,
     )
     db.add(website)
@@ -187,6 +191,8 @@ def update_website(
         website.domain = website_data.domain
     if website_data.widget_config is not None:
         website.widget_config = website_data.widget_config
+    if website_data.show_conversation_history is not None:
+        website.show_conversation_history = website_data.show_conversation_history
     
     db.commit()
     db.refresh(website)
