@@ -2,7 +2,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
 import { isAdmin } from '@/lib/roles'
-import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck } from 'lucide-react'
+import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
+import OnboardingWizard, { isDismissed, dismissOnboarding, hasCompletedOnboarding } from '@/components/OnboardingWizard'
 
 import { API_BASE } from '@/config/endpoints'
 
@@ -20,7 +21,7 @@ function getFullAvatarUrl(url: string | null | undefined): string | null {
 }
 
 export default function DashboardLayout() {
-  const { user, setUser, setToken, unreadChatsCount } = useAppStore()
+  const { user, setUser, setToken, unreadChatsCount, organization } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -28,6 +29,26 @@ export default function DashboardLayout() {
     const saved = localStorage.getItem('darkMode')
     return saved ? JSON.parse(saved) : false
   })
+  const [wizardOpen, setWizardOpen] = useState(false)
+
+  const onboardingScope = {
+    orgId: organization?.id ?? user?.organization_id ?? null,
+    orgSlug: organization?.slug ?? null,
+    userId: user?.id ?? null,
+    role: user?.role ?? null,
+  }
+
+  const shouldAutoOpenWizard = location.pathname === '/dashboard' || location.pathname.startsWith('/dashboard/chats')
+
+  // Auto-show the wizard for owner/manager/admin users until setup is completed or explicitly suppressed.
+  useEffect(() => {
+    if (!user) return
+    if (!isAdmin(user)) return
+    if (!shouldAutoOpenWizard) return
+    if (isDismissed(onboardingScope)) return
+    if (hasCompletedOnboarding(onboardingScope)) return
+    setWizardOpen(true)
+  }, [user, shouldAutoOpenWizard, onboardingScope.orgId, onboardingScope.orgSlug, onboardingScope.userId, onboardingScope.role])
 
   useEffect(() => {
     localStorage.setItem('darkMode', JSON.stringify(darkMode))
@@ -240,7 +261,16 @@ export default function DashboardLayout() {
         </nav>
 
         {/* Mobile Sidebar Footer */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+        <div className="border-t border-gray-200 dark:border-gray-700 p-4 space-y-1">
+          {isAdmin(user) && (
+            <button
+              onClick={() => { setIsMobileMenuOpen(false); setWizardOpen(true) }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all"
+            >
+              <Rocket className="h-5 w-5" />
+              <span>Setup Guide</span>
+            </button>
+          )}
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
@@ -353,6 +383,22 @@ export default function DashboardLayout() {
               </TooltipContent>
             </Tooltip>
 
+            {isAdmin(user) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setWizardOpen(true)}
+                    className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                  >
+                    <Rocket className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Setup Guide</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Link
@@ -429,6 +475,16 @@ export default function DashboardLayout() {
       <main className="flex-1 pt-16 md:pt-0 overflow-hidden">
         <Outlet />
       </main>
+
+      {/* Onboarding Wizard */}
+      <OnboardingWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onDismiss={() => {
+          dismissOnboarding(onboardingScope)
+          setWizardOpen(false)
+        }}
+      />
     </div>
   )
 }

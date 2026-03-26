@@ -195,12 +195,24 @@ interface ConversationDetails {
     last_message_at?: string
     status?: string
     team_id?: number | null
+    closed_by?: string | null
+    title?: string | null
+}
+
+interface VisitorConversation {
+    id: number
+    short_id: string
+    status: string
+    title: string | null
+    closed_by: string | null
+    created_at: string | null
+    last_visitor_message_at: string | null
 }
 
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
 export default function ConversationsView() {
-    const { sessionId, conversationId } = useParams<{ sessionId?: string; conversationId?: string }>()
+    const { chatId: chatIdParam, conversationId } = useParams<{ chatId?: string; conversationId?: string }>()
     const navigate = useNavigate()
     const location = useLocation()
     const { user, setUser } = useAppStore()
@@ -282,6 +294,7 @@ export default function ConversationsView() {
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
+    const [visitorConversations, setVisitorConversations] = useState<VisitorConversation[]>([])
 
     const [availableTeams, setAvailableTeams] = useState<any[]>([])
     const [teamPickerOpen, setTeamPickerOpen] = useState(false)
@@ -537,12 +550,19 @@ export default function ConversationsView() {
         // If we're on the list route (/dashboard/chats), never auto-select a chat
         // from location.state; the user explicitly navigated back to the list.
         if (isChatsListRoute) return null
-        const fromState = Number((location as any)?.state?.conversationId)
-        if (Number.isFinite(fromState) && fromState > 0) return fromState
-        const fromParam = Number(conversationId)
+        if (!chatIdParam) return null
+        // Canonical route: /dashboard/chats/:chatId where chatId is the short_id
+        // Look up the conversation by short_id in loaded chats
+        const matched = activeChats.find((c) => c.short_id === chatIdParam)
+            || resolvedChats.find((c: any) => c.short_id === chatIdParam)
+        if (matched) return matched.id
+        // Legacy: try numeric ID for backward compat
+        const fromParam = Number(chatIdParam)
         if (Number.isFinite(fromParam) && fromParam > 0) return fromParam
+        const fromLegacyParam = Number(conversationId)
+        if (Number.isFinite(fromLegacyParam) && fromLegacyParam > 0) return fromLegacyParam
         return null
-    }, [isChatsListRoute, location, conversationId])
+    }, [isChatsListRoute, chatIdParam, conversationId, activeChats, resolvedChats])
 
     // When navigating back to the chats list (/dashboard/chats), clear any previously
     // selected chat so the empty-state screen renders (instead of persisting the thread view).
@@ -551,6 +571,7 @@ export default function ConversationsView() {
         if (selectedChat === null) return
         setSelectedChat(null)
         setConversation(null)
+        setVisitorConversations([])
         setInput('')
         setVisitorTyping(false)
         setFirstUnreadMessageId(null)
@@ -571,8 +592,7 @@ export default function ConversationsView() {
     }, [selectedChat, getChatById])
 
     // Handle conversation selection from URL.
-    // Canonical URL is /dashboard/chats/:sessionId.
-    // We still accept a conversationId via navigation state for exact selection.
+    // Canonical URL is /dashboard/chats/:chatId where chatId is the conversation PK.
     useEffect(() => {
         const preferredId = getPreferredConversationId()
         if (preferredId) {
@@ -581,50 +601,33 @@ export default function ConversationsView() {
             }
             return
         }
+    }, [getPreferredConversationId, selectedChat, openChat])
 
-        if (!sessionId) return
-
-        const matched = activeChats.find((c) => c.session_id === sessionId)
-            || resolvedChats.find((c: any) => c.session_id === sessionId)
-        if (matched && matched.id !== selectedChat) {
-            openChat(matched.id)
-        }
-    }, [getPreferredConversationId, sessionId, activeChats, resolvedChats, selectedChat, openChat])
-
-    // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to sessionId URL.
+    // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to canonical URL.
     useEffect(() => {
         const cid = Number(conversationId)
         if (!Number.isFinite(cid) || cid <= 0) return
-
-        let cancelled = false
-            ; (async () => {
-                try {
-                    const summary = await fetchChatSummary(cid)
-                    const sid = String((summary as any)?.session_id || '').trim()
-                    if (!sid) return
-                    if (!cancelled) {
-                        navigate(`/dashboard/chats/${encodeURIComponent(sid)}`, {
-                            replace: true,
-                            state: { conversationId: cid },
-                        })
-                    }
-                } catch {
-                    // ignore
-                }
-            })()
-
-        return () => {
-            cancelled = true
+        // Look up short_id for canonical URL
+        const matched = activeChats.find((c) => c.id === cid)
+            || resolvedChats.find((c: any) => c.id === cid)
+        if (matched?.short_id) {
+            navigate(`/dashboard/chats/${matched.short_id}`, { replace: true })
         }
-    }, [conversationId, navigate])
+    }, [conversationId, navigate, activeChats, resolvedChats])
+
+    // Helper to get short_id for a conversation
+    const getShortId = useCallback((chatId: number): string | null => {
+        const chat = activeChats.find((c) => c.id === chatId)
+            || resolvedChats.find((c: any) => c.id === chatId)
+        return (chat as any)?.short_id || null
+    }, [activeChats, resolvedChats])
 
     // Load chat when selected
     useEffect(() => {
         if (selectedChat) {
-            const chatData = getChatById(selectedChat)
-            const selectedSessionId = chatData?.session_id
-            if (selectedSessionId && selectedSessionId !== sessionId) {
-                navigate(`/dashboard/chats/${encodeURIComponent(String(selectedSessionId))}`)
+            const shortId = getShortId(selectedChat)
+            if (shortId && shortId !== chatIdParam) {
+                navigate(`/dashboard/chats/${shortId}`)
             }
         }
 
@@ -1117,6 +1120,17 @@ export default function ConversationsView() {
             setNotes(fetchedNotes)
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
             setConversationRating(fetchedRating)
+
+            // Fetch other conversations from this visitor (best-effort, non-blocking).
+            apiRequest<VisitorConversation[]>(`/chats/${chatId}/visitor-history`)
+                .then((data) => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setVisitorConversations(Array.isArray(data) ? data : [])
+                    }
+                })
+                .catch(() => {
+                    if (loadDetailsTokenRef.current === token) setVisitorConversations([])
+                })
         } catch (error) {
             console.error("Failed to load conversation details:", error)
         }
@@ -2217,6 +2231,60 @@ export default function ConversationsView() {
                                     onAddNote={handleAddNote}
                                     onDeleteNote={handleDeleteNote}
                                 />
+
+                                {/* Closed by label (only for resolved conversations) */}
+                                {conversation.closed_by && conversation.status === 'resolved' && (
+                                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
+                                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
+                                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${conversation.closed_by === 'agent'
+                                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                            : conversation.closed_by === 'visitor'
+                                                ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                                            }`}>
+                                            {conversation.closed_by === 'agent' ? 'Agent' : conversation.closed_by === 'visitor' ? 'Visitor' : 'Inactivity'}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Other conversations from this visitor */}
+                                {visitorConversations.length > 0 && (
+                                    <div className="border-t border-gray-100 dark:border-gray-700/50">
+                                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-4 pt-3 pb-2">
+                                            Other conversations ({visitorConversations.length})
+                                        </p>
+                                        <div className="space-y-0.5 pb-2">
+                                            {visitorConversations
+                                                .slice()
+                                                .sort((a, b) => (b.id) - (a.id))
+                                                .map((vc) => (
+                                                    <button
+                                                        key={vc.id}
+                                                        onClick={() => openChat(vc.id)}
+                                                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group ${selectedChat === vc.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                                                {vc.title || `Conversation #${vc.id}`}
+                                                            </p>
+                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                                                }`}>
+                                                                {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                            </span>
+                                                        </div>
+                                                        {vc.created_at && (
+                                                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                                                {new Date(vc.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                                                            </p>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
