@@ -67,10 +67,11 @@ async def mark_widget_read(
     response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
+    conversation_id: int = Query(None),
     db: Session = Depends(get_db),
 ):
     """Mark a conversation as read by the visitor."""
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -78,11 +79,24 @@ async def mark_widget_read(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
-    
-    conv = db.query(Conversation).filter(
-        Conversation.website_id == website_id,
-        Conversation.session_id == session_id
-    ).first()
+
+    if conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+        ).first()
+    else:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.website_id == website_id,
+                Conversation.session_id == session_id,
+                Conversation.status == ConversationStatus.OPEN,
+            )
+            .order_by(Conversation.id.desc())
+            .first()
+        )
     
     if not conv:
         # Conversation is created lazily (typically on first message / WS activity).
@@ -120,10 +134,11 @@ async def get_widget_read_state(
     response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
+    conversation_id: int = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return read state for the visitor thread UI."""
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -131,11 +146,24 @@ async def get_widget_read_state(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
-    
-    conv = db.query(Conversation).filter(
-        Conversation.website_id == website_id,
-        Conversation.session_id == session_id
-    ).first()
+
+    if conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+        ).first()
+    else:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.website_id == website_id,
+                Conversation.session_id == session_id,
+                Conversation.status == ConversationStatus.OPEN,
+            )
+            .order_by(Conversation.id.desc())
+            .first()
+        )
     
     if not conv:
         return {
@@ -220,7 +248,7 @@ async def widget_upload_attachment(
     This does not create a message record; the client should embed the returned
     public URL into the outgoing message content.
     """
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -231,7 +259,12 @@ async def widget_upload_attachment(
 
     conv = (
         db.query(Conversation)
-        .filter(Conversation.website_id == website_id, Conversation.session_id == session_id)
+        .filter(
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+            Conversation.status == ConversationStatus.OPEN,
+        )
+        .order_by(Conversation.id.desc())
         .first()
     )
     if not conv:
@@ -341,6 +374,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     show_emoji_picker = config.get("show_emoji_picker", True)
     show_attachments = config.get("show_attachments", False)
     branding_text = config.get("branding_text")
+    popup_name = config.get("popup_name")
+    popup_button_text = config.get("popup_button_text")
     
     def _normalize_base(base: str) -> str:
         b = (base or "").strip()
@@ -381,6 +416,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     _aichatassist.showEmojiPicker = {json.dumps(bool(show_emoji_picker))};
     _aichatassist.showAttachments = {json.dumps(bool(show_attachments))};
     _aichatassist.brandingText = {json.dumps(branding_text)};
+    _aichatassist.popupName = {json.dumps(popup_name)};
+    _aichatassist.popupButtonText = {json.dumps(popup_button_text)};
   
   // Load the widget CSS
   var link = document.createElement('link');
@@ -606,6 +643,7 @@ async def get_widget_conversations(
         "active": _conv_summary(active_conv) if active_conv else None,
         "history": [_conv_summary(c) for c in history_convs],
         "total": total_resolved,
+        "show_conversation_history": bool(website.show_conversation_history),
     }
 
 

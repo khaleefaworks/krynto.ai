@@ -20,6 +20,7 @@ interface Website {
   name: string
   domain: string
   widget_key?: string
+  show_conversation_history: boolean
   widget_config: {
     theme?: string
     position?: string
@@ -35,6 +36,8 @@ interface Website {
     show_attachments?: boolean
     branding_text?: string | null
     header_icon_url?: string | null
+    popup_name?: string
+    popup_button_text?: string
     office_hours?: any
   } | null
   created_at: string
@@ -184,6 +187,7 @@ export default function WebsiteDetail() {
   const [formData, setFormData] = useState({
     name: '',
     domain: '',
+    show_conversation_history: false,
     widget_config: {
       theme: 'dark',
       position: 'bottom-right',
@@ -199,6 +203,8 @@ export default function WebsiteDetail() {
       show_attachments: false,
       branding_text: null as string | null,
       header_icon_url: null as string | null,
+      popup_name: '',
+      popup_button_text: '',
       office_hours: coerceOfficeHours(null),
     }
   })
@@ -814,6 +820,7 @@ export default function WebsiteDetail() {
       setFormData({
         name: data.name,
         domain: data.domain,
+        show_conversation_history: data.show_conversation_history ?? false,
         widget_config: {
           theme: data.widget_config?.theme || 'dark',
           position: data.widget_config?.position || 'bottom-right',
@@ -829,6 +836,8 @@ export default function WebsiteDetail() {
           show_attachments: data.widget_config?.show_attachments || false,
           branding_text: data.widget_config?.branding_text ?? null,
           header_icon_url: data.widget_config?.header_icon_url ?? null,
+          popup_name: (data.widget_config as any)?.popup_name || '',
+          popup_button_text: (data.widget_config as any)?.popup_button_text || '',
           office_hours: officeHours,
         }
       })
@@ -2104,6 +2113,26 @@ export default function WebsiteDetail() {
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">The domain where the chat widget will be embedded</p>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Conversation History */}
+              {!isNew && activeTab === 'settings' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Conversation History</h2>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        When enabled, returning visitors can view their past conversations and start a new one.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={formData.show_conversation_history}
+                      onCheckedChange={(checked) =>
+                        setFormData({ ...formData, show_conversation_history: checked })
+                      }
+                    />
                   </div>
                 </div>
               )}

@@ -23,6 +23,8 @@ interface WidgetConfig {
     show_attachments?: boolean
     branding_text?: string | null
     header_icon_url?: string | null
+    popup_name?: string
+    popup_button_text?: string
 }
 
 interface WebsiteWidgetTabProps {
@@ -391,6 +393,24 @@ export default function WebsiteWidgetTab({
                                 value={widgetConfig.bubble_text}
                                 onChange={(e) => update({ bubble_text: e.target.value })}
                                 placeholder="Chat"
+                                className="dark:bg-gray-800 dark:border-gray-700"
+                            />
+                        </Field>
+
+                        <Field label="Popup Name" hint="Sender name shown in the notification popup (default: Support)">
+                            <Input
+                                value={widgetConfig.popup_name || ''}
+                                onChange={(e) => update({ popup_name: e.target.value })}
+                                placeholder="Support"
+                                className="dark:bg-gray-800 dark:border-gray-700"
+                            />
+                        </Field>
+
+                        <Field label="Popup Button Text" hint="Button text in the notification popup (default: Reply)">
+                            <Input
+                                value={widgetConfig.popup_button_text || ''}
+                                onChange={(e) => update({ popup_button_text: e.target.value })}
+                                placeholder="Reply"
                                 className="dark:bg-gray-800 dark:border-gray-700"
                             />
                         </Field>
