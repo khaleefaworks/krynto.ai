@@ -179,7 +179,7 @@ async def get_widget_read_state(
     # agent_join, conversation_resolved, etc. which aren't meaningful to visitors).
     _SYSTEM_EVENT_TYPES = (
         "agent_join", "visitor_connected", "visitor_socket_connected",
-        "visitor_left_website", "conversation_resolved", "conversation_reopened",
+        "visitor_left_website", "conversation_resolved",
         "visitor_closed_chat",
     )
     first_unread_message_id = None

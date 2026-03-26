@@ -352,7 +352,7 @@
     if (hasRatedSession) return;
     try {
       const key = _ratedStorageKey();
-      if (key && sessionStorage.getItem(key) === '1') { hasRatedSession = true; return; }
+      if (key && localStorage.getItem(key) === '1') { hasRatedSession = true; return; }
     } catch (e) { }
 
     ratingConversationId = conversationId || null;
@@ -384,7 +384,7 @@
     hasRatedSession = true;
     try {
       const key = _ratedStorageKey();
-      if (key) sessionStorage.setItem(key, '1');
+      if (key) localStorage.setItem(key, '1');
     } catch (e) { }
 
     // Submit via WebSocket if connected
@@ -869,8 +869,17 @@
 
   function afterConversationClose() {
     CONFIG.conversationId = 0;
-    // enterStartView now handles _closeWsCleanly() internally
-    enterStartView();
+    if (widgetShowHistory) {
+      fetchConversationList().then(function (listData) {
+        if (listData && (listData.history.length > 0 || listData.active)) {
+          enterListView(listData);
+        } else {
+          enterStartView();
+        }
+      }).catch(function () { enterStartView(); });
+    } else {
+      enterStartView();
+    }
   }
 
   // --- WebSocket Communication ---

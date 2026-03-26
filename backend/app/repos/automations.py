@@ -42,9 +42,9 @@ def _normalize_actions(*, trigger: str, actions: dict | list | None):
             if not action.get("event_type"):
                 action = {**action, "event_type": "automation_welcome"}
 
-        # Convert legacy resolved/reopened events stored as send_bot_message.
+        # Convert legacy resolved events stored as send_bot_message.
         if (
-            trigger in {"conversation_resolved", "conversation_reopened"}
+            trigger == "conversation_resolved"
             and action_type == "send_bot_message"
             and isinstance(action.get("event_type"), str)
             and action.get("event_type").strip() == trigger

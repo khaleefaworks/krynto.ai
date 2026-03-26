@@ -124,7 +124,7 @@ def _seed_resolve_automations(
         # Ensure deterministic: remove any existing resolve automations.
         db.query(Automation).filter(
             Automation.website_id == website_id,
-            Automation.trigger.in_(["conversation_resolved", "conversation_reopened"]),
+            Automation.trigger == "conversation_resolved",
         ).delete(synchronize_session=False)
         db.commit()
 

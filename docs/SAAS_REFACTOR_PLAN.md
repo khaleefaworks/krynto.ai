@@ -979,7 +979,7 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] Add migration for the above (d11f4a7ff2bd, applied)
 
 ### Phase 2 — Auth, Onboarding & Email
-- [ ] **Finish `get_or_create_conversation` refactor**: use only `status=OPEN`; remove fallback to latest resolved conversation; do not reopen resolved conversations on visitor reply
+- [x] **Finish `get_or_create_conversation` refactor**: use only `status=OPEN`; remove fallback to latest resolved conversation; do not reopen resolved conversations on visitor reply
 - [x] Add `POST /auth/signup` (atomic org + user creation)
 - [x] Update `POST /auth/register` (auto-assign org from calling user)
 - [x] Add `POST /auth/forgot-password` (rate-limited, always 200, sends reset email)
@@ -1011,18 +1011,18 @@ These phases assume the app is reset to a clean DB state before any coding begin
 - [x] **Gap D:** Fix AgentsList UI — remove `system_manager` from role dropdown; add `owner`
 - [x] **Gap F:** Fix push URL — use `conversation_id` not `session_id`
 - [x] **Gap A:** Add website assignment check for MANAGER on `PUT /websites/{id}`
-- [ ] Backend: canonical close lifecycle — visitor end chat resolves conversation with `closed_by='visitor'`
-- [ ] Backend: canonical close lifecycle — agent resolve emits `conversation_resolved` event without depending on optional automation
-- [ ] Backend: remove/retire `conversation_reopened` lifecycle path from visitor flow
-- [ ] Backend: reconcile welcome/conversation creation semantics (welcome-created vs first-message-created) and update comments/code to one rule
-- [ ] Widget: on-open routing (check OPEN conv → enter thread, else list/start screen)
-- [ ] Widget: list view — polished resolved conversation history with active-thread handling consistent with backend state
-- [ ] Widget: "New Conversation" card (hidden when OPEN conv exists)
-- [ ] Widget: back navigation (thread → list)
-- [ ] Widget: read-only view for resolved conversations from history
-- [ ] Widget: rating popup guards (localStorage flag, skip for inactivity-closed, work after agent resolve without automation dependency)
-- [ ] Widget: post-close transitions (visitor close / agent resolve / inactivity) return to correct list/start state
-- [ ] Widget: draft preservation keyed by `conversation_id`
+- [x] Backend: canonical close lifecycle — visitor end chat resolves conversation with `closed_by='visitor'`
+- [x] Backend: canonical close lifecycle — agent resolve emits `conversation_resolved` event without depending on optional automation
+- [x] Backend: remove/retire `conversation_reopened` lifecycle path from visitor flow
+- [x] Backend: reconcile welcome/conversation creation semantics (welcome-created vs first-message-created) and update comments/code to one rule
+- [x] Widget: on-open routing (check OPEN conv → enter thread, else list/start screen)
+- [x] Widget: list view — polished resolved conversation history with active-thread handling consistent with backend state
+- [x] Widget: "New Conversation" card (hidden when OPEN conv exists)
+- [x] Widget: back navigation (thread → list)
+- [x] Widget: read-only view for resolved conversations from history
+- [x] Widget: rating popup guards (localStorage flag, skip for inactivity-closed, work after agent resolve without automation dependency)
+- [x] Widget: post-close transitions (visitor close / agent resolve / inactivity) return to correct list/start state
+- [x] Widget: draft preservation keyed by `conversation_id`
 - [x] Backend: auto-generate conversation title from first visitor message (truncate 60 chars)
 
 ### Phase 4 — Frontend
