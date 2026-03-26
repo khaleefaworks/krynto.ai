@@ -15,6 +15,7 @@ from app.repos import conversations as conversations_repo
 from app.repos import conversation_reads as conversation_reads_repo
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
+from app.models.conversation import Conversation
 from app.services.visibility import compute_visibility_scope
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -83,9 +84,26 @@ class ConversationResponse(BaseModel):
         from_attributes = True
 
 
+def _resolve_conversation(db: Session, chat_id: str) -> Conversation:
+    """Resolve a conversation from a path param that may be an integer PK or a short_id string."""
+    # Try integer PK first (backward compat)
+    try:
+        pk = int(chat_id)
+        conv = conversations_repo.get_conversation_by_id(db, pk)
+        if conv:
+            return conv
+    except (ValueError, TypeError):
+        pass
+    # Fall back to short_id lookup
+    conv = conversations_repo.get_conversation_by_short_id(db, chat_id)
+    if conv:
+        return conv
+    raise HTTPException(status_code=404, detail="Conversation not found")
+
+
 @router.post("/{chat_id}/join")
 async def join_chat(
-    chat_id: int,
+    chat_id: str,
     _request: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
@@ -95,13 +113,11 @@ async def join_chat(
     
     orchestrator = ConversationOrchestrator(db)
 
-    conv = conversations_repo.get_conversation_by_id(db, chat_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = _resolve_conversation(db, chat_id)
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
     result = await orchestrator.handle_agent_join(
-        conversation_id=chat_id,
+        conversation_id=conv.id,
         agent_id=current_user.id,
     )
 
@@ -110,7 +126,7 @@ async def join_chat(
 
     return {
         "success": True,
-        "conversation_id": chat_id,
+        "conversation_id": conv.id,
         "website_id": conv.website_id,
         "assigned_agent_id": current_user.id,
         "message": "Chat successfully assigned to agent",
@@ -156,6 +172,7 @@ def get_active_chats(
         result.append(
             {
                 "id": conv.id,
+                "short_id": conv.short_id,
                 "website_id": conv.website_id,
                 "website_name": website_name_val,
                 "session_id": conv.session_id,
@@ -185,7 +202,7 @@ def get_active_chats(
 
 @router.get("/{chat_id}")
 def get_chat_summary(
-    chat_id: int,
+    chat_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
@@ -195,9 +212,7 @@ def get_chat_summary(
     is hidden from the active inbox list (e.g. welcome-only/system-only cases).
     """
 
-    conv = conversations_repo.get_conversation_by_id(db, chat_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = _resolve_conversation(db, chat_id)
 
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
@@ -206,6 +221,7 @@ def get_chat_summary(
 
     return {
         "id": int(conv.id),
+        "short_id": conv.short_id,
         "website_id": int(conv.website_id),
         "website_name": website_name,
         "session_id": str(conv.session_id),
@@ -221,6 +237,8 @@ def get_chat_summary(
         "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
         "assigned_agent_id": getattr(conv, "assigned_agent_id", None),
+        "closed_by": getattr(conv, "closed_by", None),
+        "title": getattr(conv, "title", None),
         "message_count": 0,
         "unread_count": 0,
         "last_message": None,
@@ -233,19 +251,17 @@ def get_chat_summary(
 
 @router.get("/{chat_id}/messages")
 def get_chat_messages(
-    chat_id: int,
+    chat_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
     """Get all messages in a conversation"""
-    conv = conversations_repo.get_conversation_by_id(db, chat_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = _resolve_conversation(db, chat_id)
 
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
     agent_service = AgentService(db)
-    messages = agent_service.get_conversation_messages(chat_id)
+    messages = agent_service.get_conversation_messages(conv.id)
     
     if not messages:
         # Return empty array if conversation exists but no messages
@@ -292,6 +308,7 @@ def get_resolved_conversations(
         result.append(
             {
                 "id": conv.id,
+                "short_id": conv.short_id,
                 "website_id": conv.website_id,
                 "website_name": website_name_val,
                 "session_id": conv.session_id,
@@ -306,6 +323,8 @@ def get_resolved_conversations(
                 "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
+                "closed_by": getattr(conv, "closed_by", None),
+                "title": getattr(conv, "title", None),
                 "message_count": int(message_count or 0),
                 "unread_count": 0,
                 "last_message": last_message_val,
@@ -321,7 +340,7 @@ def get_resolved_conversations(
 
 @router.post("/{conversation_id}/close")
 async def close_conversation(
-    conversation_id: int,
+    conversation_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
@@ -331,42 +350,77 @@ async def close_conversation(
     Transitions conversation to RESOLVED state.
     No more messages can be added after resolving.
     """
-    conv = conversations_repo.get_conversation_by_id(db, conversation_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = _resolve_conversation(db, conversation_id)
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
     orchestrator = ConversationOrchestrator(db)
 
-    result = await orchestrator.close_conversation(conversation_id=conversation_id)
+    result = await orchestrator.close_conversation(conversation_id=conv.id)
 
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
 
     return {
         "success": True,
-        "conversation_id": conversation_id,
+        "conversation_id": conv.id,
         "message": "Conversation resolved successfully",
     }
 
 
+@router.get("/{chat_id}/visitor-history")
+def get_visitor_history(
+    chat_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Return all other conversations from the same visitor (session_id + website_id), excluding the current one."""
+    conv = _resolve_conversation(db, chat_id)
+    _ensure_conversation_visible(db, current_user=current_user, conv=conv)
+
+    others = (
+        db.query(Conversation)
+        .filter(
+            Conversation.session_id == conv.session_id,
+            Conversation.website_id == conv.website_id,
+            Conversation.id != conv.id,
+        )
+        .order_by(Conversation.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    result = []
+    for c in others:
+        result.append(
+            {
+                "id": c.id,
+                "short_id": c.short_id,
+                "status": c.status.value if hasattr(c.status, "value") else c.status,
+                "title": getattr(c, "title", None),
+                "closed_by": getattr(c, "closed_by", None),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "last_visitor_message_at": c.last_visitor_message_at.isoformat() if getattr(c, "last_visitor_message_at", None) else None,
+            }
+        )
+
+    return result
+
+
 @router.post("/{chat_id}/read")
 async def mark_chat_read(
-    chat_id: int,
+    chat_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
     """Mark a chat as read for the current user."""
 
-    conv = conversations_repo.get_conversation_by_id(db, chat_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = _resolve_conversation(db, chat_id)
 
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
     conversation_reads_repo.mark_conversation_read(
         db,
-        conversation_id=chat_id,
+        conversation_id=conv.id,
         user_id=current_user.id,
     )
     db.commit()
@@ -377,7 +431,7 @@ async def mark_chat_read(
             current_user.id,
             {
                 "type": "conversation_unread",
-                "conversation_id": chat_id,
+                "conversation_id": conv.id,
                 "website_id": conv.website_id,
                 "unread_count": 0,
             },
@@ -385,18 +439,18 @@ async def mark_chat_read(
     except Exception:
         pass
 
-    return {"success": True, "conversation_id": chat_id}
+    return {"success": True, "conversation_id": conv.id}
 
 
 @router.get("/{chat_id}/read-state")
 def get_chat_read_state(
-    chat_id: int,
+    chat_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
     """Return read state for placing an unread separator in the thread UI."""
 
-    conv = conversations_repo.get_conversation_by_id(db, chat_id)
+    conv = _resolve_conversation(db, chat_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -407,7 +461,7 @@ def get_chat_read_state(
 
         row = (
             db.query(ConversationRead)
-            .filter(ConversationRead.conversation_id == chat_id, ConversationRead.user_id == current_user.id)
+            .filter(ConversationRead.conversation_id == conv.id, ConversationRead.user_id == current_user.id)
             .first()
         )
         last_read_at = row.last_read_at if row else None
@@ -417,7 +471,7 @@ def get_chat_read_state(
     # Find the earliest unread VISITOR message after last_read_at.
     first_unread_message_id = None
     try:
-        q = db.query(Message).filter(Message.conversation_id == chat_id, Message.sender_type == MessageSenderType.VISITOR)
+        q = db.query(Message).filter(Message.conversation_id == conv.id, Message.sender_type == MessageSenderType.VISITOR)
         if last_read_at is not None:
             q = q.filter(Message.created_at > last_read_at)
         first_unread = q.order_by(Message.created_at.asc(), Message.id.asc()).first()
@@ -426,7 +480,7 @@ def get_chat_read_state(
         first_unread_message_id = None
 
     return {
-        "conversation_id": chat_id,
+        "conversation_id": conv.id,
         "last_read_at": last_read_at.isoformat() if last_read_at else None,
         "first_unread_message_id": first_unread_message_id,
     }

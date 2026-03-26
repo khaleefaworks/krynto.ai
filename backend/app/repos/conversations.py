@@ -12,10 +12,36 @@ def get_conversation_by_id(db: Session, conversation_id: int) -> Conversation | 
     return db.query(Conversation).filter_by(id=conversation_id).first()
 
 
+def get_conversation_by_short_id(db: Session, short_id: str) -> Conversation | None:
+    return db.query(Conversation).filter_by(short_id=short_id).first()
+
+
+def get_open_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
+    return (
+        db.query(Conversation)
+        .filter_by(
+            session_id=session_id,
+            website_id=website_id,
+            status=ConversationStatus.OPEN,
+        )
+        .order_by(Conversation.id.desc())
+        .first()
+    )
+
+
 def get_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
+    open_conversation = get_open_conversation_by_session(
+        db,
+        website_id=website_id,
+        session_id=session_id,
+    )
+    if open_conversation:
+        return open_conversation
+
     return (
         db.query(Conversation)
         .filter_by(session_id=session_id, website_id=website_id)
+        .order_by(Conversation.id.desc())
         .first()
     )
 

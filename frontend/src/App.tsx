@@ -417,7 +417,7 @@ function App() {
                   {/* Chats - Unified 3-column view */}
                   <Route path="chats" element={<ConversationsView />} />
                   <Route path="chats/conversation/:conversationId" element={<ConversationsView />} />
-                  <Route path="chats/:sessionId" element={<ConversationsView />} />
+                  <Route path="chats/:chatId" element={<ConversationsView />} />
                   <Route path="history" element={<ConversationHistory />} />
                   <Route path="history/:conversationId" element={<ClosedChatView />} />
 

@@ -248,10 +248,8 @@ export default function CustomersVisitors() {
         setDetailsLoading(false)
     }
 
-    const openConversation = (conversationId: number, sessionId: string) => {
-        navigate(`/dashboard/chats/${encodeURIComponent(sessionId)}`, {
-            state: { conversationId },
-        })
+    const openConversation = (conversationId: number, _sessionId: string) => {
+        navigate(`/dashboard/chats/${conversationId}`)
         closeDrawer()
     }
 
