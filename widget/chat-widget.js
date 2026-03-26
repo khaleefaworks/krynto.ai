@@ -2586,8 +2586,7 @@
 .chatassist-prompt-btn:active:not(:disabled) { background: ${CONFIG.primaryColor} !important; border-color: ${CONFIG.primaryColor} !important; color: #fff !important; }
 .chatassist-prompt-btn-selected { background: ${CONFIG.primaryColor} !important; color: #fff !important; border-color: ${CONFIG.primaryColor} !important; }
 .chatassist-conv-new-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
-.chatassist-conv-new-btn:hover { background: ${CONFIG.primaryColor} !important; color: #fff !important; }
-.chatassist-conv-item-badge { background: #e2e8f0; color: #64748b; }`;
+.chatassist-conv-new-btn:hover { background: ${CONFIG.primaryColor} !important; color: #fff !important; }`;
     } catch (e) { }
   }
 

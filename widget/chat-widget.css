@@ -1352,7 +1352,6 @@
   padding: 6px 8px;
   font-size: 11px;
   color: #b0b8c4;
-  background: #fff;
 }
 
 /* --- Toast --- */
@@ -1638,4 +1637,238 @@
 #chatassist-back {
   flex-shrink: 0;
   margin-right: 0;
+}
+
+/* =============================================
+   DARK THEME — Chat Thread View
+   ============================================= */
+
+/* Messages area */
+.chatassist-theme-dark #chatassist-messages {
+  background: #0f172a;
+}
+
+.chatassist-theme-dark #chatassist-messages::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+.chatassist-theme-dark #chatassist-messages::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* AI / Bot message bubbles */
+.chatassist-theme-dark .chatassist-message-ai .chatassist-message-bubble,
+.chatassist-theme-dark .chatassist-message-agent .chatassist-message-bubble {
+  background: #1e293b;
+  color: #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.chatassist-theme-dark .chatassist-message-ai .chatassist-message-bubble a,
+.chatassist-theme-dark .chatassist-message-agent .chatassist-message-bubble a {
+  color: #93c5fd;
+}
+
+/* Bot / AI avatar */
+.chatassist-theme-dark .chatassist-message-avatar-bot,
+.chatassist-theme-dark .chatassist-message-avatar-ai {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+/* Timestamps */
+.chatassist-theme-dark .chatassist-message-timestamp {
+  color: #64748b;
+}
+
+/* System messages */
+.chatassist-theme-dark .chatassist-message-system {
+  color: #94a3b8;
+}
+
+/* Agent joined events */
+.chatassist-theme-dark .chatassist-message-join {
+  color: #64748b;
+}
+
+/* Footer */
+.chatassist-theme-dark #chatassist-footer {
+  background: #0f172a;
+}
+
+/* Typing indicator */
+.chatassist-theme-dark .chatassist-typing {
+  color: #94a3b8;
+}
+
+.chatassist-theme-dark .chatassist-typing-dots span {
+  background: #64748b;
+}
+
+/* Input area */
+.chatassist-theme-dark #chatassist-input-container {
+  border-top-color: #1e293b;
+}
+
+.chatassist-theme-dark #chatassist-input-row {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.chatassist-theme-dark #chatassist-input {
+  color: #e2e8f0;
+}
+
+.chatassist-theme-dark #chatassist-input::placeholder {
+  color: #64748b;
+}
+
+/* Attach button */
+.chatassist-theme-dark .chatassist-attach {
+  color: #94a3b8;
+}
+
+.chatassist-theme-dark .chatassist-attach:hover {
+  background: #334155;
+}
+
+/* Attachment tiles */
+.chatassist-theme-dark .chatassist-attachment-tile {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+/* End chat overlay */
+.chatassist-theme-dark .chatassist-end-overlay-panel {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-title {
+  color: #f1f5f9;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-cancel {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-cancel:hover {
+  background: #1e293b;
+}
+
+/* Rating overlay */
+.chatassist-theme-dark .chatassist-rating-overlay-panel {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.chatassist-theme-dark .chatassist-rating-title {
+  color: #f1f5f9;
+}
+
+.chatassist-theme-dark .chatassist-rating-close {
+  color: #64748b;
+}
+
+.chatassist-theme-dark .chatassist-rating-close:hover {
+  color: #e2e8f0;
+}
+
+/* Conv list extras */
+.chatassist-theme-dark .chatassist-conv-item-date {
+  color: #64748b;
+}
+
+.chatassist-theme-dark .chatassist-conv-item-badge {
+  background: #334155;
+  color: #94a3b8;
+}
+
+.chatassist-theme-dark .chatassist-conv-item-badge-active {
+  background: #064e3b;
+  color: #34d399;
+}
+
+.chatassist-theme-dark .chatassist-conv-new-btn {
+  border-color: #3b82f6;
+  color: #60a5fa;
+}
+
+.chatassist-theme-dark .chatassist-conv-new-btn:hover {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.chatassist-theme-dark .chatassist-conv-list-empty {
+  color: #64748b;
+}
+
+/* Bot prompt buttons — only background override; accent color/border set dynamically */
+.chatassist-theme-dark .chatassist-prompt-btn {
+  background: #1e293b;
+}
+
+.chatassist-theme-dark .chatassist-prompt-btn:hover {
+  background: #334155;
+}
+
+/* Date separator */
+.chatassist-theme-dark .chatassist-date-separator::before {
+  background: #334155;
+}
+
+.chatassist-theme-dark .chatassist-date-separator span {
+  background: #0f172a;
+  color: #64748b;
+}
+
+/* Unread divider */
+.chatassist-theme-dark .chatassist-unread-divider::before {
+  background: #334155;
+}
+
+.chatassist-theme-dark .chatassist-unread-divider span {
+  background: #0f172a;
+  color: #94a3b8;
+}
+
+/* Contact overlay */
+.chatassist-theme-dark .chatassist-contact-overlay-panel {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.chatassist-theme-dark .chatassist-contact-overlay-title {
+  color: #f1f5f9;
+}
+
+.chatassist-theme-dark .chatassist-contact-overlay-close {
+  background: #334155;
+  color: #94a3b8;
+}
+
+.chatassist-theme-dark .chatassist-contact-overlay-close:hover {
+  background: #475569;
+}
+
+.chatassist-theme-dark .chatassist-contact-overlay-subtitle {
+  color: #94a3b8;
+}
+
+.chatassist-theme-dark .chatassist-contact-form input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.chatassist-theme-dark .chatassist-contact-form input::placeholder {
+  color: #64748b;
+}
+
+.chatassist-theme-dark .chatassist-contact-msg-preview {
+  background: #0f172a;
+  color: #94a3b8;
 }
