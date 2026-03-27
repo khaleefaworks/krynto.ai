@@ -414,7 +414,7 @@ export default function CustomersVisitors() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.came_from || '-'}</span>
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.came_from || 'Direct'}</span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right">
                                             <span className="text-sm text-gray-700 dark:text-gray-300">{r.visits}</span>

@@ -315,9 +315,9 @@ class ConversationOrchestrator:
                         None,
                         lambda: send_web_push_to_subscriptions(
                             subscriptions=subs,
-                            title=f"New message in conversation #{conversation.id}",
+                            title=f"New message in conversation #{conversation.short_id}",
                             body=(message or "New message")[:120],
-                            url=f"/dashboard/chats?conversationId={conversation.id}",
+                            url=f"/dashboard/chats/{conversation.short_id}",
                         ),
                     )
             except Exception as e:
@@ -364,7 +364,7 @@ class ConversationOrchestrator:
                         subscriptions=subs,
                         title=f"Unassigned message - Website {website_id}",
                         body=(message or "New message")[:120],
-                        url=f"/dashboard/chats?conversationId={conversation.id}",
+                        url=f"/dashboard/chats/{conversation.short_id}",
                     ),
                 )
         except Exception:

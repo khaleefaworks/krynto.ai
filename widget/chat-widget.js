@@ -249,8 +249,14 @@
 
     if (nameEl) nameEl.textContent = senderName || CONFIG.popupName;
     if (bodyEl) {
-      const plain = String(messageText || '').replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
-      const truncated = plain.slice(0, 150);
+      var raw = String(messageText || '');
+      var plain = raw.replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
+      if (!plain) {
+        if (/!\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcf7 Sent an image';
+        else if (/\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcce Sent a file';
+        else plain = 'New message';
+      }
+      var truncated = plain.slice(0, 150);
       bodyEl.textContent = truncated + (plain.length > 150 ? '\u2026' : '');
     }
     if (avatarWrap) {
@@ -1918,6 +1924,8 @@
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
       autoResizeInput();
+      saveDraft('');
+      saveDraftAttachments([]);
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);
@@ -1941,6 +1949,8 @@
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
       autoResizeInput();
+      saveDraft('');
+      saveDraftAttachments([]);
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);

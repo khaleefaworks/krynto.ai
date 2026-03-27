@@ -318,12 +318,14 @@
                 }
             };
 
-            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const stored = localStorage.getItem('demo_dark_mode');
+            const prefersDark = stored !== null ? stored === 'true' : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
             toggleInput.checked = prefersDark;
             applyTheme(prefersDark);
 
             toggleInput.addEventListener('input', (event) => {
                 const isDark = toggleInput.checked;
+                localStorage.setItem('demo_dark_mode', isDark);
 
                 let x = window.innerWidth / 2;
                 let y = window.innerHeight / 2;

@@ -195,8 +195,8 @@ export default function PersonalSettings() {
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Profile</h1>
       </div>
 
-      <div className="flex-1 flex items-center justify-center overflow-auto py-8">
-        <div className="max-w-xl w-full px-6 space-y-8">
+      <div className="flex-1 overflow-auto py-8">
+        <div className="max-w-xl w-full mx-auto px-6 space-y-8">
           {message && (
             <div className={`p-3 rounded-lg text-sm ${message.type === 'success'
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'

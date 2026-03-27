@@ -1406,12 +1406,10 @@ export default function ConversationsView() {
     })
 
     useEffect(() => {
-        if (activeFilter !== 'resolved') return
-
         let cancelled = false
         const load = async () => {
             try {
-                setResolvedLoading(true)
+                if (activeFilter === 'resolved') setResolvedLoading(true)
                 const { fetchClosedConversations } = await import('@/services/chats')
                 const data = await fetchClosedConversations(undefined, undefined, 100)
                 if (!cancelled) setResolvedChats(Array.isArray(data) ? (data as any) : [])

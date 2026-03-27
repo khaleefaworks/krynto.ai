@@ -2118,7 +2118,7 @@ export default function WebsiteDetail() {
               )}
 
               {/* Conversation History */}
-              {!isNew && activeTab === 'settings' && (
+              {!isNew && activeTab === 'widget' && (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <div>

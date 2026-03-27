@@ -368,6 +368,7 @@ export default function AgentsList() {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {filtered.map(agent => {
                   const isSysManager = agent.role === 'system_manager'
+                  const isOwner = agent.role === 'owner'
                   const avatar = getFullAvatarUrl(agent.avatar_url)
                   const initials = (agent.name || '?').trim().charAt(0).toUpperCase()
 
@@ -407,8 +408,8 @@ export default function AgentsList() {
                       </td>
                       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
-                          checked={isSysManager ? true : agent.is_active}
-                          disabled={isSysManager}
+                          checked={isSysManager || isOwner ? true : agent.is_active}
+                          disabled={isSysManager || isOwner}
                           onCheckedChange={checked => toggleActive(agent, checked)}
                         />
                       </td>
