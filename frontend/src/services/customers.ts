@@ -69,7 +69,9 @@ export interface CustomerVisitorDetails {
     }>
     conversations: Array<{
         conversation_id: number
+        short_id: string | null
         session_id: string
+        title: string | null
         status: string
         created_at: string | null
     }>
@@ -100,7 +102,9 @@ export interface CustomerContactDetails {
     chats: number
     conversations: Array<{
         conversation_id: number
+        short_id: string | null
         session_id: string
+        title: string | null
         status: string
         created_at: string | null
     }>

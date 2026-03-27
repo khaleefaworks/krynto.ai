@@ -248,8 +248,8 @@ export default function CustomersVisitors() {
         setDetailsLoading(false)
     }
 
-    const openConversation = (conversationId: number, _sessionId: string) => {
-        navigate(`/dashboard/chats/${conversationId}`)
+    const openConversation = (shortId: string | null, conversationId: number) => {
+        navigate(`/dashboard/chats/${shortId || conversationId}`)
         closeDrawer()
     }
 
@@ -481,7 +481,7 @@ export default function CustomersVisitors() {
                                                     const latest = details.conversations?.[0]
                                                     const cid = Number(latest?.conversation_id)
                                                     if (Number.isFinite(cid) && cid > 0) {
-                                                        openConversation(cid, details.session_id)
+                                                        openConversation(latest?.short_id || null, cid)
                                                     }
                                                 }}
                                                 className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
@@ -533,11 +533,11 @@ export default function CustomersVisitors() {
                                                 details.conversations.map((c) => (
                                                     <button
                                                         key={c.conversation_id}
-                                                        onClick={() => openConversation(Number(c.conversation_id), c.session_id)}
+                                                        onClick={() => openConversation(c.short_id || null, Number(c.conversation_id))}
                                                         className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-gray-200 dark:border-gray-700"
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation'}</div>
+                                                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.title || (c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation')}</div>
                                                             <div className="text-xs text-gray-500 dark:text-gray-400">{c.status}</div>
                                                         </div>
                                                     </button>

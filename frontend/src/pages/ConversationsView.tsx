@@ -101,6 +101,17 @@ function shortSessionId(sessionId: string | null | undefined): string {
     return compact.length >= 12 ? compact.slice(-12) : raw
 }
 
+function conversationDisplayName(chat: { visitor_name?: string | null; title?: string | null; short_id?: string | null; session_id?: string | null } | null | undefined): string {
+    if (!chat) return ''
+    const name = String(chat.visitor_name || '').trim()
+    if (name) return name
+    const title = String(chat.title || '').trim()
+    if (title) return title
+    const shortId = String(chat.short_id || '').trim()
+    if (shortId) return shortId
+    return shortSessionId(chat.session_id)
+}
+
 function getInitials(name: string | null | undefined, fallback: string): string {
     const v = String(name || '').trim()
     if (!v) return fallback
@@ -181,6 +192,7 @@ function TagIcon({ className }: { className?: string }) {
 
 interface ConversationDetails {
     id: number
+    short_id?: string
     website_id?: number
     session_id: string
     visitor_name?: string
@@ -1686,12 +1698,12 @@ export default function ConversationsView() {
                                             bgColor={(chat as any).visitor_avatar_color}
                                             className="w-10 h-10 flex-shrink-0"
                                             iconClassName="w-10 h-10"
-                                            title={(chat as any).visitor_name || shortSessionId(chat.session_id)}
+                                            title={conversationDisplayName(chat as any)}
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between">
                                                 <span className="font-semibold text-gray-900 dark:text-white truncate">
-                                                    {(chat as any).visitor_name || shortSessionId(chat.session_id)}
+                                                    {conversationDisplayName(chat as any)}
                                                 </span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                                                     {((chat as any).last_message_at || (chat as any).created_at)
@@ -1736,11 +1748,11 @@ export default function ConversationsView() {
                                     bgColor={conversation?.visitor_avatar_color}
                                     className="w-10 h-10 flex-shrink-0"
                                     iconClassName="w-10 h-10"
-                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                    title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-                                        {conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                        {conversationDisplayName(conversation as any)}
                                     </h2>
                                     {conversation?.last_seen_at && (
                                         <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -2077,7 +2089,7 @@ export default function ConversationsView() {
                                                                     bgColor={conversation?.visitor_avatar_color}
                                                                     className="w-8 h-8 flex-shrink-0"
                                                                     iconClassName="w-8 h-8"
-                                                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                                                    title={conversationDisplayName(conversation as any)}
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
@@ -2169,7 +2181,7 @@ export default function ConversationsView() {
                                 bgColor={conversation?.visitor_avatar_color}
                                 className="w-10 h-10"
                                 iconClassName="w-10 h-10"
-                                title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                title={conversationDisplayName(conversation as any)}
                             />
                         </div>
                     ) : (

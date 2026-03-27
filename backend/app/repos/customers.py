@@ -488,7 +488,9 @@ def get_visitor_details(
     conv_rows = [
         {
             "conversation_id": int(c.id),
+            "short_id": str(c.short_id) if getattr(c, "short_id", None) else None,
             "session_id": str(c.session_id),
+            "title": getattr(c, "title", None),
             "status": str(c.status.value if hasattr(c.status, "value") else c.status),
             "created_at": _as_utc(c.created_at).isoformat() if _as_utc(c.created_at) else None,
         }
@@ -627,7 +629,9 @@ def get_contact_details(
         conv_rows.append(
             {
                 "conversation_id": int(c.id),
+                "short_id": str(c.short_id) if getattr(c, "short_id", None) else None,
                 "session_id": str(c.session_id),
+                "title": getattr(c, "title", None),
                 "status": str(c.status.value if hasattr(c.status, "value") else c.status),
                 "created_at": created_at.isoformat() if created_at is not None else None,
             }
