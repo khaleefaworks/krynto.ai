@@ -615,6 +615,35 @@ export default function ConversationsView() {
         }
     }, [getPreferredConversationId, selectedChat, openChat])
 
+    // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
+    // fetch the conversation from the API and inject it so it can be selected.
+    useEffect(() => {
+        if (isChatsListRoute || !chatIdParam) return
+        // If already resolved (found in active/resolved chats), skip
+        if (getPreferredConversationId() !== null) return
+        // Only run after initial chats have loaded
+        if (!hasLoadedChatsRef.current) return
+        // Don't retry if we already selected something
+        if (selectedChat) return
+
+        let cancelled = false
+        ;(async () => {
+            try {
+                const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
+                })
+                if (cancelled || !summary?.id) return
+                // Inject into activeChats so it appears in the left list
+                setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                openChat(summary.id)
+            } catch {
+                // Conversation not found or no access — ignore
+            }
+        })()
+
+        return () => { cancelled = true }
+    }, [isChatsListRoute, chatIdParam, selectedChat, activeChats, openChat])
+
     // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to canonical URL.
     useEffect(() => {
         const cid = Number(conversationId)
@@ -1080,6 +1109,12 @@ export default function ConversationsView() {
                     if (loadDetailsTokenRef.current === token) {
                         setConversation(summary as any)
                         setConversationTags(((summary as any).tags || []) as any)
+
+                        // Temporarily inject into activeChats so it appears in the left list
+                        // (e.g. bot-only conversations opened from the Visitors page).
+                        if (!activeChats.some(c => c.id === chatId)) {
+                            setActiveChats([summary as any, ...activeChats])
+                        }
                     }
 
                     const wid = (summary as any).website_id
@@ -1969,6 +2004,21 @@ export default function ConversationsView() {
                                                         </div>
                                                     )}
                                                 </div>
+
+                                                {isAdmin(user) ? (
+                                                    <div className="pt-1 text-right">
+                                                        <Link
+                                                            to={`/dashboard/settings/websites/${(conversation as any)?.website_id ?? ''}?tab=teams`}
+                                                            className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                            onClick={() => {
+                                                                setTeamPickerOpen(false)
+                                                                setTeamPickerQuery('')
+                                                            }}
+                                                        >
+                                                            Manage teams
+                                                        </Link>
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         </PopoverContent>
                                     </Popover>

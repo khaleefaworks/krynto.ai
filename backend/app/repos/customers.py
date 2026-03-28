@@ -235,14 +235,31 @@ def list_active_visitors(
 
     # Conversation-derived flags for richer UI (visitor-initiated chat, agent joined, etc.)
     visitor_initiated_map: Dict[Tuple[int, str], bool] = {}
+    # Only check the latest open conversation per visitor for the chat icon
+    _vi_ranked = func.row_number().over(
+        partition_by=(Conversation.website_id, Conversation.session_id),
+        order_by=Conversation.created_at.desc(),
+    ).label("rn")
+    _vi_subq = (
+        db.query(
+            Conversation.website_id.label("website_id"),
+            Conversation.session_id.label("session_id"),
+            case((Conversation.last_visitor_message_at.isnot(None), 1), else_=0).label("has_visitor_msg"),
+            _vi_ranked,
+        )
+        .filter(
+            tuple_(Conversation.website_id, Conversation.session_id).in_(key_tuples),
+            Conversation.status == ConversationStatus.OPEN,
+        )
+        .subquery()
+    )
     initiated_rows = (
         db.query(
-            Conversation.website_id,
-            Conversation.session_id,
-            func.max(case((Conversation.last_visitor_message_at.isnot(None), 1), else_=0)).label("has_visitor_msg"),
+            _vi_subq.c.website_id,
+            _vi_subq.c.session_id,
+            _vi_subq.c.has_visitor_msg,
         )
-        .filter(tuple_(Conversation.website_id, Conversation.session_id).in_(key_tuples))
-        .group_by(Conversation.website_id, Conversation.session_id)
+        .filter(_vi_subq.c.rn == 1)
         .all()
     )
     for wid, sid, flag in initiated_rows:
@@ -468,7 +485,10 @@ def get_visitor_details(
     visitor_email = getattr(conversations[0], "visitor_email", None) if conversations else None
     visitor_phone = getattr(conversations[0], "visitor_phone", None) if conversations else None
 
-    visitor_initiated_chat = any(getattr(c, "last_visitor_message_at", None) is not None for c in conversations)
+    # Check only the latest open conversation for visitor-initiated chat
+    open_convs = [c for c in conversations if (c.status.value if hasattr(c.status, "value") else c.status) == "open"]
+    latest_open = open_convs[0] if open_convs else None
+    visitor_initiated_chat = getattr(latest_open, "last_visitor_message_at", None) is not None if latest_open else False
 
     latest_assigned_agent = None
     if conversations:
@@ -492,6 +512,7 @@ def get_visitor_details(
             "session_id": str(c.session_id),
             "title": getattr(c, "title", None),
             "status": str(c.status.value if hasattr(c.status, "value") else c.status),
+            "has_visitor_message": getattr(c, "last_visitor_message_at", None) is not None,
             "created_at": _as_utc(c.created_at).isoformat() if _as_utc(c.created_at) else None,
         }
         for c in conversations

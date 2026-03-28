@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch'
 import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2, Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { addMessageHandler } from '@/services/agentSocket'
+import { useAppStore } from '@/store/appStore'
 
 interface Agent {
   id: number
@@ -22,6 +23,7 @@ interface Agent {
 type PanelMode = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; item: Agent }
 
 export default function AgentsList() {
+  const { user: currentUser } = useAppStore()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -150,6 +152,7 @@ export default function AgentsList() {
   // ─── Inline status toggle ────────────────────────────
   const toggleActive = async (agent: Agent, isActive: boolean) => {
     if (agent.role === 'system_manager') return
+    if (agent.id === currentUser?.id) return
     setAgents(prev => prev.map(a => (a.id === agent.id ? { ...a, is_active: isActive } : a)))
     try {
       await apiRequest(`/users/${agent.id}/status`, {
@@ -369,6 +372,7 @@ export default function AgentsList() {
                 {filtered.map(agent => {
                   const isSysManager = agent.role === 'system_manager'
                   const isOwner = agent.role === 'owner'
+                  const isSelf = agent.id === currentUser?.id
                   const avatar = getFullAvatarUrl(agent.avatar_url)
                   const initials = (agent.name || '?').trim().charAt(0).toUpperCase()
 
@@ -408,8 +412,8 @@ export default function AgentsList() {
                       </td>
                       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
-                          checked={isSysManager || isOwner ? true : agent.is_active}
-                          disabled={isSysManager || isOwner}
+                          checked={isSysManager || isOwner || isSelf ? true : agent.is_active}
+                          disabled={isSysManager || isOwner || isSelf}
                           onCheckedChange={checked => toggleActive(agent, checked)}
                         />
                       </td>

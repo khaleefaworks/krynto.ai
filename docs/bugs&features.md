@@ -9,7 +9,7 @@ Phase 5 Audit — 3 items still pending:
 6	Agent resolve shows rating popup without requiring closing automation — no test	Missing
 8	JWT organization_id tampering test — no test	Missing
 
-2) Assign team dropdown in chat page not having create team button same like Tag Conversation dropdown.
+2) Assign team dropdown in chat page not having create team button same like Tag Conversation dropdown. ✅ FIXED — Added "Manage teams" link in team picker popover (visible to admins)
 
 3) Notification sounds on both side is not good, need to clone like smartsupp.
 
@@ -49,15 +49,17 @@ Phase 5 Audit — 3 items still pending:
 
 21) Settings -> Organization page needs to be improved same as Profile. But logo upload and all not needed but some text generated can be there like chats. Organization name edit option needs to be rethink I guess.
 
-22) Huge issue, in Settings -> User list row, there is a toggle for disable user but for owner it should not be there. basically they should not lockdown themself. ✅ FIXED — Toggle is now always-on and disabled for owner role (same as system_manager) What will happen for other users? what if they lockdown themselves?
+22) Huge issue, in Settings -> User list row, there is a toggle for disable user but for owner it should not be there. basically they should not lockdown themself. ✅ FIXED — Toggle is now always-on and disabled for owner role (same as system_manager). Self-deactivation prevented on both frontend (disabled toggle) and backend (403 guard). What will happen for other users? what if they lockdown themselves?
 
 23) Settings -> Website -> General - Conversation History option should be to Widget setting I guess. In widget settings goups the fields and improve the UI/UX. Like new message popup's settings and conversation popup's settings separately can help the users to understand better. ✅ FIXED — Conversation History toggle moved from Settings tab to Widget tab
 
 24) Settings -> Website -> Automations - this is not that user friendly. Lot of unwanted templates, now we changes relove workflow right? so few things needs to be deleted in templates itself. There should be 4 tabs, Templates Auto Messages, Chatbots, AI Agents. Same like Automessages, chatnot should have delete option. if delete it will be available in templates to add again. AI Agents feature is comming soon. Need to understand how the automessage feature is implemented and need to be improved and code optimizations.
 
-25) If a chat is resolved or closed, agent side also the send message input should not be available. mistakenly also they should not send message to closed chats.
+25) If a chat is resolved or closed, agent side also the send message input should not be available. mistakenly also they should not send message to closed chats. ✅ FIXED — ChatComposer disabled on resolved chats; also fixed textarea staying locked when switching from resolved back to active conversation (editor.setEditable sync)
 
-26) http://localhost:5173/dashboard/customers/visitors - one more bug is in the row the visitor column have chat icon if the visitor initiate chat. But now we are conversation based, when a 1st message send from visitor for the current open conversation then only it should show. Also found a bug in open conversation button and the open conv in conv section of right popover. On clicking on that taking me to chats page but if there is not 1st chat initiated, it is not opening that chat at all. just url have that new id that only have bot conversation in it.
+26) http://localhost:5173/dashboard/customers/visitors - one more bug is in the row the visitor column have chat icon if the visitor initiate chat. But now we are conversation based, when a 1st message send from visitor for the current open conversation then only it should show. Also found a bug in open conversation button and the open conv in conv section of right popover. On clicking on that taking me to chats page but if there is not 1st chat initiated, it is not opening that chat at all. just url have that new id that only have bot conversation in it. ✅ FIXED — Chat icon now checks latest open conversation only; bot-only convs open with styled warning modal; deep-link fallback fetches unknown short_ids from API; assigned conversations always appear in active list; auto-title from first visitor message removed (title only set from offline form)
+
+27) Currently if no agents online, there is a form popup, that needs to be impoved. Forms and form fields should not be via columns. We can create a form table and each form column can be stored as objects. Will this work out? Also form should be triggered via agent chat, automations.
 
 
 Features:

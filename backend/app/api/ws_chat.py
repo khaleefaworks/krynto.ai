@@ -922,16 +922,8 @@ async def chat_ws(
                         registered_conversation_id = conv.id
                         ChatService.register_visitor(conv.id, websocket)
 
-                        # Set conversation title from the first visitor message.
-                        if not conv.title:
-                            try:
-                                conv.title = user_message[:60].strip()
-                                db.commit()
-                            except Exception:
-                                try:
-                                    db.rollback()
-                                except Exception:
-                                    pass
+                        # Title is only set from the offline contact form (visitor_name).
+                        # We no longer auto-generate titles from the first visitor message.
 
                         # Notify the widget so it can store the new conversation_id.
                         try:

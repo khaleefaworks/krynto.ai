@@ -250,14 +250,8 @@ class ConversationOrchestrator:
         if not msg:
             return "Unable to process your message right now."
 
-        # Auto-generate title from the first visitor message (up to 60 chars).
-        if prior_message_count == 0 and not conversation.title:
-            try:
-                conversation.title = message.strip()[:60]
-                self.db.add(conversation)
-                self.db.flush()
-            except Exception:
-                pass
+        # Title is only set from the offline contact form (visitor_name).
+        # We no longer auto-generate titles from the first visitor message.
 
         # Best-effort: acknowledge back to the visitor with server truth.
         # This lets the widget reconcile optimistic timestamps/IDs.

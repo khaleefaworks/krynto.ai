@@ -377,6 +377,13 @@ def update_user_status(
             detail="Administrator account cannot be disabled",
         )
 
+    # Prevent users from disabling their own account.
+    if user.id == _admin.id and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot disable your own account",
+        )
+
     user.is_active = payload.is_active
     db.commit()
     db.refresh(user)
