@@ -120,7 +120,7 @@ export default function OnboardingPage() {
                 <Input
                   type={showSetupKey ? "text" : "password"}
                   autoComplete="off"
-                  placeholder="SERVER_SECRET_KEY from .env"
+                  placeholder="Enter the Secret Key "
                   {...register('setupKey')}
                   className={errors.setupKey ? 'border-red-500 pr-10' : 'pr-10'}
                 />
@@ -135,9 +135,7 @@ export default function OnboardingPage() {
               {errors.setupKey && (
                 <p className="text-sm text-red-600">{errors.setupKey.message}</p>
               )}
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                The <span className="font-mono">SECRET_KEY</span> value set in the server's <span className="font-mono">.env</span> file.
-              </p>
+    
             </div>
 
             <div className="space-y-2">
@@ -197,10 +195,6 @@ export default function OnboardingPage() {
               {isSubmitting ? 'Setting up...' : 'Complete Setup'}
             </Button>
 
-            <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-4">
-              This creates the platform administrator account.<br />
-              Only the person with access to the server <span className="font-mono">.env</span> can complete this step.
-            </p>
           </form>
         </CardContent>
       </Card>
