@@ -61,6 +61,9 @@ Phase 5 Audit — 3 items still pending:
 
 27) Currently if no agents online, there is a form popup, that needs to be impoved. Forms and form fields should not be via columns. We can create a form table and each form column can be stored as objects. Will this work out? Also form should be triggered via agent chat, automations.
 
+28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT."
+
+29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent."
 
 Features:
 
