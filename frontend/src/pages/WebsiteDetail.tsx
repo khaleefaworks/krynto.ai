@@ -2117,25 +2117,7 @@ export default function WebsiteDetail() {
                 </div>
               )}
 
-              {/* Conversation History */}
-              {!isNew && activeTab === 'widget' && (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Conversation History</h2>
-                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                        When enabled, returning visitors can view their past conversations and start a new one.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={formData.show_conversation_history}
-                      onCheckedChange={(checked) =>
-                        setFormData({ ...formData, show_conversation_history: checked })
-                      }
-                    />
-                  </div>
-                </div>
-              )}
+
 
               {/* Office Hours */}
               {(isNew || activeTab === 'settings') && (
@@ -2348,8 +2330,10 @@ export default function WebsiteDetail() {
                   widgetConfig={formData.widget_config}
                   websiteId={Number(websiteId)}
                   saving={saving}
+                  showConversationHistory={formData.show_conversation_history}
                   onConfigChange={(config) => setFormData({ ...formData, widget_config: { ...formData.widget_config, ...config } })}
                   onUploadIcon={handleUploadWidgetIcon}
+                  onShowConversationHistoryChange={(checked) => setFormData({ ...formData, show_conversation_history: checked })}
                 />
               )}
 
