@@ -11,10 +11,11 @@
         href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@99,700&amp;display=swap"
         rel="stylesheet">
     <style>
-        body{
+        body {
             margin: 0;
             padding: 0;
         }
+
         :root {
             --background-color-light: hsla(230, 80%, 98%, 1);
             --toggle-light: hsla(230, 25%, 10%, 1);
@@ -278,15 +279,190 @@
             transform: scale(1.5);
             transition: transform 0.5s ease 0.15s;
         }
+
+        /* --- Widget Key UI --- */
+        #demo-key-btn {
+            position: fixed;
+            top: 12px;
+            right: 16px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px 5px 8px;
+            border-radius: 20px;
+            border: 1px solid var(--line-color);
+            background: var(--background-color);
+            color: var(--text-color-bottom);
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        #demo-key-btn:hover {
+            border-color: var(--dot-color);
+        }
+
+        #demo-key-btn svg {
+            flex-shrink: 0;
+            opacity: 0.6;
+        }
+
+        #demo-key-btn .demo-key-label {
+            font-weight: 600;
+            opacity: 0.5;
+            letter-spacing: 0.02em;
+        }
+
+        #demo-key-btn .demo-key-val {
+            font-family: monospace;
+            font-size: 11px;
+            opacity: 0.75;
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* --- Key Modal --- */
+        #demo-key-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(4px);
+        }
+
+        #demo-key-modal.open {
+            display: flex;
+        }
+
+        #demo-key-box {
+            background: var(--background-color);
+            border-radius: 16px;
+            padding: 32px 28px 24px;
+            width: clamp(300px, 90vw, 440px);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        #demo-key-box h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-color-top);
+        }
+
+        #demo-key-box p {
+            margin: 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-color-bottom);
+            opacity: 0.8;
+        }
+
+        #demo-key-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--line-color);
+            background: var(--background-color);
+            color: var(--text-color-top);
+            font-family: monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #demo-key-input:focus {
+            border-color: var(--dot-color);
+        }
+
+        #demo-key-input.error {
+            border-color: #ef4444;
+        }
+
+        .demo-key-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .demo-key-actions button {
+            padding: 8px 18px;
+            border-radius: 8px;
+            border: none;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .demo-key-actions button:hover {
+            opacity: 0.85;
+        }
+
+        #demo-key-cancel {
+            background: var(--line-color);
+            color: var(--text-color-bottom);
+        }
+
+        #demo-key-save {
+            background: #3b82f6;
+            color: #fff;
+        }
+
+        #demo-key-error {
+            font-size: 12px;
+            color: #ef4444;
+            display: none;
+        }
     </style>
 </head>
 
 <body>
 
+    <!-- Dark/light toggle -->
     <label class="toggle">
         <input type="checkbox" />
         <div></div>
     </label>
+
+    <!-- Widget key indicator & change button -->
+    <button id="demo-key-btn" title="Change widget key">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="7.5" cy="15.5" r="5.5" />
+            <path d="M21 2l-9.6 9.6" />
+            <path d="M15.5 7.5l3 3L21 2z" />
+        </svg>
+        <span class="demo-key-label">KEY</span>
+        <span class="demo-key-val" id="demo-key-display">not set</span>
+    </button>
+
+    <!-- Widget key modal -->
+    <div id="demo-key-modal">
+        <div id="demo-key-box">
+            <h2>Widget Key</h2>
+            <p>Enter the widget key from your dashboard (<strong>Settings → Websites → Widget tab</strong>). It will be
+                saved in localStorage so you won't need to set it again.</p>
+            <input id="demo-key-input" type="text" placeholder="Paste your widget key here…" autocomplete="off"
+                spellcheck="false" />
+            <span id="demo-key-error">Please enter a valid widget key.</span>
+            <div class="demo-key-actions">
+                <button id="demo-key-cancel">Cancel</button>
+                <button id="demo-key-save">Save &amp; Reload</button>
+            </div>
+        </div>
+    </div>
 
     <main>
         <hr />
@@ -366,20 +542,99 @@
         });
     </script>
 
-    <!-- AI ChatAssist Live Chat script -->
-    <script type="text/javascript">
-        var _aichatassist = _aichatassist || {};
-        _aichatassist.key = '978704fb461679f9964999f7026051756028103a47eeea163d04c49bfe197401';
-        window.aichatassist || (function (d) {
-            var s, c, o = aichatassist = function () { o._.push(arguments) }; o._ = [];
-            s = d.getElementsByTagName('script')[0]; c = d.createElement('script');
-            c.type = 'text/javascript'; c.charset = 'utf-8'; c.async = true;
-            // Ensure the loader request includes a Referer on sites that set Referrer-Policy: no-referrer
-            // (required for server-side domain lock verification).
-            c.referrerPolicy = 'origin';
-            c.src = 'http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
-            s.parentNode.insertBefore(c, s);
-        })(document);
+    <!-- AI ChatAssist Live Chat — key loaded from localStorage -->
+    <script>
+        (function () {
+            var STORAGE_KEY = 'demo_widget_key';
+            var modal = document.getElementById('demo-key-modal');
+            var input = document.getElementById('demo-key-input');
+            var saveBtn = document.getElementById('demo-key-save');
+            var cancelBtn = document.getElementById('demo-key-cancel');
+            var errorEl = document.getElementById('demo-key-error');
+            var keyBtn = document.getElementById('demo-key-btn');
+            var keyDisplay = document.getElementById('demo-key-display');
+
+            function getKey() {
+                return localStorage.getItem(STORAGE_KEY) || '';
+            }
+
+            function updateKeyDisplay(key) {
+                if (key) {
+                    keyDisplay.textContent = key.slice(0, 8) + '…' + key.slice(-4);
+                } else {
+                    keyDisplay.textContent = 'not set';
+                }
+            }
+
+            function loadWidget(key) {
+                var _aichatassist = window._aichatassist || {};
+                _aichatassist.key = key;
+                window._aichatassist = _aichatassist;
+                if (!window.aichatassist) {
+                    var o = window.aichatassist = function () { o._.push(arguments); };
+                    o._ = [];
+                }
+                var s = document.getElementsByTagName('script')[0];
+                var c = document.createElement('script');
+                c.type = 'text/javascript';
+                c.charset = 'utf-8';
+                c.async = true;
+                c.referrerPolicy = 'origin';
+                c.src = 'http://localhost:8000/widget/loader.js?key=' + encodeURIComponent(key);
+                s.parentNode.insertBefore(c, s);
+            }
+
+            function openModal() {
+                input.value = getKey();
+                errorEl.style.display = 'none';
+                input.classList.remove('error');
+                modal.classList.add('open');
+                setTimeout(function () { input.focus(); input.select(); }, 50);
+            }
+
+            function closeModal() {
+                modal.classList.remove('open');
+            }
+
+            function saveKey() {
+                var key = input.value.trim();
+                if (!key) {
+                    input.classList.add('error');
+                    errorEl.style.display = 'block';
+                    input.focus();
+                    return;
+                }
+                localStorage.setItem(STORAGE_KEY, key);
+                window.location.reload();
+            }
+
+            // Modal controls
+            saveBtn.addEventListener('click', saveKey);
+            cancelBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) closeModal();
+            });
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') saveKey();
+                if (e.key === 'Escape') closeModal();
+                input.classList.remove('error');
+                errorEl.style.display = 'none';
+            });
+
+            // Change key button
+            keyBtn.addEventListener('click', openModal);
+
+            // Boot: load widget or prompt
+            var storedKey = getKey();
+            updateKeyDisplay(storedKey);
+            if (storedKey) {
+                loadWidget(storedKey);
+            } else {
+                // No key yet — open modal automatically
+                modal.classList.add('open');
+                setTimeout(function () { input.focus(); }, 100);
+            }
+        })();
     </script>
     <noscript> Powered by <a href="#" target="_blank">AI ChatAssist</a></noscript>
 </body>
