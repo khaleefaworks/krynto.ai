@@ -22,6 +22,18 @@
   opacity: 1;
 }
 
+/* Position variants (set by JS: chatassist-position-b-r, b-l, t-r, t-l) */
+#chatassist-widget.chatassist-position-b-r { bottom: 20px; right: 20px; top: auto; left: auto; }
+#chatassist-widget.chatassist-position-b-l { bottom: 20px; left: 20px; top: auto; right: auto; }
+#chatassist-widget.chatassist-position-t-r { top: 20px; right: 20px; bottom: auto; left: auto; }
+#chatassist-widget.chatassist-position-t-l { top: 20px; left: 20px; bottom: auto; right: auto; }
+
+/* For top-anchored widgets, hide by translating upward instead of downward */
+#chatassist-widget.chatassist-position-t-r:not(.chatassist-visible),
+#chatassist-widget.chatassist-position-t-l:not(.chatassist-visible) {
+  transform: translateY(-100px);
+}
+
 /* --- Chat Bubble (Smartsupp pill style) --- */
 #chatassist-bubble {
   display: inline-flex;
@@ -40,27 +52,110 @@
   gap: 8px;
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #fff;
-  padding: 12px 18px 12px 20px;
+  padding: 5px 5px 5px 10px;
   border-radius: 28px;
   font-size: 15px;
   font-weight: 600;
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35), 0 2px 4px rgba(0,0,0,0.1);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   white-space: nowrap;
 }
 
+#chatassist-bubble-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  padding: 5px 8px 5px 10px;
+  border-radius: 22px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28), 0 2px 6px rgba(0,0,0,0.08);
+  transition: box-shadow 0.28s cubic-bezier(.2,.9,.3,1), filter 0.28s ease;
+  position: relative;
+  white-space: nowrap;
+}
+
+/* Soft illumination on hover (gentle light, not dark) */
 #chatassist-bubble-pill:hover {
-  transform: scale(1.03);
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4), 0 3px 6px rgba(0,0,0,0.12);
+  /* no scaling or translation on hover per user preference */
+  box-shadow: 0 10px 30px rgba(59,130,246,0.12), 0 4px 10px rgba(0,0,0,0.06);
+  filter: brightness(1.06);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
 }
-
-#chatassist-bubble-pill:active {
-  transform: scale(0.98);
-}
-
-#chatassist-bubble-pill svg {
+.chatassist-bubble-icon {
+  margin-left: 10px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none; /* avoid hard border */
+  background: transparent;
+  box-sizing: border-box;
   flex-shrink: 0;
+  position: relative;
+  transition: box-shadow 180ms, background 180ms;
+  overflow: visible;
+}
+
+/* Faded white fill behind the icon that animates (open/close pulse). */
+.chatassist-bubble-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  z-index: 0;
+  transform-origin: center;
+  animation: chatassist-bubble-fill 3s ease-in-out infinite;
+  transition: background 180ms, opacity 180ms;
+}
+
+.chatassist-bubble-icon svg {
+  width: 24px;
+  height: 24px;
+  transition: transform 160ms cubic-bezier(.2,.9,.3,1), color 160ms ease;
+  transform-origin: center;
+  /* slightly lift the icon inside the circle by default (no widget movement) */
+  transform: translateY(-2px) scale(1);
+  color: #fff;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+/* Hover sequencing: pill -> circle -> icon
+   Icon only scales on hover (no upward translation) */
+#chatassist-bubble-pill:hover .chatassist-bubble-icon {
+  /* no widget movement; only a subtle shadow change */
+  box-shadow: 0 8px 20px rgba(0,0,0,0.10);
+}
+
+/* Hover should only toggle the circular "lite" — pause pulse and brighten */
+#chatassist-bubble-pill:hover .chatassist-bubble-icon::before {
+  animation-play-state: paused;
+  background: rgba(255,255,255,0.26);
+  opacity: 1;
+}
+
+/* Icon scales on hover (only the svg inside the circle) */
+#chatassist-bubble-pill:hover .chatassist-bubble-icon svg {
+  transform: translateY(-2px) scale(1.28);
+}
+
+
+#chatassist-bubble-pill:hover::after {
+  transform: translateY(-3px);
+  width: 20px;
+}
+
+@keyframes chatassist-bubble-fill {
+  0% { transform: scale(0.96); opacity: 1; }
+  50% { transform: scale(1.04); opacity: 0.6; }
+  100% { transform: scale(0.96); opacity: 1; }
 }
 
 #chatassist-bubble-text {
@@ -72,16 +167,24 @@
 /* Online dot */
 #chatassist-bubble-online-dot {
   position: absolute;
-  bottom: -2px;
+  bottom: 0px;
   left: -2px;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #ef4444;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  /* very small, subtle white border */
+  border: 1px solid rgba(255,255,255,0.9);
+  /* softer shadow */
+  box-shadow: 0 1px 1px rgba(0,0,0,0.08);
   display: block;
-  z-index: 2;
+  z-index: 3;
+  transform: translateY(0);
+}
+
+/* keep online dot static (no hover movement) */
+#chatassist-bubble-pill:hover #chatassist-bubble-online-dot {
+  transform: translateY(0);
 }
 
 #chatassist-bubble-online-dot.chatassist-dot-online {
@@ -124,6 +227,51 @@
   gap: 5px;
   animation: chatassist-popup-in 0.3s ease-out;
   z-index: 5;
+}
+
+/* Position-specific adjustments */
+/* Left vs right alignment for the bubble */
+#chatassist-widget.chatassist-position-b-l #chatassist-bubble,
+#chatassist-widget.chatassist-position-t-l #chatassist-bubble {
+  float: left;
+}
+#chatassist-widget.chatassist-position-b-r #chatassist-bubble,
+#chatassist-widget.chatassist-position-t-r #chatassist-bubble {
+  float: right;
+}
+
+/* Swap icon spacing when bubble is left-aligned */
+#chatassist-widget.chatassist-position-b-l #chatassist-bubble .chatassist-bubble-icon,
+#chatassist-widget.chatassist-position-t-l #chatassist-bubble .chatassist-bubble-icon {
+  margin-left: 0;
+  margin-right: 10px;
+}
+
+/* Unread badge should flip sides on left-aligned bubble */
+#chatassist-widget.chatassist-position-b-l #chatassist-bubble-unread,
+#chatassist-widget.chatassist-position-t-l #chatassist-bubble-unread {
+  right: auto;
+  left: -6px;
+}
+
+/* Online dot should flip to the opposite side for left-aligned bubble */
+#chatassist-widget.chatassist-position-b-l #chatassist-bubble-online-dot,
+#chatassist-widget.chatassist-position-t-l #chatassist-bubble-online-dot {
+  left: auto;
+  right: -2px;
+}
+
+/* Message popup and dots preview anchored on the bubble side */
+#chatassist-widget.chatassist-position-b-l #chatassist-msg-popup,
+#chatassist-widget.chatassist-position-t-l #chatassist-msg-popup {
+  right: auto;
+  left: 0;
+}
+
+#chatassist-widget.chatassist-position-b-l #chatassist-dots-preview,
+#chatassist-widget.chatassist-position-t-l #chatassist-dots-preview {
+  right: auto;
+  left: 0;
 }
 
 #chatassist-dots-preview.chatassist-dots-visible {
@@ -1633,6 +1781,40 @@
    DARK THEME — Chat Thread View
    ============================================= */
 
+/* Popup & bubble overrides (dark theme) */
+.chatassist-theme-dark #chatassist-msg-popup {
+  background: #0f172a;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35);
+  color: #e2e8f0;
+}
+.chatassist-theme-dark #chatassist-dots-preview {
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+}
+.chatassist-theme-dark .chatassist-popup-avatar {
+  background: #334155;
+  color: #e2e8f0;
+}
+.chatassist-theme-dark .chatassist-popup-avatar-placeholder {
+  background: #334155;
+  color: #e2e8f0;
+}
+.chatassist-theme-dark .chatassist-popup-name {
+  color: #e2e8f0;
+}
+.chatassist-theme-dark .chatassist-popup-close {
+  background: #0f172a;
+  color: #64748b;
+}
+.chatassist-theme-dark .chatassist-popup-close:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.chatassist-theme-dark .chatassist-popup-body {
+  color: #e2e8f0;
+}
+
 /* Messages area */
 .chatassist-theme-dark #chatassist-messages {
   background: #0f172a;
@@ -1862,3 +2044,14 @@
   background: #0f172a;
   color: #94a3b8;
 }
+
+/* Final override: ensure message icon hover is medium-sized (not oversized) */
+.chatassist-bubble-icon svg {
+  transform: translateY(-1px) scale(1) !important;
+  transition: transform 300ms cubic-bezier(.2,.9,.3,1) !important;
+}
+
+#chatassist-bubble-pill:hover .chatassist-bubble-icon svg {
+  transform: translateY(-1px) scale(1.06) !important;
+}
+

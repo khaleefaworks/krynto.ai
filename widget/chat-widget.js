@@ -2082,13 +2082,15 @@
           </div>
           <div class="chatassist-popup-body" id="chatassist-popup-body"></div>
           <button class="chatassist-popup-reply" id="chatassist-popup-reply" type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            <svg width="1.2em" height="1.2em" viewBox="0 0 209 209" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" fill-rule="evenodd" clip-rule="evenodd" stroke-linecap="round" stroke-linejoin="round"><path d="M177.954,104.163l-110.066,-0m110.066,-0l-138.95,69.4l28.884,-69.4l-28.884,-69.584l138.95,69.584Z" style="fill:none;fill-rule:nonzero;stroke:currentColor;stroke-width:17.38px;"></path></svg>
             ${CONFIG.popupButtonText}
           </button>
         </div>
         <div id="chatassist-bubble-pill">
           <span id="chatassist-bubble-text">${CONFIG.bubbleText}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" preserveAspectRatio="xMidYMid meet" width="24" height="24"><path d="M63.113,18.51v-.16C60.323,7.05,44.582,3,31.972,3S3.582,7,.792,18.5a66.22,66.22,0,0,0,0,20.46c1.18,4.74,5.05,8.63,11.36,11.41l-4,5A3.47,3.47,0,0,0,10.882,61a3.39,3.39,0,0,0,1.44-.31L26.862,54c1.79.18,3.49.27,5.07.27,11.04.04,28.41-4.04,31.18-15.43a60.33,60.33,0,0,0,0-20.33Z"></path></svg>
+          <span class="chatassist-bubble-icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" preserveAspectRatio="xMidYMid meet" width="24" height="24"><path d="M63.113,18.51v-.16C60.323,7.05,44.582,3,31.972,3S3.582,7,.792,18.5a66.22,66.22,0,0,0,0,20.46c1.18,4.74,5.05,8.63,11.36,11.41l-4,5A3.47,3.47,0,0,0,10.882,61a3.39,3.39,0,0,0,1.44-.31L26.862,54c1.79.18,3.49.27,5.07.27,11.04.04,28.41-4.04,31.18-15.43a60.33,60.33,0,0,0,0-20.33Z"></path></svg>
+          </span>
           <span id="chatassist-bubble-unread" style="display:none;"></span>
           <div id="chatassist-bubble-online-dot"></div>
         </div>
@@ -2610,6 +2612,72 @@
 
       // Apply config styles immediately to avoid flicker/jump on reload.
       _applyThemeStyles();
+
+      // Sync widget theme with host page theme changes.
+      // Detects `html.dark` / `body.dark` and `prefers-color-scheme` changes and reapplies theme.
+      (function setupHostThemeSync() {
+        function detectHostTheme() {
+          try {
+            const htmlDark = document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('dark');
+            const bodyDark = document.body && document.body.classList && document.body.classList.contains('dark');
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            return (htmlDark || bodyDark || prefersDark) ? 'dark' : 'light';
+          } catch (e) {
+            return CONFIG.theme || 'dark';
+          }
+        }
+
+        function applyHostThemeIfDifferent() {
+          const hostTheme = detectHostTheme();
+          if (!hostTheme) return;
+          // Respect explicit dashboard setting: if the widget theme was
+          // explicitly set to 'dark' or 'light' on the website config, do
+          // not override it with the host page. Only apply host-page
+          // syncing when the widget theme is 'auto' / 'system' / empty.
+          try {
+            const current = String(CONFIG.theme || '').toLowerCase();
+            if (current === 'auto' || current === 'system' || current === '') {
+              if (current !== hostTheme) {
+                CONFIG.theme = hostTheme;
+                _applyThemeStyles();
+              }
+            }
+          } catch (e) {
+            // Fallback: do nothing if anything goes wrong
+          }
+        }
+
+        // Initial sync
+        try { applyHostThemeIfDifferent(); } catch (e) { }
+
+        // Observe class changes on <html> and <body>
+        try {
+          const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+              if (m.attributeName === 'class') { applyHostThemeIfDifferent(); break; }
+            }
+          });
+          if (document.documentElement) mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+          if (document.body) mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        } catch (e) { }
+
+        // Listen for prefers-color-scheme changes
+        try {
+          if (window.matchMedia) {
+            const mm = window.matchMedia('(prefers-color-scheme: dark)');
+            if (mm.addEventListener) mm.addEventListener('change', applyHostThemeIfDifferent);
+            else if (mm.addListener) mm.addListener(applyHostThemeIfDifferent);
+          }
+        } catch (e) { }
+
+        // Storage event (demo uses localStorage demo_dark_mode)
+        try {
+          window.addEventListener('storage', (e) => {
+            if (!e) return;
+            if (e.key === 'demo_dark_mode') applyHostThemeIfDifferent();
+          });
+        } catch (e) { }
+      })();
 
       // Set popup avatar to headerIconUrl if configured.
       if (CONFIG.headerIconUrl) {

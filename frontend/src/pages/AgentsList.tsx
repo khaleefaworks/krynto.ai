@@ -306,6 +306,23 @@ export default function AgentsList() {
     ? agents.find(a => a.id === panel.item.id) ?? panel.item
     : null
   const isAdminAccount = editItem?.role === 'system_manager'
+  const isOwnerAccount = editItem?.role === 'owner'
+  const currentRole = currentUser?.role
+  const canDelete = Boolean(
+    editItem &&
+    currentUser &&
+    editItem.id !== currentUser.id &&
+    // Never allow deleting a system manager from the UI
+    !isAdminAccount &&
+    (
+      // System admin can delete anyone (except other system admins)
+      currentRole === 'system_manager' ||
+      // Owners can delete other users (including other Owners) in their org
+      currentRole === 'owner' ||
+      // Managers can delete non-owner users
+      (currentRole === 'manager' && editItem.role !== 'owner')
+    )
+  )
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
@@ -633,7 +650,7 @@ export default function AgentsList() {
                   value={formRole}
                   onChange={e => setFormRole(e.target.value as 'owner' | 'manager' | 'agent' | 'system_manager')}
                   className="w-full h-10 px-3 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-                  disabled={saving || isAdminAccount}
+                  disabled={saving || isAdminAccount || isOwnerAccount}
                 >
                   {isAdminAccount ? (
                     <option value="system_manager">System Manager – Full system access</option>
@@ -654,7 +671,7 @@ export default function AgentsList() {
             {/* Panel footer */}
             <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-4 flex-shrink-0">
               <div className="flex items-center justify-between">
-                {panel.kind === 'edit' && !isAdminAccount ? (
+                {panel.kind === 'edit' && canDelete ? (
                   <button
                     type="button"
                     onClick={handleDelete}

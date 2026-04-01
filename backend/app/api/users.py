@@ -377,6 +377,13 @@ def update_user_status(
             detail="Administrator account cannot be disabled",
         )
 
+    # Owner account must not be disabled.
+    if user.role == UserRole.OWNER and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner account cannot be disabled",
+        )
+
     # Prevent users from disabling their own account.
     if user.id == _admin.id and payload.is_active is False:
         raise HTTPException(
@@ -425,6 +432,13 @@ def update_user_role(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
+        )
+
+    # Owner account role must not be changed.
+    if user.role == UserRole.OWNER and payload.role != UserRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner account role cannot be changed",
         )
 
     # System Manager is a bootstrap-only Administrator account.
@@ -534,20 +548,46 @@ def delete_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own account"
         )
-    
-    # Managers cannot delete administrators
+    # Managers cannot delete administrators (SYSTEM_MANAGER)
     if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can delete administrator accounts"
         )
-    
+
     # Administrator / system manager must always stay enabled.
     if user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Administrator account cannot be deleted",
         )
+
+    # Owner deletion rules: allow deletion by SYSTEM_MANAGER or another OWNER in the same org,
+    # but prevent deleting the last active owner for the organization.
+    if user.role == UserRole.OWNER:
+        # Only SYSTEM_MANAGER or an OWNER in the same org may delete an Owner
+        if not (
+            current_admin.role == UserRole.SYSTEM_MANAGER
+            or (current_admin.role == UserRole.OWNER and current_admin.organization_id == user.organization_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners or administrators can delete Owner accounts",
+            )
+
+        # Prevent deleting the last active owner in the organisation
+        org_id = user.organization_id
+        owner_count = db.query(User).filter(
+            User.organization_id == org_id,
+            User.role == UserRole.OWNER,
+            User.is_deleted == False,
+            User.is_active == True,
+        ).count()
+        if owner_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete the last owner of the organization",
+            )
     
     # Soft delete: mark as deleted and deactivate
     user.is_deleted = True
@@ -566,6 +606,51 @@ def delete_user(
     return {
         "message": "User deleted successfully",
         "user_id": user_id
+    }
+
+@router.post("/{user_id}/undelete")
+def undelete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin)
+):
+    """
+    Restore a soft-deleted user (admin only).
+    Sets `is_deleted` to False and re-enables the account (`is_active` = True).
+    Scoped to the calling admin's organization (non-system admins).
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Org boundary: non-superadmin admins can only act within their org.
+    org_id = get_org_scope(current_admin)
+    if org_id is not None and user.organization_id != org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not found")
+
+    # Prevent modifying platform administrator via this endpoint.
+    if user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Administrator account cannot be modified")
+
+    # Managers cannot act on administrator accounts.
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can modify administrator accounts")
+
+    user.is_deleted = False
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User restored successfully",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, "value") else user.role,
+            "is_active": user.is_active,
+            "avatar_url": user.avatar_url,
+        },
     }
 
 
