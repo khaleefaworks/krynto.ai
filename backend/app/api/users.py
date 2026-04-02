@@ -581,12 +581,11 @@ def delete_user(
             User.organization_id == org_id,
             User.role == UserRole.OWNER,
             User.is_deleted == False,
-            User.is_active == True,
         ).count()
         if owner_count <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete the last owner of the organization",
+                detail="Their should be atleast 1 owner",
             )
     
     # Soft delete: mark as deleted and deactivate

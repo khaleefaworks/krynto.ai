@@ -308,21 +308,33 @@ export default function AgentsList() {
   const isAdminAccount = editItem?.role === 'system_manager'
   const isOwnerAccount = editItem?.role === 'owner'
   const currentRole = currentUser?.role
-  const canDelete = Boolean(
-    editItem &&
-    currentUser &&
-    editItem.id !== currentUser.id &&
-    // Never allow deleting a system manager from the UI
-    !isAdminAccount &&
-    (
-      // System admin can delete anyone (except other system admins)
+  const ownerCount = agents.filter(a => a.role === 'owner').length
+  const isSelfAccount = Boolean(editItem && currentUser && editItem.id === currentUser.id)
+  const isLastRemainingOwner = Boolean(editItem && editItem.role === 'owner' && ownerCount <= 1)
+  const canDeleteByRole = Boolean(
+    editItem && (
       currentRole === 'system_manager' ||
-      // Owners can delete other users (including other Owners) in their org
       currentRole === 'owner' ||
-      // Managers can delete non-owner users
       (currentRole === 'manager' && editItem.role !== 'owner')
     )
   )
+  const canDelete = Boolean(
+    editItem &&
+    !isSelfAccount &&
+    // Never allow deleting a system manager from the UI
+    !isAdminAccount &&
+    !isLastRemainingOwner &&
+    canDeleteByRole
+  )
+  const deleteBlockedReason = isAdminAccount
+    ? 'Administrator account cannot be deleted.'
+    : isSelfAccount
+      ? 'Cannot delete your own account.'
+      : isLastRemainingOwner
+        ? 'Their should be atleast 1 owner'
+        : !canDeleteByRole
+          ? 'You do not have permission to delete this user.'
+          : null
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
@@ -671,12 +683,13 @@ export default function AgentsList() {
             {/* Panel footer */}
             <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-4 flex-shrink-0">
               <div className="flex items-center justify-between">
-                {panel.kind === 'edit' && canDelete ? (
+                {panel.kind === 'edit' && !isAdminAccount ? (
                   <button
                     type="button"
                     onClick={handleDelete}
-                    disabled={deleting}
-                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                    disabled={deleting || !canDelete}
+                    title={deleteBlockedReason || undefined}
+                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     {deleting ? 'Deleting…' : 'Delete'}
