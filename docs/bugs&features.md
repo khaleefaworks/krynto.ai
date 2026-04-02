@@ -47,11 +47,11 @@ Phase 5 Audit — 3 items still pending:
 
 20) In Settings -> Profile page the body doesn't have top and bottom paddding. It is declared but it's not working. ✅ FIXED — Removed vertical centering that was overriding padding; content now flows naturally with proper top/bottom padding
 
-21) Settings -> Organization page needs to be improved same as Profile. But logo upload and all not needed but some text generated can be there like chats. Organization name edit option needs to be rethink I guess.
+21) Settings -> Organization page needs to be improved same as Profile. ✅ FIXED — Page redesigned to match Profile layout: centered content with a top header bar, organization initials avatar (no upload), inline edit for organization name, a small stats overview and plan/active badge. See `frontend/src/pages/OrgSettings.tsx` for implementation details.
 
 22) Huge issue, in Settings -> User list row, there is a toggle for disable user but for owner it should not be there. basically they should not lockdown themself. ✅ FIXED — Toggle is now always-on and disabled for owner role (same as system_manager). Self-deactivation prevented on both frontend (disabled toggle) and backend (403 guard). What will happen for other users? what if they lockdown themselves?
 
-23) Settings -> Website -> General - Conversation History option should be to Widget setting I guess. In widget settings goups the fields and improve the UI/UX. Like new message popup's settings and conversation popup's settings separately can help the users to understand better. ✅ FIXED — Conversation History toggle moved from Settings tab to Widget tab
+23) Settings -> Website -> General - Conversation History option should be in Widget settings. ✅ FIXED — Widget settings were redesigned and grouped (Appearance, Header, Chat Bubble, Notification Popup, Colors, Features). Conversation History moved into the Widget tab; live Widget and Popup previews were added; position options limited to Bottom Right/Left. See `frontend/src/pages/WebsiteWidgetTab.tsx` and `frontend/src/pages/WebsiteDetail.tsx`.
 
 24) Settings -> Website -> Automations - this is not that user friendly. Lot of unwanted templates, now we changes relove workflow right? so few things needs to be deleted in templates itself. There should be 4 tabs, Templates Auto Messages, Chatbots, AI Agents. Same like Automessages, chatnot should have delete option. if delete it will be available in templates to add again. AI Agents feature is comming soon. Need to understand how the automessage feature is implemented and need to be improved and code optimizations.
 
@@ -64,6 +64,10 @@ Phase 5 Audit — 3 items still pending:
 28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT."
 
 29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent."
+
+30) In the Profile section, the "Change Password" option is available for users with the Owner role, which should not be the case.
+
+31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner.
 
 Features:
 
