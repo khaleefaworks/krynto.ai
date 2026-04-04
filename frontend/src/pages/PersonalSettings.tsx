@@ -153,7 +153,13 @@ export default function PersonalSettings() {
     }
   }
 
-  const roleLabel = user?.role === 'system_manager' ? 'System Manager' : user?.role === 'manager' ? 'Manager' : 'Agent'
+  const roleLabel = (() => {
+    const r = String(user?.role || '').toLowerCase()
+    if (r === 'system_manager') return 'System Manager'
+    if (r === 'owner') return 'Owner'
+    if (r === 'manager') return 'Manager'
+    return 'Agent'
+  })()
   const initials = user?.name?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
   const pushReady = isPushSupported() && vapidPublicKeyPresent === true
   const pushGranted = pushPermission === 'granted'

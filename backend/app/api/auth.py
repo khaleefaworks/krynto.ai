@@ -581,11 +581,19 @@ async def register(
     if existing_user:
         if existing_user.is_deleted:
             # Re-enable the previously deleted account instead of rejecting.
-            if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
+            # Only SYSTEM_MANAGER may never be recreated via this endpoint.
+            if register_request.role == UserRole.SYSTEM_MANAGER:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="System Manager role can only be set during bootstrap",
                 )
+            # Allow re-enabling as OWNER only when caller is an existing Owner or SYSTEM_MANAGER.
+            if register_request.role == UserRole.OWNER:
+                if not (_admin.role == UserRole.OWNER or _admin.is_superadmin()):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Only Owners or administrators can create Owner accounts",
+                    )
             existing_user.is_deleted = False
             existing_user.is_active = True
             existing_user.is_available = False
@@ -608,12 +616,21 @@ async def register(
             detail="Email already registered"
         )
 
-    # System Manager and OWNER accounts cannot be created via this endpoint.
-    if register_request.role in [UserRole.SYSTEM_MANAGER, UserRole.OWNER]:
+    # System Manager accounts cannot be created via this endpoint.
+    if register_request.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="System Manager role can only be set during bootstrap",
         )
+    # Owner accounts may only be created by an existing Owner (within the same org)
+    # or by a platform SYSTEM_MANAGER.
+    if register_request.role == UserRole.OWNER:
+        calling_admin: User = _admin
+        if not (calling_admin.role == UserRole.OWNER or calling_admin.is_superadmin()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Owner role can only be created by an existing Owner or administrator",
+            )
 
     # New users automatically inherit the calling admin's organisation.
     # A SYSTEM_MANAGER (organization_id=None) must be handled by /auth/signup instead.

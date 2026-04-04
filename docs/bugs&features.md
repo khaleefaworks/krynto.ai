@@ -69,6 +69,12 @@ Phase 5 Audit — 3 items still pending:
 
 31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner.
 
+32) In User list, the manager should not get update password option, only owner should have that.However all other users can do it via profile page.
+
+33) When a new user added in the organization, the email is not getting sent to them. Need to check the email configuration and flow once. After OTP verification only they should be able to login.
+
+34) Failed to fetch error, when new user is getting added in the organization. Need to check the API once.
+
 Features:
 
 1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists. But if it is adding more load, then leave it.

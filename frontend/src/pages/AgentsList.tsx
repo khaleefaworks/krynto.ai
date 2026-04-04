@@ -306,6 +306,35 @@ export default function AgentsList() {
     ? agents.find(a => a.id === panel.item.id) ?? panel.item
     : null
   const isAdminAccount = editItem?.role === 'system_manager'
+  const isOwnerAccount = editItem?.role === 'owner'
+  const currentRole = currentUser?.role
+  const ownerCount = agents.filter(a => a.role === 'owner').length
+  const isSelfAccount = Boolean(editItem && currentUser && editItem.id === currentUser.id)
+  const isLastRemainingOwner = Boolean(editItem && editItem.role === 'owner' && ownerCount <= 1)
+  const canDeleteByRole = Boolean(
+    editItem && (
+      currentRole === 'system_manager' ||
+      currentRole === 'owner' ||
+      (currentRole === 'manager' && editItem.role !== 'owner')
+    )
+  )
+  const canDelete = Boolean(
+    editItem &&
+    !isSelfAccount &&
+    // Never allow deleting a system manager from the UI
+    !isAdminAccount &&
+    !isLastRemainingOwner &&
+    canDeleteByRole
+  )
+  const deleteBlockedReason = isAdminAccount
+    ? 'Administrator account cannot be deleted.'
+    : isSelfAccount
+      ? 'Cannot delete your own account.'
+      : isLastRemainingOwner
+        ? 'Their should be atleast 1 owner'
+        : !canDeleteByRole
+          ? 'You do not have permission to delete this user.'
+          : null
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
@@ -633,7 +662,7 @@ export default function AgentsList() {
                   value={formRole}
                   onChange={e => setFormRole(e.target.value as 'owner' | 'manager' | 'agent' | 'system_manager')}
                   className="w-full h-10 px-3 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-                  disabled={saving || isAdminAccount}
+                  disabled={saving || isAdminAccount || isOwnerAccount}
                 >
                   {isAdminAccount ? (
                     <option value="system_manager">System Manager – Full system access</option>
@@ -658,8 +687,9 @@ export default function AgentsList() {
                   <button
                     type="button"
                     onClick={handleDelete}
-                    disabled={deleting}
-                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                    disabled={deleting || !canDelete}
+                    title={deleteBlockedReason || undefined}
+                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     {deleting ? 'Deleting…' : 'Delete'}
