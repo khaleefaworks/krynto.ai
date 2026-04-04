@@ -237,94 +237,6 @@ class ConversationOrchestrator:
         if visitor_ws:
             ChatService.register_visitor(conversation.id, visitor_ws)
 
-        # If the visitor returns to a previously resolved conversation (same session_id),
-        # reopen it and make it unassigned again.
-        if conversation.status == ConversationStatus.RESOLVED:
-            conversation.status = ConversationStatus.OPEN
-            conversation.assigned_agent_id = None
-            conversation.is_handoff = False
-            self.db.commit()
-
-            # Optional automations when reopening.
-            try:
-                from app.repos import messages as messages_repo
-
-                automation_service = AutomationService(self.db)
-
-                # Emit system events only if configured.
-                system_actions = automation_service.get_system_event_actions(
-                    website_id=website_id,
-                    trigger="conversation_reopened",
-                )
-                for action in system_actions:
-                    event_type = action.get("event_type") or "conversation_reopened"
-                    content = action.get("content")
-                    if not content:
-                        continue
-
-                    if _should_skip_due_to_repeat(
-                        db=self.db,
-                        conversation_id=conversation.id,
-                        event_type=str(event_type),
-                        repeat=action.get("repeat"),
-                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                    ):
-                        continue
-                    saved_evt = self.conversation_service.add_system_message(
-                        conversation.id,
-                        str(content),
-                        event_type=str(event_type),
-                    )
-                    if visitor_ws is not None:
-                        try:
-                            await visitor_ws.send_json(
-                                {
-                                    "type": "system",
-                                    "message": saved_evt.content,
-                                    "message_obj": serialize_message(self.db, saved_evt),
-                                }
-                            )
-                        except Exception:
-                            pass
-
-                # Optional bot messages on reopen.
-                bot_actions = automation_service.get_bot_message_actions(
-                    website_id=website_id,
-                    trigger="conversation_reopened",
-                )
-                for action in bot_actions:
-                    event_type = action.get("event_type") or "bot_reopened"
-
-                    if _should_skip_due_to_repeat(
-                        db=self.db,
-                        conversation_id=conversation.id,
-                        event_type=str(event_type),
-                        repeat=action.get("repeat"),
-                        repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                    ):
-                        continue
-                    saved_bot = self.conversation_service.add_bot_message(
-                        conversation.id,
-                        action["message"],
-                        event_type=str(event_type),
-                    )
-                    if visitor_ws is not None:
-                        try:
-                            await visitor_ws.send_json(
-                                {
-                                    "type": "bot",
-                                    "message": action["message"],
-                                    "message_obj": serialize_message(self.db, saved_bot),
-                                }
-                            )
-                        except Exception:
-                            pass
-            except Exception:
-                try:
-                    self.db.rollback()
-                except Exception:
-                    pass
-
         # Determine if this is the first message before persisting
         prior_message_count = (
             self.db.query(Message).filter_by(conversation_id=conversation.id).count()
@@ -337,6 +249,9 @@ class ConversationOrchestrator:
         )
         if not msg:
             return "Unable to process your message right now."
+
+        # Title is only set from the offline contact form (visitor_name).
+        # We no longer auto-generate titles from the first visitor message.
 
         # Best-effort: acknowledge back to the visitor with server truth.
         # This lets the widget reconcile optimistic timestamps/IDs.
@@ -394,9 +309,9 @@ class ConversationOrchestrator:
                         None,
                         lambda: send_web_push_to_subscriptions(
                             subscriptions=subs,
-                            title=f"New message in conversation #{conversation.id}",
+                            title=f"New message in conversation #{conversation.short_id}",
                             body=(message or "New message")[:120],
-                            url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                            url=f"/dashboard/chats/{conversation.short_id}",
                         ),
                     )
             except Exception as e:
@@ -429,7 +344,7 @@ class ConversationOrchestrator:
                 .filter(
                     User.is_active == True,  # noqa: E712
                     User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
                 )
                 .all()
             )
@@ -443,7 +358,7 @@ class ConversationOrchestrator:
                         subscriptions=subs,
                         title=f"Unassigned message - Website {website_id}",
                         body=(message or "New message")[:120],
-                        url=f"/dashboard/chats?sessionId={conversation.session_id}",
+                        url=f"/dashboard/chats/{conversation.short_id}",
                     ),
                 )
         except Exception:
@@ -583,7 +498,7 @@ class ConversationOrchestrator:
                 .filter(
                     User.is_active == True,  # noqa: E712
                     User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
                 )
                 .all()
             )
@@ -1007,7 +922,7 @@ class ConversationOrchestrator:
         saved = self.conversation_service.add_agent_message(
             conversation_id=conversation_id,
             agent_id=agent_id,
-            agent_email=str(agent_id),
+            agent_email=agent.email,
             content=content,
         )
         if not saved:
@@ -1039,18 +954,21 @@ class ConversationOrchestrator:
             "availability_changed": availability_changed,
         }
 
-    async def close_conversation(self, *, conversation_id: int) -> dict:
+    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent") -> dict:
         """Close a conversation.
 
-        Visitor-facing messages are automation-driven (no hardcoded close text).
+        A canonical `conversation_resolved` event is always recorded so visitor
+        lifecycle does not depend on optional automation wiring.
         """
-        conversation = self.conversation_service.close_conversation(conversation_id)
+        conversation = self.conversation_service.close_conversation(
+            conversation_id,
+            closed_by=closed_by,
+        )
         if not conversation:
             return {"error": "Conversation not found"}
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
-        # Optional: automation-driven system event + bot closing message.
         await self._run_automation_trigger(
             conversation_id=conversation_id,
             website_id=website_id,
@@ -1058,6 +976,12 @@ class ConversationOrchestrator:
             default_system_event_type="conversation_resolved",
             default_bot_event_type="bot_closing",
             log_key="conversation_resolve_automation_failed",
+            ensure_system_event=True,
+            fallback_system_content=(
+                "You ended the chat."
+                if closed_by == "visitor"
+                else "This conversation has been resolved."
+            ),
         )
 
         # Notify dashboards to remove/refresh the closed conversation.
@@ -1073,51 +997,19 @@ class ConversationOrchestrator:
                 "type": "conversation_closed",
                 "conversation_id": conversation_id,
                 "website_id": website_id,
+                "closed_by": getattr(conversation, "closed_by", None),
             },
             include_global=True,
         )
 
-        return {"success": True}
+        return {"success": True, "closed_by": getattr(conversation, "closed_by", None)}
 
     async def visitor_closed_chat(self, *, conversation_id: int) -> dict:
         """Visitor explicitly ended the chat UI.
 
-        This MUST NOT resolve the conversation; only agents decide that.
+        This resolves the active conversation with `closed_by='visitor'`.
         """
-        try:
-            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
-        except Exception:
-            conversation = None
-
-        if not conversation:
-            return {"error": "Conversation not found"}
-
-        website_id = int(getattr(conversation, "website_id", None) or 0) or None
-
-        await self._run_automation_trigger(
-            conversation_id=conversation_id,
-            website_id=website_id,
-            trigger="visitor_closed_chat",
-            default_system_event_type="visitor_closed_chat",
-            default_bot_event_type="bot_visitor_closed",
-            log_key="visitor_closed_chat_automation_failed",
-        )
-
-        # Best-effort realtime notice to dashboards.
-        try:
-            await self.agent_service.broadcast_to_active_agents(
-                website_id=website_id,
-                message_data={
-                    "type": "visitor_closed_chat",
-                    "conversation_id": conversation_id,
-                    "website_id": website_id,
-                },
-                include_global=True,
-            )
-        except Exception:
-            pass
-
-        return {"success": True}
+        return await self.close_conversation(conversation_id=conversation_id, closed_by="visitor")
 
     async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
         """Visitor websocket connected for an existing conversation.
@@ -1217,6 +1109,8 @@ class ConversationOrchestrator:
         log_key: str,
         send_system_events_to_visitor: bool = True,
         send_bot_messages_to_visitor: bool = True,
+        ensure_system_event: bool = False,
+        fallback_system_content: str | None = None,
     ) -> None:
         if not website_id:
             return
@@ -1228,6 +1122,7 @@ class ConversationOrchestrator:
                 website_id=int(website_id),
                 trigger=str(trigger),
             )
+            emitted_system_event = False
             for action in system_actions:
                 event_type = action.get("event_type") or default_system_event_type or str(trigger)
                 content = action.get("content")
@@ -1248,15 +1143,41 @@ class ConversationOrchestrator:
                     str(content),
                     event_type=str(event_type),
                 )
+                emitted_system_event = True
                 if send_system_events_to_visitor:
+                    message_obj = serialize_message(self.db, saved_evt)
+                    payload = {
+                        "type": "system",
+                        "message": saved_evt.content,
+                        "message_obj": message_obj,
+                        "conversation_id": conversation_id,
+                        "website_id": website_id,
+                    }
+                    if message_obj.get("closed_by"):
+                        payload["closed_by"] = message_obj["closed_by"]
                     await ChatService.send_to_visitor(
                         conversation_id,
-                        {
-                            "type": "system",
-                            "message": saved_evt.content,
-                            "message_obj": serialize_message(self.db, saved_evt),
-                        },
+                        payload,
                     )
+
+            if ensure_system_event and not emitted_system_event and default_system_event_type and fallback_system_content:
+                saved_evt = self.conversation_service.add_system_message(
+                    conversation_id,
+                    str(fallback_system_content),
+                    event_type=str(default_system_event_type),
+                )
+                if send_system_events_to_visitor:
+                    message_obj = serialize_message(self.db, saved_evt)
+                    payload = {
+                        "type": "system",
+                        "message": saved_evt.content,
+                        "message_obj": message_obj,
+                        "conversation_id": conversation_id,
+                        "website_id": website_id,
+                    }
+                    if message_obj.get("closed_by"):
+                        payload["closed_by"] = message_obj["closed_by"]
+                    await ChatService.send_to_visitor(conversation_id, payload)
 
             bot_actions = automation_service.get_bot_message_actions(
                 website_id=int(website_id),

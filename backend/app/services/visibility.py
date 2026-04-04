@@ -14,12 +14,15 @@ from app.models.website_team import WebsiteTeam, WebsiteTeamMember
 class VisibilityScope:
     """Computed visibility scope for a user.
 
-    - website_ids: None means unrestricted (admins). Otherwise explicit allowed website ids.
-    - team_ids: None means unrestricted (admins, or users with no team memberships).
+    - organization_id: None means no org restriction (SYSTEM_MANAGER).
+      For all other roles this is set to the user's org.
+    - website_ids: None means unrestricted within the org (OWNER/MANAGER).
+      When set, only the listed website IDs are visible (AGENT with assignments).
+    - team_ids: None means unrestricted (no team membership constraint).
       When set, only conversations assigned to one of these teams are visible.
-      Conversations with team_id NULL are NOT visible to team-scoped users.
     """
 
+    organization_id: Optional[int]
     website_ids: Optional[list[int]]
     team_ids: Optional[list[int]]
 
@@ -29,11 +32,17 @@ def _unique_sorted_ints(values: Iterable[int]) -> list[int]:
 
 
 def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
-    # Only system_manager (Administrator) is unrestricted.
-    # Managers are scoped to their assigned websites, same as agents.
+    # SYSTEM_MANAGER sees everything across all orgs.
     if user.is_administrator():
-        return VisibilityScope(website_ids=None, team_ids=None)
+        return VisibilityScope(organization_id=None, website_ids=None, team_ids=None)
 
+    org_id: Optional[int] = user.organization_id
+
+    # OWNER and MANAGER can see all websites within their org.
+    if user.is_admin():  # includes OWNER and MANAGER
+        return VisibilityScope(organization_id=org_id, website_ids=None, team_ids=None)
+
+    # AGENT: scoped to assigned websites + optional team membership.
     website_rows = (
         db.query(AgentWebsiteAssignment.website_id)
         .filter(AgentWebsiteAssignment.agent_id == int(user.id))
@@ -42,7 +51,7 @@ def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
     website_ids = _unique_sorted_ints([int(r[0]) for r in website_rows])
 
     if not website_ids:
-        return VisibilityScope(website_ids=[], team_ids=[])
+        return VisibilityScope(organization_id=org_id, website_ids=[], team_ids=[])
 
     team_rows = (
         db.query(WebsiteTeamMember.team_id)
@@ -53,12 +62,11 @@ def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
     )
     team_ids = _unique_sorted_ints([int(r[0]) for r in team_rows])
 
-    # If the user is not a member of any team, they can see all chats
-    # for their assigned websites (team_ids=None means unrestricted).
+    # No team membership → can see all chats for assigned websites (team_ids=None).
     if not team_ids:
-        return VisibilityScope(website_ids=website_ids, team_ids=None)
+        return VisibilityScope(organization_id=org_id, website_ids=website_ids, team_ids=None)
 
-    return VisibilityScope(website_ids=website_ids, team_ids=team_ids)
+    return VisibilityScope(organization_id=org_id, website_ids=website_ids, team_ids=team_ids)
 
 
 def ensure_website_visible(scope: VisibilityScope, *, website_id: int) -> None:

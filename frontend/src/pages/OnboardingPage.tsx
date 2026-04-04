@@ -1,9 +1,6 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useNavigate } from 'react-router-dom'
-import { useAppStore } from '@/store/appStore'
-import { saveToken } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +10,8 @@ import Logo from '@/components/Logo'
 import { API_BASE } from '@/config/endpoints'
 
 const setupSchema = z.object({
+  email: z.string().email('Enter a valid email address'),
+  setupKey: z.string().min(1, 'Setup key is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
@@ -23,11 +22,10 @@ const setupSchema = z.object({
 type SetupForm = z.infer<typeof setupSchema>
 
 export default function OnboardingPage() {
-  const navigate = useNavigate()
-  const { setUser, setToken } = useAppStore()
   const [error, setError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [showSetupKey, setShowSetupKey] = useState(false)
 
   const {
     register,
@@ -41,16 +39,14 @@ export default function OnboardingPage() {
     try {
       setError(null)
 
-      // Create Administrator user
       const response = await fetch(`${API_BASE}/auth/bootstrap`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: 'Administrator',
-          email: 'administrator@chatassist.system',
+          email: data.email,
           password: data.password,
+          setup_secret: data.setupKey,
         }),
       })
 
@@ -60,37 +56,12 @@ export default function OnboardingPage() {
         throw new Error(typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg))
       }
 
-      const result = await response.json()
-      console.log('Setup complete:', result)
-
-      // Now login with the created credentials (using 'Administrator' as username)
-      const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: 'Administrator',
-          password: data.password,
-        }),
-      })
-
-      if (!loginResponse.ok) {
-        throw new Error('Login failed after setup')
-      }
-
-      const loginData = await loginResponse.json()
-
-      // Save token and user
-      saveToken(loginData.access_token)
-      setUser(loginData.user)
-      setToken(loginData.access_token)
-
-      // Redirect to dashboard
-      navigate('/dashboard/chats')
+      // Full page reload so App.tsx re-checks /auth/setup/status and gets needs_setup=false,
+      // then renders the login page with the success message.
+      sessionStorage.setItem('setup_success', 'Setup complete! Please log in with your administrator account.')
+      window.location.href = '/login'
     } catch (err: any) {
       setError(err.message || 'Setup failed')
-      console.error('Setup failed:', err)
     }
   }
 
@@ -115,26 +86,66 @@ export default function OnboardingPage() {
             )}
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
-                Username
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Full Name
               </label>
               <Input
                 value="Administrator"
                 disabled
-                className="bg-gray-50 font-semibold"
+                className="bg-gray-50 dark:bg-gray-700 font-semibold"
               />
-              <p className="text-xs text-gray-500">
-                This is your system administrator account. Login with username: <span className="font-mono font-semibold">Administrator</span>
-              </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Email Address
+              </label>
+              <Input
+                type="email"
+                autoComplete="email"
+                placeholder="admin@yourcompany.com"
+                {...register('email')}
+                className={errors.email ? 'border-red-500' : ''}
+              />
+              {errors.email && (
+                <p className="text-sm text-red-600">{errors.email.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Setup Key
+              </label>
+              <div className="relative">
+                <Input
+                  type={showSetupKey ? "text" : "password"}
+                  autoComplete="off"
+                  placeholder="Enter the Secret Key "
+                  {...register('setupKey')}
+                  className={errors.setupKey ? 'border-red-500 pr-10' : 'pr-10'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSetupKey(!showSetupKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showSetupKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {errors.setupKey && (
+                <p className="text-sm text-red-600">{errors.setupKey.message}</p>
+              )}
+    
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Password
               </label>
               <div className="relative">
                 <Input
                   type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
                   placeholder="Enter a secure password"
                   {...register('password')}
                   className={errors.password ? 'border-red-500 pr-10' : 'pr-10'}
@@ -153,7 +164,7 @@ export default function OnboardingPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Confirm Password
               </label>
               <div className="relative">
@@ -184,10 +195,6 @@ export default function OnboardingPage() {
               {isSubmitting ? 'Setting up...' : 'Complete Setup'}
             </Button>
 
-            <p className="text-xs text-center text-gray-500 mt-4">
-              This will create the system administrator account.<br />
-              You can create additional users later.
-            </p>
           </form>
         </CardContent>
       </Card>

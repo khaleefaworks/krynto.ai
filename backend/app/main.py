@@ -20,7 +20,6 @@ from app.api.users import router as users_router
 from app.api.widget import router as widget_router
 from app.api.websites import router as websites_router
 from app.api.agent_assignments import router as agent_assignments_router
-from app.api.system import router as system_router
 from app.api.conversation_metadata import router as conversation_metadata_router
 from app.api.shortcuts import router as shortcuts_router
 from app.api.push import router as push_router
@@ -34,6 +33,8 @@ from app.api.website_shortcuts import router as website_shortcuts_router
 from app.api.teams_overview import router as teams_overview_router
 from app.api.analytics import router as analytics_router
 from app.api.ratings import router as ratings_router
+from app.api.organization import router as organization_router
+from app.api.admin import router as admin_router
 from app.core.logging import setup_logging
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.core.config import settings
@@ -90,9 +91,12 @@ async def lifespan(app: FastAPI):
         await ChatService.deliver_bus_event(event)
 
     await realtime_bus.start(_handle_event)
+    from app.services.auto_close_scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     try:
         yield
     finally:
+        stop_scheduler()
         await realtime_bus.stop()
 
 
@@ -141,7 +145,6 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
-app.include_router(system_router)
 app.include_router(widget_router)
 app.include_router(ws_chat_router)
 app.include_router(ws_agent_router)
@@ -163,6 +166,8 @@ app.include_router(website_shortcuts_router)
 app.include_router(teams_overview_router)
 app.include_router(analytics_router)
 app.include_router(ratings_router)
+app.include_router(organization_router)
+app.include_router(admin_router)
 
 # Serve widget files statically
 project_root = Path(__file__).resolve().parents[2]

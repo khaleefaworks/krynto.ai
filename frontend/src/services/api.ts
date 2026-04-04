@@ -52,7 +52,11 @@ export async function apiRequest<T>(
       clearToken()
     }
 
-    throw new Error(error.detail || "Request failed")
+    const detail = error.detail
+    const message = Array.isArray(detail)
+      ? detail.map((e: any) => e.msg || String(e)).join(', ')
+      : (typeof detail === 'string' ? detail : null) || "Request failed"
+    throw new Error(message)
   }
 
   // 204 No Content (common for DELETE)

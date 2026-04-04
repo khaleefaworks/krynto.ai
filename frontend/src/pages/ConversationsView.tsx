@@ -101,6 +101,17 @@ function shortSessionId(sessionId: string | null | undefined): string {
     return compact.length >= 12 ? compact.slice(-12) : raw
 }
 
+function conversationDisplayName(chat: { visitor_name?: string | null; title?: string | null; short_id?: string | null; session_id?: string | null } | null | undefined): string {
+    if (!chat) return ''
+    const name = String(chat.visitor_name || '').trim()
+    if (name) return name
+    const title = String(chat.title || '').trim()
+    if (title) return title
+    const shortId = String(chat.short_id || '').trim()
+    if (shortId) return shortId
+    return shortSessionId(chat.session_id)
+}
+
 function getInitials(name: string | null | undefined, fallback: string): string {
     const v = String(name || '').trim()
     if (!v) return fallback
@@ -181,6 +192,7 @@ function TagIcon({ className }: { className?: string }) {
 
 interface ConversationDetails {
     id: number
+    short_id?: string
     website_id?: number
     session_id: string
     visitor_name?: string
@@ -195,12 +207,24 @@ interface ConversationDetails {
     last_message_at?: string
     status?: string
     team_id?: number | null
+    closed_by?: string | null
+    title?: string | null
+}
+
+interface VisitorConversation {
+    id: number
+    short_id: string
+    status: string
+    title: string | null
+    closed_by: string | null
+    created_at: string | null
+    last_visitor_message_at: string | null
 }
 
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
 export default function ConversationsView() {
-    const { sessionId, conversationId } = useParams<{ sessionId?: string; conversationId?: string }>()
+    const { chatId: chatIdParam, conversationId } = useParams<{ chatId?: string; conversationId?: string }>()
     const navigate = useNavigate()
     const location = useLocation()
     const { user, setUser } = useAppStore()
@@ -282,6 +306,7 @@ export default function ConversationsView() {
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
+    const [visitorConversations, setVisitorConversations] = useState<VisitorConversation[]>([])
 
     const [availableTeams, setAvailableTeams] = useState<any[]>([])
     const [teamPickerOpen, setTeamPickerOpen] = useState(false)
@@ -537,12 +562,19 @@ export default function ConversationsView() {
         // If we're on the list route (/dashboard/chats), never auto-select a chat
         // from location.state; the user explicitly navigated back to the list.
         if (isChatsListRoute) return null
-        const fromState = Number((location as any)?.state?.conversationId)
-        if (Number.isFinite(fromState) && fromState > 0) return fromState
-        const fromParam = Number(conversationId)
+        if (!chatIdParam) return null
+        // Canonical route: /dashboard/chats/:chatId where chatId is the short_id
+        // Look up the conversation by short_id in loaded chats
+        const matched = activeChats.find((c) => c.short_id === chatIdParam)
+            || resolvedChats.find((c: any) => c.short_id === chatIdParam)
+        if (matched) return matched.id
+        // Legacy: try numeric ID for backward compat
+        const fromParam = Number(chatIdParam)
         if (Number.isFinite(fromParam) && fromParam > 0) return fromParam
+        const fromLegacyParam = Number(conversationId)
+        if (Number.isFinite(fromLegacyParam) && fromLegacyParam > 0) return fromLegacyParam
         return null
-    }, [isChatsListRoute, location, conversationId])
+    }, [isChatsListRoute, chatIdParam, conversationId, activeChats, resolvedChats])
 
     // When navigating back to the chats list (/dashboard/chats), clear any previously
     // selected chat so the empty-state screen renders (instead of persisting the thread view).
@@ -551,6 +583,7 @@ export default function ConversationsView() {
         if (selectedChat === null) return
         setSelectedChat(null)
         setConversation(null)
+        setVisitorConversations([])
         setInput('')
         setVisitorTyping(false)
         setFirstUnreadMessageId(null)
@@ -571,8 +604,7 @@ export default function ConversationsView() {
     }, [selectedChat, getChatById])
 
     // Handle conversation selection from URL.
-    // Canonical URL is /dashboard/chats/:sessionId.
-    // We still accept a conversationId via navigation state for exact selection.
+    // Canonical URL is /dashboard/chats/:chatId where chatId is the conversation PK.
     useEffect(() => {
         const preferredId = getPreferredConversationId()
         if (preferredId) {
@@ -581,50 +613,62 @@ export default function ConversationsView() {
             }
             return
         }
+    }, [getPreferredConversationId, selectedChat, openChat])
 
-        if (!sessionId) return
+    // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
+    // fetch the conversation from the API and inject it so it can be selected.
+    useEffect(() => {
+        if (isChatsListRoute || !chatIdParam) return
+        // If already resolved (found in active/resolved chats), skip
+        if (getPreferredConversationId() !== null) return
+        // Only run after initial chats have loaded
+        if (!hasLoadedChatsRef.current) return
+        // Don't retry if we already selected something
+        if (selectedChat) return
 
-        const matched = activeChats.find((c) => c.session_id === sessionId)
-            || resolvedChats.find((c: any) => c.session_id === sessionId)
-        if (matched && matched.id !== selectedChat) {
-            openChat(matched.id)
-        }
-    }, [getPreferredConversationId, sessionId, activeChats, resolvedChats, selectedChat, openChat])
+        let cancelled = false
+        ;(async () => {
+            try {
+                const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
+                })
+                if (cancelled || !summary?.id) return
+                // Inject into activeChats so it appears in the left list
+                setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                openChat(summary.id)
+            } catch {
+                // Conversation not found or no access — ignore
+            }
+        })()
 
-    // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to sessionId URL.
+        return () => { cancelled = true }
+    }, [isChatsListRoute, chatIdParam, selectedChat, activeChats, openChat])
+
+    // Legacy deep-link support: /dashboard/chats/conversation/:conversationId -> redirect to canonical URL.
     useEffect(() => {
         const cid = Number(conversationId)
         if (!Number.isFinite(cid) || cid <= 0) return
-
-        let cancelled = false
-            ; (async () => {
-                try {
-                    const summary = await fetchChatSummary(cid)
-                    const sid = String((summary as any)?.session_id || '').trim()
-                    if (!sid) return
-                    if (!cancelled) {
-                        navigate(`/dashboard/chats/${encodeURIComponent(sid)}`, {
-                            replace: true,
-                            state: { conversationId: cid },
-                        })
-                    }
-                } catch {
-                    // ignore
-                }
-            })()
-
-        return () => {
-            cancelled = true
+        // Look up short_id for canonical URL
+        const matched = activeChats.find((c) => c.id === cid)
+            || resolvedChats.find((c: any) => c.id === cid)
+        if (matched?.short_id) {
+            navigate(`/dashboard/chats/${matched.short_id}`, { replace: true })
         }
-    }, [conversationId, navigate])
+    }, [conversationId, navigate, activeChats, resolvedChats])
+
+    // Helper to get short_id for a conversation
+    const getShortId = useCallback((chatId: number): string | null => {
+        const chat = activeChats.find((c) => c.id === chatId)
+            || resolvedChats.find((c: any) => c.id === chatId)
+        return (chat as any)?.short_id || null
+    }, [activeChats, resolvedChats])
 
     // Load chat when selected
     useEffect(() => {
         if (selectedChat) {
-            const chatData = getChatById(selectedChat)
-            const selectedSessionId = chatData?.session_id
-            if (selectedSessionId && selectedSessionId !== sessionId) {
-                navigate(`/dashboard/chats/${encodeURIComponent(String(selectedSessionId))}`)
+            const shortId = getShortId(selectedChat)
+            if (shortId && shortId !== chatIdParam) {
+                navigate(`/dashboard/chats/${shortId}`)
             }
         }
 
@@ -1065,6 +1109,12 @@ export default function ConversationsView() {
                     if (loadDetailsTokenRef.current === token) {
                         setConversation(summary as any)
                         setConversationTags(((summary as any).tags || []) as any)
+
+                        // Temporarily inject into activeChats so it appears in the left list
+                        // (e.g. bot-only conversations opened from the Visitors page).
+                        if (!activeChats.some(c => c.id === chatId)) {
+                            setActiveChats([summary as any, ...activeChats])
+                        }
                     }
 
                     const wid = (summary as any).website_id
@@ -1105,7 +1155,8 @@ export default function ConversationsView() {
 
             let fetchedRating: { rating: number; feedback?: string } | null = null
             try {
-                fetchedRating = await apiRequest<{ rating: number; feedback?: string }>(`/ratings/${chatId}`)
+                const ratingResp = await apiRequest<{ rating: { rating: number; feedback?: string } | null }>(`/ratings/${chatId}`)
+                fetchedRating = ratingResp?.rating ?? null
             } catch {
                 fetchedRating = null
             }
@@ -1116,6 +1167,17 @@ export default function ConversationsView() {
             setNotes(fetchedNotes)
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
             setConversationRating(fetchedRating)
+
+            // Fetch other conversations from this visitor (best-effort, non-blocking).
+            apiRequest<VisitorConversation[]>(`/chats/${chatId}/visitor-history`)
+                .then((data) => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setVisitorConversations(Array.isArray(data) ? data : [])
+                    }
+                })
+                .catch(() => {
+                    if (loadDetailsTokenRef.current === token) setVisitorConversations([])
+                })
         } catch (error) {
             console.error("Failed to load conversation details:", error)
         }
@@ -1379,12 +1441,10 @@ export default function ConversationsView() {
     })
 
     useEffect(() => {
-        if (activeFilter !== 'resolved') return
-
         let cancelled = false
         const load = async () => {
             try {
-                setResolvedLoading(true)
+                if (activeFilter === 'resolved') setResolvedLoading(true)
                 const { fetchClosedConversations } = await import('@/services/chats')
                 const data = await fetchClosedConversations(undefined, undefined, 100)
                 if (!cancelled) setResolvedChats(Array.isArray(data) ? (data as any) : [])
@@ -1671,12 +1731,12 @@ export default function ConversationsView() {
                                             bgColor={(chat as any).visitor_avatar_color}
                                             className="w-10 h-10 flex-shrink-0"
                                             iconClassName="w-10 h-10"
-                                            title={(chat as any).visitor_name || shortSessionId(chat.session_id)}
+                                            title={conversationDisplayName(chat as any)}
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between">
                                                 <span className="font-semibold text-gray-900 dark:text-white truncate">
-                                                    {(chat as any).visitor_name || shortSessionId(chat.session_id)}
+                                                    {conversationDisplayName(chat as any)}
                                                 </span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                                                     {((chat as any).last_message_at || (chat as any).created_at)
@@ -1721,11 +1781,11 @@ export default function ConversationsView() {
                                     bgColor={conversation?.visitor_avatar_color}
                                     className="w-10 h-10 flex-shrink-0"
                                     iconClassName="w-10 h-10"
-                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                    title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-                                        {conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                        {conversationDisplayName(conversation as any)}
                                     </h2>
                                     {conversation?.last_seen_at && (
                                         <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -1944,6 +2004,21 @@ export default function ConversationsView() {
                                                         </div>
                                                     )}
                                                 </div>
+
+                                                {isAdmin(user) ? (
+                                                    <div className="pt-1 text-right">
+                                                        <Link
+                                                            to={`/dashboard/settings/websites/${(conversation as any)?.website_id ?? ''}?tab=teams`}
+                                                            className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                                                            onClick={() => {
+                                                                setTeamPickerOpen(false)
+                                                                setTeamPickerQuery('')
+                                                            }}
+                                                        >
+                                                            Manage teams
+                                                        </Link>
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         </PopoverContent>
                                     </Popover>
@@ -2062,7 +2137,7 @@ export default function ConversationsView() {
                                                                     bgColor={conversation?.visitor_avatar_color}
                                                                     className="w-8 h-8 flex-shrink-0"
                                                                     iconClassName="w-8 h-8"
-                                                                    title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                                                    title={conversationDisplayName(conversation as any)}
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
@@ -2154,7 +2229,7 @@ export default function ConversationsView() {
                                 bgColor={conversation?.visitor_avatar_color}
                                 className="w-10 h-10"
                                 iconClassName="w-10 h-10"
-                                title={conversation?.visitor_name || shortSessionId(conversation?.session_id)}
+                                title={conversationDisplayName(conversation as any)}
                             />
                         </div>
                     ) : (
@@ -2216,6 +2291,60 @@ export default function ConversationsView() {
                                     onAddNote={handleAddNote}
                                     onDeleteNote={handleDeleteNote}
                                 />
+
+                                {/* Closed by label (only for resolved conversations) */}
+                                {conversation.closed_by && conversation.status === 'resolved' && (
+                                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
+                                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
+                                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${conversation.closed_by === 'agent'
+                                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                            : conversation.closed_by === 'visitor'
+                                                ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                                            }`}>
+                                            {conversation.closed_by === 'agent' ? 'Agent' : conversation.closed_by === 'visitor' ? 'Visitor' : 'Inactivity'}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Other conversations from this visitor */}
+                                {visitorConversations.length > 0 && (
+                                    <div className="border-t border-gray-100 dark:border-gray-700/50">
+                                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-4 pt-3 pb-2">
+                                            Other conversations ({visitorConversations.length})
+                                        </p>
+                                        <div className="space-y-0.5 pb-2">
+                                            {visitorConversations
+                                                .slice()
+                                                .sort((a, b) => (b.id) - (a.id))
+                                                .map((vc) => (
+                                                    <button
+                                                        key={vc.id}
+                                                        onClick={() => openChat(vc.id)}
+                                                        className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group ${selectedChat === vc.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                                                {vc.title || `Conversation #${vc.id}`}
+                                                            </p>
+                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                                                }`}>
+                                                                {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                            </span>
+                                                        </div>
+                                                        {vc.created_at && (
+                                                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                                                {new Date(vc.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                                                            </p>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -67,10 +67,11 @@ async def mark_widget_read(
     response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
+    conversation_id: int = Query(None),
     db: Session = Depends(get_db),
 ):
     """Mark a conversation as read by the visitor."""
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -78,11 +79,24 @@ async def mark_widget_read(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
-    
-    conv = db.query(Conversation).filter(
-        Conversation.website_id == website_id,
-        Conversation.session_id == session_id
-    ).first()
+
+    if conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+        ).first()
+    else:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.website_id == website_id,
+                Conversation.session_id == session_id,
+                Conversation.status == ConversationStatus.OPEN,
+            )
+            .order_by(Conversation.id.desc())
+            .first()
+        )
     
     if not conv:
         # Conversation is created lazily (typically on first message / WS activity).
@@ -120,10 +134,11 @@ async def get_widget_read_state(
     response: FastAPIResponse,
     website_id: int = Query(...),
     session_id: str = Query(...),
+    conversation_id: int = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return read state for the visitor thread UI."""
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -131,11 +146,24 @@ async def get_widget_read_state(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
-    
-    conv = db.query(Conversation).filter(
-        Conversation.website_id == website_id,
-        Conversation.session_id == session_id
-    ).first()
+
+    if conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+        ).first()
+    else:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.website_id == website_id,
+                Conversation.session_id == session_id,
+                Conversation.status == ConversationStatus.OPEN,
+            )
+            .order_by(Conversation.id.desc())
+            .first()
+        )
     
     if not conv:
         return {
@@ -151,7 +179,7 @@ async def get_widget_read_state(
     # agent_join, conversation_resolved, etc. which aren't meaningful to visitors).
     _SYSTEM_EVENT_TYPES = (
         "agent_join", "visitor_connected", "visitor_socket_connected",
-        "visitor_left_website", "conversation_resolved", "conversation_reopened",
+        "visitor_left_website", "conversation_resolved",
         "visitor_closed_chat",
     )
     first_unread_message_id = None
@@ -220,7 +248,7 @@ async def widget_upload_attachment(
     This does not create a message record; the client should embed the returned
     public URL into the outgoing message content.
     """
-    from app.models.conversation import Conversation
+    from app.models.conversation import Conversation, ConversationStatus
 
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
@@ -231,7 +259,12 @@ async def widget_upload_attachment(
 
     conv = (
         db.query(Conversation)
-        .filter(Conversation.website_id == website_id, Conversation.session_id == session_id)
+        .filter(
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+            Conversation.status == ConversationStatus.OPEN,
+        )
+        .order_by(Conversation.id.desc())
         .first()
     )
     if not conv:
@@ -341,6 +374,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     show_emoji_picker = config.get("show_emoji_picker", True)
     show_attachments = config.get("show_attachments", False)
     branding_text = config.get("branding_text")
+    popup_name = config.get("popup_name")
+    popup_button_text = config.get("popup_button_text")
     
     def _normalize_base(base: str) -> str:
         b = (base or "").strip()
@@ -381,6 +416,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     _aichatassist.showEmojiPicker = {json.dumps(bool(show_emoji_picker))};
     _aichatassist.showAttachments = {json.dumps(bool(show_attachments))};
     _aichatassist.brandingText = {json.dumps(branding_text)};
+    _aichatassist.popupName = {json.dumps(popup_name)};
+    _aichatassist.popupButtonText = {json.dumps(popup_button_text)};
   
   // Load the widget CSS
   var link = document.createElement('link');
@@ -516,3 +553,173 @@ def get_widget_status(
     online = is_website_online(website_id)
     
     return WidgetStatusResponse(online=online)
+
+
+# ---------------------------------------------------------------------------
+# Conversation list & new-conversation endpoints (Phase 2 — session refactor)
+# ---------------------------------------------------------------------------
+
+from app.models.conversation import Conversation, ConversationStatus  # noqa: E402
+from app.models.conversation_rating import ConversationRating  # noqa: E402
+
+
+@router.get("/conversations")
+async def get_widget_conversations(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(...),
+    session_id: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the active conversation (if any) and paginated history for a visitor session.
+
+    Response shape:
+      {
+        active: { id, status, last_message_preview, last_message_at, ... } | null,
+        history: [...],
+        total: int
+      }
+    """
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    _set_widget_cors_headers(response=response, request=request)
+
+    def _conv_summary(conv: Conversation, include_agent: bool = True) -> dict:
+        # Last message preview
+        last_msg = (
+            db.query(Message)
+            .filter(Message.conversation_id == conv.id)
+            .order_by(Message.id.desc())
+            .first()
+        )
+        preview = (last_msg.content or "")[:80] if last_msg else ""
+        last_at = last_msg.created_at.isoformat() if last_msg and last_msg.created_at else None
+
+        rating_row = (
+            db.query(ConversationRating)
+            .filter(ConversationRating.conversation_id == conv.id)
+            .first()
+        )
+
+        from app.models.user import User as UserModel
+        agent = db.query(UserModel).filter(UserModel.id == conv.assigned_agent_id).first() if conv.assigned_agent_id else None
+
+        return {
+            "id": conv.id,
+            "status": conv.status.value,
+            "last_message_preview": preview,
+            "last_message_at": last_at,
+            "assigned_agent_name": agent.name if agent else None,
+            "assigned_agent_avatar": agent.avatar_url if agent else None,
+            "is_rated": rating_row is not None,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            "closed_by": conv.closed_by,
+        }
+
+    # Active (OPEN) conversation
+    active_conv = (
+        db.query(Conversation)
+        .filter_by(website_id=website_id, session_id=session_id, status=ConversationStatus.OPEN)
+        .first()
+    )
+
+    # Resolved history (most recent first, paginated)
+    history_query = (
+        db.query(Conversation)
+        .filter_by(website_id=website_id, session_id=session_id)
+        .filter(Conversation.status == ConversationStatus.RESOLVED)
+        .order_by(Conversation.id.desc())
+    )
+    total_resolved = history_query.count()
+    history_convs = history_query.offset(offset).limit(limit).all()
+
+    return {
+        "active": _conv_summary(active_conv) if active_conv else None,
+        "history": [_conv_summary(c) for c in history_convs],
+        "total": total_resolved,
+        "show_conversation_history": bool(website.show_conversation_history),
+    }
+
+
+@router.options("/conversations")
+async def widget_conversations_options(request: Request, response: FastAPIResponse):
+    _set_widget_cors_headers(response=response, request=request)
+    return {}
+
+
+@router.post("/conversations/new", status_code=201)
+async def create_new_widget_conversation(
+    request: Request,
+    response: FastAPIResponse,
+    website_id: int = Query(...),
+    session_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Explicitly start a new conversation for a session.
+    Returns 409 if an OPEN conversation already exists (prevents race conditions).
+    """
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    _set_widget_cors_headers(response=response, request=request)
+
+    existing_open = (
+        db.query(Conversation)
+        .filter_by(website_id=website_id, session_id=session_id, status=ConversationStatus.OPEN)
+        .first()
+    )
+    if existing_open:
+        raise HTTPException(
+            status_code=409,
+            detail="An open conversation already exists for this session",
+        )
+
+    from app.core.avatar_colors import pick_avatar_color
+    new_conv = Conversation(
+        website_id=website_id,
+        session_id=session_id,
+        status=ConversationStatus.OPEN,
+        visitor_avatar_color=pick_avatar_color(session_id),
+    )
+    db.add(new_conv)
+    db.commit()
+    db.refresh(new_conv)
+
+    return {"conversation_id": new_conv.id}
+
+
+@router.options("/conversations/new")
+async def widget_conversations_new_options(request: Request, response: FastAPIResponse):
+    _set_widget_cors_headers(response=response, request=request)
+    return {}
+
+
+@router.get("/conversations/{conversation_id}/rating")
+async def get_conversation_rating(
+    request: Request,
+    response: FastAPIResponse,
+    conversation_id: int,
+    db: Session = Depends(get_db),
+):
+    """Check whether a conversation has already been rated."""
+    _set_widget_cors_headers(response=response, request=request)
+
+    rating_row = (
+        db.query(ConversationRating)
+        .filter(ConversationRating.conversation_id == conversation_id)
+        .first()
+    )
+    if not rating_row:
+        return {"rating": None, "feedback": None}
+
+    return {"rating": rating_row.rating, "feedback": rating_row.feedback}
+

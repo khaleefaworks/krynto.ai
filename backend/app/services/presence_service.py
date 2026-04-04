@@ -102,7 +102,7 @@ class PresenceService:
             .filter(
                 User.id.in_(assigned_agent_ids),
                 User.is_active == True,  # noqa: E712
-                User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER]),
+                User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
             )
             .all()
         )

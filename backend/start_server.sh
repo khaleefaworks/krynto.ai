@@ -1,22 +1,38 @@
 #!/bin/bash
 set -euo pipefail
 
-cd /home/frappe/Applications/ai-chatassist/backend
-export PYTHONPATH=/home/frappe/Applications/ai-chatassist/backend
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$SCRIPT_DIR"
+REPO_ROOT="$(cd -- "$BACKEND_DIR/.." && pwd)"
 
-VENV_PY="/home/frappe/Applications/ai-chatassist/.venv/bin/python"
-VENV_UVICORN="/home/frappe/Applications/ai-chatassist/.venv/bin/uvicorn"
-VENV_ALEMBIC="/home/frappe/Applications/ai-chatassist/.venv/bin/alembic"
+cd "$BACKEND_DIR"
+export PYTHONPATH="$BACKEND_DIR"
 
-if [[ ! -x "$VENV_PY" ]]; then
-	echo "ERROR: Missing python at $VENV_PY" >&2
-	echo "Create the venv at repo root: cd /home/frappe/Applications/ai-chatassist && python -m venv .venv" >&2
+if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+	VENV_BIN="${VIRTUAL_ENV}/bin"
+elif [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then
+	VENV_BIN="$BACKEND_DIR/.venv/bin"
+elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+	VENV_BIN="$REPO_ROOT/.venv/bin"
+else
+	echo "ERROR: No virtual environment found." >&2
+	echo "Expected one of:" >&2
+	echo "  - active virtualenv via VIRTUAL_ENV" >&2
+	echo "  - $BACKEND_DIR/.venv" >&2
+	echo "  - $REPO_ROOT/.venv" >&2
+	echo "Create the preferred backend-local venv with:" >&2
+	echo "  cd $BACKEND_DIR && python3 -m venv .venv" >&2
 	exit 1
 fi
 
+VENV_PY="$VENV_BIN/python"
+VENV_UVICORN="$VENV_BIN/uvicorn"
+VENV_ALEMBIC="$VENV_BIN/alembic"
+
 if [[ ! -x "$VENV_UVICORN" ]]; then
 	echo "ERROR: Missing uvicorn at $VENV_UVICORN" >&2
-	echo "Install deps: $VENV_PY -m pip install -r /home/frappe/Applications/ai-chatassist/backend/requirements.txt" >&2
+	echo "Install deps: $VENV_PY -m pip install -r $BACKEND_DIR/requirements.txt" >&2
+	echo "Or use the locked set: $VENV_PY -m pip install -r $BACKEND_DIR/requirements.lock.txt" >&2
 	exit 1
 fi
 

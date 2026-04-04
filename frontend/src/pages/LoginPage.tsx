@@ -1,9 +1,8 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { login as loginApi } from '@/services/auth'
 import { saveToken } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import Logo from '@/components/Logo'
+import { API_BASE } from '@/config/endpoints'
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email or username is required'),
@@ -21,10 +21,13 @@ type LoginForm = z.infer<typeof loginSchema>
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { setUser, setToken } = useAppStore()
+  const location = useLocation()
+  const setupMessage = sessionStorage.getItem('setup_success') || ((location.state as any)?.message as string | undefined)
+  if (setupMessage) sessionStorage.removeItem('setup_success')
+  const { setUser, setToken, setOrganization } = useAppStore()
   const [error, setError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
-  
+
   const {
     register,
     handleSubmit,
@@ -36,16 +39,48 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     try {
       setError(null)
-      const response = await loginApi(data)
-      
+      // Use raw fetch so we can detect needs_verification before it reaches loginApi's
+      // type-narrowing (which expects access_token to always be present).
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        throw new Error(result.detail || 'Login failed')
+      }
+
+      // Email not yet verified — send to OTP step on the signup page
+      if (result.needs_verification) {
+        navigate('/signup', { state: { step: 'verify', email: result.email }, replace: true })
+        return
+      }
+
+      const response = result
+
       // Save token to localStorage
       saveToken(response.access_token)
-      
+
       // Update store
       setUser(response.user)
       setToken(response.access_token)
-      
-      navigate('/dashboard/chats')
+
+      // Fetch org details for non-super-admin users
+      if (response.user.role !== 'system_manager' && response.user.organization_id) {
+        try {
+          const orgRes = await fetch(`${API_BASE}/organization`, {
+            headers: { Authorization: `Bearer ${response.access_token}` },
+          })
+          if (orgRes.ok) setOrganization(await orgRes.json())
+        } catch { /* non-critical */ }
+      }
+
+      if (response.user.role === 'system_manager') {
+        navigate('/superadmin/organizations', { replace: true })
+      } else {
+        navigate('/dashboard/chats', { replace: true })
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed')
       console.error('Login failed:', err)
@@ -66,12 +101,17 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {setupMessage && (
+              <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-md">
+                {setupMessage}
+              </div>
+            )}
             {error && (
               <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
                 {error}
               </div>
             )}
-            
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
                 Email / Username
@@ -85,9 +125,6 @@ export default function LoginPage() {
               {errors.email && (
                 <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>
               )}
-              <p className="text-xs text-gray-500 mt-1">
-                For Administrator account, use: <span className="font-mono font-semibold">Administrator</span>
-              </p>
             </div>
 
             <div>
@@ -113,12 +150,23 @@ export default function LoginPage() {
               {errors.password && (
                 <p className="text-sm text-red-600 mt-1">{errors.password.message}</p>
               )}
+              <div className="text-right">
+                <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">
+            New here?{' '}
+            <Link to="/signup" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+              Sign up for free
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

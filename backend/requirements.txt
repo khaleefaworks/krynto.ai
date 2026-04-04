@@ -4,6 +4,7 @@ uvicorn[standard]
 sqlalchemy
 psycopg2-binary
 alembic
+apscheduler
 python-dotenv
 pydantic-settings
 structlog
@@ -19,3 +20,4 @@ requests
 slowapi
 redis
 pywebpush
+resend

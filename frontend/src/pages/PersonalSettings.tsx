@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useAppStore } from "@/store/appStore"
 import { apiRequest } from "@/services/api"
-import { Camera, Bell, BellOff, Mail, Shield, User as UserIcon, Trash2, Loader2 } from "lucide-react"
+import { Camera, Bell, BellOff, Mail, Shield, User as UserIcon, Trash2, Loader2, Lock, Eye, EyeOff } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from "@/services/push"
 import { API_BASE } from "@/config/endpoints"
@@ -18,6 +18,16 @@ export default function PersonalSettings() {
     typeof window !== 'undefined' ? getNotificationPermission() : 'unsupported'
   )
   const [vapidPublicKeyPresent, setVapidPublicKeyPresent] = useState<boolean | null>(null)
+
+  // Change password form
+  const [pwCurrent, setPwCurrent] = useState('')
+  const [pwNew, setPwNew] = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
+  const [showPwCurrent, setShowPwCurrent] = useState(false)
+  const [showPwNew, setShowPwNew] = useState(false)
+  const [showPwConfirm, setShowPwConfirm] = useState(false)
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwMessage, setPwMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Check if user is logged in
   useEffect(() => {
@@ -143,10 +153,47 @@ export default function PersonalSettings() {
     }
   }
 
-  const roleLabel = user?.role === 'system_manager' ? 'System Manager' : user?.role === 'manager' ? 'Manager' : 'Agent'
+  const roleLabel = (() => {
+    const r = String(user?.role || '').toLowerCase()
+    if (r === 'system_manager') return 'System Manager'
+    if (r === 'owner') return 'Owner'
+    if (r === 'manager') return 'Manager'
+    return 'Agent'
+  })()
   const initials = user?.name?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
   const pushReady = isPushSupported() && vapidPublicKeyPresent === true
   const pushGranted = pushPermission === 'granted'
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPwMessage(null)
+    if (pwNew !== pwConfirm) {
+      setPwMessage({ type: 'error', text: 'New passwords do not match.' })
+      return
+    }
+    if (pwNew.length < 6) {
+      setPwMessage({ type: 'error', text: 'New password must be at least 6 characters.' })
+      return
+    }
+    setPwSaving(true)
+    try {
+      await apiRequest('/users/me/password', {
+        method: 'PATCH',
+        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
+      })
+      setPwMessage({ type: 'success', text: 'Password changed successfully.' })
+      setPwCurrent('')
+      setPwNew('')
+      setPwConfirm('')
+      setShowPwCurrent(false)
+      setShowPwNew(false)
+      setShowPwConfirm(false)
+    } catch (err: any) {
+      setPwMessage({ type: 'error', text: err?.message || 'Failed to change password.' })
+    } finally {
+      setPwSaving(false)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -154,8 +201,8 @@ export default function PersonalSettings() {
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Profile</h1>
       </div>
 
-      <div className="flex-1 flex items-center justify-center overflow-auto py-8">
-        <div className="max-w-xl w-full px-6 space-y-8">
+      <div className="flex-1 overflow-auto py-8">
+        <div className="max-w-xl w-full mx-auto px-6 space-y-8">
           {message && (
             <div className={`p-3 rounded-lg text-sm ${message.type === 'success'
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
@@ -281,6 +328,95 @@ export default function PersonalSettings() {
             {pushPermission === 'denied' && (
               <p className="mt-2 text-xs text-red-600 dark:text-red-400">Blocked in browser settings. Update site permissions to allow.</p>
             )}
+          </div>
+
+          {/* ─── Change Password ─── */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Change Password</h3>
+            <form onSubmit={handleChangePassword} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 p-4 space-y-4">
+              {pwMessage && (
+                <div className={`p-3 rounded-lg text-sm ${pwMessage.type === 'success'
+                    ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
+                    : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+                  }`}>
+                  {pwMessage.text}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <Lock className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+                  Current Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPwCurrent ? 'text' : 'password'}
+                    value={pwCurrent}
+                    onChange={e => setPwCurrent(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    required
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <button type="button" onClick={() => setShowPwCurrent(v => !v)} tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    {showPwCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showPwNew ? 'text' : 'password'}
+                    value={pwNew}
+                    onChange={e => setPwNew(e.target.value)}
+                    placeholder="Min. 6 characters"
+                    autoComplete="new-password"
+                    required
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <button type="button" onClick={() => setShowPwNew(v => !v)} tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    {showPwNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showPwConfirm ? 'text' : 'password'}
+                    value={pwConfirm}
+                    onChange={e => setPwConfirm(e.target.value)}
+                    placeholder="Re-enter new password"
+                    autoComplete="new-password"
+                    required
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <button type="button" onClick={() => setShowPwConfirm(v => !v)} tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    {showPwConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {pwNew && pwConfirm && pwNew !== pwConfirm && (
+                  <p className="mt-1 text-xs text-red-500">Passwords do not match.</p>
+                )}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={pwSaving || !pwCurrent || !pwNew || !pwConfirm}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {pwSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+                  {pwSaving ? 'Saving…' : 'Change Password'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -268,6 +268,7 @@ export default function ChatComposer({
             }),
         ],
         editable: !disabled,
+        // NOTE: editable is only used at init; a useEffect below keeps it in sync.
         editorProps: {
             attributes: {
                 class:
@@ -411,6 +412,12 @@ export default function ChatComposer({
         },
         [editor]
     )
+
+    // Keep editor editable state in sync with the disabled prop
+    // (useEditor only reads editable at initialization)
+    useEffect(() => {
+        if (editor) editor.setEditable(!disabled)
+    }, [editor, disabled])
 
     const applyPickedShortcut = useCallback(
         (message: string) => {

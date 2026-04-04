@@ -10,7 +10,8 @@ from app.repos import agent_sessions as agent_sessions_repo
 from app.repos import users as users_repo
 from app.infra import realtime_bus, BusEvent
 from app.models.agent_website_assignment import AgentWebsiteAssignment
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.models.website import Website
 
 logger = get_logger(__name__)
 
@@ -93,13 +94,26 @@ class AgentService:
             except Exception:
                 pass
         
-        # Compute website visibility for this socket (only administrator unrestricted).
+        # Compute website visibility for this socket.
+        # SYSTEM_MANAGER: unrestricted (sees all orgs).
+        # OWNER/MANAGER: all websites within their org.
+        # AGENT: only websites they are explicitly assigned to.
         visible_website_ids: list[int] | None
         try:
             user = self.db.query(User).filter(User.id == int(agent_id)).first()
             if user and user.is_administrator():
+                # SYSTEM_MANAGER — no restriction at all
                 visible_website_ids = None
+            elif user and user.role in (UserRole.OWNER, UserRole.MANAGER) and user.organization_id is not None:
+                # OWNER/MANAGER — all websites in their org
+                rows = (
+                    self.db.query(Website.id)
+                    .filter(Website.organization_id == user.organization_id)
+                    .all()
+                )
+                visible_website_ids = sorted({int(r[0]) for r in rows})
             else:
+                # AGENT (or unknown) — only explicitly assigned websites
                 rows = (
                     self.db.query(AgentWebsiteAssignment.website_id)
                     .filter(AgentWebsiteAssignment.agent_id == int(agent_id))

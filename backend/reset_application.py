@@ -18,9 +18,13 @@ Usage:
 import sys
 from pathlib import Path
 import shutil
-from app.core.database import SessionLocal, engine
+from app.core.database import SessionLocal
 from app.models.base import Base
 from app.models.system_settings import SystemSettings
+from app.models.user import User
+from app.models.website import Website
+from app.models.organization import Organization
+from app.models.conversation import Conversation
 from seed_data import seed_database
 
 # Ensure all models are imported so Base.metadata knows about every table.
@@ -124,48 +128,67 @@ def reset_database(with_seed=False):
         if not existing_tables:
             print("  ⚠️  No tables detected in the database. If this is a fresh DB, run: alembic upgrade head")
 
-        for table in reversed(Base.metadata.sorted_tables):
-            # Keep Alembic bookkeeping intact.
-            if table.name == "alembic_version":
-                continue
+        dialect = db.get_bind().dialect.name
 
-            # If the DB schema is behind, skip tables that don't exist yet.
-            if table.name not in existing_tables:
-                continue
-
-            try:
-                db.execute(table.delete())
-            except ProgrammingError as e:
-                # Safety net for cases where the table disappears or isn't present
-                # in the current schema despite inspector results.
-                msg = str(getattr(e, "orig", e))
-                if "UndefinedTable" in msg or "does not exist" in msg:
-                    print(f"  ⚠️  Skipping missing table: {table.name}")
-                    db.rollback()
+        if dialect == "postgresql":
+            # Fast and reliable wipe for all known tables, handling FK cycles.
+            truncatable = [
+                table.name
+                for table in Base.metadata.tables.values()
+                if table.name != "alembic_version" and table.name in existing_tables
+            ]
+            if truncatable:
+                quoted = ", ".join(f'"{name}"' for name in truncatable)
+                db.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+                db.commit()
+            else:
+                db.commit()
+        else:
+            # Generic fallback for SQLite/other DBs.
+            # Commit per table so a rollback on one table does not undo prior deletions.
+            for table in reversed(Base.metadata.sorted_tables):
+                if table.name == "alembic_version":
                     continue
-                raise
+                if table.name not in existing_tables:
+                    continue
 
-        db.commit()
+                try:
+                    db.execute(table.delete())
+                    db.commit()
+                except ProgrammingError as e:
+                    msg = str(getattr(e, "orig", e))
+                    if "UndefinedTable" in msg or "does not exist" in msg:
+                        print(f"  ⚠️  Skipping missing table: {table.name}")
+                        db.rollback()
+                        continue
+                    raise
         
-        # Reset all sequences to start from 1
-        print("  Resetting ID sequences...")
+        # Reset all sequences to start from 1 (Postgres only).
+        if dialect == "postgresql":
+            print("  Resetting ID sequences...")
 
-        seq_rows = db.execute(
-            text(
-                """
-                SELECT sequence_name
-                FROM information_schema.sequences
-                WHERE sequence_schema = 'public'
-                """
-            )
-        ).fetchall()
+            seq_rows = db.execute(
+                text(
+                    """
+                    SELECT sequence_name
+                    FROM information_schema.sequences
+                    WHERE sequence_schema = 'public'
+                    """
+                )
+            ).fetchall()
 
-        for (seq_name,) in seq_rows:
-            # Quote sequence names defensively.
-            db.execute(text(f'ALTER SEQUENCE "{seq_name}" RESTART WITH 1'))
+            for (seq_name,) in seq_rows:
+                db.execute(text(f'ALTER SEQUENCE "{seq_name}" RESTART WITH 1'))
 
-        db.commit()
+            db.commit()
         
+        # Final sanity check to prove full wipe happened.
+        print("\n🔎 Verifying reset state...")
+        print(f"   users={db.query(User).count()}")
+        print(f"   organizations={db.query(Organization).count()}")
+        print(f"   websites={db.query(Website).count()}")
+        print(f"   conversations={db.query(Conversation).count()}")
+
         print("\n✅ Database reset successfully!")
         
         if with_seed:

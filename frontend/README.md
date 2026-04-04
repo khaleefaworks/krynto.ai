@@ -1,10 +1,10 @@
 # Agent Dashboard - Frontend
 
-React 18 + TypeScript agent dashboard for AI ChatAssist.
+React 19 + TypeScript agent dashboard for AI ChatAssist.
 
 ## Tech Stack
 
-- **React 18** with TypeScript
+- **React 19** with TypeScript
 - **Vite** for build tooling
 - **Tailwind CSS** for styling
 - **shadcn/ui** for UI components

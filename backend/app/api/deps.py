@@ -70,7 +70,29 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
-    
+
+    # Reject tokens issued before the user's last password change.
+    if token_iat and user.password_changed_at:
+        pwd_changed = user.password_changed_at
+        if pwd_changed.tzinfo is None:
+            pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+        token_datetime = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        if token_datetime < pwd_changed:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token invalidated due to password change",
+            )
+
+    # Reject tokens for users whose organisation has been deactivated.
+    if user.organization_id is not None:
+        from app.models.organization import Organization
+        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+        if org and not org.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organisation is inactive",
+            )
+
     return user
 
 
@@ -121,12 +143,46 @@ def require_agent(
     """
     Require agent access.
     Used for agent dashboard and chat handling endpoints.
-    
-    Note: Admin roles (SYSTEM_MANAGER/MANAGER) can also act as agents.
+
+    Note: Admin roles (SYSTEM_MANAGER/OWNER/MANAGER) can also act as agents.
     """
-    if current_user.role not in (UserRole.AGENT, UserRole.MANAGER, UserRole.SYSTEM_MANAGER):
+    if current_user.role not in (UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Agent access required",
         )
     return current_user
+
+
+def require_org_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """OWNER or MANAGER within an org. SYSTEM_MANAGER also passes."""
+    if current_user.role not in (UserRole.OWNER, UserRole.MANAGER, UserRole.SYSTEM_MANAGER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organisation admin access required",
+        )
+    return current_user
+
+
+def require_org_owner(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Only the org OWNER (or SYSTEM_MANAGER) can do this."""
+    if current_user.role not in (UserRole.OWNER, UserRole.SYSTEM_MANAGER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organisation owner access required",
+        )
+    return current_user
+
+
+def get_org_scope(current_user: User) -> int | None:
+    """
+    Returns organization_id for boundary filtering.
+    None means unrestricted (SYSTEM_MANAGER / super-admin).
+    """
+    if current_user.is_superadmin():
+        return None
+    return current_user.organization_id

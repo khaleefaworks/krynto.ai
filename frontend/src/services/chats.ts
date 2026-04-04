@@ -3,6 +3,7 @@ import { useAppStore } from "../store/appStore"
 
 export type ActiveChat = {
   id: number
+  short_id: string
   website_id: number
   website_name?: string
   session_id: string

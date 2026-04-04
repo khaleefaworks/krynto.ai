@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MessageCircle, Search, X } from 'lucide-react'
+import { MessageCircle, Search, X, AlertTriangle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import type { CustomerVisitor, CustomerVisitorDetails } from '@/services/customers'
@@ -74,6 +74,9 @@ export default function CustomersVisitors() {
     const [detailsLoading, setDetailsLoading] = useState(false)
     const [detailsError, setDetailsError] = useState<string | null>(null)
     const [details, setDetails] = useState<CustomerVisitorDetails | null>(null)
+
+    // Confirm modal state for bot-only conversations
+    const [confirmBotConv, setConfirmBotConv] = useState<{ shortId: string | null; conversationId: number } | null>(null)
 
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const refreshDetailsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -248,10 +251,8 @@ export default function CustomersVisitors() {
         setDetailsLoading(false)
     }
 
-    const openConversation = (conversationId: number, sessionId: string) => {
-        navigate(`/dashboard/chats/${encodeURIComponent(sessionId)}`, {
-            state: { conversationId },
-        })
+    const openConversation = (shortId: string | null, conversationId: number) => {
+        navigate(`/dashboard/chats/${shortId || conversationId}`)
         closeDrawer()
     }
 
@@ -416,7 +417,7 @@ export default function CustomersVisitors() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.came_from || '-'}</span>
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.came_from || 'Direct'}</span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right">
                                             <span className="text-sm text-gray-700 dark:text-gray-300">{r.visits}</span>
@@ -483,7 +484,7 @@ export default function CustomersVisitors() {
                                                     const latest = details.conversations?.[0]
                                                     const cid = Number(latest?.conversation_id)
                                                     if (Number.isFinite(cid) && cid > 0) {
-                                                        openConversation(cid, details.session_id)
+                                                        openConversation(latest?.short_id || null, cid)
                                                     }
                                                 }}
                                                 className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-medium"
@@ -532,18 +533,30 @@ export default function CustomersVisitors() {
                                         </summary>
                                         <div className="px-4 pb-4 space-y-2">
                                             {details.conversations?.length ? (
-                                                details.conversations.map((c) => (
+                                                details.conversations.map((c) => {
+                                                    const hasMsgs = (c as any).has_visitor_message
+                                                    return (
                                                     <button
                                                         key={c.conversation_id}
-                                                        onClick={() => openConversation(Number(c.conversation_id), c.session_id)}
-                                                        className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-gray-200 dark:border-gray-700"
+                                                        onClick={() => {
+                                                            if (!hasMsgs) {
+                                                                setConfirmBotConv({ shortId: c.short_id || null, conversationId: Number(c.conversation_id) })
+                                                                return
+                                                            }
+                                                            openConversation(c.short_id || null, Number(c.conversation_id))
+                                                        }}
+                                                        className={`w-full text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${!hasMsgs ? 'opacity-75' : ''}`}
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation'}</div>
-                                                            <div className="text-xs text-gray-500 dark:text-gray-400">{c.status}</div>
+                                                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.title || (c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation')}</div>
+                                                            <div className="flex items-center gap-1.5">
+                                                                {!hasMsgs && <span className="text-xs text-amber-500 dark:text-amber-400">Bot only</span>}
+                                                                <span className="text-xs text-gray-500 dark:text-gray-400">{c.status}</span>
+                                                            </div>
                                                         </div>
                                                     </button>
-                                                ))
+                                                    )
+                                                })
                                             ) : (
                                                 <div className="text-sm text-gray-500 dark:text-gray-400">No conversations</div>
                                             )}
@@ -555,6 +568,41 @@ export default function CustomersVisitors() {
                     </div>
                 </div>
             ) : null}
+
+            {/* Bot-only conversation confirm modal */}
+            {confirmBotConv && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setConfirmBotConv(null)}>
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                            </div>
+                            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Open bot-only conversation?</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                            No messages have been sent by the visitor yet. Opening this will let you initiate the conversation from the agent side.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setConfirmBotConv(null)}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const { shortId, conversationId } = confirmBotConv
+                                    setConfirmBotConv(null)
+                                    openConversation(shortId, conversationId)
+                                }}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                            >
+                                Open conversation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

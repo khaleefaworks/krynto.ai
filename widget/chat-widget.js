@@ -52,7 +52,9 @@
     headerIconUrl: globalConfig.headerIconUrl || null,
     showEmojiPicker: globalConfig.showEmojiPicker || false,
     showAttachments: globalConfig.showAttachments || false,
-    brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist'
+    brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist',
+    popupName: globalConfig.popupName || 'Support',
+    popupButtonText: globalConfig.popupButtonText || 'Reply'
   };
 
   // State
@@ -102,6 +104,16 @@
   // another message. This prevents repeated end_chat triggers from reopen/close.
   let endChatDisabled = false;
 
+  // --- Multi-conversation view state ---
+  // viewMode: 'start' | 'list' | 'thread'
+  let viewMode = 'start';
+  // isReadOnlyThread: true when viewing a resolved conversation from history
+  let isReadOnlyThread = false;
+  // widgetShowHistory: controlled by website.show_conversation_history setting
+  let widgetShowHistory = false;
+  // cached resolved conversations from last fetchConversationList call
+  let convListHistory = [];
+
   function _endChatStorageKey() {
     if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
     return `aichatassist_end_chat_disabled_${CONFIG.websiteId}_${CONFIG.sessionId}`;
@@ -111,7 +123,9 @@
     endChatDisabled = Boolean(disabled);
     const endBtn = document.getElementById('chatassist-end');
     if (endBtn) {
-      endBtn.style.display = endChatDisabled ? 'none' : '';
+      // Only toggle visibility in active (non-readonly) thread mode
+      const inActiveThread = viewMode === 'thread' && !isReadOnlyThread;
+      endBtn.style.display = (inActiveThread && !endChatDisabled) ? '' : 'none';
     }
     if (endChatDisabled) {
       try { hideEndOverlay(); } catch (e) { }
@@ -155,6 +169,8 @@
           win.style.display = 'flex';
           win.classList.remove('chatassist-window-closing');
           setTimeout(function () { scrollToBottom(false); }, 50);
+          // Re-measure input height now that the window is visible.
+          setTimeout(function () { autoResizeInput(); }, 0);
         }
       }
     } catch (e) { }
@@ -231,14 +247,20 @@
 
     if (!popup) return;
 
-    if (nameEl) nameEl.textContent = senderName || 'Support';
+    if (nameEl) nameEl.textContent = senderName || CONFIG.popupName;
     if (bodyEl) {
-      const plain = String(messageText || '').replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
-      const truncated = plain.slice(0, 150);
+      var raw = String(messageText || '');
+      var plain = raw.replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
+      if (!plain) {
+        if (/!\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcf7 Sent an image';
+        else if (/\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcce Sent a file';
+        else plain = 'New message';
+      }
+      var truncated = plain.slice(0, 150);
       bodyEl.textContent = truncated + (plain.length > 150 ? '\u2026' : '');
     }
     if (avatarWrap) {
-      const url = getFullAssetUrl(avatarUrl);
+      const url = getFullAssetUrl(avatarUrl) || getFullAssetUrl(CONFIG.headerIconUrl);
       if (url) {
         avatarWrap.className = 'chatassist-popup-avatar';
         avatarWrap.innerHTML = '';
@@ -249,7 +271,7 @@
         avatarWrap.appendChild(img);
       } else {
         avatarWrap.className = 'chatassist-popup-avatar-placeholder';
-        const initials = (senderName || 'S').trim().split(/\s+/).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || 'S';
+        const initials = (senderName || CONFIG.popupName || 'S').trim().split(/\s+/).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || 'S';
         avatarWrap.innerHTML = '';
         avatarWrap.textContent = initials;
       }
@@ -328,15 +350,15 @@
   let hasRatedSession = false;
 
   function _ratedStorageKey() {
-    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
-    return `aichatassist_rated_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+    if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
+    return `aichatassist_rated_${CONFIG.websiteId}_${CONFIG.conversationId}`;
   }
 
   function showRatingOverlay(conversationId) {
     if (hasRatedSession) return;
     try {
       const key = _ratedStorageKey();
-      if (key && sessionStorage.getItem(key) === '1') { hasRatedSession = true; return; }
+      if (key && localStorage.getItem(key) === '1') { hasRatedSession = true; return; }
     } catch (e) { }
 
     ratingConversationId = conversationId || null;
@@ -358,13 +380,17 @@
       el.classList.remove('chatassist-rating-overlay-visible');
       el.style.display = 'none';
     }
+    // After the rating overlay is dismissed, transition away from the closed thread.
+    if (viewMode === 'thread' && !isReadOnlyThread) {
+      afterConversationClose();
+    }
   }
 
   function submitRating(ratingValue) {
     hasRatedSession = true;
     try {
       const key = _ratedStorageKey();
-      if (key) sessionStorage.setItem(key, '1');
+      if (key) localStorage.setItem(key, '1');
     } catch (e) { }
 
     // Submit via WebSocket if connected
@@ -454,11 +480,19 @@
   // --- API & State Management ---
 
   async function fetchReadState() {
+    // Save the conversation ID set by enterThreadView so the read-state
+    // response cannot accidentally override it with a different conversation.
+    const targetConvId = CONFIG.conversationId;
     try {
-      const response = await fetch(`${CONFIG.apiUrl}/widget/read-state?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`);
+      const qs = `website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}` +
+        (targetConvId ? `&conversation_id=${targetConvId}` : '');
+      const response = await fetch(`${CONFIG.apiUrl}/widget/read-state?${qs}`);
       if (response.ok) {
         const data = await response.json();
-        if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || 0;
+        // Only update conversationId if we didn't already have one (start-view mode).
+        if (!targetConvId && typeof data.conversation_id === 'number') {
+          CONFIG.conversationId = data.conversation_id || 0;
+        }
         firstUnreadMessageId = data.first_unread_message_id;
         if (typeof data.unread_count === 'number') setUnreadCount(data.unread_count);
       }
@@ -475,7 +509,9 @@
 
   async function markRead() {
     try {
-      const response = await fetch(`${CONFIG.apiUrl}/widget/read?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`, {
+      const qs = `website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}` +
+        (CONFIG.conversationId ? `&conversation_id=${CONFIG.conversationId}` : '');
+      const response = await fetch(`${CONFIG.apiUrl}/widget/read?${qs}`, {
         method: 'POST'
       });
       if (response.ok) {
@@ -487,12 +523,379 @@
     }
   }
 
+  // --- Draft Preservation (keyed by conversation_id) ---
+
+  function _draftKey() {
+    if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
+    return `ai_chatassist_draft_${CONFIG.websiteId}_${CONFIG.conversationId}`;
+  }
+
+  function _attachmentDraftKey() {
+    if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
+    return `ai_chatassist_attachment_draft_${CONFIG.websiteId}_${CONFIG.conversationId}`;
+  }
+
+  function saveDraft(text) {
+    try {
+      const key = _draftKey();
+      if (!key) return;
+      if (text) localStorage.setItem(key, text);
+      else localStorage.removeItem(key);
+    } catch (e) { }
+  }
+
+  function loadDraft() {
+    try {
+      const key = _draftKey();
+      return key ? (localStorage.getItem(key) || '') : '';
+    } catch (e) { return ''; }
+  }
+
+  function saveDraftAttachments(attachments) {
+    try {
+      const key = _attachmentDraftKey();
+      if (!key) return;
+      if (Array.isArray(attachments) && attachments.length) {
+        localStorage.setItem(key, JSON.stringify(attachments));
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch (e) { }
+  }
+
+  function loadDraftAttachments() {
+    try {
+      const key = _attachmentDraftKey();
+      if (!key) return [];
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+
+  // --- Conversation List API ---
+
+  async function fetchConversationList() {
+    try {
+      const res = await fetch(
+        `${CONFIG.apiUrl}/widget/conversations?website_id=${CONFIG.websiteId}&session_id=${CONFIG.sessionId}`
+      );
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error('[ChatWidget] Failed to fetch conversation list:', e);
+    }
+    return { active: null, history: [], total: 0, show_conversation_history: false };
+  }
+
+  // --- View Management ---
+
+  function _closeWsCleanly() {
+    if (ws) {
+      ws.onclose = null;
+      try { ws.close(); } catch (e) { }
+      ws = null;
+    }
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    isConnecting = false;
+  }
+
+  function _updateHeaderButtons() {
+    const backBtn = document.getElementById('chatassist-back');
+    const endBtn = document.getElementById('chatassist-end');
+    if (backBtn) {
+      // Show back button when in thread view AND (history enabled OR read-only mode)
+      const showBack = viewMode === 'thread' && (widgetShowHistory || isReadOnlyThread);
+      backBtn.style.display = showBack ? '' : 'none';
+    }
+    if (endBtn) {
+      // Show end button only in active (non-readonly) thread
+      const showEnd = viewMode === 'thread' && !isReadOnlyThread && !endChatDisabled;
+      endBtn.style.display = showEnd ? '' : 'none';
+    }
+  }
+
+  function _safeText(str) {
+    // Safe text for DOM insertion; used in renderConvList
+    return String(str || '').replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function renderConvList(listData) {
+    const body = document.getElementById('chatassist-conv-list-body');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const history = (listData && listData.history) || [];
+
+    // Active (open) conversation at the top — visitor can resume it by clicking
+    if (listData && listData.active) {
+      const conv = listData.active;
+      const activeItem = document.createElement('div');
+      activeItem.className = 'chatassist-conv-item';
+      activeItem.setAttribute('role', 'button');
+      activeItem.setAttribute('tabindex', '0');
+
+      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const dateText = conv.last_message_at
+        ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'chatassist-conv-item-title';
+      titleEl.textContent = titleText;
+
+      const metaEl = document.createElement('div');
+      metaEl.className = 'chatassist-conv-item-meta';
+
+      const dateEl = document.createElement('span');
+      dateEl.className = 'chatassist-conv-item-date';
+      dateEl.textContent = dateText;
+
+      const badgeEl = document.createElement('span');
+      badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
+      badgeEl.textContent = 'Active';
+
+      metaEl.appendChild(dateEl);
+      metaEl.appendChild(badgeEl);
+      activeItem.appendChild(titleEl);
+      activeItem.appendChild(metaEl);
+
+      const resumeFn = function () { enterThreadView(conv.id, false); };
+      activeItem.addEventListener('click', resumeFn);
+      activeItem.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resumeFn(); }
+      });
+      body.appendChild(activeItem);
+    }
+
+    // "New Conversation" button — only when there is no active conversation
+    if (!listData || !listData.active) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'chatassist-conv-new-btn';
+      newBtn.type = 'button';
+      newBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>' +
+        '<span>New Conversation</span>';
+      newBtn.addEventListener('click', startNewConversation);
+      body.appendChild(newBtn);
+    }
+
+    if (!history.length) {
+      const emptyEl = document.createElement('div');
+      emptyEl.className = 'chatassist-conv-list-empty';
+      emptyEl.textContent = listData && listData.active ? 'No past conversations' : 'No past conversations';
+      body.appendChild(emptyEl);
+      return;
+    }
+
+    history.forEach(function (conv) {
+      const item = document.createElement('div');
+      item.className = 'chatassist-conv-item';
+      item.setAttribute('role', 'button');
+      item.setAttribute('tabindex', '0');
+
+      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const dateText = conv.last_message_at
+        ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'chatassist-conv-item-title';
+      titleEl.textContent = titleText;
+
+      const metaEl = document.createElement('div');
+      metaEl.className = 'chatassist-conv-item-meta';
+
+      const dateEl = document.createElement('span');
+      dateEl.className = 'chatassist-conv-item-date';
+      dateEl.textContent = dateText;
+
+      const badgeEl = document.createElement('span');
+      badgeEl.className = 'chatassist-conv-item-badge';
+      badgeEl.textContent = 'Resolved';
+
+      metaEl.appendChild(dateEl);
+      metaEl.appendChild(badgeEl);
+      item.appendChild(titleEl);
+      item.appendChild(metaEl);
+
+      const openFn = function () { openHistoryThread(conv.id); };
+      item.addEventListener('click', openFn);
+      item.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFn(); }
+      });
+      body.appendChild(item);
+    });
+  }
+
+  function enterListView(listData) {
+    viewMode = 'list';
+    isReadOnlyThread = false;
+
+    _closeWsCleanly();
+
+    const el_messages = document.getElementById('chatassist-messages');
+    const el_empty = document.getElementById('chatassist-empty-state');
+    const el_list = document.getElementById('chatassist-conv-list');
+    const el_footer = document.getElementById('chatassist-footer');
+    const el_newMsg = document.getElementById('chatassist-new-msg-indicator');
+
+    if (el_messages) el_messages.style.display = 'none';
+    if (el_empty) el_empty.style.display = 'none';
+    if (el_footer) el_footer.style.display = 'none';
+    if (el_newMsg) el_newMsg.style.display = 'none';
+    if (el_list) el_list.style.display = 'flex';
+
+    _updateHeaderButtons();
+    renderConvList(listData);
+    // Restore open/closed state from localStorage (no WS messages in list view to trigger this).
+    _restoreWidgetState();
+  }
+
+  function enterStartView() {
+    viewMode = 'start';
+    isReadOnlyThread = false;
+    CONFIG.conversationId = 0;
+
+    // Ensure any existing WS is closed before connecting fresh
+    _closeWsCleanly();
+
+    const el_messages = document.getElementById('chatassist-messages');
+    const el_empty = document.getElementById('chatassist-empty-state');
+    const el_list = document.getElementById('chatassist-conv-list');
+    const el_footer = document.getElementById('chatassist-footer');
+
+    if (el_list) el_list.style.display = 'none';
+    if (el_messages) el_messages.style.display = '';
+    if (el_empty) el_empty.style.display = '';
+    if (el_footer) el_footer.style.display = '';
+
+    // Clear any old messages
+    if (el_messages) { el_messages.innerHTML = ''; lastAppendedDateStr = null; }
+    historyQueue = null;
+    isReadStateFetched = true; // no queue guard needed in start mode
+    draftAttachments = [];
+    renderAttachmentChips();
+
+    // Clear input (may retain stale text if coming from a just-closed thread)
+    const el_input = document.getElementById('chatassist-input');
+    if (el_input) { el_input.value = ''; autoResizeInput(); }
+
+    _updateHeaderButtons();
+
+    // Connect with conv_id=0 so the bot can send welcome / automations fire
+    connectWebSocket();
+    // Restore open/closed widget state for page-reload scenarios.
+    // (When a bot_prompt arrives it will call this too, but if there's no automation
+    //  configured, this explicit call ensures the widget reopens if it was left open.)
+    _restoreWidgetState();
+  }
+
+  async function enterThreadView(convId, readOnly) {
+    viewMode = 'thread';
+    isReadOnlyThread = Boolean(readOnly);
+    CONFIG.conversationId = convId || 0;
+
+    // Reset message area
+    const el_messages = document.getElementById('chatassist-messages');
+    const el_empty = document.getElementById('chatassist-empty-state');
+    const el_list = document.getElementById('chatassist-conv-list');
+    const el_footer = document.getElementById('chatassist-footer');
+    const el_newMsg = document.getElementById('chatassist-new-msg-indicator');
+
+    if (el_list) el_list.style.display = 'none';
+    if (el_messages) { el_messages.style.display = ''; el_messages.innerHTML = ''; }
+    if (el_empty) el_empty.style.display = '';
+    if (el_newMsg) el_newMsg.style.display = 'none';
+
+    lastAppendedDateStr = null;
+    historyQueue = null;
+    isReadStateFetched = false;
+    hasScrolledToUnread = false;
+    firstUnreadMessageId = null;
+    setUnreadCount(0);
+
+    if (isReadOnlyThread) {
+      if (el_footer) el_footer.style.display = 'none';
+      draftAttachments = [];
+      renderAttachmentChips();
+    } else {
+      if (el_footer) el_footer.style.display = '';
+      // Restore draft for this conversation
+      const input = document.getElementById('chatassist-input');
+      draftAttachments = loadDraftAttachments();
+      renderAttachmentChips();
+      if (input) { input.value = loadDraft(); autoResizeInput(); }
+    }
+
+    _updateHeaderButtons();
+
+    // Disconnect current WS before starting new one
+    _closeWsCleanly();
+
+    if (!isReadOnlyThread) {
+      await fetchReadState();
+    } else {
+      isReadStateFetched = true;
+    }
+
+    connectWebSocket();
+  }
+
+  function goBack() {
+    // Persist draft before leaving
+    const input = document.getElementById('chatassist-input');
+    if (input && !isReadOnlyThread) saveDraft(input.value);
+    if (!isReadOnlyThread) saveDraftAttachments(draftAttachments);
+
+    _closeWsCleanly();
+
+    if (widgetShowHistory) {
+      fetchConversationList().then(function (listData) {
+        convListHistory = (listData && listData.history) || [];
+        enterListView(listData);
+      });
+    } else {
+      enterStartView();
+    }
+  }
+
+  async function startNewConversation() {
+    // enterStartView() handles _closeWsCleanly() internally now.
+    enterStartView();
+  }
+
+  function openHistoryThread(convId) {
+    enterThreadView(convId, true);
+  }
+
+  function afterConversationClose() {
+    CONFIG.conversationId = 0;
+    if (widgetShowHistory) {
+      fetchConversationList().then(function (listData) {
+        if (listData && (listData.history.length > 0 || listData.active)) {
+          enterListView(listData);
+        } else {
+          enterStartView();
+        }
+      }).catch(function () { enterStartView(); });
+    } else {
+      enterStartView();
+    }
+  }
+
   // --- WebSocket Communication ---
 
   function connectWebSocket() {
     if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
     isConnecting = true;
-    const wsEndpoint = `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}`;
+    const wsEndpoint = (CONFIG.conversationId && CONFIG.conversationId > 0)
+      ? `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}/${CONFIG.conversationId}`
+      : `${CONFIG.wsUrl}/ws/chat/${CONFIG.websiteId}/${CONFIG.sessionId}`;
 
     try {
       ws = new WebSocket(wsEndpoint);
@@ -649,16 +1052,22 @@
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
         else showSystemMessage(data.message);
-        // When conversation is resolved by agent, show rating overlay
+        // When conversation is resolved by agent, show rating overlay (skip for inactivity closes)
         if (eventType === 'conversation_resolved') {
+          const closedBy = (dto && dto.closed_by) || (data && data.closed_by) || null;
           const convId = (dto && dto.conversation_id) || (data && data.conversation_id) || ratingConversationId;
-          showRatingOverlay(convId);
+          if (closedBy !== 'inactivity') {
+            showRatingOverlay(convId);
+          } else {
+            // Inactivity: visitor was offline anyway; just transition view
+            afterConversationClose();
+          }
         }
       } else {
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
         if (!isWidgetOpen() || document.hidden) {
-          notifyNewMessage('Support', null, data.message);
+          notifyNewMessage(null, null, data.message);
         } else if (isAtBottom) {
           markRead();
         }
@@ -675,7 +1084,7 @@
       const automationId = data.automation_id;
       appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
       if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage('Support', null, data.message);
+        notifyNewMessage(null, null, data.message);
       } else if (isAtBottom) {
         markRead();
       }
@@ -690,7 +1099,7 @@
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage('Support', null, data.message);
+        notifyNewMessage(null, null, data.message);
       } else if (isAtBottom) {
         markRead();
       }
@@ -747,6 +1156,15 @@
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
+    } else if (data.type === 'conversation_created') {
+      // Backend auto-created a conversation in response to our first message (conv_id=0 path).
+      // Update our local state without reconnecting the WS.
+      if (data.conversation_id) {
+        CONFIG.conversationId = data.conversation_id;
+        viewMode = 'thread';
+        isReadOnlyThread = false;
+        _updateHeaderButtons();
+      }
     }
   }
 
@@ -956,6 +1374,7 @@
     const wrap = document.getElementById('chatassist-attachments');
     if (!wrap) return;
     wrap.innerHTML = '';
+    saveDraftAttachments(draftAttachments);
     if (!draftAttachments.length) {
       wrap.style.display = 'none';
       return;
@@ -1020,7 +1439,10 @@
       throw new Error(detail || `Upload failed (${res.status})`);
     }
     const data = await res.json();
-    if (typeof data.conversation_id === 'number') CONFIG.conversationId = data.conversation_id || CONFIG.conversationId || 0;
+    // Only adopt the server's conversation_id if we don't have one yet (start-view).
+    if (!CONFIG.conversationId && typeof data.conversation_id === 'number') {
+      CONFIG.conversationId = data.conversation_id || 0;
+    }
     const absoluteUrl = getFullAssetUrl(data.url) || data.url;
     return {
       id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `att-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1502,6 +1924,8 @@
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
       autoResizeInput();
+      saveDraft('');
+      saveDraftAttachments([]);
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);
@@ -1525,6 +1949,8 @@
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       input.value = '';
       autoResizeInput();
+      saveDraft('');
+      saveDraftAttachments([]);
       draftAttachments = [];
       renderAttachmentChips();
       sendMessage(outgoing, meta);
@@ -1651,18 +2077,20 @@
             <div id="chatassist-popup-avatar-wrap" class="chatassist-popup-avatar-placeholder">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </div>
-            <div class="chatassist-popup-name" id="chatassist-popup-name">Support</div>
+            <div class="chatassist-popup-name" id="chatassist-popup-name">${CONFIG.popupName}</div>
             <button class="chatassist-popup-close" id="chatassist-popup-close" type="button">&times;</button>
           </div>
           <div class="chatassist-popup-body" id="chatassist-popup-body"></div>
           <button class="chatassist-popup-reply" id="chatassist-popup-reply" type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-            Reply
+            <svg width="1.2em" height="1.2em" viewBox="0 0 209 209" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" fill-rule="evenodd" clip-rule="evenodd" stroke-linecap="round" stroke-linejoin="round"><path d="M177.954,104.163l-110.066,-0m110.066,-0l-138.95,69.4l28.884,-69.4l-28.884,-69.584l138.95,69.584Z" style="fill:none;fill-rule:nonzero;stroke:currentColor;stroke-width:17.38px;"></path></svg>
+            ${CONFIG.popupButtonText}
           </button>
         </div>
         <div id="chatassist-bubble-pill">
           <span id="chatassist-bubble-text">${CONFIG.bubbleText}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" preserveAspectRatio="xMidYMid meet" width="24" height="24"><path d="M63.113,18.51v-.16C60.323,7.05,44.582,3,31.972,3S3.582,7,.792,18.5a66.22,66.22,0,0,0,0,20.46c1.18,4.74,5.05,8.63,11.36,11.41l-4,5A3.47,3.47,0,0,0,10.882,61a3.39,3.39,0,0,0,1.44-.31L26.862,54c1.79.18,3.49.27,5.07.27,11.04.04,28.41-4.04,31.18-15.43a60.33,60.33,0,0,0,0-20.33Z"></path></svg>
+          <span class="chatassist-bubble-icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" preserveAspectRatio="xMidYMid meet" width="24" height="24"><path d="M63.113,18.51v-.16C60.323,7.05,44.582,3,31.972,3S3.582,7,.792,18.5a66.22,66.22,0,0,0,0,20.46c1.18,4.74,5.05,8.63,11.36,11.41l-4,5A3.47,3.47,0,0,0,10.882,61a3.39,3.39,0,0,0,1.44-.31L26.862,54c1.79.18,3.49.27,5.07.27,11.04.04,28.41-4.04,31.18-15.43a60.33,60.33,0,0,0,0-20.33Z"></path></svg>
+          </span>
           <span id="chatassist-bubble-unread" style="display:none;"></span>
           <div id="chatassist-bubble-online-dot"></div>
         </div>
@@ -1718,6 +2146,9 @@
           </div>
         </div>
         <div id="chatassist-header">
+          <button id="chatassist-back" class="chatassist-header-btn" aria-label="Go back" style="display:none;" title="Go back">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
           <div class="chatassist-header-content">
             <div id="chatassist-header-icon" class="chatassist-header-avatars">
               <div id="chatassist-header-icon-inner"></div>
@@ -1728,7 +2159,7 @@
             </div>
           </div>
           <div class="chatassist-header-actions">
-            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat">
+            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat" title="Minimize">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">
@@ -1737,6 +2168,9 @@
           </div>
         </div>
         <div id="chatassist-messages"></div>
+        <div id="chatassist-conv-list" class="chatassist-conv-list" style="display:none;">
+          <div id="chatassist-conv-list-body" class="chatassist-conv-list-body"></div>
+        </div>
         <div id="chatassist-empty-state" class="chatassist-empty-state">
           <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <div>Send a message to start the conversation</div>
@@ -1766,7 +2200,7 @@
                 <span class="chatassist-attach-spinner" aria-hidden="true"></span>
               </button>
             ` : ``}
-            <textarea id="chatassist-input" placeholder="Type your message..." rows="1"></textarea>
+            <textarea id="chatassist-input" placeholder="Type your message..." rows="1" autocomplete="off"></textarea>
             <button id="chatassist-send" aria-label="Send message"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
             </div>
           </div>
@@ -1796,7 +2230,14 @@
       win.style.animation = 'none';
       win.offsetHeight; // force reflow
       win.style.animation = '';
-      input.focus();
+      const canFocusInput = input
+        && input.offsetParent !== null
+        && viewMode !== 'list'
+        && !isReadOnlyThread;
+      if (canFocusInput) {
+        input.focus();
+        autoResizeInput(); // re-measure now the window is visible
+      }
       isAtBottom = true;
       hideNewMsgIndicator();
       setTimeout(function () { scrollToBottom(false); }, 50);
@@ -1825,6 +2266,10 @@
       closeWidget(true);
     });
 
+    document.getElementById('chatassist-back').addEventListener('click', () => {
+      goBack();
+    });
+
     document.getElementById('chatassist-end').addEventListener('click', () => {
       showEndOverlay();
     });
@@ -1845,8 +2290,6 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      // Show rating overlay instead of immediately closing
-      showRatingOverlay(CONFIG.conversationId || null);
     });
 
     // Rating overlay buttons
@@ -1917,6 +2360,8 @@
 
     input.addEventListener('input', () => {
       autoResizeInput();
+      // Persist draft for the current conversation so it survives navigation
+      if (!isReadOnlyThread) saveDraft(input.value || '');
       const value = input.value || '';
       const hasText = value.trim().length > 0;
 
@@ -1972,10 +2417,15 @@
   function autoResizeInput() {
     const input = document.getElementById('chatassist-input');
     if (!input) return;
+    // Bail when the chat window is hidden: scrollHeight is 0 inside display:none,
+    // which would set inline height:0px and cause the cursor to render at the top
+    // corner of the textarea the next time the window is opened.
+    if (!isWidgetOpen()) return;
     input.style.height = 'auto';
     const maxH = 100; // max ~4 lines
-    input.style.height = Math.min(input.scrollHeight, maxH) + 'px';
-    input.style.overflowY = input.scrollHeight > maxH ? 'auto' : 'hidden';
+    const h = input.scrollHeight;
+    input.style.height = Math.min(h, maxH) + 'px';
+    input.style.overflowY = h > maxH ? 'auto' : 'hidden';
   }
 
   function updateEmptyState() {
@@ -2120,6 +2570,38 @@
     return id;
   }
 
+  function _applyThemeStyles() {
+    try {
+      const widget = document.getElementById('chatassist-widget');
+      const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
+      widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
+      const themeBackground = CONFIG.colorMode === 'gradient'
+        ? `linear-gradient(135deg, ${CONFIG.gradientStart} 0%, ${CONFIG.gradientEnd} 100%)`
+        : CONFIG.primaryColor;
+      const pillEl = document.getElementById('chatassist-bubble-pill');
+      if (pillEl) pillEl.style.background = themeBackground;
+      document.getElementById('chatassist-header').style.background = themeBackground;
+      document.getElementById('chatassist-send').style.background = themeBackground;
+      const replyBtn = document.getElementById('chatassist-popup-reply');
+      if (replyBtn) replyBtn.style.background = themeBackground;
+      const contactSubmit = document.querySelector('.chatassist-contact-overlay-submit');
+      if (contactSubmit) contactSubmit.style.background = themeBackground;
+      let themeStyle = document.getElementById('chatassist-theme-style');
+      if (!themeStyle) {
+        themeStyle = document.createElement('style');
+        themeStyle.id = 'chatassist-theme-style';
+        document.head.appendChild(themeStyle);
+      }
+      themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }
+.chatassist-prompt-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
+.chatassist-prompt-btn:hover:not(:disabled) { background: ${CONFIG.primaryColor} !important; color: #fff !important; }
+.chatassist-prompt-btn:active:not(:disabled) { background: ${CONFIG.primaryColor} !important; border-color: ${CONFIG.primaryColor} !important; color: #fff !important; }
+.chatassist-prompt-btn-selected { background: ${CONFIG.primaryColor} !important; color: #fff !important; border-color: ${CONFIG.primaryColor} !important; }
+.chatassist-conv-new-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
+.chatassist-conv-new-btn:hover { background: ${CONFIG.primaryColor} !important; color: #fff !important; }`;
+    } catch (e) { }
+  }
+
   async function init() {
     CONFIG.sessionId = getSessionId();
     try {
@@ -2129,42 +2611,107 @@
       hydrateEndChatDisabled();
 
       // Apply config styles immediately to avoid flicker/jump on reload.
-      try {
-        const widget = document.getElementById('chatassist-widget');
-        const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
-        widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
-        // Compute the CSS background value based on color mode
-        const themeBackground = CONFIG.colorMode === 'gradient'
-          ? `linear-gradient(135deg, ${CONFIG.gradientStart} 0%, ${CONFIG.gradientEnd} 100%)`
-          : CONFIG.primaryColor;
-        const pillEl = document.getElementById('chatassist-bubble-pill');
-        if (pillEl) pillEl.style.background = themeBackground;
-        document.getElementById('chatassist-header').style.background = themeBackground;
-        document.getElementById('chatassist-send').style.background = themeBackground;
-        // Update popup reply button color too
-        const replyBtn = document.getElementById('chatassist-popup-reply');
-        if (replyBtn) replyBtn.style.background = themeBackground;
-        // Update visitor message bubbles and contact overlay submit
-        const contactSubmit = document.querySelector('.chatassist-contact-overlay-submit');
-        if (contactSubmit) contactSubmit.style.background = themeBackground;
-        // Apply to visitor message CSS via a dynamic style element
-        let themeStyle = document.getElementById('chatassist-theme-style');
-        if (!themeStyle) {
-          themeStyle = document.createElement('style');
-          themeStyle.id = 'chatassist-theme-style';
-          document.head.appendChild(themeStyle);
+      _applyThemeStyles();
+
+      // Sync widget theme with host page theme changes.
+      // Detects `html.dark` / `body.dark` and `prefers-color-scheme` changes and reapplies theme.
+      (function setupHostThemeSync() {
+        function detectHostTheme() {
+          try {
+            const htmlDark = document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('dark');
+            const bodyDark = document.body && document.body.classList && document.body.classList.contains('dark');
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            return (htmlDark || bodyDark || prefersDark) ? 'dark' : 'light';
+          } catch (e) {
+            return CONFIG.theme || 'dark';
+          }
         }
-        themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }
-.chatassist-prompt-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
-.chatassist-prompt-btn:hover:not(:disabled) { background: ${CONFIG.primaryColor} !important; color: #fff !important; }
-.chatassist-prompt-btn:active:not(:disabled) { background: ${CONFIG.primaryColor} !important; border-color: ${CONFIG.primaryColor} !important; color: #fff !important; }
-.chatassist-prompt-btn-selected { background: ${CONFIG.primaryColor} !important; color: #fff !important; border-color: ${CONFIG.primaryColor} !important; }`;
-      } catch (e) { }
 
-      await fetchReadState();
+        function applyHostThemeIfDifferent() {
+          const hostTheme = detectHostTheme();
+          if (!hostTheme) return;
+          // Respect explicit dashboard setting: if the widget theme was
+          // explicitly set to 'dark' or 'light' on the website config, do
+          // not override it with the host page. Only apply host-page
+          // syncing when the widget theme is 'auto' / 'system' / empty.
+          try {
+            const current = String(CONFIG.theme || '').toLowerCase();
+            if (current === 'auto' || current === 'system' || current === '') {
+              if (current !== hostTheme) {
+                CONFIG.theme = hostTheme;
+                _applyThemeStyles();
+              }
+            }
+          } catch (e) {
+            // Fallback: do nothing if anything goes wrong
+          }
+        }
 
+        // Initial sync
+        try { applyHostThemeIfDifferent(); } catch (e) { }
+
+        // Observe class changes on <html> and <body>
+        try {
+          const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+              if (m.attributeName === 'class') { applyHostThemeIfDifferent(); break; }
+            }
+          });
+          if (document.documentElement) mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+          if (document.body) mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        } catch (e) { }
+
+        // Listen for prefers-color-scheme changes
+        try {
+          if (window.matchMedia) {
+            const mm = window.matchMedia('(prefers-color-scheme: dark)');
+            if (mm.addEventListener) mm.addEventListener('change', applyHostThemeIfDifferent);
+            else if (mm.addListener) mm.addListener(applyHostThemeIfDifferent);
+          }
+        } catch (e) { }
+
+        // Storage event (demo uses localStorage demo_dark_mode)
+        try {
+          window.addEventListener('storage', (e) => {
+            if (!e) return;
+            if (e.key === 'demo_dark_mode') applyHostThemeIfDifferent();
+          });
+        } catch (e) { }
+      })();
+
+      // Set popup avatar to headerIconUrl if configured.
+      if (CONFIG.headerIconUrl) {
+        const avatarWrap = document.getElementById('chatassist-popup-avatar-wrap');
+        if (avatarWrap) {
+          const url = getFullAssetUrl(CONFIG.headerIconUrl);
+          if (url) {
+            avatarWrap.className = 'chatassist-popup-avatar';
+            avatarWrap.innerHTML = '';
+            var img = document.createElement('img');
+            img.src = url;
+            img.alt = CONFIG.popupName;
+            img.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+            avatarWrap.appendChild(img);
+          }
+        }
+      }
+
+      // Fetch the conversation list to decide which view to show first.
+      const listData = await fetchConversationList();
+      convListHistory = (listData && listData.history) || [];
+      widgetShowHistory = Boolean(listData && listData.show_conversation_history);
+
+      if (listData && listData.active) {
+        // Resume the active (open) conversation directly.
+        await enterThreadView(listData.active.id, false);
+      } else {
+        // With no active conversation, always start a fresh thread entry flow.
+        // History remains available when the user navigates back from an active thread.
+        enterStartView();
+      }
+
+      armSoundOnFirstGesture();
       setupPageViewTracking();
-      connectWebSocket();
       connectPresenceWebSocket();
     } catch (e) {
       console.error('[ChatWidget] Init failed:', e);

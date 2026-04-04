@@ -1,5 +1,6 @@
 """Models package."""
 
+from app.models.organization import Organization
 from app.models.website import Website
 from app.models.user import User, UserRole
 from app.models.system_settings import SystemSettings
@@ -18,6 +19,8 @@ from app.models.push_subscription import PushSubscription
 from app.models.tag import Tag
 from app.models.automation import Automation
 from app.models.conversation_rating import ConversationRating
+from app.models.password_reset_token import PasswordResetToken
+from app.models.email_otp import EmailOTP
 
 __all__ = [
     "Website",
@@ -42,4 +45,7 @@ __all__ = [
     "Tag",
     "Automation",
     "ConversationRating",
+    "Organization",
+    "PasswordResetToken",
+    "EmailOTP",
 ]

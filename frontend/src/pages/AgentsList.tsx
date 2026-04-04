@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2 } from 'lucide-react'
+import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2, Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { addMessageHandler } from '@/services/agentSocket'
+import { useAppStore } from '@/store/appStore'
 
 interface Agent {
   id: number
@@ -22,6 +23,7 @@ interface Agent {
 type PanelMode = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; item: Agent }
 
 export default function AgentsList() {
+  const { user: currentUser } = useAppStore()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +34,12 @@ export default function AgentsList() {
   const [formName, setFormName] = useState('')
   const [formEmail, setFormEmail] = useState('')
   const [formPassword, setFormPassword] = useState('')
-  const [formRole, setFormRole] = useState<'system_manager' | 'manager' | 'agent'>('agent')
+  const [formRole, setFormRole] = useState<'owner' | 'manager' | 'agent' | 'system_manager'>('agent')
+
+  // Password reveal toggles
+  const [showCreatePassword, setShowCreatePassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -96,34 +103,44 @@ export default function AgentsList() {
 
   const roleLabel = (role: string) => {
     if (role === 'system_manager') return 'System Manager'
+    if (role === 'owner') return 'Owner'
     if (role === 'manager') return 'Manager'
     return 'Agent'
   }
 
   // ─── Panel helpers ────────────────────────────────────
+  const resetPasswordState = () => {
+    setFormPassword('')
+    setShowCreatePassword(false)
+    setShowNewPassword(false)
+  }
+
   const openCreate = () => {
     setFormName('')
     setFormEmail('')
-    setFormPassword('')
     setFormRole('agent')
     setAvatarPreview(null)
     setError(null)
+    resetPasswordState()
     setPanel({ kind: 'create' })
   }
 
   const openEdit = (item: Agent) => {
     setFormName(item.name)
     setFormEmail(item.email)
-    setFormPassword('')
-    setFormRole(item.role as 'system_manager' | 'manager' | 'agent')
+    setFormRole(item.role as 'owner' | 'manager' | 'agent' | 'system_manager')
     setAvatarPreview(getFullAvatarUrl(item.avatar_url))
     setError(null)
+    resetPasswordState()
     setPanel({ kind: 'edit', item })
   }
 
-  const closePanel = () => setPanel({ kind: 'closed' })
+  const closePanel = () => {
+    resetPasswordState()
+    setPanel({ kind: 'closed' })
+  }
 
-  // Close on Escape
+  // Escape closes panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && panel.kind !== 'closed') closePanel()
@@ -135,6 +152,7 @@ export default function AgentsList() {
   // ─── Inline status toggle ────────────────────────────
   const toggleActive = async (agent: Agent, isActive: boolean) => {
     if (agent.role === 'system_manager') return
+    if (agent.id === currentUser?.id) return
     setAgents(prev => prev.map(a => (a.id === agent.id ? { ...a, is_active: isActive } : a)))
     try {
       await apiRequest(`/users/${agent.id}/status`, {
@@ -240,10 +258,18 @@ export default function AgentsList() {
         }
 
         const emailChanged = (item.email || '').trim() !== email
-        if (emailChanged) {
+        const nameChanged = (item.name || '').trim() !== name
+        if (emailChanged || nameChanged) {
           await apiRequest(`/users/${item.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ email, ...(nameChanged && { name }) }),
+          })
+        }
+
+        if (formPassword.trim()) {
+          await apiRequest(`/users/${item.id}/password`, {
+            method: 'PATCH',
+            body: JSON.stringify({ new_password: formPassword.trim() }),
           })
         }
 
@@ -280,6 +306,35 @@ export default function AgentsList() {
     ? agents.find(a => a.id === panel.item.id) ?? panel.item
     : null
   const isAdminAccount = editItem?.role === 'system_manager'
+  const isOwnerAccount = editItem?.role === 'owner'
+  const currentRole = currentUser?.role
+  const ownerCount = agents.filter(a => a.role === 'owner').length
+  const isSelfAccount = Boolean(editItem && currentUser && editItem.id === currentUser.id)
+  const isLastRemainingOwner = Boolean(editItem && editItem.role === 'owner' && ownerCount <= 1)
+  const canDeleteByRole = Boolean(
+    editItem && (
+      currentRole === 'system_manager' ||
+      currentRole === 'owner' ||
+      (currentRole === 'manager' && editItem.role !== 'owner')
+    )
+  )
+  const canDelete = Boolean(
+    editItem &&
+    !isSelfAccount &&
+    // Never allow deleting a system manager from the UI
+    !isAdminAccount &&
+    !isLastRemainingOwner &&
+    canDeleteByRole
+  )
+  const deleteBlockedReason = isAdminAccount
+    ? 'Administrator account cannot be deleted.'
+    : isSelfAccount
+      ? 'Cannot delete your own account.'
+      : isLastRemainingOwner
+        ? 'Their should be atleast 1 owner'
+        : !canDeleteByRole
+          ? 'You do not have permission to delete this user.'
+          : null
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
@@ -345,6 +400,8 @@ export default function AgentsList() {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {filtered.map(agent => {
                   const isSysManager = agent.role === 'system_manager'
+                  const isOwner = agent.role === 'owner'
+                  const isSelf = agent.id === currentUser?.id
                   const avatar = getFullAvatarUrl(agent.avatar_url)
                   const initials = (agent.name || '?').trim().charAt(0).toUpperCase()
 
@@ -373,17 +430,19 @@ export default function AgentsList() {
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${isSysManager
                           ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                          : agent.role === 'manager'
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                            : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
+                          : agent.role === 'owner'
+                            ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                            : agent.role === 'manager'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                              : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400'
                           }`}>
                           {roleLabel(agent.role)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
-                          checked={isSysManager ? true : agent.is_active}
-                          disabled={isSysManager}
+                          checked={isSysManager || isOwner || isSelf ? true : agent.is_active}
+                          disabled={isSysManager || isOwner || isSelf}
                           onCheckedChange={checked => toggleActive(agent, checked)}
                         />
                       </td>
@@ -520,12 +579,8 @@ export default function AgentsList() {
                   onChange={e => setFormName(e.target.value)}
                   placeholder="John Doe"
                   className="dark:bg-gray-800 dark:border-gray-700"
-                  disabled={panel.kind === 'edit' && Boolean(editItem?.name?.trim())}
                   autoFocus={panel.kind === 'create'}
                 />
-                {panel.kind === 'edit' && Boolean(editItem?.name?.trim()) && (
-                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Name cannot be changed after creation.</p>
-                )}
               </div>
 
               {/* Email */}
@@ -543,21 +598,60 @@ export default function AgentsList() {
                 />
               </div>
 
-              {/* Password (create only) */}
-              {panel.kind === 'create' && (
+              {/* Password (create: required; edit: optional reset) */}
+              {panel.kind === 'create' ? (
                 <div>
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                     <Lock className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
                     Password
                   </label>
-                  <Input
-                    type="password"
-                    value={formPassword}
-                    onChange={e => setFormPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="dark:bg-gray-800 dark:border-gray-700"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showCreatePassword ? 'text' : 'password'}
+                      value={formPassword}
+                      onChange={e => setFormPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="pr-10 dark:bg-gray-800 dark:border-gray-700"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCreatePassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      tabIndex={-1}
+                    >
+                      {showCreatePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Minimum 6 characters.</p>
+                </div>
+              ) : (
+                <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Reset Password</p>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
+                      New Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={formPassword}
+                        onChange={e => setFormPassword(e.target.value)}
+                        placeholder="Leave blank to keep current password"
+                        className="pr-10 dark:bg-gray-800 dark:border-gray-700"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        tabIndex={-1}
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Min. 6 characters. Leave blank to keep the current password.</p>
+                  </div>
                 </div>
               )}
 
@@ -566,16 +660,17 @@ export default function AgentsList() {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Role</label>
                 <select
                   value={formRole}
-                  onChange={e => setFormRole(e.target.value as 'system_manager' | 'manager' | 'agent')}
+                  onChange={e => setFormRole(e.target.value as 'owner' | 'manager' | 'agent' | 'system_manager')}
                   className="w-full h-10 px-3 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-                  disabled={saving || isAdminAccount}
+                  disabled={saving || isAdminAccount || isOwnerAccount}
                 >
                   {isAdminAccount ? (
                     <option value="system_manager">System Manager – Full system access</option>
                   ) : (
                     <>
+                      <option value="owner">Owner – Full org control</option>
+                      <option value="manager">Manager – Full access except ownership</option>
                       <option value="agent">Agent – Chat handling only</option>
-                      <option value="manager">Manager – Full access except reset</option>
                     </>
                   )}
                 </select>
@@ -592,8 +687,9 @@ export default function AgentsList() {
                   <button
                     type="button"
                     onClick={handleDelete}
-                    disabled={deleting}
-                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                    disabled={deleting || !canDelete}
+                    title={deleteBlockedReason || undefined}
+                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     {deleting ? 'Deleting…' : 'Delete'}

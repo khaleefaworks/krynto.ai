@@ -60,7 +60,7 @@ async def agent_ws(
             websocket, 
             db, 
             token=token,
-            required_roles=[UserRole.AGENT, UserRole.SYSTEM_MANAGER, UserRole.MANAGER]
+            required_roles=[UserRole.AGENT, UserRole.SYSTEM_MANAGER, UserRole.MANAGER, UserRole.OWNER]
         )
         
         if not user:

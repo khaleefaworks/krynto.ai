@@ -115,10 +115,21 @@ def get_visitors(
     if website_id is not None and scope.website_ids is not None:
         if int(website_id) not in set(scope.website_ids):
             return []
+
+    # For OWNER/MANAGER (website_ids=None but org-scoped), restrict to org's websites
+    effective_website_ids = scope.website_ids
+    if effective_website_ids is None and scope.organization_id is not None:
+        from app.models.website import Website
+        effective_website_ids = [
+            row[0] for row in db.query(Website.id).filter(
+                Website.organization_id == scope.organization_id
+            ).all()
+        ]
+
     return customers_repo.list_active_visitors(
         db,
         website_id=website_id,
-        website_ids=None if scope.website_ids is None else scope.website_ids,
+        website_ids=effective_website_ids,
         recently_left_within_seconds=recently_left_within_seconds,
         limit=limit,
     )
@@ -136,6 +147,11 @@ def get_visitor_details(
     scope = compute_visibility_scope(db, user=current_user)
     if scope.website_ids is not None and int(website_id) not in set(scope.website_ids):
         raise HTTPException(status_code=403, detail="Visitor not available")
+    if scope.organization_id is not None:
+        from app.models.website import Website
+        w = db.query(Website.organization_id).filter(Website.id == website_id).first()
+        if w is None or w[0] != scope.organization_id:
+            raise HTTPException(status_code=403, detail="Visitor not available")
     return customers_repo.get_visitor_details(
         db,
         website_id=website_id,

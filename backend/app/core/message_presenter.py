@@ -152,4 +152,18 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
     if event_type == "bot_prompt_buttons" and raw_content and raw_content != display_content:
         result["raw_content"] = raw_content
 
+    if event_type == "conversation_resolved":
+        try:
+            from app.models.conversation import Conversation
+
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == getattr(msg, "conversation_id", None))
+                .first()
+            )
+            if conversation is not None:
+                result["closed_by"] = getattr(conversation, "closed_by", None)
+        except Exception:
+            pass
+
     return result

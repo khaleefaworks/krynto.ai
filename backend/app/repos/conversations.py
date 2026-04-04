@@ -12,10 +12,36 @@ def get_conversation_by_id(db: Session, conversation_id: int) -> Conversation | 
     return db.query(Conversation).filter_by(id=conversation_id).first()
 
 
+def get_conversation_by_short_id(db: Session, short_id: str) -> Conversation | None:
+    return db.query(Conversation).filter_by(short_id=short_id).first()
+
+
+def get_open_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
+    return (
+        db.query(Conversation)
+        .filter_by(
+            session_id=session_id,
+            website_id=website_id,
+            status=ConversationStatus.OPEN,
+        )
+        .order_by(Conversation.id.desc())
+        .first()
+    )
+
+
 def get_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
+    open_conversation = get_open_conversation_by_session(
+        db,
+        website_id=website_id,
+        session_id=session_id,
+    )
+    if open_conversation:
+        return open_conversation
+
     return (
         db.query(Conversation)
         .filter_by(session_id=session_id, website_id=website_id)
+        .order_by(Conversation.id.desc())
         .first()
     )
 
@@ -72,12 +98,15 @@ def active_conversations_with_counts_and_last_message(
         .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
         .filter(Conversation.status == ConversationStatus.OPEN)
         # Do not show "empty" conversations (e.g. welcome-only) in the agent inbox.
-        # A conversation is considered "active" for pickup only after the visitor has
-        # sent at least one message OR the agent initiated the conversation.
+        # A conversation is considered "active" when:
+        #   - the visitor has sent at least one message, OR
+        #   - an agent has sent a message, OR
+        #   - an agent has joined/been assigned to it
         .filter(
             sa.or_(
                 Conversation.last_visitor_message_at.isnot(None),
                 Conversation.last_agent_message_at.isnot(None),
+                Conversation.assigned_agent_id.isnot(None),
             )
         )
     )

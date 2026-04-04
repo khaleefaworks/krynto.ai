@@ -244,19 +244,6 @@ class AutomationService:
                 ],
             },
             {
-                "name": "Reopened event",
-                "trigger": "conversation_reopened",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "This conversation has been reopened.",
-                        "event_type": "conversation_reopened",
-                    }
-                ],
-            },
-            {
                 "name": "Visitor closed event",
                 "trigger": "visitor_closed_chat",
                 "enabled": True,
@@ -419,7 +406,7 @@ class AutomationService:
                 # Backward-compatibility: older UI versions stored some system events
                 # as `send_bot_message` with event_type == trigger (e.g. conversation_resolved).
                 # Those should be treated as system events, not bot messages.
-                if trigger in {"conversation_resolved", "conversation_reopened"}:
+                if trigger == "conversation_resolved":
                     event_type = action.get("event_type")
                     if isinstance(event_type, str) and event_type.strip() == trigger:
                         continue
@@ -516,7 +503,7 @@ class AutomationService:
                     pass
                 # Backward-compatibility: treat `send_bot_message` where event_type == trigger
                 # as a system event (this matches how older templates were saved).
-                elif action_type == "send_bot_message" and trigger in {"conversation_resolved", "conversation_reopened"}:
+                elif action_type == "send_bot_message" and trigger == "conversation_resolved":
                     event_type = action.get("event_type")
                     if not (isinstance(event_type, str) and event_type.strip() == trigger):
                         continue

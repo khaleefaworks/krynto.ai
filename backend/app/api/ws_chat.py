@@ -332,12 +332,14 @@ async def chat_ws(
         except Exception:
             pass
 
-        # Load history if a conversation already exists for this session.
+        # Load history only for an OPEN conversation tied to this session.
         # IMPORTANT: Do NOT create a new conversation just because the widget connected.
-        # We only create the conversation on the first visitor message.
+        # If all prior conversations are resolved, the generic widget route must
+        # start empty; resolved history is opened explicitly via the
+        # /ws/chat/{website_id}/{session_id}/{conversation_id} route.
         conversation = None
         try:
-            conversation = conversations_repo.get_conversation_by_session(
+            conversation = conversations_repo.get_open_conversation_by_session(
                 db,
                 website_id=website_id,
                 session_id=session_id,
@@ -608,7 +610,7 @@ async def chat_ws(
                 conversation = None
                 if conversation_id is None:
                     try:
-                        conversation = conversations_repo.get_conversation_by_session(
+                        conversation = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -698,7 +700,7 @@ async def chat_ws(
                 btn_conversation_id: int | None = registered_conversation_id
                 if btn_conversation_id is None:
                     try:
-                        btn_conv = conversations_repo.get_conversation_by_session(
+                        btn_conv = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -724,12 +726,11 @@ async def chat_ws(
                 continue
 
             # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
-            # IMPORTANT: this should NOT mark the conversation as resolved.
-            # The agent is the only one who should resolve conversations.
+            # This resolves the current open conversation and records closed_by=visitor.
             if message_type == "end_chat":
                 conversation = None
                 try:
-                    conversation = conversations_repo.get_conversation_by_session(
+                    conversation = conversations_repo.get_open_conversation_by_session(
                         db,
                         website_id=website_id,
                         session_id=session_id,
@@ -741,8 +742,6 @@ async def chat_ws(
                     # Nothing to close.
                     continue
 
-                # Trigger automation-driven bot/system messages for this event.
-                # This does not change conversation.status.
                 try:
                     await orchestrator.visitor_closed_chat(conversation_id=int(conversation.id))
                 except Exception:
@@ -756,6 +755,7 @@ async def chat_ws(
                             "type": "end_chat_ok",
                             "conversation_id": int(conversation.id),
                             "website_id": website_id,
+                            "closed_by": "visitor",
                         }
                     )
                 except Exception:
@@ -816,7 +816,7 @@ async def chat_ws(
                 conversation = None
                 if conversation_id is None:
                     try:
-                        conversation = conversations_repo.get_conversation_by_session(
+                        conversation = conversations_repo.get_open_conversation_by_session(
                             db,
                             website_id=website_id,
                             session_id=session_id,
@@ -913,26 +913,38 @@ async def chat_ws(
             # Conversation may have been created on first message; register for cleanup.
             if registered_conversation_id is None:
                 try:
-                    from app.models.conversation import Conversation
-
-                    conv = (
-                        db.query(Conversation)
-                        .filter_by(session_id=session_id, website_id=website_id)
-                        .first()
+                    conv = conversations_repo.get_open_conversation_by_session(
+                        db,
+                        website_id=website_id,
+                        session_id=session_id,
                     )
                     if conv:
                         registered_conversation_id = conv.id
+                        ChatService.register_visitor(conv.id, websocket)
+
+                        # Title is only set from the offline contact form (visitor_name).
+                        # We no longer auto-generate titles from the first visitor message.
+
+                        # Notify the widget so it can store the new conversation_id.
+                        try:
+                            await websocket.send_json(
+                                {
+                                    "type": "conversation_created",
+                                    "conversation_id": conv.id,
+                                }
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
             # Store visitor contact info if provided (conversation exists now after first message)
             if visitor_name or visitor_email:
                 try:
-                    from app.models.conversation import Conversation
-                    conv = (
-                        db.query(Conversation)
-                        .filter_by(session_id=session_id, website_id=website_id)
-                        .first()
+                    conv = conversations_repo.get_open_conversation_by_session(
+                        db,
+                        website_id=website_id,
+                        session_id=session_id,
                     )
                     if conv:
                         changed = False
@@ -1023,6 +1035,277 @@ async def chat_ws(
             pass
         db.close()
 
+        try:
+            structlog.contextvars.clear_contextvars()
+        except Exception:
+            pass
+
+
+@router.websocket("/ws/chat/{website_id}/{session_id}/{conversation_id}")
+async def chat_ws_with_conversation(
+    websocket: WebSocket,
+    website_id: int,
+    session_id: str,
+    conversation_id: int,
+):
+    """WebSocket route with an explicit conversation_id.
+
+    Used by the widget when reconnecting to a known conversation (e.g. from the
+    conversation list view). For OPEN conversations, messages are processed
+    normally. For RESOLVED conversations, only the history is delivered and
+    further visitor messages are rejected with an informational notice.
+    """
+    connection_id = str(uuid.uuid4())
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        connection_id=connection_id,
+        ws_kind="chat",
+        website_id=website_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+    )
+
+    await websocket.accept()
+    try:
+        ws_connect(kind="chat")
+    except Exception:
+        pass
+
+    db = SessionLocal()
+    try:
+        # Validate website exists.
+        from app.models.website import Website
+        from app.models.conversation import Conversation, ConversationStatus
+
+        website = db.query(Website).filter_by(id=website_id).first()
+        if not website:
+            await websocket.close(code=1008, reason=_ws_close_reason("Website not found"))
+            return
+
+        # Validate conversation belongs to this website.
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.website_id == website_id,
+        ).first()
+        if not conv:
+            await websocket.close(code=1008, reason=_ws_close_reason("Conversation not found"))
+            return
+
+        # Register visitor presence only for OPEN conversations.
+        is_open = conv.status not in (ConversationStatus.RESOLVED,)
+        if is_open and str(conv.session_id) == str(session_id):
+            ChatService.register_visitor(conv.id, websocket)
+            ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+
+        # Send conversation history.
+        try:
+            messages = messages_repo.list_messages_for_conversation(db, conv.id)
+            await websocket.send_json(
+                {
+                    "type": "history",
+                    "conversation_id": conv.id,
+                    "status": conv.status.value if hasattr(conv.status, "value") else str(conv.status),
+                    "messages": [serialize_message(db, m) for m in messages],
+                }
+            )
+        except Exception as e:
+            logger.error("conversation_history_failed", conversation_id=conversation_id, error=str(e))
+
+        db.close()
+        db = SessionLocal()
+        orchestrator = ConversationOrchestrator(db)
+        agent_service = AgentService(db)
+
+        # For resolved conversations only deliver history; reject further messages.
+        if not is_open:
+            try:
+                await websocket.send_json(
+                    {"type": "resolved", "message": "This conversation is closed."}
+                )
+            except Exception:
+                pass
+            # Hold the socket open until the client disconnects.
+            try:
+                while True:
+                    await websocket.receive_text()
+                    await websocket.send_json(
+                        {"type": "error", "message": "This conversation is closed. Start a new one."}
+                    )
+            except WebSocketDisconnect:
+                pass
+            return
+
+        # OPEN conversation — process messages the same as the main route.
+        try:
+            while True:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+                message_type = payload.get("type")
+
+                if message_type == "typing":
+                    is_typing = bool(payload.get("is_typing"))
+                    event = {
+                        "type": "visitor_typing",
+                        "conversation_id": conv.id,
+                        "website_id": website_id,
+                        "session_id": session_id,
+                        "is_typing": is_typing,
+                    }
+                    if conv.assigned_agent_id:
+                        await agent_service.send_to_agent(conv.assigned_agent_id, event)
+                    else:
+                        await agent_service.broadcast_to_active_agents(
+                            website_id=website_id, message_data=event, include_global=True
+                        )
+                    continue
+
+                if message_type == "heartbeat":
+                    continue
+
+                if message_type == "page_view":
+                    try:
+                        page_views_repo.create_page_view(
+                            db,
+                            website_id=website_id,
+                            session_id=session_id,
+                            conversation_id=conv.id,
+                            url=str(payload.get("url", ""))[:2048],
+                            title=str(payload.get("title", ""))[:500] if payload.get("title") else None,
+                            referrer=str(payload.get("referrer", ""))[:2048] if payload.get("referrer") else None,
+                            device_info=str(payload.get("device_info", ""))[:255] if payload.get("device_info") else None,
+                            browser_info=str(payload.get("browser_info", ""))[:255] if payload.get("browser_info") else None,
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+                if message_type == "end_chat":
+                    try:
+                        db.expire_all()
+                        fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
+                        if fresh_conv and fresh_conv.status == ConversationStatus.OPEN:
+                            await orchestrator.visitor_closed_chat(conversation_id=int(conv.id))
+                            await websocket.send_json(
+                                {
+                                    "type": "end_chat_ok",
+                                    "conversation_id": int(conv.id),
+                                    "website_id": website_id,
+                                    "closed_by": "visitor",
+                                }
+                            )
+                    except Exception:
+                        pass
+                    continue
+
+                if message_type == "bot_button_click":
+                    btn_automation_id = payload.get("automation_id")
+                    btn_button_index = payload.get("button_index")
+                    if btn_automation_id is not None and btn_button_index is not None:
+                        try:
+                            await orchestrator.handle_bot_button_click(
+                                conversation_id=int(conv.id),
+                                automation_id=int(btn_automation_id),
+                                button_index=int(btn_button_index),
+                                visitor_ws=websocket,
+                            )
+                        except Exception as e:
+                            logger.warning("bot_button_click_failed", error=str(e))
+                    continue
+
+                if message_type == "submit_rating":
+                    rating_val = payload.get("rating")
+                    if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
+                        try:
+                            from app.models.conversation_rating import ConversationRating
+
+                            existing = (
+                                db.query(ConversationRating)
+                                .filter(ConversationRating.conversation_id == conv.id)
+                                .first()
+                            )
+                            if existing:
+                                existing.rating = rating_val
+                                db.commit()
+                            else:
+                                new_rating = ConversationRating(
+                                    conversation_id=conv.id,
+                                    rating=rating_val,
+                                    session_id=session_id,
+                                )
+                                db.add(new_rating)
+                                db.commit()
+                        except Exception as e:
+                            logger.warning("rating_submit_failed", error=str(e))
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                    continue
+
+                user_message = payload.get("message")
+                if not user_message:
+                    continue
+
+                exceeded = False
+                try:
+                    exceeded = await is_chat_rate_limited(
+                        website_id=website_id,
+                        session_id=session_id,
+                        limit=settings.RATE_LIMIT_CHAT_MESSAGE,
+                    )
+                except Exception:
+                    pass
+                if exceeded:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Rate limit exceeded. Please slow down."}
+                    )
+                    continue
+
+                response = await orchestrator.handle_visitor_message(
+                    website_id=website_id,
+                    session_id=session_id,
+                    message=user_message,
+                    visitor_ws=websocket,
+                    visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
+                )
+                if response:
+                    await websocket.send_json({"type": "system", "message": response})
+
+        except WebSocketDisconnect:
+            pass
+
+    except Exception as e:
+        logger.error("chat_ws_with_conversation_error", error=str(e), exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=_ws_close_reason(str(e)))
+        except Exception:
+            pass
+    finally:
+        try:
+            ws_disconnect(kind="chat")
+        except Exception:
+            pass
+        try:
+            ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+        try:
+            ChatService.unregister_session_socket(websocket)
+        except Exception:
+            pass
+        # Best-effort: schedule visitor_left_website event for OPEN conversations.
+        try:
+            if is_open and conv and conv.id not in _visitor_left_scheduled:
+                _visitor_left_scheduled.add(conv.id)
+                asyncio.create_task(
+                    _send_delayed_visitor_left_event(
+                        conversation_id=int(conv.id),
+                        delay_seconds=VISITOR_LEFT_DELAY_SECONDS,
+                    )
+                )
+        except Exception:
+            pass
+        db.close()
         try:
             structlog.contextvars.clear_contextvars()
         except Exception:

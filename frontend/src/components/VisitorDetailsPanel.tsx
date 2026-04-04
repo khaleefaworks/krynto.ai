@@ -22,9 +22,20 @@ function shortSessionId(sessionId: string | null | undefined): string {
   return compact.length >= 12 ? compact.slice(-12) : raw
 }
 
+function visitorDisplayName(conv: { visitor_name?: string | null; title?: string | null; short_id?: string | null; session_id?: string | null }): string {
+  const name = String(conv.visitor_name || '').trim()
+  if (name) return name
+  const title = String(conv.title || '').trim()
+  if (title) return title
+  const shortId = String(conv.short_id || '').trim()
+  if (shortId) return shortId
+  return shortSessionId(conv.session_id)
+}
+
 interface VisitorDetailsPanelProps {
   conversation: {
     id: number
+    short_id?: string
     session_id: string
     visitor_name?: string
     visitor_email?: string
@@ -35,6 +46,7 @@ interface VisitorDetailsPanelProps {
     last_seen_at?: string
     visitor_avatar_color?: string | null
     created_at?: string
+    title?: string | null
   }
   notes?: Array<{
     id: number
@@ -132,10 +144,10 @@ export default function VisitorDetailsPanel({
             bgColor={conversation.visitor_avatar_color}
             className="w-16 h-16 shadow-lg mb-3"
             iconClassName="w-16 h-16"
-            title={conversation.visitor_name || shortSessionId(conversation.session_id)}
+            title={visitorDisplayName(conversation)}
           />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-            {conversation.visitor_name || shortSessionId(conversation.session_id)}
+            {visitorDisplayName(conversation)}
           </h3>
         </div>
       </div>

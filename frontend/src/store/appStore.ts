@@ -1,8 +1,8 @@
 import { create } from 'zustand'
-import type { User, Conversation, Message } from '../types/index'
+import type { User, Conversation, Message, Organization } from '../types/index'
 
 // Re-export types for convenience
-export type { User, Conversation, Message }
+export type { User, Conversation, Message, Organization }
 
 interface AppState {
   // Auth
@@ -10,6 +10,10 @@ interface AppState {
   token: string | null
   setUser: (user: User | null) => void
   setToken: (token: string | null) => void
+
+  // Organization (populated for non-super-admin users)
+  organization: Organization | null
+  setOrganization: (org: Organization | null) => void
 
   // Chats
   activeChats: Conversation[]
@@ -73,6 +77,10 @@ export const useAppStore = create<AppState>((set) => ({
   token: null,
   setUser: (user) => set({ user }),
   setToken: (token) => set({ token }),
+
+  // Organization
+  organization: null,
+  setOrganization: (org) => set({ organization: org }),
 
   // Chats
   activeChats: [],

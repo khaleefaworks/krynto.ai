@@ -1,9 +1,19 @@
 import enum
+import secrets
+import string
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Enum as SQLEnum, DateTime, Text
 from sqlalchemy.orm import relationship
 
 from app.models.base import TimestampMixin
 from app.core.database import Base
+
+_SHORT_ID_ALPHABET = string.ascii_letters + string.digits  # a-zA-Z0-9 (62 chars)
+_SHORT_ID_LENGTH = 8  # 62^8 ≈ 218 trillion combinations
+
+
+def generate_short_id() -> str:
+    """Generate a cryptographically random URL-safe short identifier."""
+    return ''.join(secrets.choice(_SHORT_ID_ALPHABET) for _ in range(_SHORT_ID_LENGTH))
 
 
 class ConversationStatus(str, enum.Enum):
@@ -16,6 +26,7 @@ class Conversation(Base, TimestampMixin):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True)
+    short_id = Column(String(16), unique=True, nullable=False, default=generate_short_id, index=True)
     website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
     session_id = Column(String(255), nullable=False)
     status = Column(
@@ -48,6 +59,12 @@ class Conversation(Base, TimestampMixin):
 
     # Read state for visitor
     visitor_last_read_at = Column(DateTime(timezone=True), nullable=True)
+
+    # How the conversation was closed: 'agent' | 'visitor' | 'inactivity' | NULL (still open)
+    closed_by = Column(String(20), nullable=True)
+
+    # Auto-generated title from the first visitor message (up to 60 chars)
+    title = Column(String(120), nullable=True)
 
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")

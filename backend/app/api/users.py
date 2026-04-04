@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 import os
 import uuid
@@ -9,8 +9,10 @@ from pathlib import Path
 
 from app.core.database import get_db
 from app.core.uploads import get_uploads_root, uploads_url_to_path, validate_image_upload
-from app.api.deps import require_authenticated_user, require_admin
+from app.core.security import get_password_hash, verify_password
+from app.api.deps import require_authenticated_user, require_admin, get_org_scope
 from app.models.user import User, UserRole
+from app.models.conversation import Conversation, ConversationStatus
 from app.services.presence_service import PresenceService
 from app.services.agent_service import AgentService
 from app.services.agent_resolver import is_agent_eligible
@@ -25,9 +27,12 @@ def list_users(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """List all users (admin only)."""
-
-    users = db.query(User).all()
+    """List all users (admin only). Scoped to the calling user's organization."""
+    org_id = get_org_scope(_admin)
+    q = db.query(User).filter(User.is_deleted == False)
+    if org_id is not None:
+        q = q.filter(User.organization_id == org_id)
+    users = q.all()
     connected_ids = users_repo.recently_heartbeat_user_ids(
         db, ttl_seconds=AgentService.heartbeat_ttl_seconds,
     )
@@ -66,9 +71,14 @@ def update_user(
     - Name can only be set once: allowed only if currently empty
     """
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.is_deleted == False).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Org boundary: non-superadmin admins can only update users in their own org.
+    org_id = get_org_scope(_admin)
+    if org_id is not None and user.organization_id != org_id:
+        raise HTTPException(status_code=403, detail="User not found")
 
     changed = False
 
@@ -90,12 +100,9 @@ def update_user(
         if not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty")
 
-        current_name = str(getattr(user, "name", "") or "").strip()
-        if current_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be changed after creation")
-
-        user.name = name
-        changed = True
+        if user.name != name:
+            user.name = name
+            changed = True
 
     if changed:
         db.commit()
@@ -370,6 +377,20 @@ def update_user_status(
             detail="Administrator account cannot be disabled",
         )
 
+    # Owner account must not be disabled.
+    if user.role == UserRole.OWNER and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner account cannot be disabled",
+        )
+
+    # Prevent users from disabling their own account.
+    if user.id == _admin.id and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot disable your own account",
+        )
+
     user.is_active = payload.is_active
     db.commit()
     db.refresh(user)
@@ -413,6 +434,13 @@ def update_user_role(
             detail="User not found"
         )
 
+    # Owner account role must not be changed.
+    if user.role == UserRole.OWNER and payload.role != UserRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner account role cannot be changed",
+        )
+
     # System Manager is a bootstrap-only Administrator account.
     # Do not allow changing its role (including demotion).
     if user.role == UserRole.SYSTEM_MANAGER and payload.role != UserRole.SYSTEM_MANAGER:
@@ -449,6 +477,18 @@ def update_user_role(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators can modify administrator accounts"
+            )
+        # Cannot grant OWNER role — only an OWNER or SYSTEM_MANAGER can do that
+        if payload.role == UserRole.OWNER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners can grant Owner role",
+            )
+        # Cannot modify OWNER accounts at all
+        if user.role == UserRole.OWNER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners can modify Owner accounts",
             )
     
     # Prevent removing the last administrator
@@ -508,26 +548,182 @@ def delete_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own account"
         )
-    
-    # Managers cannot delete administrators
+    # Managers cannot delete administrators (SYSTEM_MANAGER)
     if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can delete administrator accounts"
         )
-    
+
     # Administrator / system manager must always stay enabled.
     if user.role == UserRole.SYSTEM_MANAGER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Administrator account cannot be disabled",
+            detail="Administrator account cannot be deleted",
         )
+
+    # Owner deletion rules: allow deletion by SYSTEM_MANAGER or another OWNER in the same org,
+    # but prevent deleting the last active owner for the organization.
+    if user.role == UserRole.OWNER:
+        # Only SYSTEM_MANAGER or an OWNER in the same org may delete an Owner
+        if not (
+            current_admin.role == UserRole.SYSTEM_MANAGER
+            or (current_admin.role == UserRole.OWNER and current_admin.organization_id == user.organization_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Owners or administrators can delete Owner accounts",
+            )
+
+        # Prevent deleting the last active owner in the organisation
+        org_id = user.organization_id
+        owner_count = db.query(User).filter(
+            User.organization_id == org_id,
+            User.role == UserRole.OWNER,
+            User.is_deleted == False,
+        ).count()
+        if owner_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Their should be atleast 1 owner",
+            )
     
-    # Soft delete
+    # Soft delete: mark as deleted and deactivate
+    user.is_deleted = True
     user.is_active = False
+    user.is_available = False
+
+    # Unassign any open conversations still held by this agent so they
+    # can be re-assigned without the deleted user blocking the queue.
+    db.query(Conversation).filter(
+        Conversation.assigned_agent_id == user_id,
+        Conversation.status == ConversationStatus.OPEN,
+    ).update({"assigned_agent_id": None}, synchronize_session=False)
+
     db.commit()
     
     return {
         "message": "User deleted successfully",
         "user_id": user_id
     }
+
+@router.post("/{user_id}/undelete")
+def undelete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin)
+):
+    """
+    Restore a soft-deleted user (admin only).
+    Sets `is_deleted` to False and re-enables the account (`is_active` = True).
+    Scoped to the calling admin's organization (non-system admins).
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Org boundary: non-superadmin admins can only act within their org.
+    org_id = get_org_scope(current_admin)
+    if org_id is not None and user.organization_id != org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not found")
+
+    # Prevent modifying platform administrator via this endpoint.
+    if user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Administrator account cannot be modified")
+
+    # Managers cannot act on administrator accounts.
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can modify administrator accounts")
+
+    user.is_deleted = False
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User restored successfully",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, "value") else user.role,
+            "is_active": user.is_active,
+            "avatar_url": user.avatar_url,
+        },
+    }
+
+
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
+@router.post("/me/verify-password")
+def verify_my_password(
+    payload: VerifyPasswordRequest,
+    current_user: User = Depends(require_authenticated_user),
+):
+    """
+    Check whether the calling user's own password is correct.
+    Always returns HTTP 200 with { valid: bool } — never a 4xx — so the
+    client can give inline feedback without confusing error states.
+    """
+    valid = verify_password(payload.password, current_user.password_hash)
+    return {"valid": valid}
+
+
+class SelfPasswordChangeRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
+
+
+@router.patch("/me/password")
+def change_my_password(
+    payload: SelfPasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """
+    Self-service password change — any authenticated user can change their own password.
+    Requires the current password for re-verification.
+    """
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    current_user.password_hash = get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
+    return {"message": "Password changed successfully"}
+
+
+class PasswordChangeRequest(BaseModel):
+    new_password: str = Field(..., min_length=6)
+
+
+@router.patch("/{user_id}/password")
+def change_user_password(
+    user_id: int,
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin),
+):
+    """
+    Set a new password for any user (admin only).
+    Admins are already authenticated via JWT — no inline re-auth required.
+    System managers can change any password.
+    Managers can change passwords for agents/managers only.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managers cannot change an administrator's password",
+        )
+
+    user.password_hash = get_password_hash(payload.new_password)
+    db.commit()
+    return {"message": "Password updated successfully"}
