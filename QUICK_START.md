@@ -1,154 +1,131 @@
-# Quick Start - Run All these Services
+# Quick Start — AI ChatAssist
 
-The  file explains how to get this  project runs 
+Step-by-step guide to run the **backend**, **frontend dashboard**, and **chat widget** locally for development.
 
-## Pre-requirements  (install system packages)
-Install system dependencies (example for Ubuntu):
-```bash
-sudo apt update
-sudo apt install -y git build-essential python3 python3-venv python3-pip nodejs npm postgresql postgresql-contrib
-```
-- Install Node.js .
-- Make sure PostgreSQL is running and you can create a database/user.
+---
 
+## Table of Contents
 
-## Now Clone repository
+1. [Prerequisites](#1-prerequisites)
+2. [Clone the Repository](#2-clone-the-repository)
+3. [Database Setup (PostgreSQL)](#3-database-setup-postgresql)
+4. [Backend Setup](#4-backend-setup)
+5. [Frontend Dashboard](#5-frontend-dashboard)
+6. [Widget Demo](#6-widget-demo)
+7. [Optional Services](#7-optional-services)
+   - [Push Notifications (VAPID)](#71-push-notifications-vapid)
+   - [Email via Resend](#72-email-via-resend)
+   - [Redis](#73-redis)
+8. [Health Checks](#8-health-checks)
+9. [Running Tests](#9-running-tests)
+10. [Reset Application (Development Only)](#10-reset-application-development-only)
+11. [Troubleshooting](#11-troubleshooting)
 
-```bash
-git clone <your-repo-url> 
+---
 
-change the directory to ~/Applications/ai-chatassist
-```
+## 1. Prerequisites
 
-
-
-## For the Backend - First create the virtualenv & install
-
-```bash
-# Quick Start — Run All Services (new machine)
-
-This guide shows a minimal, reproducible workflow to run the backend, frontend, and widget locally for development. It follows the repository conventions (backend uses `backend/.env`).
-
-## 1. Prerequisites (Ubuntu/Debian)
-Install system dependencies (example):
+Install system dependencies (Ubuntu/Debian):
 
 ```bash
 sudo apt update
 sudo apt install -y git build-essential python3 python3-venv python3-pip nodejs npm postgresql postgresql-contrib
 ```
 
-- Recommend Node LTS (use `nvm` to manage Node versions).
-- PostgreSQL is required for development. Redis is optional (see Redis section).
+> **Tip:** Use [nvm](https://github.com/nvm-sh/nvm) to install and manage Node.js (LTS recommended).
 
-## 2. Clone repository
-# Quick Start — Run All Services
 
-This guide shows a minimal, reproducible workflow to run the backend, frontend, and widget locally for development. It follows the repository conventions (backend loads `backend/.env`).
-
-## Prerequisites (Ubuntu/Debian)
-
-Install system dependencies (example):
+Make sure PostgreSQL is running:
 
 ```bash
-sudo apt update
-sudo apt install -y git build-essential python3 python3-venv python3-pip nodejs npm postgresql postgresql-contrib
+sudo systemctl enable --now postgresql
 ```
 
-- Recommend Node LTS (use `nvm` to manage Node versions).
-- PostgreSQL is required for development. Redis is optional (see Redis section).
+---
 
-## Clone repository
+## 2. Clone the Repository
 
 ```bash
 git clone <your-repo-url> ~/Applications/ai-chatassist
 cd ~/Applications/ai-chatassist
 ```
 
-## Backend — virtualenv & dependencies
+---
+
+## 3. Database Setup (PostgreSQL)
+
+Create a Postgres user and database:
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-# Prefer the locked deps when available
-pip install -r requirements.lock.txt || pip install -r requirements.txt
-```
-
-### Configure environment
-
-Copy and edit the example env file:
-
-```bash
-cp .env.example .env
-# Edit backend/.env and set at minimum: DATABASE_URL, SECRET_KEY
-```
-
-Common env keys (examples):
-
-```env
-ENV=development
-DATABASE_URL=postgresql+psycopg2://chatassist:chatassist_pass@localhost:5432/chatassist
-SECRET_KEY=dev-only-change-me
-PUBLIC_BASE_URL=http://localhost:8000
-# Optional Redis (see Redis section)
-REDIS_URL=redis://127.0.0.1:6379/0
-# Web Push (VAPID)
-VAPID_PUBLIC_KEY=your-vapid-public-key
-VAPID_PRIVATE_KEY=your-vapid-private-key
-VAPID_SUBJECT=mailto:dev@localhost
-# Email (Resend)
-RESEND_API_KEY=your-resend-api-key
-FROM_EMAIL="AI ChatAssist <onboarding@resend.dev>"
-FRONTEND_URL=http://localhost:5173
-RESEND_OVERRIDE_TO_EMAIL=your-email@example.com
-```
-
-Notes:
-- The app reads `backend/.env` via `app/core/config.py`.
-- Use `REDIS_URL` only if you need Redis-backed features (rate-limiting, multi-worker pub/sub).
-
-## Database setup
-
-Create a Postgres role and database (example matching `.env.example`):
-
-```bash
-sudo -u postgres createuser -P chatassist   # choose a secure password
+sudo -u postgres createuser -P chatassist       # enter a password when prompted
 sudo -u postgres createdb -O chatassist chatassist
 ```
 
 Verify connectivity:
 
 ```bash
-psql "postgresql://chatassist:your_password@localhost:5432/chatassist" -c "SELECT 1;"
+psql "postgresql://chatassist:<your_password>@localhost:5432/chatassist" -c "SELECT 1;"
 ```
 
-## Run migrations & start backend
+---
 
-Option A (recommended — auto-migrate on start):
+## 4. Backend Setup
+
+### 4.1 Create virtualenv and install dependencies
 
 ```bash
 cd backend
+python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.lock.txt || pip install -r requirements.txt
+```
+
+### 4.2 Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Open `backend/.env` and set **at minimum** these values:
+
+| Variable | Example | Required? |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+psycopg2://chatassist:<password>@localhost:5432/chatassist` | **Yes** |
+| `SECRET_KEY` | `dev-only-change-me` | **Yes** |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | **Yes** |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | No (see [Redis](#73-redis)) |
+| `VAPID_PUBLIC_KEY` | *(generated — see section 7)* | No |
+| `VAPID_PRIVATE_KEY` | *(generated — see section 7)* | No |
+| `RESEND_API_KEY` | *(from Resend dashboard)* | No (see [Email](#72-email-via-resend)) |
+
+> The app reads `backend/.env` via `app/core/config.py`.
+> See `backend/.env.example` for the full list of available keys and their defaults.
+
+### 4.3 Run migrations and start the server
+
+**Option A — Auto-migrate on start (recommended):**
+
+```bash
 RUN_MIGRATIONS=1 ./start_server.sh
 ```
 
-Option B (manual migrations):
+**Option B — Manual migrations then start:**
 
 ```bash
-cd backend
-source .venv/bin/activate
 alembic upgrade head
 ./start_server.sh
 ```
 
-`start_server.sh` performs preflight checks (venv, DB connectivity) and starts Uvicorn on `:8000`.
+`start_server.sh` performs preflight checks (virtualenv, DB connectivity) and starts Uvicorn on port **8000**.
 
-API docs: http://localhost:8000/docs
+> API docs: http://localhost:8000/docs
 
-## Frontend (dashboard)
+---
 
-In a new terminal:
+## 5. Frontend Dashboard
+
+Open a **new terminal**:
 
 ```bash
 cd frontend
@@ -156,36 +133,52 @@ npm ci
 npm run dev
 ```
 
-Open: http://localhost:5173 
-## Widget demo (static)
+> Dashboard: http://localhost:5173
+
+---
+
+## 6. Widget Demo
+
+Open a **new terminal**:
 
 ```bash
 cd widget
 python3 -m http.server 8080
 ```
 
-Open: http://localhost:8080/demo.html
+> Widget demo: http://localhost:8080/demo.html
 
-## VAPID / Push notifications (development)
+---
 
-Generate keys from the frontend folder and paste into `backend/.env`:
+## 7. Optional Services
+
+These services are **not required** to run the app locally but enable additional features.
+
+### 7.1 Push Notifications (VAPID)
+
+Generate VAPID keys:
 
 ```bash
 cd frontend
 npx --yes web-push generate-vapid-keys
 ```
 
-Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in `backend/.env`, then restart the backend.
+Copy the output into `backend/.env`:
 
-## Email (Resend) — development notes
+```env
+VAPID_PUBLIC_KEY=<generated-public-key>
+VAPID_PRIVATE_KEY=<generated-private-key>
+VAPID_SUBJECT=mailto:dev@localhost
+```
 
-This app uses Resend for transactional email (OTP, password reset, welcome).
+Restart the backend after updating.
+
+### 7.2 Email via Resend
+
+The app uses [Resend](https://resend.com) for transactional email (OTP, password reset, welcome).
 
 1. Sign up at https://resend.com and create an API key.
-2. Add `RESEND_API_KEY`, `FROM_EMAIL`, and `FRONTEND_URL` to `backend/.env`.
-3. If using Resend's shared test domain (`onboarding@resend.dev`), set `RESEND_OVERRIDE_TO_EMAIL` to your verified Resend address to redirect all outgoing mail during development.
-
-Example env (in `.env.example`):
+2. Add these to `backend/.env`:
 
 ```env
 RESEND_API_KEY=your-resend-api-key
@@ -194,86 +187,103 @@ FRONTEND_URL=http://localhost:5173
 RESEND_OVERRIDE_TO_EMAIL=your-email@example.com
 ```
 
-The `EmailService` wrapper uses these vars and honors `RESEND_OVERRIDE_TO_EMAIL` (see `app/services/email_service.py`).
+> **Development note:** When using Resend's shared test domain (`onboarding@resend.dev`), set `RESEND_OVERRIDE_TO_EMAIL` to your verified Resend email. This redirects all outgoing mail to that address. Remove it once you verify a custom domain.
 
-## Redis (optional — development)
+See `app/services/email_service.py` for implementation details.
 
-When `REDIS_URL` is configured the app uses Redis for websocket rate-limiting and multi-worker pub/sub. If unset, the app falls back to in-memory behavior appropriate for single-process local dev.
+### 7.3 Redis
 
-Install & run Redis (Ubuntu):
+Redis enables WebSocket rate-limiting and multi-worker pub/sub. Without it, the app falls back to in-memory mode (fine for single-process local dev).
+
+**Install via apt:**
 
 ```bash
-sudo apt update
 sudo apt install -y redis-server
 sudo systemctl enable --now redis-server
 ```
 
-Or run with Docker:
+**Or via Docker:**
 
 ```bash
 docker run -d --name redis -p 6379:6379 redis:7
 ```
 
-Verify:
+**Verify:**
 
 ```bash
-redis-cli -h 127.0.0.1 -p 6379 PING   # should return PONG
+redis-cli PING   # should return PONG
 ```
 
-If running in containers, set `REDIS_URL` to the container hostname (e.g. `redis://redis:6379/0`).
+Set in `backend/.env`:
 
-## Health checks
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+```
 
-- Liveness: `GET /health/live` — basic liveness probe.
-- Readiness: `GET /health/ready` — checks DB and (if configured) Redis:
+---
+
+## 8. Health Checks
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health/live` | Basic liveness probe |
+| `GET /health/ready` | Checks DB + Redis (if configured) |
 
 ```bash
 curl http://localhost:8000/health/ready
 ```
 
-When `REDIS_URL` is not set the readiness response shows `"redis": "disabled"`.
+> When `REDIS_URL` is not set, the readiness response shows `"redis": "disabled"`.
 
-## Reset application (development only)
+---
 
-Back up DB before wiping:
+## 9. Running Tests
 
-```bash
-sudo -u postgres pg_dump -Fc -f backup.dump chatassist
-```
-
-Reset (destructive):
-
-```bash
-cd backend
-source .venv/bin/activate
-python3 reset_application.py        # interactive — type YES to confirm
-# Or reset + seed test data:
-python3 reset_application.py --seed
-```
-
-This deletes uploaded files, truncates tables, resets sequences, and (with `--seed`) repopulates test data.
-
-## Running tests (backend)
-
-From `backend/` with venv active:
+From `backend/` with the virtualenv active:
 
 ```bash
 pytest -q
 ```
 
-Some tests mock/disable Redis — see `backend/tests/` for details.
-
-## Troubleshooting
-
-- If `start_server.sh` reports a missing virtualenv, create `backend/.venv` or activate your venv.
-- If DB connectivity fails, verify `DATABASE_URL` and Postgres is listening on the expected host/port.
-- If email sending fails in dev, ensure `RESEND_OVERRIDE_TO_EMAIL` is set when using Resend's shared test domain.
-- If frontend build errors occur, remove `node_modules` and run `npm ci`.
+> Some tests mock/disable Redis — see `backend/tests/` for details.
 
 ---
 
-## Summary
+## 10. Reset Application (Development Only)
 
-- Dashboard: http://localhost:5173
-- API Docs: http://localhost:8000/docs
-- Widget Demo: http://localhost:8080/demo.html
+**Back up first:**
+
+```bash
+sudo -u postgres pg_dump -Fc -f backup.dump chatassist
+```
+
+**⚠️ Reset (destructive: deletes uploads, truncates tables, resets sequences):**
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 reset_application.py            # interactive — type YES to confirm
+python3 reset_application.py --seed     # reset + seed test data
+```
+
+---
+
+## 11. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `start_server.sh` reports missing virtualenv | Create it: `python3 -m venv backend/.venv` and activate |
+| DB connectivity fails | Check `DATABASE_URL` in `.env`; verify Postgres is running on the expected host/port |
+| Email sending fails in dev | Set `RESEND_OVERRIDE_TO_EMAIL` when using Resend's shared test domain |
+| Frontend build errors | Delete `node_modules/` and run `npm ci` |
+| Push notifications not working | Ensure VAPID keys are set in `.env` and backend is restarted |
+
+---
+
+## Quick Reference
+
+| Service | URL |
+|---|---|
+| **Dashboard** | http://localhost:5173 |
+| **API Docs** | http://localhost:8000/docs |
+| **Widget Demo** | http://localhost:8080/demo.html |
