@@ -20,6 +20,7 @@ Step-by-step guide to run the **backend**, **frontend dashboard**, and **chat wi
 9. [Running Tests](#9-running-tests)
 10. [Reset Application (Development Only)](#10-reset-application-development-only)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Production Deployment](#12-production-deployment)
 
 ---
 
@@ -277,6 +278,166 @@ python3 reset_application.py --seed     # reset + seed test data
 | Email sending fails in dev | Set `RESEND_OVERRIDE_TO_EMAIL` when using Resend's shared test domain |
 | Frontend build errors | Delete `node_modules/` and run `npm ci` |
 | Push notifications not working | Ensure VAPID keys are set in `.env` and backend is restarted |
+
+---
+
+## 12. Production Deployment
+
+> This section documents how the app is currently deployed and maintained on the **novelofficespace.com** production server. Refer here whenever you need to deploy a new release or troubleshoot the live environment.
+
+### Server Layout
+
+| Path | Purpose |
+|---|---|
+| `/home/frappe/ai-chatassist` | Git repo — single source of truth for all code |
+| `/home/frappe/ai-chatassist/.venv` | Python virtualenv for the backend |
+| `/var/www/aichatassist-dashboard` | Built frontend assets served by Nginx |
+| `/home/frappe/aichatassist-data/uploads` | Persistent user uploads (avatars, attachments) — survives redeploys |
+| `/home/frappe/ai-chatassist/uploads` | Symlink → the persistent uploads directory above |
+| `/etc/aichatassist/backend.env` | Production environment variables (DB, keys, etc.) |
+| `/home/frappe/aichatassist-data/backups/` | Timestamped DB + uploads backups taken before each release |
+
+### Running Services
+
+| Service | Config | Notes |
+|---|---|---|
+| **Backend** | `aichatassist-backend.service` (systemd) | Gunicorn + Uvicorn, 2 workers, binds to `127.0.0.1:8000` |
+| **Nginx** | `/etc/nginx/sites-enabled/` | Proxies `api.novelofficespace.com` → backend; serves `dashboard.novelofficespace.com` as static files |
+| **PostgreSQL** | System systemd service | Enabled; auto-starts on reboot |
+| **Redis** | System systemd service | Enabled; required in production for multi-worker WebSocket pub/sub |
+
+> **Server reboot:** All four services are `enabled` via systemd and will come back up automatically on a reboot — no manual action needed.
+
+### Deploying a New Release
+
+Every deployment follows these steps in order:
+
+#### Step 1 — Assess incoming changes
+
+```bash
+cd /home/frappe/ai-chatassist
+git fetch origin
+
+# What's coming in?
+git log --oneline HEAD..origin/main
+git diff --stat HEAD..origin/main
+
+# New DB migrations?
+git diff --name-only HEAD..origin/main -- backend/alembic/versions/
+
+# New backend or frontend packages?
+git diff HEAD..origin/main -- backend/requirements.txt
+git diff HEAD..origin/main -- frontend/package.json
+```
+
+#### Step 2 — Backup (always, before touching anything)
+
+```bash
+cd /home/frappe/ai-chatassist
+
+# Git rollback pointer
+git branch prod-backup-$(date +%Y%m%d-%H%M%S) HEAD
+
+# DB + uploads backup
+BKDIR=/home/frappe/aichatassist-data/backups/rollout-$(date +%Y%m%d-%H%M%S)
+mkdir -p "$BKDIR"
+set -a && source /etc/aichatassist/backend.env && set +a
+PG_DSN=${DATABASE_URL/postgresql+psycopg2:\/\//postgresql:\/\/}
+pg_dump "$PG_DSN" | gzip -c > "$BKDIR/db.sql.gz"
+rsync -a --numeric-ids /home/frappe/aichatassist-data/uploads/ "$BKDIR/uploads/"
+```
+
+#### Step 3 — Pull latest code
+
+```bash
+git stash push -u -m "pre-deploy $(date -Is)" || true
+git reset --hard origin/main
+```
+
+#### Step 4 — Backend dependencies (if `requirements.txt` changed)
+
+```bash
+/home/frappe/ai-chatassist/.venv/bin/pip install -r /home/frappe/ai-chatassist/backend/requirements.txt
+```
+
+#### Step 5 — DB migrations (if new migration files were added)
+
+```bash
+# Stop backend during schema changes to prevent conflicts
+sudo systemctl stop aichatassist-backend
+
+set -a && source /etc/aichatassist/backend.env && set +a
+cd /home/frappe/ai-chatassist/backend
+/home/frappe/ai-chatassist/.venv/bin/alembic upgrade head
+
+sudo systemctl start aichatassist-backend
+curl http://127.0.0.1:8000/health   # must return {"status":"ok"}
+```
+
+> If there are **no new migrations**, just restart instead:
+> ```bash
+> sudo systemctl restart aichatassist-backend
+> ```
+
+#### Step 6 — Frontend (if any frontend files changed)
+
+```bash
+cd /home/frappe/ai-chatassist/frontend
+npm ci
+npm run build
+sudo rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
+```
+
+Nginx starts serving the new files immediately — no Nginx restart required.
+
+> **Widget files** (`widget/chat-widget.js`, `widget/chat-widget.css`) are served directly from the repo via the backend's `StaticFiles` mount at `/widget`. A backend restart after pulling is enough to pick up widget changes — no separate build step.
+
+#### Step 7 — Smoke Tests
+
+```bash
+# API health
+curl https://api.novelofficespace.com/health
+# → {"status":"ok"}
+
+# Dashboard loads
+curl -o /dev/null -w "%{http_code}" https://dashboard.novelofficespace.com/
+# → 200
+
+# Widget loader returns JS even for an invalid key (ORB-safe)
+curl -I 'https://api.novelofficespace.com/widget/loader.js?key=INVALID'
+# → Content-Type: application/javascript
+
+# No errors in backend log
+journalctl -u aichatassist-backend --since '5 min ago' --no-pager -p err
+```
+
+### Minimal Deploy Reference
+
+| What changed | Steps needed |
+|---|---|
+| Widget CSS/JS only | Pull code + `sudo systemctl restart aichatassist-backend` |
+| Backend code, no new migrations | Pull code + `sudo systemctl restart aichatassist-backend` |
+| New DB migrations | Pull → stop backend → `alembic upgrade head` → start backend |
+| Frontend only | Pull → `npm ci && npm run build` → rsync to dashboard root |
+| Full release (code + migrations + frontend) | All of Steps 1–7 above |
+
+### Rollback (if something breaks)
+
+```bash
+# Restore code to the last backup branch
+git reset --hard prod-backup-YYYYMMDD-HHMMSS
+sudo systemctl restart aichatassist-backend
+
+# Rebuild frontend if frontend was deployed
+cd /home/frappe/ai-chatassist/frontend
+npm ci && npm run build
+sudo rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
+
+# If DB migrations were applied, restore from backup
+set -a && source /etc/aichatassist/backend.env && set +a
+PG_DSN=${DATABASE_URL/postgresql+psycopg2:\/\//postgresql:\/\/}
+gunzip -c /home/frappe/aichatassist-data/backups/rollout-TIMESTAMP/db.sql.gz | psql "$PG_DSN"
+```
 
 ---
 

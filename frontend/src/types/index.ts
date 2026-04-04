@@ -43,6 +43,8 @@ export interface Conversation {
   last_message_at?: string
   created_at?: string
   closed_at?: string
+  short_id?: string | null
+  title?: string | null
 }
 
 export interface Message {
