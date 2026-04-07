@@ -978,7 +978,7 @@ class ConversationOrchestrator:
             log_key="conversation_resolve_automation_failed",
             ensure_system_event=True,
             fallback_system_content=(
-                "You ended the chat."
+                "Visitor ended the chat."
                 if closed_by == "visitor"
                 else "This conversation has been resolved."
             ),
@@ -1153,6 +1153,17 @@ class ConversationOrchestrator:
                         "conversation_id": conversation_id,
                         "website_id": website_id,
                     }
+                    # If this system event resolves the conversation CLOSED_BY=visitor,
+                    # present a visitor-friendly message when delivering to the widget.
+                    try:
+                        if message_obj and message_obj.get("closed_by") == "visitor":
+                            visitor_friendly = "You ended the chat."
+                            payload["message"] = visitor_friendly
+                            # Also patch the message_obj content so the widget displays
+                            # the visitor-friendly text consistently for live frames.
+                            payload["message_obj"]["content"] = visitor_friendly
+                    except Exception:
+                        pass
                     if message_obj.get("closed_by"):
                         payload["closed_by"] = message_obj["closed_by"]
                     await ChatService.send_to_visitor(
@@ -1175,6 +1186,14 @@ class ConversationOrchestrator:
                         "conversation_id": conversation_id,
                         "website_id": website_id,
                     }
+                    # Adjust visitor-facing wording when the conversation was closed by the visitor.
+                    try:
+                        if message_obj and message_obj.get("closed_by") == "visitor":
+                            visitor_friendly = "You ended the chat."
+                            payload["message"] = visitor_friendly
+                            payload["message_obj"]["content"] = visitor_friendly
+                    except Exception:
+                        pass
                     if message_obj.get("closed_by"):
                         payload["closed_by"] = message_obj["closed_by"]
                     await ChatService.send_to_visitor(conversation_id, payload)
