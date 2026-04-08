@@ -317,6 +317,25 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.error("assigned_agent_push_failed", error=str(e))
 
+            # Also broadcast to all other connected agents so they can spectate live.
+            # The assigned agent already received the message above; exclude them to avoid
+            # double-delivery. Spectators receive visitor_message events but not push notifications.
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_message",
+                    "conversation_id": conversation.id,
+                    "website_id": website_id,
+                    "message": message,
+                    "message_obj": serialize_message(self.db, msg),
+                    # Clients use this to skip rendering if they are the assigned agent
+                    # (they already have the message from send_to_agent above).
+                    "_assigned_agent_id": conversation.assigned_agent_id,
+                },
+                include_global=True,
+                exclude_agent_id=conversation.assigned_agent_id,
+            )
+
             return None
 
         # Unassigned: still notify agents in realtime so inbox updates immediately.

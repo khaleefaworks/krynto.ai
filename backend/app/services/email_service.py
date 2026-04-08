@@ -107,6 +107,23 @@ class EmailService:
             logger.exception("welcome_email_failed", to=to_email)
             return False
 
+    def send_user_invite(self, to_email: str, name: str, org_name: str, otp: str) -> bool:
+        """Send an invite + OTP email to a newly admin-created user. Returns True on success."""
+        try:
+            r = self._client()
+            from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
+            r.Emails.send({
+                "from": from_email,
+                "to": [self._to(to_email)],
+                "subject": f"You've been invited to {org_name} on AI ChatAssist",
+                "html": _invite_html(name=name, org_name=org_name, otp=otp),
+            })
+            logger.info("invite_email_sent", to=to_email, override=self._to(to_email) != to_email)
+            return True
+        except Exception:
+            logger.exception("invite_email_failed", to=to_email)
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Email templates (minimal, inline-CSS safe for most clients)
@@ -195,6 +212,36 @@ def _otp_html(*, name: str, otp: str) -> str:
   </div>
   <p style="color:#6b7280;font-size:13px">
     If you did not sign up for AI ChatAssist, please ignore this email.
+  </p>
+  <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
+</body>
+</html>
+"""
+
+
+def _invite_html(*, name: str, org_name: str, otp: str) -> str:
+    frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+    login_url = f"{frontend_url}/login" if frontend_url else ""
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:480px;margin:40px auto;color:#1a1a1a">
+  <h2>You've been invited to {org_name}</h2>
+  <p>Hi {name},</p>
+  <p>An administrator has created an account for you on <strong>AI ChatAssist</strong>
+     under the organisation <strong>{org_name}</strong>.</p>
+  <p>Use the verification code below to activate your account. It expires in <strong>15 minutes</strong>.</p>
+  <div style="margin:32px 0;text-align:center">
+    <span style="display:inline-block;background:#f3f4f6;border:1px solid #e5e7eb;
+                 border-radius:8px;padding:16px 32px;font-size:32px;font-weight:700;
+                 letter-spacing:8px;color:#111827;font-family:monospace">
+      {otp}
+    </span>
+  </div>
+  {"<p style='margin:24px 0'><a href='" + login_url + "' style='background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block'>Go to login →</a></p>" if login_url else ""}
+  <p style="color:#6b7280;font-size:13px">
+    Enter this code on the login page when prompted. If you weren't expecting this invitation,
+    you can safely ignore this email.
   </p>
   <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
 </body>
