@@ -966,6 +966,23 @@ class ConversationOrchestrator:
             }
         )
 
+        # Broadcast to spectating agents (exclude the sender – they get `message_sent` via ws_agent.py).
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=int(conversation.website_id),
+            message_data={
+                "type": "agent_message",
+                "conversation_id": conversation_id,
+                "website_id": int(conversation.website_id),
+                "message": content,
+                "message_obj": message_obj,
+                "agent_name": agent_name,
+                "agent_avatar": agent.avatar_url if agent else None,
+                "agent_id": agent_id,
+            },
+            include_global=True,
+            exclude_agent_id=agent_id,
+        )
+
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),

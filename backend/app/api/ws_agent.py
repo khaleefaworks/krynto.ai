@@ -227,6 +227,20 @@ async def agent_ws(
                         "agent_avatar": user.avatar_url,
                     },
                 )
+
+                # Broadcast to spectating agents so they can show "Agent X is typing…".
+                await agent_service.broadcast_to_active_agents(
+                    website_id=int(conv.website_id),
+                    message_data={
+                        "type": "agent_typing",
+                        "conversation_id": conversation_id,
+                        "is_typing": is_typing,
+                        "agent_id": agent_id,
+                        "agent_name": user.name,
+                    },
+                    include_global=True,
+                    exclude_agent_id=agent_id,
+                )
                 continue
             
             if message_type == "join_chat":
