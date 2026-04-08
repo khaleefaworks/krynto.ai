@@ -936,6 +936,14 @@ export default function ConversationsView() {
                 } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
+                // System events (e.g. "Agent joined the chat.") broadcast to all spectating agents.
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    addMessage(dto)
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
                 getBrowsingHistory(selectedChat)
                     .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))

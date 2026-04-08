@@ -837,6 +837,18 @@ class ConversationOrchestrator:
             }
         )
 
+        # Push the system message to all agents' open threads in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "message_obj": serialize_message(self.db, saved),
+            },
+            include_global=True,
+        )
+
         # Notify dashboards so lists refresh and unread can clear.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -896,6 +908,18 @@ class ConversationOrchestrator:
                 "agent_name": agent_name,
                 "previous_agent_id": previous_agent_id,
             },
+        )
+
+        # Push the system message to all agents' open threads in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "message_obj": serialize_message(self.db, saved),
+            },
+            include_global=True,
         )
 
         await self.agent_service.broadcast_to_active_agents(
