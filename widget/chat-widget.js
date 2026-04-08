@@ -119,6 +119,36 @@
     return `aichatassist_end_chat_disabled_${CONFIG.websiteId}_${CONFIG.sessionId}`;
   }
 
+  // --- Closed-view persistence (history disabled) ---
+  // Saves the resolved conversation id so the closed view survives a page reload.
+  function _closedStateKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_closed_conv_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function _saveClosedState(convId) {
+    try {
+      const k = _closedStateKey();
+      if (k && convId) localStorage.setItem(k, String(convId));
+    } catch (e) { }
+  }
+
+  function _clearClosedState() {
+    try {
+      const k = _closedStateKey();
+      if (k) localStorage.removeItem(k);
+    } catch (e) { }
+  }
+
+  function _loadClosedState() {
+    try {
+      const k = _closedStateKey();
+      if (!k) return null;
+      const v = localStorage.getItem(k);
+      return v ? parseInt(v, 10) : null;
+    } catch (e) { return null; }
+  }
+
   function setEndChatDisabled(disabled) {
     endChatDisabled = Boolean(disabled);
     const endBtn = document.getElementById('chatassist-end');
@@ -606,8 +636,10 @@
     const backBtn = document.getElementById('chatassist-back');
     const endBtn = document.getElementById('chatassist-end');
     if (backBtn) {
-      // Show back button when in thread view AND (history enabled OR read-only mode)
-      const showBack = viewMode === 'thread' && (widgetShowHistory || isReadOnlyThread);
+      // Show back button only when history is enabled (there is a list to go back to).
+      // When history is disabled and we are in read-only (closed) mode, the back
+      // button leads nowhere — hide it.
+      const showBack = viewMode === 'thread' && widgetShowHistory;
       backBtn.style.display = showBack ? '' : 'none';
     }
     if (endBtn) {
@@ -873,7 +905,70 @@
     enterThreadView(convId, true);
   }
 
+  function _appendClosedBanner() {
+    // Remove any existing banner first (idempotent).
+    const existing = document.getElementById('chatassist-closed-banner');
+    if (existing) existing.remove();
+
+    const el_messages = document.getElementById('chatassist-messages');
+    if (!el_messages) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'chatassist-closed-banner';
+    banner.style.cssText = [
+      'display:flex', 'flex-direction:column', 'align-items:center',
+      'gap:12px', 'padding:20px 16px 8px', 'text-align:center',
+    ].join(';');
+
+    const label = document.createElement('p');
+    label.style.cssText = 'margin:0;font-size:13px;color:#9ca3af;';
+    label.textContent = 'This conversation has ended.';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Start new chat';
+    btn.style.cssText = [
+      'padding:9px 22px', 'border-radius:9999px', 'border:none',
+      'font-size:14px', 'font-weight:600', 'cursor:pointer',
+      'color:#fff', 'background:' + (
+        CONFIG.colorMode === 'gradient'
+          ? 'linear-gradient(135deg,' + CONFIG.gradientStart + ' 0%,' + CONFIG.gradientEnd + ' 100%)'
+          : CONFIG.primaryColor
+      ),
+    ].join(';');
+    btn.addEventListener('click', function () {
+      _clearClosedState();
+      banner.remove();
+      enterStartView();
+    });
+
+    banner.appendChild(label);
+    banner.appendChild(btn);
+    el_messages.appendChild(banner);
+
+    try { banner.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch (e) { }
+  }
+
+  function enterClosedView(convId) {
+    // Show the current messages as read-only with a "Start new chat" prompt.
+    // Does NOT reconnect the WebSocket — prevents the welcome automation from
+    // firing again when the conversation history feature is disabled.
+    viewMode = 'thread';
+    isReadOnlyThread = true;
+    _closeWsCleanly();
+
+    // Persist so the closed view survives a page reload.
+    if (convId) _saveClosedState(convId);
+
+    const el_footer = document.getElementById('chatassist-footer');
+    if (el_footer) el_footer.style.display = 'none';
+    _updateHeaderButtons();
+
+    _appendClosedBanner();
+  }
+
   function afterConversationClose() {
+    const closedConvId = CONFIG.conversationId;
     CONFIG.conversationId = 0;
     if (widgetShowHistory) {
       fetchConversationList().then(function (listData) {
@@ -884,7 +979,9 @@
         }
       }).catch(function () { enterStartView(); });
     } else {
-      enterStartView();
+      // History disabled: show a closed state instead of auto-reconnecting.
+      // Auto-reconnecting would re-trigger the welcome automation immediately.
+      enterClosedView(closedConvId);
     }
   }
 
@@ -1013,6 +1110,7 @@
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
+          else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
         } else {
           appendMessage('ai', m.content, m.created_at, null, m.id);
@@ -1029,6 +1127,27 @@
       if (data.messages.length > 0) {
         _restoreWidgetState();
       }
+
+      // Re-inject the "Start new chat" banner if we're restoring a closed
+      // conversation on reload (history disabled). The banner was wiped above
+      // by container.innerHTML = '' but belongs at the bottom of the thread.
+      if (data.status === 'resolved' && isReadOnlyThread && !widgetShowHistory) {
+        _appendClosedBanner();
+      }
+      return;
+    }
+
+    // Server-side notification that the conversation is resolved (sent after
+    // history for closed conversations). Swallow it here so it is never
+    // rendered as a plain AI message via the generic fallback below.
+    if (data.type === 'resolved') {
+      // Banner already appended by the history handler above; nothing to do.
+      return;
+    }
+
+    // Backend responds with {type:'error'} when a message arrives on a resolved
+    // conversation (e.g. page-view ping on reconnect). Suppress in read-only mode.
+    if (data.type === 'error' && isReadOnlyThread) {
       return;
     }
 
@@ -2704,6 +2823,14 @@
       if (listData && listData.active) {
         // Resume the active (open) conversation directly.
         await enterThreadView(listData.active.id, false);
+      } else if (!widgetShowHistory && _loadClosedState()) {
+        // History is disabled and the visitor previously ended a chat.
+        // Reload the closed conversation as read-only so they see their
+        // history and the "Start new chat" button — no welcome loop.
+        // enterThreadView → connectWebSocket → backend sends {type:'history',
+        // status:'resolved'} which re-injects the banner automatically.
+        const closedId = _loadClosedState();
+        await enterThreadView(closedId, true);
       } else {
         // With no active conversation, always start a fresh thread entry flow.
         // History remains available when the user navigates back from an active thread.

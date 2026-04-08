@@ -247,18 +247,39 @@
   margin-right: 10px;
 }
 
-/* Unread badge should flip sides on left-aligned bubble */
-#chatassist-widget.chatassist-position-b-l #chatassist-bubble-unread,
-#chatassist-widget.chatassist-position-t-l #chatassist-bubble-unread {
-  right: auto;
-  left: -6px;
+/* Unread badge and online dot keep same positions on left-aligned bubble (no flipping) */
+
+/* Chat window opens from the bottom-left corner when widget is left-aligned */
+#chatassist-widget.chatassist-position-b-l #chatassist-window,
+#chatassist-widget.chatassist-position-t-l #chatassist-window {
+  transform-origin: bottom left;
+  animation-name: chatassist-window-open-left;
+}
+#chatassist-widget.chatassist-position-b-l #chatassist-window.chatassist-window-closing,
+#chatassist-widget.chatassist-position-t-l #chatassist-window.chatassist-window-closing {
+  animation-name: chatassist-window-close-left;
 }
 
-/* Online dot should flip to the opposite side for left-aligned bubble */
-#chatassist-widget.chatassist-position-b-l #chatassist-bubble-online-dot,
-#chatassist-widget.chatassist-position-t-l #chatassist-bubble-online-dot {
-  left: auto;
-  right: -2px;
+@keyframes chatassist-window-open-left {
+  from {
+    opacity: 0;
+    transform: scale(0.4) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes chatassist-window-close-left {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.4) translateY(20px);
+  }
 }
 
 /* Message popup and dots preview anchored on the bubble side */
