@@ -75,7 +75,14 @@ Phase 5 Audit — 3 items still pending:
 
 34) Failed to fetch error, when new user is getting added in the organization. Need to check the API once. ✅ FIXED — /auth/register had response_model=UserResponse but returned a dict of shape {message, user} causing a ResponseValidationError (500). Removed the response_model so FastAPI returns the dict directly.
 
-35) In chat page, if there is a new chat and 2 agents are just spectating the messages but not joined the conversation yet. Both of them properly getting the new chats in the conversation. But once an agent joined the conversation, then they other agent who spectates the conversation not geeting the new message via socket. Also when an agent is already joined and having the conversation. But then another agent joined the same conversation, here the old agent is not actively listening to the socket. Actually the push notification should only send to who joined recently but anyone can spectate the live converations. ✅ FIXED — After delivering visitor_message to the assigned agent via send_to_agent(), the orchestrator now also broadcasts to all other connected agents (spectators) via broadcast_to_active_agents(exclude_agent_id=assigned_agent_id). Push notifications remain assigned-agent-only. BusEvent and deliver_bus_event updated to support exclude_agent_id.
+35) In chat page, if there is a new chat and 2 agents are just spectating the messages but not joined the conversation yet. Both of them properly getting the new chats in the conversation. But once an agent joined the conversation, then they other agent who spectates the conversation not geeting the new message via socket. Also when an agent is already joined and having the conversation. But then another agent joined the same conversation, here the old agent is not actively listening to the socket. Actually the push notification should only send to who joined recently but anyone can spectate the live converations. ✅ FIXED (fully) — Complete spectator broadcasting implemented across all event types:
+- Visitor message → assigned agent (direct) + all spectating agents (broadcast, exclude assigned) — push notification to assigned agent only
+- Agent message → visitor + all spectating agents (broadcast, exclude sender); spectators see message live in thread via new agent_message handler
+- Agent typing → visitor (only if sender is assigned agent; spectators' typing is never leaked to visitor) + all other agents via agent_typing broadcast; spectators see "Agent X is typing…" in status bar
+- Visitor typing → assigned agent (direct) + all spectating agents (broadcast, exclude assigned); both ws_chat.py code paths (new conv + reconnect) fixed
+- System messages (agent joined / takeover) → all agents via system_message broadcast; spectators see "Agent joined the chat." and date chips live in thread
+- joinedRef kept in sync via conversation_assigned WS event so the takeover popup triggers correctly even after mid-session ownership changes
+- confirmTakeoverAndSend now shows optimistic message immediately (same as handleSendMessage)
 
 Features:
 

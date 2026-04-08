@@ -630,19 +630,19 @@ export default function ConversationsView() {
         if (selectedChat) return
 
         let cancelled = false
-        ;(async () => {
-            try {
-                const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
-                })
-                if (cancelled || !summary?.id) return
-                // Inject into activeChats so it appears in the left list
-                setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
-                openChat(summary.id)
-            } catch {
-                // Conversation not found or no access — ignore
-            }
-        })()
+            ; (async () => {
+                try {
+                    const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
+                        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
+                    })
+                    if (cancelled || !summary?.id) return
+                    // Inject into activeChats so it appears in the left list
+                    setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                    openChat(summary.id)
+                } catch {
+                    // Conversation not found or no access — ignore
+                }
+            })()
 
         return () => { cancelled = true }
     }, [isChatsListRoute, chatIdParam, selectedChat, activeChats, openChat])
@@ -861,6 +861,10 @@ export default function ConversationsView() {
                 } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'conversation_assigned' && dataConversationId === selectedChat) {
+                // Keep joinedRef in sync: if someone else took over, we are no longer the handler.
+                const newAssignedId = Number((data as any)?.assigned_agent_id) || null
+                joinedRef.current = newAssignedId !== null && newAssignedId === user?.id
             } else if (data.type === 'conversation_team_changed' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'conversation_closed' && dataConversationId === selectedChat) {
@@ -1413,7 +1417,21 @@ export default function ConversationsView() {
             }
 
             stopAgentTyping(selectedChat)
-            sendAgentMessage(content, selectedChat.toString())
+            const clientId = sendAgentMessage(content, selectedChat.toString())
+
+            // Optimistic UI — show the message immediately, same as handleSendMessage.
+            const optimisticCreatedAt = new Date().toISOString()
+            addMessage({
+                id: `tmp:${clientId}`,
+                conversation_id: selectedChat,
+                sender_type: 'agent',
+                actor: 'agent',
+                kind: 'chat',
+                content: content,
+                created_at: optimisticCreatedAt,
+                sender_name: user?.name || undefined,
+                sender_avatar_url: (user as any)?.avatar_url || undefined,
+            } as any)
         } catch (error) {
             console.error('Failed to takeover and send:', error)
             setInput(content)
