@@ -311,8 +311,8 @@ function PopupPreview({ config }: { config: WidgetConfig }) {
 
 function PositionPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
     const opts = [
-        { value: 'bottom-right', icon: AlignRight, label: 'Bottom Right' },
         { value: 'bottom-left', icon: AlignLeft, label: 'Bottom Left' },
+        { value: 'bottom-right', icon: AlignRight, label: 'Bottom Right' },
     ]
     return (
         <div className="grid grid-cols-2 gap-2">

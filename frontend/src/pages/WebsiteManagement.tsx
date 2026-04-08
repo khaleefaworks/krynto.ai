@@ -343,8 +343,8 @@ export default function WebsiteManagement() {
                       value={widgetConfigData.position}
                       onChange={(e) => setWidgetConfigData({ ...widgetConfigData, position: e.target.value })}
                     >
-                      <option value="bottom-right">Bottom Right</option>
                       <option value="bottom-left">Bottom Left</option>
+                      <option value="bottom-right">Bottom Right</option>
                       <option value="top-right">Top Right</option>
                       <option value="top-left">Top Left</option>
                     </select>
