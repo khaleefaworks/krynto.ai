@@ -709,20 +709,27 @@ def change_user_password(
     current_admin: User = Depends(require_admin),
 ):
     """
-    Set a new password for any user (admin only).
-    Admins are already authenticated via JWT — no inline re-auth required.
-    System managers can change any password.
-    Managers can change passwords for agents/managers only.
+    Set a new password for any user (owner/system_manager only).
+    Managers must use /me/password to change their own password (requires current password).
+    Owners and system managers can reset other users' passwords without re-auth.
     """
+    # Only owner and system_manager can reset other users' passwords.
+    if current_admin.role == UserRole.MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managers cannot reset other users' passwords. Use your profile page to change your own password.",
+        )
+
+    # Prevent self-reset via this admin endpoint — use /me/password instead (requires current password).
+    if current_admin.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Use /users/me/password to change your own password.",
+        )
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    if current_admin.role == UserRole.MANAGER and user.role == UserRole.SYSTEM_MANAGER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Managers cannot change an administrator's password",
-        )
 
     user.password_hash = get_password_hash(payload.new_password)
     db.commit()

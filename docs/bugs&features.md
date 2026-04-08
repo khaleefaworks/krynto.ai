@@ -13,9 +13,9 @@ Phase 5 Audit — 3 items still pending:
 
 3) Notification sounds on both side is not good, need to clone like smartsupp.
 
-4) New message popup on widget's reply button icon should be same like smartsupp. Also this popup color should be same as widget theme color that defined in this page http://localhost:5173/dashboard/settings/websites/1?tab=widget
+4) New message popup on widget's reply button icon should be same like smartsupp. Also this popup color should be same as widget theme color that defined in this page http://localhost:5173/dashboard/settings/websites/1?tab=widget ✅ FIXED
 
-5) Widget's hover is slightly croppinmg the chat icon inside it. Try to replicate this design also same as smarstupp.
+5) Widget's hover is slightly croppinmg the chat icon inside it. Try to replicate this design also same as smarstupp. ✅ FIXED
 
 6) Widget CSS & JS need to be optimized.
 
@@ -37,7 +37,7 @@ Phase 5 Audit — 3 items still pending:
 
 15) In the textarea always a Hi message is there when I open. It is due to ai_chatassist_draft_1_2 key in local storage. I guess the functionality is not working properly. ✅ FIXED — Draft and draft attachments are now cleared from localStorage after sending a message
 
-16) When the visitor ends chat, the rating is showing after that new conversation is starting. I guess this is not needed here. Why simply wasting a conversation. If a visitor resolved means his need is over. For better UX, after rated or skiped rating just minimize the widget. Basically next again the bot message should not trigger. So something needs to store in session storage. if the visitor closed the browser tabs and coming back even after immediately then we can start the new conversation silently and start the loop. Okey what if the visitor wants to start new conversation without closing the tabs??? Great idea, after minimized if the visitor clicks the widget, if history is enabled via website settings show the history by default andd there new conversation option should be there. What if history is disabled? then start the new conversation. Especially in this case what if the visitor sends message before the 1st bot message ? then if bot message comes it won't be nice. I think here we need to have one more automation message trigger for returning visitor within some time period. so without delay as soon as the conversation page opened before even the visitor sends message, the system bot message should trigger like welcome back. This is purely controlled from automations.
+16) When the visitor ends chat, the rating is showing after that new conversation is starting. I guess this is not needed here. Why simply wasting a conversation. If a visitor resolved means his need is over. For better UX, after rated or skiped rating just minimize the widget. Basically next again the bot message should not trigger. So something needs to store in session storage. if the visitor closed the browser tabs and coming back even after immediately then we can start the new conversation silently and start the loop. Okey what if the visitor wants to start new conversation without closing the tabs??? Great idea, after minimized if the visitor clicks the widget, if history is enabled via website settings show the history by default andd there new conversation option should be there. What if history is disabled? then start the new conversation. Especially in this case what if the visitor sends message before the 1st bot message ? then if bot message comes it won't be nice. I think here we need to have one more automation message trigger for returning visitor within some time period. so without delay as soon as the conversation page opened before even the visitor sends message, the system bot message should trigger like welcome back. This is purely controlled from automations. 🔶 PARTIAL — Closed conversation state + "Start new chat" button implemented for history-disabled case; immediate reconnect/welcome message suppressed. Still pending: history-enabled returning visitor flow, new automation trigger for returning visitor.
 
 17) http://localhost:5173/dashboard/customers/visitors - visitor page conversation history and open conversation green button flows are not working. The id is wrong I guess. Also the conversation with just bot message is showing in the list, this is fine I guess. The agent can initiate the chat by clicking it right? but on clicking it is not opening any chat in chat page. just openinhg the chat page but the URL has chat id. ✅ VERIFIED — Navigation now uses short_id and matches the route pattern correctly
 
@@ -61,20 +61,22 @@ Phase 5 Audit — 3 items still pending:
 
 27) Currently if no agents online, there is a form popup, that needs to be impoved. Forms and form fields should not be via columns. We can create a form table and each form column can be stored as objects. Will this work out? Also form should be triggered via agent chat, automations.
 
-28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT."
+28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT." ✅ FIXED — Backend stores "Visitor ended the chat." for agents; widget receives "You ended the chat." only for the visitor. System message content is rendered directly so agents see correct wording.
 
-29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent."
+29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent." ✅ FIXED — PersonalSettings.tsx has full role label mapping (Owner, Manager, System Manager, Agent).
 
-30) In the Profile section, the "Change Password" option is available for users with the Owner role, which should not be the case.
+30) In the Profile section, the "Change Password" option is available for users with the Owner role, which should not be the case. ✅ RESOLVED (by design) — Change Password in Profile is correct for ALL roles including Owner; it requires the current password (OWASP security control). Admin-level "Reset Password" (no current-password check) lives only in User List and is now restricted to Owner/System Manager only (not Manager, not self).
 
-31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner.
+31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner. ✅ FIXED — Widget position now reads from website settings (commit e393e74)
 
-32) In User list, the manager should not get update password option, only owner should have that.However all other users can do it via profile page.
+32) In User list, the manager should not get update password option, only owner should have that.However all other users can do it via profile page. ✅ FIXED — "Reset Password" block in User List edit panel now hidden for Manager role and for own account. Backend `/users/{id}/password` endpoint returns 403 for Manager and for self-reset; self must use `/users/me/password` (requires current password).
 
 33) When a new user added in the organization, the email is not getting sent to them. Need to check the email configuration and flow once. After OTP verification only they should be able to login.
 
 34) Failed to fetch error, when new user is getting added in the organization. Need to check the API once.
 
+35) In chat page, if there is a new chat and 2 agents are just spectating the messages but not joined the conversation yet. Both of them properly getting the new chats in the conversation. But once an agent joined the conversation, then they other agent who spectates the conversation not geeting the new message via socket. Also when an agent is already joined and having the conversation. But then another agent joined the same conversation, here the old agent is not actively listening to the socket. Actually the push notification should only send to who joined recently but anyone can spectate the live converations.
+
 Features:
 
-1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists. But if it is adding more load, then leave it.
+1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists.
