@@ -103,6 +103,9 @@
   // After a visitor ends the chat UI, hide the End (X) button until they send
   // another message. This prevents repeated end_chat triggers from reopen/close.
   let endChatDisabled = false;
+  // Set when the visitor intentionally clicks "End chat" so the rating overlay
+  // knows to minimise (not run afterConversationClose) on dismiss.
+  let ratingTriggeredByVisitorEnd = false;
 
   // --- Multi-conversation view state ---
   // viewMode: 'start' | 'list' | 'thread'
@@ -410,8 +413,12 @@
       el.classList.remove('chatassist-rating-overlay-visible');
       el.style.display = 'none';
     }
-    // After the rating overlay is dismissed, transition away from the closed thread.
-    if (viewMode === 'thread' && !isReadOnlyThread) {
+    if (ratingTriggeredByVisitorEnd) {
+      // Visitor intentionally ended — just minimize, conversation stays OPEN.
+      ratingTriggeredByVisitorEnd = false;
+      closeWidget(false);
+    } else if (viewMode === 'thread' && !isReadOnlyThread) {
+      // Agent resolved — transition view as usual.
       afterConversationClose();
     }
   }
@@ -2237,8 +2244,9 @@
           <div class="chatassist-end-overlay-backdrop"></div>
           <div class="chatassist-end-overlay-panel">
             <div class="chatassist-end-overlay-title">End this chat?</div>
+            <div class="chatassist-end-overlay-desc">By ending this conversation you won&rsquo;t be able to continue it later.</div>
             <div class="chatassist-end-overlay-actions">
-              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Cancel</button>
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
               <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
             </div>
           </div>
@@ -2395,6 +2403,7 @@
 
     document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
       hideEndOverlay();
+      closeWidget(true);
     });
 
     document.getElementById('chatassist-new-msg-indicator').addEventListener('click', () => {
@@ -2409,6 +2418,10 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
+      // Show rating overlay so we capture feedback before the visitor leaves.
+      // Conversation stays OPEN on the server — agents follow up and resolve manually.
+      ratingTriggeredByVisitorEnd = true;
+      showRatingOverlay(CONFIG.conversationId || null);
     });
 
     // Rating overlay buttons
@@ -2832,8 +2845,8 @@
         const closedId = _loadClosedState();
         await enterThreadView(closedId, true);
       } else {
-        // With no active conversation, always start a fresh thread entry flow.
-        // History remains available when the user navigates back from an active thread.
+        // No active conversation — start fresh so the bot welcome fires
+        // and the new-message popup can show for returning visitors.
         enterStartView();
       }
 

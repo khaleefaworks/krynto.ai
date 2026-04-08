@@ -1071,6 +1071,36 @@ class ConversationOrchestrator:
         """
         return await self.close_conversation(conversation_id=conversation_id, closed_by="visitor")
 
+    async def visitor_left_chat(self, *, conversation_id: int) -> dict:
+        """Visitor clicked 'End chat' — records a timeline event but keeps the
+        conversation OPEN so agents can still follow up and no lead is lost.
+
+        The conversation status is NOT changed. Agents must manually resolve it.
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        saved = self.conversation_service.add_system_message(
+            conversation_id,
+            "Visitor ended the chat.",
+            event_type="visitor_left",
+        )
+
+        # Notify agent dashboards so the timeline updates in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": int(conversation.website_id),
+                "message_obj": serialize_message(self.db, saved),
+            },
+            include_global=True,
+        )
+
+        return {"success": True}
+
     async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
         """Visitor websocket connected for an existing conversation.
 

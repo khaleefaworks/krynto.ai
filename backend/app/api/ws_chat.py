@@ -725,8 +725,8 @@ async def chat_ws(
 
                 continue
 
-            # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
-            # This resolves the current open conversation and records closed_by=visitor.
+            # Visitor clicked 'End chat'. Record a timeline event but keep the
+            # conversation OPEN — agents follow up and resolve manually (no lost leads).
             if message_type == "end_chat":
                 conversation = None
                 try:
@@ -739,23 +739,22 @@ async def chat_ws(
                     conversation = None
 
                 if not conversation:
-                    # Nothing to close.
+                    # Nothing to record.
                     continue
 
                 try:
-                    await orchestrator.visitor_closed_chat(conversation_id=int(conversation.id))
+                    await orchestrator.visitor_left_chat(conversation_id=int(conversation.id))
                 except Exception:
                     # Best-effort: still allow the socket to continue.
                     pass
 
-                # Optional ack for the widget.
+                # Ack so widget can minimise immediately.
                 try:
                     await websocket.send_json(
                         {
                             "type": "end_chat_ok",
                             "conversation_id": int(conversation.id),
                             "website_id": website_id,
-                            "closed_by": "visitor",
                         }
                     )
                 except Exception:
@@ -1198,13 +1197,12 @@ async def chat_ws_with_conversation(
                         db.expire_all()
                         fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
                         if fresh_conv and fresh_conv.status == ConversationStatus.OPEN:
-                            await orchestrator.visitor_closed_chat(conversation_id=int(conv.id))
+                            await orchestrator.visitor_left_chat(conversation_id=int(conv.id))
                             await websocket.send_json(
                                 {
                                     "type": "end_chat_ok",
                                     "conversation_id": int(conv.id),
                                     "website_id": website_id,
-                                    "closed_by": "visitor",
                                 }
                             )
                     except Exception:
