@@ -165,6 +165,20 @@ def get_active_chats(
         db, user_id=current_user.id, conversation_ids=conversation_ids
     )
 
+    # Batch-fetch visitor_left events to avoid N+1 queries.
+    visitor_ended_ids: set[int] = set()
+    if conversation_ids:
+        visitor_ended_ids = {
+            int(row[0])
+            for row in db.query(Message.conversation_id)
+            .filter(
+                Message.conversation_id.in_(conversation_ids),
+                Message.event_type == "visitor_left",
+            )
+            .distinct()
+            .all()
+        }
+
     result = []
     for conv, website_name, message_count, last_message, last_message_at in rows:
         website_name_val = website_name or f"Website {conv.website_id}"
@@ -188,6 +202,8 @@ def get_active_chats(
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
                 "assigned_agent_id": conv.assigned_agent_id,
+                "closed_by": getattr(conv, "closed_by", None),
+                "visitor_ended": int(conv.id) in visitor_ended_ids,
                 "message_count": int(message_count or 0),
                 "unread_count": int(unread_counts.get(int(conv.id), 0)),
                 "last_message": last_message_val,
@@ -238,6 +254,12 @@ def get_chat_summary(
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
         "assigned_agent_id": getattr(conv, "assigned_agent_id", None),
         "closed_by": getattr(conv, "closed_by", None),
+        "visitor_ended": db.query(Message)
+            .filter(
+                Message.conversation_id == conv.id,
+                Message.event_type == "visitor_left",
+            )
+            .first() is not None,
         "title": getattr(conv, "title", None),
         "message_count": 0,
         "unread_count": 0,

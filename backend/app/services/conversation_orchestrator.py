@@ -1081,23 +1081,55 @@ class ConversationOrchestrator:
         if not conversation:
             return {"error": "Conversation not found"}
 
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        # Persist agent-facing system message (content seen in agent dashboard).
         saved = self.conversation_service.add_system_message(
             conversation_id,
             "Visitor ended the chat.",
             event_type="visitor_left",
         )
 
+        message_obj = serialize_message(self.db, saved)
+
+        # Echo to visitor WS with visitor-friendly wording.
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "system",
+                "event_type": "visitor_left",
+                "message": "You ended the chat.",
+                "message_obj": message_obj,
+                "conversation_id": conversation_id,
+            },
+        )
+
         # Notify agent dashboards so the timeline updates in real-time.
         await self.agent_service.broadcast_to_active_agents(
-            website_id=conversation.website_id,
+            website_id=website_id,
             message_data={
                 "type": "system_message",
                 "conversation_id": conversation_id,
-                "website_id": int(conversation.website_id),
-                "message_obj": serialize_message(self.db, saved),
+                "website_id": website_id,
+                "message_obj": message_obj,
+                "visitor_ended": True,
             },
             include_global=True,
         )
+
+        # Fire visitor_left automation trigger so agents can configure an
+        # automatic bot message like "Visitor ended the chat. You may now resolve it."
+        if website_id:
+            await self._run_automation_trigger(
+                conversation_id=conversation_id,
+                website_id=website_id,
+                trigger="visitor_left",
+                default_system_event_type=None,
+                default_bot_event_type="bot_visitor_left",
+                log_key="visitor_left_automation_failed",
+                send_system_events_to_visitor=False,
+                send_bot_messages_to_visitor=False,
+            )
 
         return {"success": True}
 
@@ -1156,6 +1188,19 @@ class ConversationOrchestrator:
 
         if not conversation:
             return {"error": "Conversation not found"}
+
+        # If the visitor intentionally ended the chat, don't add a redundant
+        # "Visitor left website." noise — the visitor_left event already tells the story.
+        visitor_left_exists = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.event_type == "visitor_left",
+            )
+            .first()
+        )
+        if visitor_left_exists:
+            return {"success": True}
 
         if not self._should_record_presence_event(conversation=conversation):
             return {"success": True}
