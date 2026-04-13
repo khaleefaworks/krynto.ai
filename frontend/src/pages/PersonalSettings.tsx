@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from "react"
 import { useAppStore } from "@/store/appStore"
 import { apiRequest } from "@/services/api"
-import { Camera, Bell, BellOff, Mail, Shield, User as UserIcon, Trash2, Loader2, Lock, Eye, EyeOff } from "lucide-react"
+import { Camera, Mail, Shield, User as UserIcon, Trash2, Loader2, Lock, Eye, EyeOff } from "lucide-react"
 import { useNavigate } from "react-router-dom"
-import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from "@/services/push"
 import { API_BASE } from "@/config/endpoints"
 
 export default function PersonalSettings() {
@@ -13,11 +12,6 @@ export default function PersonalSettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarLoading, setAvatarLoading] = useState(false)
-  const [pushLoading, setPushLoading] = useState(false)
-  const [pushPermission, setPushPermission] = useState<ReturnType<typeof getNotificationPermission>>(
-    typeof window !== 'undefined' ? getNotificationPermission() : 'unsupported'
-  )
-  const [vapidPublicKeyPresent, setVapidPublicKeyPresent] = useState<boolean | null>(null)
 
   // Change password form
   const [pwCurrent, setPwCurrent] = useState('')
@@ -38,52 +32,6 @@ export default function PersonalSettings() {
   }, [])
 
   // Load existing avatar when user data is available
-  useEffect(() => {
-    if (user?.avatar_url) {
-      const fullAvatarUrl = user.avatar_url.startsWith('http')
-        ? user.avatar_url
-        : `${API_BASE}${user.avatar_url}`
-      setAvatarPreview(fullAvatarUrl)
-    }
-  }, [user])
-
-  // Push status (best-effort; public key is safe to fetch unauthenticated)
-  useEffect(() => {
-    let cancelled = false
-      ; (async () => {
-        try {
-          const key = await getVapidPublicKey()
-          if (!cancelled) setVapidPublicKeyPresent(Boolean(key))
-        } catch {
-          if (!cancelled) setVapidPublicKeyPresent(false)
-        }
-      })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-
-  const handleEnablePush = async () => {
-    setPushLoading(true)
-    try {
-      const perm = await requestPermissionAndSubscribe()
-      setPushPermission(perm)
-      if (perm === 'granted') {
-        setMessage({ type: 'success', text: 'Browser notifications enabled.' })
-      } else if (perm === 'denied') {
-        setMessage({ type: 'error', text: 'Notifications were blocked in the browser.' })
-      } else {
-        setMessage({ type: 'error', text: 'Notifications permission was not granted.' })
-      }
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e?.message || 'Failed to enable notifications' })
-    } finally {
-      setPushLoading(false)
-    }
-  }
-
-  // Pick file and auto-upload immediately
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     // Reset input so the same file can be re-selected
@@ -161,9 +109,6 @@ export default function PersonalSettings() {
     return 'Agent'
   })()
   const initials = user?.name?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
-  const pushReady = isPushSupported() && vapidPublicKeyPresent === true
-  const pushGranted = pushPermission === 'granted'
-
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setPwMessage(null)
@@ -286,58 +231,14 @@ export default function PersonalSettings() {
             </div>
           </div>
 
-          {/* ─── Preferences ─── */}
-          <div>
-            <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Preferences</h3>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800/50">
-              <div className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  {pushGranted ? (
-                    <Bell className="h-4 w-4 text-green-500 flex-shrink-0" />
-                  ) : (
-                    <BellOff className="h-4 w-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">Browser Notifications</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Get alerted when new chats arrive</p>
-                  </div>
-                </div>
-                {pushGranted ? (
-                  <span className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-900/30 px-2.5 py-1 text-xs font-medium text-green-700 dark:text-green-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    On
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleEnablePush}
-                    disabled={pushLoading || !pushReady}
-                    className="flex-shrink-0 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {pushLoading ? 'Enabling…' : 'Enable'}
-                  </button>
-                )}
-              </div>
-            </div>
-            {!isPushSupported() && (
-              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">Your browser doesn't support push notifications.</p>
-            )}
-            {vapidPublicKeyPresent === false && (
-              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">Push unavailable — server VAPID keys not configured.</p>
-            )}
-            {pushPermission === 'denied' && (
-              <p className="mt-2 text-xs text-red-600 dark:text-red-400">Blocked in browser settings. Update site permissions to allow.</p>
-            )}
-          </div>
-
           {/* ─── Change Password ─── */}
           <div>
             <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Change Password</h3>
             <form onSubmit={handleChangePassword} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 p-4 space-y-4">
               {pwMessage && (
                 <div className={`p-3 rounded-lg text-sm ${pwMessage.type === 'success'
-                    ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
-                    : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+                  ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
                   }`}>
                   {pwMessage.text}
                 </div>

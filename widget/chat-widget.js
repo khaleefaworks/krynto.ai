@@ -54,7 +54,9 @@
     showAttachments: globalConfig.showAttachments || false,
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist',
     popupName: globalConfig.popupName || 'Support',
-    popupButtonText: globalConfig.popupButtonText || 'Reply'
+    popupButtonText: globalConfig.popupButtonText || 'Reply',
+    notificationSoundCollapsed: globalConfig.notificationSoundCollapsed || 'notification.mp3',
+    notificationSoundOpened: globalConfig.notificationSoundOpened || 'notification.mp3'
   };
 
   // State
@@ -70,7 +72,6 @@
 
   let unreadCount = 0;
   let soundEnabled = false;
-  let notificationAudioCtx = null;
   const originalTitle = document.title;
   let firstUnreadMessageId = null;
   let historyQueue = null;
@@ -338,12 +339,21 @@
   }
 
   function notifyNewMessage(senderName, avatarUrl, messageText) {
-    if (isWidgetOpen() && !document.hidden) return;
+    var isOpen = isWidgetOpen();
+
+    if (isOpen) {
+      // Widget is open: play sound immediately (visitor may be in another tab)
+      // No popup/badge — the message already appears in the chat thread
+      playNotificationSound('opened');
+      return;
+    }
+
+    // Widget collapsed: show typing dots, then play sound + popup together
     bumpUnread();
-    playNotificationSound();
     showDotsPreview();
     dotsPreviewTimer = setTimeout(function () {
       hideDotsPreview();
+      playNotificationSound('collapsed');
       showMessagePopup(senderName, avatarUrl, messageText);
     }, 1200);
   }
@@ -467,41 +477,19 @@
 
   function enableNotificationSound() {
     soundEnabled = true;
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!notificationAudioCtx) notificationAudioCtx = new AC();
-      if (notificationAudioCtx.state !== 'running') {
-        notificationAudioCtx.resume().catch(() => { });
-      }
-      if (notificationAudioCtx.state === 'running') {
-        const osc = notificationAudioCtx.createOscillator();
-        const gain = notificationAudioCtx.createGain();
-        gain.gain.value = 0;
-        osc.connect(gain);
-        gain.connect(notificationAudioCtx.destination);
-        osc.start();
-        osc.stop(notificationAudioCtx.currentTime + 0.01);
-      }
-    } catch (e) { }
   }
 
-  function playNotificationSound() {
-    if (!soundEnabled || !notificationAudioCtx) return;
-    if (notificationAudioCtx.state !== 'running') {
-      notificationAudioCtx.resume().catch(() => { });
-      if (notificationAudioCtx.state !== 'running') return;
-    }
+  function playNotificationSound(mode) {
+    if (!soundEnabled) return;
+    var fileName = mode === 'opened'
+      ? (CONFIG.notificationSoundOpened || '')
+      : (CONFIG.notificationSoundCollapsed || '');
+    if (!fileName) return;
     try {
-      const osc = notificationAudioCtx.createOscillator();
-      const gain = notificationAudioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.value = 0.04;
-      osc.connect(gain);
-      gain.connect(notificationAudioCtx.destination);
-      osc.start();
-      osc.stop(notificationAudioCtx.currentTime + 0.14);
+      var baseUrl = (CONFIG.apiUrl || '').replace(/\/$/, '');
+      var a = new Audio(baseUrl + '/sounds/' + fileName);
+      a.volume = 1.0;
+      a.play().catch(function () { });
     } catch (e) { }
   }
 
@@ -1217,11 +1205,8 @@
       } else {
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
-        if (!isWidgetOpen() || document.hidden) {
-          notifyNewMessage(null, null, data.message);
-        } else if (isAtBottom) {
-          markRead();
-        }
+        notifyNewMessage(null, null, data.message);
+        if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
         showNewMsgIndicator();
       }
       smartScroll();
@@ -1234,11 +1219,8 @@
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
       appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(null, null, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(null, null, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
       // Restore widget state after bot prompt arrives (new sessions).
@@ -1249,11 +1231,8 @@
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(null, null, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(null, null, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'visitor_message_saved') {
@@ -1274,11 +1253,8 @@
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'agent_joined') {

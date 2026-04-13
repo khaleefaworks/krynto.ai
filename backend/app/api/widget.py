@@ -376,6 +376,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     branding_text = config.get("branding_text")
     popup_name = config.get("popup_name")
     popup_button_text = config.get("popup_button_text")
+    notification_sound_collapsed = config.get("notification_sound_collapsed", "notification.mp3")
+    notification_sound_opened = config.get("notification_sound_opened", "notification.mp3")
     
     def _normalize_base(base: str) -> str:
         b = (base or "").strip()
@@ -418,6 +420,8 @@ async def get_widget_loader(request: Request, key: str, db: Session = Depends(ge
     _aichatassist.brandingText = {json.dumps(branding_text)};
     _aichatassist.popupName = {json.dumps(popup_name)};
     _aichatassist.popupButtonText = {json.dumps(popup_button_text)};
+    _aichatassist.notificationSoundCollapsed = {json.dumps(notification_sound_collapsed)};
+    _aichatassist.notificationSoundOpened = {json.dumps(notification_sound_opened)};
   
   // Load the widget CSS
   var link = document.createElement('link');

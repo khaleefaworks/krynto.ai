@@ -11,7 +11,14 @@ Phase 5 Audit — 3 items still pending:
 
 2) Assign team dropdown in chat page not having create team button same like Tag Conversation dropdown. ✅ FIXED — Added "Manage teams" link in team picker popover (visible to admins)
 
-3) Notification sounds on both side is not good, need to clone like smartsupp.
+3) Notification sounds on both side is not good, need to clone like smartsupp. ✅ FIXED — Full notification sound overhaul:
+- Dashboard: new Notifications page under Settings → Personal (Bell icon in sidebar). Push notification toggle moved here. Three configurable sound dropdowns (New chat / New message / New visitor on website) with live preview. 12 sound options + silent. Preferences stored in DB (`user.notification_preferences`) and synced to localStorage on login — works across devices/browsers.
+- Dashboard sounds: single global 1500ms gate prevents stacking; only `visitor_message` triggers sound (not `conversation_unread`) — fixes double-sound bug.
+- "New visitor on website" sound plays only when agent is on the Customers → Visitors tab (component-mounted gate).
+- Widget side: two per-website sound dropdowns in Website → Widget tab (sound when collapsed / sound when open). Only blackberry2.mp3 and notification.mp3 offered. Preview button on each. Config served from backend loader as `notificationSoundCollapsed` / `notificationSoundOpened`.
+- Widget sound timing fixed: collapsed sound fires together with popup (after 1200ms typing dots), not immediately. Open-widget sound fires immediately (visitor may be in another tab).
+- Sound files served from backend at `/sounds/*` (mounts `frontend/public/sounds/`), so widget URL `apiUrl/sounds/file.mp3` works in production without knowing the frontend URL.
+- In-app toasts removed entirely. Push notification scoped by org + website assignment + team membership.
 
 4) New message popup on widget's reply button icon should be same like smartsupp. Also this popup color should be same as widget theme color that defined in this page http://localhost:5173/dashboard/settings/websites/1?tab=widget ✅ FIXED
 

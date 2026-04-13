@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Enum as SQLEnum, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Enum as SQLEnum, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -61,6 +61,10 @@ class User(Base):
 
     # Heartbeat (presence)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Per-user notification sound preferences stored as JSON.
+    # Keys: new_chat_sound, message_sound, new_visitor_website_sound (filename strings)
+    notification_preferences = Column(JSON, nullable=True, default=None)
 
     organization = relationship(
         "Organization",

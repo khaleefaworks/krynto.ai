@@ -6,6 +6,7 @@ import type { CustomerVisitor, CustomerVisitorDetails } from '@/services/custome
 import { fetchVisitorDetails, fetchVisitors } from '@/services/customers'
 import { addMessageHandler, connectAgentSocket } from '@/services/agentSocket'
 import { isAdmin } from '@/lib/roles'
+import { playNewVisitorOnWebsiteSound } from '@/lib/notificationSound'
 import { websitesApi } from '@/services/websites'
 import { agentAssignmentsApi } from '@/services/agentAssignments'
 import UserAvatar from '@/components/UserAvatar'
@@ -199,6 +200,11 @@ export default function CustomersVisitors() {
                 t === 'page_view'
             ) {
                 scheduleRefreshList()
+
+                // Play 'New visitor on website' sound when a new chat starts
+                if (t === 'new_chat') {
+                    try { playNewVisitorOnWebsiteSound() } catch { }
+                }
 
                 // If drawer is open for this session, refresh the details too.
                 const sid = String((data as any)?.session_id || '')
@@ -536,25 +542,25 @@ export default function CustomersVisitors() {
                                                 details.conversations.map((c) => {
                                                     const hasMsgs = (c as any).has_visitor_message
                                                     return (
-                                                    <button
-                                                        key={c.conversation_id}
-                                                        onClick={() => {
-                                                            if (!hasMsgs) {
-                                                                setConfirmBotConv({ shortId: c.short_id || null, conversationId: Number(c.conversation_id) })
-                                                                return
-                                                            }
-                                                            openConversation(c.short_id || null, Number(c.conversation_id))
-                                                        }}
-                                                        className={`w-full text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${!hasMsgs ? 'opacity-75' : ''}`}
-                                                    >
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.title || (c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation')}</div>
-                                                            <div className="flex items-center gap-1.5">
-                                                                {!hasMsgs && <span className="text-xs text-amber-500 dark:text-amber-400">Bot only</span>}
-                                                                <span className="text-xs text-gray-500 dark:text-gray-400">{c.status}</span>
+                                                        <button
+                                                            key={c.conversation_id}
+                                                            onClick={() => {
+                                                                if (!hasMsgs) {
+                                                                    setConfirmBotConv({ shortId: c.short_id || null, conversationId: Number(c.conversation_id) })
+                                                                    return
+                                                                }
+                                                                openConversation(c.short_id || null, Number(c.conversation_id))
+                                                            }}
+                                                            className={`w-full text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${!hasMsgs ? 'opacity-75' : ''}`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{c.title || (c.created_at ? new Date(c.created_at).toLocaleString() : 'Conversation')}</div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    {!hasMsgs && <span className="text-xs text-amber-500 dark:text-amber-400">Bot only</span>}
+                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">{c.status}</span>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    </button>
+                                                        </button>
                                                     )
                                                 })
                                             ) : (

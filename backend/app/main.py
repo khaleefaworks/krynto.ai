@@ -184,3 +184,9 @@ from app.core.uploads import get_uploads_root
 uploads_dir = get_uploads_root()
 uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
+# Serve notification sound files from frontend/public/sounds/
+# The widget loads sounds via apiUrl + /sounds/<file>, so they must be on the backend.
+sounds_dir = project_root / "frontend" / "public" / "sounds"
+if sounds_dir.is_dir():
+    app.mount("/sounds", StaticFiles(directory=str(sounds_dir)), name="sounds")

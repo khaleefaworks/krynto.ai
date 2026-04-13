@@ -653,6 +653,51 @@ def undelete_user(
     }
 
 
+class NotificationPreferences(BaseModel):
+    new_chat_sound: str = 'new-notification.mp3'
+    message_sound: str = 'notification.mp3'
+    new_visitor_website_sound: str = ''
+
+
+_ALLOWED_SOUNDS = {
+    '', 'alarm.mp3', 'blackberry.mp3', 'blackberry2.mp3', 'echo.mp3',
+    'message-bells.mp3', 'message.mp3', 'msn-message.mp3', 'msn-nudge.mp3',
+    'new-notification.mp3', 'notification.mp3', 'simplesms.mp3', 'windows7.mp3',
+}
+
+
+@router.get("/me/notification-preferences", response_model=NotificationPreferences)
+def get_notification_preferences(
+    current_user: User = Depends(require_authenticated_user),
+):
+    prefs = current_user.notification_preferences or {}
+    return NotificationPreferences(
+        new_chat_sound=prefs.get('new_chat_sound', 'new-notification.mp3'),
+        message_sound=prefs.get('message_sound', 'notification.mp3'),
+        new_visitor_website_sound=prefs.get('new_visitor_website_sound', ''),
+    )
+
+
+@router.patch("/me/notification-preferences", response_model=NotificationPreferences)
+def update_notification_preferences(
+    payload: NotificationPreferences,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    for field in ('new_chat_sound', 'message_sound', 'new_visitor_website_sound'):
+        val = getattr(payload, field)
+        if val not in _ALLOWED_SOUNDS:
+            raise HTTPException(status_code=400, detail=f"Invalid sound file: {val}")
+    current_user.notification_preferences = {
+        'new_chat_sound': payload.new_chat_sound,
+        'message_sound': payload.message_sound,
+        'new_visitor_website_sound': payload.new_visitor_website_sound,
+    }
+    db.add(current_user)
+    db.commit()
+    return NotificationPreferences(**current_user.notification_preferences)
+
+
 class VerifyPasswordRequest(BaseModel):
     password: str
 

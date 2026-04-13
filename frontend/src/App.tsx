@@ -23,6 +23,7 @@ import CustomersVisitors from './pages/CustomersVisitors'
 import CustomersContacts from './pages/CustomersContacts'
 import PersonalSettings from './pages/PersonalSettings'
 import PersonalShortcutsSettings from './pages/PersonalShortcutsSettings'
+import NotificationSettings from './pages/NotificationSettings'
 import Teams from './pages/Teams'
 import Analytics from './pages/Analytics'
 import OrgSettings from './pages/OrgSettings'
@@ -33,12 +34,24 @@ import SuperAdminStats from './pages/SuperAdminStats'
 import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
-import NotificationToasts from './components/NotificationToasts'
 import NotificationPermissionPrompt from './components/NotificationPermissionPrompt'
 import { installNotificationSoundArm, playMessageNotificationSound, playNewVisitorNotificationSound } from './lib/notificationSound'
+import { fetchNotificationPreferences, syncPrefsToLocalStorage } from './services/notificationPrefs'
 import { API_BASE } from './config/endpoints'
 
 const _lastToastByKey = new Map<string, number>()
+
+// Global sound gate: any notification sound (chat or message) is blocked for this window.
+// Prevents rapid-fire stacking when many events arrive at once.
+let _lastAnySoundAt = 0
+const _SOUND_MIN_INTERVAL_MS = 1500
+
+function _shouldPlaySound(): boolean {
+  const now = Date.now()
+  if (now - _lastAnySoundAt < _SOUND_MIN_INTERVAL_MS) return false
+  _lastAnySoundAt = now
+  return true
+}
 
 function _shouldToast(key: string, minIntervalMs: number): boolean {
   const now = Date.now()
@@ -61,7 +74,6 @@ function App() {
     setOrganization,
     setUnreadChatsCount,
     bumpChatEventsVersion,
-    pushNotification,
   } = useAppStore()
   const [initializing, setInitializing] = useState(true)
   const [needsSetup, setNeedsSetup] = useState(false)
@@ -86,12 +98,11 @@ function App() {
         const data: any = event?.data || {}
         if (data?.type !== 'push') return
 
-        // If the dashboard is open + realtime is connected, avoid double-beeping.
-        // In that case the WebSocket event handler will produce the in-app beep.
+        // If WS is connected it will handle the sound — never double-play from SW push.
         const isRealtimeConnected = Boolean((useAppStore as any).getState?.()?.isConnected)
-        if (document.visibilityState === 'visible' && isRealtimeConnected) return
+        if (isRealtimeConnected) return
 
-        if (_shouldBeep('sw_push', 1200)) {
+        if (_shouldPlaySound()) {
           try { playMessageNotificationSound() } catch { }
         }
 
@@ -106,7 +117,7 @@ function App() {
     return () => {
       try { sw.removeEventListener('message', handler) } catch { }
     }
-  }, [pushNotification])
+  }, [])
 
   // Single initialization effect: check setup status, then restore session.
   // Merging these three concerns prevents the race where the stale-token-clear
@@ -133,6 +144,9 @@ function App() {
             try {
               const userData = await getCurrentUser()
               setUser(userData)
+              // Sync notification sound preferences from DB → localStorage so
+              // sounds always reflect the user's saved settings on any device.
+              fetchNotificationPreferences().then(syncPrefsToLocalStorage).catch(() => { })
               // Populate org state for non-super-admin users.
               if (userData.role !== 'system_manager' && userData.organization_id) {
                 try {
@@ -242,7 +256,7 @@ function App() {
             : Number((data as any)?.website_id) || undefined
 
         if (data.type === 'new_chat') {
-          if (_shouldBeep('new_chat', 1200)) {
+          if (_shouldPlaySound()) {
             try { playNewVisitorNotificationSound() } catch { }
           }
           const websiteName = String((data as any)?.website_name || '').trim()
@@ -260,38 +274,14 @@ function App() {
           })
 
           if (_shouldToast(`new_chat:${conversationId || 'na'}`, 3000)) {
-            pushNotification({
-              type: 'new_chat',
-              title: websiteName ? `New chat — ${websiteName}` : 'New chat',
-              body,
-              conversationId,
-              websiteId,
-            })
+            void 0  // in-app toasts removed; desktop push + sounds handle notifications
           }
-        } else if (data.type === 'visitor_message' || data.type === 'conversation_unread') {
-          if (_shouldBeep(String(conversationId || 'activity'), 1200)) {
+        } else if (data.type === 'visitor_message') {
+          // Only play on visitor_message — not on conversation_unread.
+          // The backend sends both events for the same message; listening to
+          // conversation_unread here caused a double-sound on every message.
+          if (_shouldPlaySound()) {
             try { playMessageNotificationSound() } catch { }
-          }
-          if (conversationId && _shouldToast(`activity:${conversationId}`, 8000)) {
-            const dto = (data as any)?.message_obj
-            const content =
-              (dto && typeof dto === 'object' ? String((dto as any)?.content || '').trim() : '') ||
-              String((data as any)?.message || '').trim()
-
-            maybeBrowserNotify({
-              title: 'New visitor activity',
-              body: content ? content.slice(0, 120) : undefined,
-              url: '/dashboard/chats',
-              tag: `activity:${conversationId}`,
-            })
-
-            pushNotification({
-              type: String(data.type),
-              title: 'New visitor activity',
-              body: content ? content.slice(0, 120) : undefined,
-              conversationId,
-              websiteId,
-            })
           }
         }
       } catch {
@@ -367,7 +357,6 @@ function App() {
 
   return (
     <BrowserRouter>
-      <NotificationToasts />
       {token ? <NotificationPermissionPrompt /> : null}
       <Routes>
         {/* System bootstrap — shown when backend is not yet initialized */}
@@ -464,6 +453,7 @@ function App() {
                     {/* Personal settings - All users */}
                     <Route path="personal" element={<PersonalSettings />} />
                     <Route path="personal/shortcuts" element={<PersonalShortcutsSettings />} />
+                    <Route path="personal/notifications" element={<NotificationSettings />} />
                     <Route index element={
                       <div className="flex-1 flex items-center justify-center h-full">
                         <div className="text-center max-w-md px-8">

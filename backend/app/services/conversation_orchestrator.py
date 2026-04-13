@@ -36,6 +36,95 @@ logger = get_logger(__name__)
 _waiting_bot_message_scheduled: set[int] = set()
 
 
+def _get_eligible_agent_ids_for_push(db: Session, *, website_id: int) -> set[int]:
+    """Return IDs of agents who should receive push notifications for the given website.
+
+    Scoping rules (org-aware, multi-tenant):
+    - SYSTEM_MANAGER: always eligible (cross-org administrator).
+    - OWNER/MANAGER of the website's org: always eligible.
+    - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
+      - If the website has teams WITH members → further restrict to team members only.
+      - If the website has no teams (or teams have no members) → all assigned agents.
+    - All candidates must be is_active=True AND is_available=True.
+    """
+    from app.models.user import UserRole
+    from app.models.website import Website
+    from app.models.agent_website_assignment import AgentWebsiteAssignment
+    from app.models.website_team import WebsiteTeam, WebsiteTeamMember
+
+    website = db.query(Website).filter_by(id=website_id).first()
+    if not website:
+        return set()
+
+    org_id = website.organization_id
+    eligible: set[int] = set()
+
+    # SYSTEM_MANAGER — active + available system managers (cross-org)
+    sys_mgrs = (
+        db.query(User)
+        .filter(
+            User.is_active == True,   # noqa: E712
+            User.is_available == True,  # noqa: E712
+            User.role == UserRole.SYSTEM_MANAGER,
+        )
+        .all()
+    )
+    eligible.update(int(u.id) for u in sys_mgrs)
+
+    if org_id is not None:
+        # OWNER/MANAGER in same org
+        org_admins = (
+            db.query(User)
+            .filter(
+                User.is_active == True,   # noqa: E712
+                User.is_available == True,  # noqa: E712
+                User.organization_id == org_id,
+                User.role.in_([UserRole.OWNER, UserRole.MANAGER]),
+            )
+            .all()
+        )
+        eligible.update(int(u.id) for u in org_admins)
+
+    # AGENT: must be directly assigned to this website
+    assigned_rows = (
+        db.query(AgentWebsiteAssignment.agent_id)
+        .filter(AgentWebsiteAssignment.website_id == website_id)
+        .all()
+    )
+    assigned_agent_ids = {int(r[0]) for r in assigned_rows}
+
+    if assigned_agent_ids:
+        # If website has teams with members, restrict agents to those team members
+        team_member_rows = (
+            db.query(WebsiteTeamMember.user_id)
+            .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+            .filter(WebsiteTeam.website_id == website_id)
+            .all()
+        )
+        team_member_ids = {int(r[0]) for r in team_member_rows}
+
+        if team_member_ids:
+            # Teams exist with members → only team members who are also assigned
+            agent_candidates = assigned_agent_ids & team_member_ids
+        else:
+            # No teams configured → all directly assigned agents are eligible
+            agent_candidates = assigned_agent_ids
+
+        if agent_candidates:
+            agents = (
+                db.query(User)
+                .filter(
+                    User.id.in_(agent_candidates),
+                    User.is_active == True,   # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                )
+                .all()
+            )
+            eligible.update(int(u.id) for u in agents)
+
+    return eligible
+
+
 def _should_skip_due_to_repeat(
     *,
     db: Session,
@@ -352,22 +441,12 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push for unassigned: notify all available agents (non-blocking)
+        # Web Push for unassigned: notify eligible agents scoped to this website (non-blocking)
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
-            from app.models.user import User, UserRole
 
-            candidates = (
-                self.db.query(User)
-                .filter(
-                    User.is_active == True,  # noqa: E712
-                    User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
-                )
-                .all()
-            )
-            agent_ids = {int(u.id) for u in candidates}
+            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=website_id)
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
             if subs:
                 loop = asyncio.get_event_loop()
@@ -504,25 +583,13 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push: notify all available agents.
+        # Web Push: notify eligible agents (scoped to this website's org + teams).
         # This is best-effort and requires VAPID keys to be configured.
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
 
-            from app.models.user import User, UserRole
-
-            candidates = (
-                self.db.query(User)
-                .filter(
-                    User.is_active == True,  # noqa: E712
-                    User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
-                )
-                .all()
-            )
-
-            agent_ids = {int(u.id) for u in candidates}
+            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=int(conversation.website_id))
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
