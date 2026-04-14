@@ -205,7 +205,15 @@ def get_active_chats(
                 "closed_by": getattr(conv, "closed_by", None),
                 "visitor_ended": int(conv.id) in visitor_ended_ids,
                 "message_count": int(message_count or 0),
-                "unread_count": int(unread_counts.get(int(conv.id), 0)),
+                # Only surface unread count for the assigned agent (or when
+                # unassigned — i.e. open for pickup). Spectating agents should
+                # not accumulate badge noise for conversations they don't own.
+                "unread_count": int(unread_counts.get(int(conv.id), 0))
+                if (
+                    conv.assigned_agent_id is None
+                    or int(conv.assigned_agent_id) == int(current_user.id)
+                )
+                else 0,
                 "last_message": last_message_val,
                 "last_message_at": last_message_at.isoformat() if last_message_at else None,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,

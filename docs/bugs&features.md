@@ -34,7 +34,7 @@ Phase 5 Audit — 3 items still pending:
 
 10) Push notification & inapp notification should one come for assigned teams chat. If agents including owner is not assigned to any team, then for all chats it should come but only for assigned websites.
 
-11) Currently notification count badge is not working properly. When an agent is assigned to a website, then only he will get the chat. Also if a chat is joined by any agent, then for other agents un read cound need not to show. But always the chat list should get updated with live chats.
+11) Currently notification count badge is not working properly. When an agent is assigned to a website, then only he will get the chat. Also if a chat is joined by any agent, then for other agents un read cound need not to show. But always the chat list should get updated with live chats. ✅ FIXED — `GET /chats/active` now zeroes out `unread_count` for spectating agents: only the assigned agent (or any agent when the conversation is unassigned/open for pickup) gets the real unread count. Spectators still see the conversation in the list and it updates live, but their badge count is not inflated by chats they don't own.
 
 12) Chats page filter should be improved.
 
