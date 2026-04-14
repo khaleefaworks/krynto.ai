@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { Image, Palette, ToggleRight, Upload, MessageCircle, Sparkles, Bell, AlignLeft, AlignRight } from 'lucide-react'
+import { Image, Palette, ToggleRight, Upload, MessageCircle, Sparkles, Bell, AlignLeft, AlignRight, Volume2, Play } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 
 /* ── Types ────────────────────────────────────────────── */
@@ -25,6 +25,8 @@ interface WidgetConfig {
     header_icon_url?: string | null
     popup_name?: string
     popup_button_text?: string
+    notification_sound_collapsed?: string
+    notification_sound_opened?: string
 }
 
 interface WebsiteWidgetTabProps {
@@ -508,6 +510,54 @@ export default function WebsiteWidgetTab({
                         <p className="text-xs text-gray-400 dark:text-gray-500 italic">
                             The popup color uses your primary/gradient color set in Colors below.
                         </p>
+                    </Section>
+
+                    {/* ── 4b. Notification Sounds ── */}
+                    <Section icon={Volume2} title="Notification Sounds" description="Sound played when a new message arrives in the widget">
+                        <Field label="Sound (collapsed widget)" hint="Plays when widget is minimised">
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={widgetConfig.notification_sound_collapsed ?? 'notification.mp3'}
+                                    onChange={(e) => update({ notification_sound_collapsed: e.target.value })}
+                                    className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">--- (silent)</option>
+                                    <option value="blackberry2.mp3">Blackberry 2</option>
+                                    <option value="notification.mp3">Notification</option>
+                                </select>
+                                <button
+                                    type="button"
+                                    title="Preview sound"
+                                    disabled={!widgetConfig.notification_sound_collapsed}
+                                    onClick={() => { try { new Audio(`/sounds/${widgetConfig.notification_sound_collapsed}`).play() } catch { } }}
+                                    className="flex-shrink-0 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    <Play className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        </Field>
+                        <Field label="Sound (open widget)" hint="Plays when widget is open (visitor may be in another tab)">
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={widgetConfig.notification_sound_opened ?? 'notification.mp3'}
+                                    onChange={(e) => update({ notification_sound_opened: e.target.value })}
+                                    className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">--- (silent)</option>
+                                    <option value="blackberry2.mp3">Blackberry 2</option>
+                                    <option value="notification.mp3">Notification</option>
+                                </select>
+                                <button
+                                    type="button"
+                                    title="Preview sound"
+                                    disabled={!widgetConfig.notification_sound_opened}
+                                    onClick={() => { try { new Audio(`/sounds/${widgetConfig.notification_sound_opened}`).play() } catch { } }}
+                                    className="flex-shrink-0 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    <Play className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        </Field>
                     </Section>
 
                     {/* ── 5. Colors ── */}

@@ -1232,6 +1232,13 @@
   color: #111827;
 }
 
+.chatassist-end-overlay-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
 .chatassist-end-overlay-actions {
   margin-top: 12px;
   display: flex;
@@ -1940,6 +1947,10 @@
 
 .chatassist-theme-dark .chatassist-end-overlay-title {
   color: #f1f5f9;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-desc {
+  color: #94a3b8;
 }
 
 .chatassist-theme-dark .chatassist-end-overlay-cancel {

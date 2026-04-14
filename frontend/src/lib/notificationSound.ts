@@ -3,11 +3,35 @@ let isArmed = false
 
 const _audioBaseCache = new Map<string, HTMLAudioElement>()
 
-// Fixed structure (no user settings):
-// - New visitor (first message / new chat): /sounds/new-notification.mp3
-// - Subsequent messages: /sounds/notification.mp3
+// localStorage keys for user-configurable notification sounds
+export const SOUND_PREF_KEYS = {
+  newChat: 'notif_sound_new_chat',
+  message: 'notif_sound_message',
+  newVisitorWebsite: 'notif_sound_new_visitor_website',
+} as const
+
+// Default sound file names (relative to /sounds/)
+const SOUND_DEFAULTS = {
+  newChat: 'new-notification.mp3',
+  message: 'notification.mp3',
+  newVisitorWebsite: '',  // silent by default
+}
+
+// Kept for backward-compat (used by components that reference these constants directly)
 export const NEW_VISITOR_SOUND_URL = '/sounds/new-notification.mp3'
 export const MESSAGE_SOUND_URL = '/sounds/notification.mp3'
+
+/** Returns the configured sound URL for a given key, or '' if silent. */
+function _getSoundUrl(key: keyof typeof SOUND_PREF_KEYS): string {
+  try {
+    const stored = localStorage.getItem(SOUND_PREF_KEYS[key])
+    // null means never set → use default; empty string means user chose silent
+    const fileName = stored !== null ? stored : SOUND_DEFAULTS[key]
+    return fileName ? `/sounds/${fileName}` : ''
+  } catch {
+    return SOUND_DEFAULTS[key] ? `/sounds/${SOUND_DEFAULTS[key]}` : ''
+  }
+}
 
 function _getOrCreateBaseAudio(url: string): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null
@@ -27,10 +51,15 @@ function _getOrCreateBaseAudio(url: string): HTMLAudioElement | null {
 
 function _preloadKnownSounds(): void {
   try {
-    const a1 = _getOrCreateBaseAudio(NEW_VISITOR_SOUND_URL)
-    try { a1?.load() } catch { }
-    const a2 = _getOrCreateBaseAudio(MESSAGE_SOUND_URL)
-    try { a2?.load() } catch { }
+    // Preload all configured sounds at arm time
+    const urls = [
+      _getSoundUrl('newChat'),
+      _getSoundUrl('message'),
+      _getSoundUrl('newVisitorWebsite'),
+    ].filter(Boolean)
+    for (const url of urls) {
+      try { _getOrCreateBaseAudio(url)?.load() } catch { }
+    }
   } catch {
     // ignore
   }
@@ -52,7 +81,7 @@ function _playFile(url: string): void {
   }
 }
 
-export type NotificationSoundKind = 'new_visitor' | 'message'
+export type NotificationSoundKind = 'new_visitor' | 'message' | 'new_visitor_website'
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -108,9 +137,9 @@ export function installNotificationSoundArm(): void {
   const opts: AddEventListenerOptions = { capture: true, passive: true, once: true }
 
   const cleanup = () => {
-    try { window.removeEventListener('pointerdown', once, true) } catch {}
-    try { window.removeEventListener('keydown', once, true) } catch {}
-    try { window.removeEventListener('touchstart', once, true) } catch {}
+    try { window.removeEventListener('pointerdown', once, true) } catch { }
+    try { window.removeEventListener('keydown', once, true) } catch { }
+    try { window.removeEventListener('touchstart', once, true) } catch { }
   }
 
   window.addEventListener('pointerdown', once, opts)
@@ -123,9 +152,14 @@ export function installNotificationSoundArm(): void {
  * No-op if audio isn't available/armed.
  */
 function _playNotificationSound(kind: NotificationSoundKind): void {
-  const url = kind === 'new_visitor' ? NEW_VISITOR_SOUND_URL : MESSAGE_SOUND_URL
+  const url = kind === 'new_visitor'
+    ? _getSoundUrl('newChat')
+    : kind === 'new_visitor_website'
+      ? _getSoundUrl('newVisitorWebsite')
+      : _getSoundUrl('message')
 
-  // 1) Prefer file-based sounds.
+  // 1) Prefer file-based sounds. Empty URL means user chose silent.
+  if (!url) return
   try {
     _playFile(url)
     isArmed = true
@@ -176,6 +210,8 @@ function _playNotificationSound(kind: NotificationSoundKind): void {
 
     if (kind === 'new_visitor') {
       playTone({ start: now, duration: 0.14, frequency: 988, type: 'square', peakGain: 0.22 })
+    } else if (kind === 'new_visitor_website') {
+      playTone({ start: now, duration: 0.14, frequency: 880, type: 'square', peakGain: 0.18 })
     } else {
       playTone({ start: now, duration: 0.13, frequency: 880, type: 'sine', peakGain: 0.12 })
     }
@@ -192,10 +228,20 @@ export function playNotificationBeep(): void {
   _playNotificationSound('message')
 }
 
+/** Plays the 'New chat' sound (configurable, plays from any dashboard page). */
 export function playNewVisitorNotificationSound(): void {
   _playNotificationSound('new_visitor')
 }
 
+/** Plays the 'New message' sound (configurable). */
 export function playMessageNotificationSound(): void {
   _playNotificationSound('message')
+}
+
+/**
+ * Plays the 'New visitor on website' sound.
+ * This should only be called when the agent is on the Customers → Visitors tab.
+ */
+export function playNewVisitorOnWebsiteSound(): void {
+  _playNotificationSound('new_visitor_website')
 }

@@ -347,6 +347,32 @@ async def chat_ws(
         except Exception:
             conversation = None
 
+        # If the visitor intentionally ended this conversation, properly resolve it
+        # before starting a fresh one.  Two OPEN conversations per session cannot
+        # coexist, so the visitor-ended conversation must be closed first.
+        # We call close_conversation() (not a raw DB write) so the agent dashboard
+        # receives a clean conversation_closed broadcast and the conv moves to the
+        # Resolved tab explicitly instead of silently disappearing.
+        if conversation:
+            try:
+                from app.models.message import Message as _Msg
+                _visitor_left = (
+                    db.query(_Msg)
+                    .filter(
+                        _Msg.conversation_id == conversation.id,
+                        _Msg.event_type == "visitor_left",
+                    )
+                    .first()
+                )
+                if _visitor_left:
+                    await orchestrator.close_conversation(
+                        conversation_id=int(conversation.id),
+                        closed_by="visitor_ended",
+                    )
+                    conversation = None
+            except Exception:
+                pass
+
         if conversation:
             # Track whether this conversation already had an active visitor socket.
             # This is best-effort and helps reduce noisy presence events.
@@ -725,8 +751,8 @@ async def chat_ws(
 
                 continue
 
-            # Smartsupp-like UX: allow the visitor to explicitly end/close the chat.
-            # This resolves the current open conversation and records closed_by=visitor.
+            # Visitor clicked 'End chat'. Record a timeline event but keep the
+            # conversation OPEN — agents follow up and resolve manually (no lost leads).
             if message_type == "end_chat":
                 conversation = None
                 try:
@@ -739,26 +765,13 @@ async def chat_ws(
                     conversation = None
 
                 if not conversation:
-                    # Nothing to close.
+                    # Nothing to record.
                     continue
 
                 try:
-                    await orchestrator.visitor_closed_chat(conversation_id=int(conversation.id))
+                    await orchestrator.visitor_left_chat(conversation_id=int(conversation.id))
                 except Exception:
                     # Best-effort: still allow the socket to continue.
-                    pass
-
-                # Optional ack for the widget.
-                try:
-                    await websocket.send_json(
-                        {
-                            "type": "end_chat_ok",
-                            "conversation_id": int(conversation.id),
-                            "website_id": website_id,
-                            "closed_by": "visitor",
-                        }
-                    )
-                except Exception:
                     pass
 
                 continue
@@ -845,6 +858,13 @@ async def chat_ws(
 
                 if conversation and conversation.assigned_agent_id:
                     await agent_service.send_to_agent(conversation.assigned_agent_id, event)
+                    # Also broadcast to spectating agents (exclude assigned to avoid double-delivery).
+                    await agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data=event,
+                        include_global=True,
+                        exclude_agent_id=conversation.assigned_agent_id,
+                    )
                 else:
                     await agent_service.broadcast_to_active_agents(
                         website_id=website_id,
@@ -1153,6 +1173,13 @@ async def chat_ws_with_conversation(
                     }
                     if conv.assigned_agent_id:
                         await agent_service.send_to_agent(conv.assigned_agent_id, event)
+                        # Also broadcast to spectating agents.
+                        await agent_service.broadcast_to_active_agents(
+                            website_id=website_id,
+                            message_data=event,
+                            include_global=True,
+                            exclude_agent_id=conv.assigned_agent_id,
+                        )
                     else:
                         await agent_service.broadcast_to_active_agents(
                             website_id=website_id, message_data=event, include_global=True
@@ -1184,15 +1211,7 @@ async def chat_ws_with_conversation(
                         db.expire_all()
                         fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
                         if fresh_conv and fresh_conv.status == ConversationStatus.OPEN:
-                            await orchestrator.visitor_closed_chat(conversation_id=int(conv.id))
-                            await websocket.send_json(
-                                {
-                                    "type": "end_chat_ok",
-                                    "conversation_id": int(conv.id),
-                                    "website_id": website_id,
-                                    "closed_by": "visitor",
-                                }
-                            )
+                            await orchestrator.visitor_left_chat(conversation_id=int(conv.id))
                     except Exception:
                         pass
                     continue

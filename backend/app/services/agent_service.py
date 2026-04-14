@@ -202,11 +202,14 @@ class AgentService:
         website_id: Optional[int],
         message_data: dict,
         include_global: bool = True,
+        exclude_agent_id: Optional[int] = None,
     ) -> int:
         """Broadcast a message to active agent sockets.
 
         If website_id is provided, sends to sockets connected for that website.
         If include_global is True, also sends to "global notification" sockets (website_id == 0).
+        If exclude_agent_id is set, skips all sockets belonging to that agent (used to avoid
+        double-delivery when the assigned agent already received the message directly).
 
         Returns number of sockets successfully sent.
         """
@@ -219,6 +222,7 @@ class AgentService:
                     website_id=website_id,
                     include_global=bool(include_global),
                     payload=message_data,
+                    exclude_agent_id=exclude_agent_id,
                 )
             )
             return 0
@@ -226,6 +230,10 @@ class AgentService:
         sent_count = 0
 
         for ws_id, agent_info in AgentService.active_agents.items():
+            # Skip the excluded agent (e.g. assigned agent already received directly).
+            if exclude_agent_id is not None and agent_info.get("agent_id") == exclude_agent_id:
+                continue
+
             ws_website_id = agent_info.get("website_id")
             should_send = False
 
@@ -292,8 +300,13 @@ class AgentService:
         if event_type == "agent_broadcast":
             website_id = event.get("website_id")
             include_global = bool(event.get("include_global", True))
+            exclude_agent_id = event.get("exclude_agent_id")
 
             for agent_info in cls.active_agents.values():
+                # Skip the excluded agent (e.g. assigned agent already received directly).
+                if exclude_agent_id is not None and agent_info.get("agent_id") == exclude_agent_id:
+                    continue
+
                 ws_website_id = agent_info.get("website_id")
                 should_send = False
 

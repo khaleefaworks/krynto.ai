@@ -38,6 +38,8 @@ interface Website {
     header_icon_url?: string | null
     popup_name?: string
     popup_button_text?: string
+    notification_sound_collapsed?: string
+    notification_sound_opened?: string
     office_hours?: any
   } | null
   created_at: string
@@ -205,6 +207,8 @@ export default function WebsiteDetail() {
       header_icon_url: null as string | null,
       popup_name: '',
       popup_button_text: '',
+      notification_sound_collapsed: 'notification.mp3',
+      notification_sound_opened: 'notification.mp3',
       office_hours: coerceOfficeHours(null),
     }
   })
@@ -838,6 +842,8 @@ export default function WebsiteDetail() {
           header_icon_url: data.widget_config?.header_icon_url ?? null,
           popup_name: (data.widget_config as any)?.popup_name || '',
           popup_button_text: (data.widget_config as any)?.popup_button_text || '',
+          notification_sound_collapsed: (data.widget_config as any)?.notification_sound_collapsed ?? 'notification.mp3',
+          notification_sound_opened: (data.widget_config as any)?.notification_sound_opened ?? 'notification.mp3',
           office_hours: officeHours,
         }
       })

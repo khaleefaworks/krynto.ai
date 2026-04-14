@@ -208,6 +208,7 @@ interface ConversationDetails {
     status?: string
     team_id?: number | null
     closed_by?: string | null
+    visitor_ended?: boolean
     title?: string | null
 }
 
@@ -255,12 +256,14 @@ export default function ConversationsView() {
     const agentTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const agentTypingActiveRef = useRef(false)
     const lastTypingConversationIdRef = useRef<number | null>(null)
+    const spectatorAgentTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const connectedWebsiteIdRef = useRef<number | null>(null)
 
     const [resolvedChats, setResolvedChats] = useState<any[]>([])
     const [resolvedLoading, setResolvedLoading] = useState(false)
     const [visitorTyping, setVisitorTyping] = useState(false)
+    const [spectatorAgentTyping, setSpectatorAgentTyping] = useState<string | null>(null)
 
     // Filter state
     const [activeFilter, setActiveFilter] = useState<FilterCategory>('all')
@@ -552,6 +555,7 @@ export default function ConversationsView() {
     }, [activeChats, resolvedChats])
 
     const isResolvedSelected = Boolean(conversation && (conversation as any).status === 'resolved')
+    const isVisitorEnded = Boolean(conversation && (conversation as any).visitor_ended)
 
     const isChatsListRoute = (() => {
         const p = String(location?.pathname || '')
@@ -586,6 +590,7 @@ export default function ConversationsView() {
         setVisitorConversations([])
         setInput('')
         setVisitorTyping(false)
+        setSpectatorAgentTyping(null)
         setFirstUnreadMessageId(null)
         setShowTakeoverConfirm(false)
         setPendingSendMessage(null)
@@ -627,19 +632,19 @@ export default function ConversationsView() {
         if (selectedChat) return
 
         let cancelled = false
-        ;(async () => {
-            try {
-                const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
-                })
-                if (cancelled || !summary?.id) return
-                // Inject into activeChats so it appears in the left list
-                setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
-                openChat(summary.id)
-            } catch {
-                // Conversation not found or no access — ignore
-            }
-        })()
+            ; (async () => {
+                try {
+                    const summary = await apiRequest<any>(`/chats/${chatIdParam}`, {
+                        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
+                    })
+                    if (cancelled || !summary?.id) return
+                    // Inject into activeChats so it appears in the left list
+                    setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                    openChat(summary.id)
+                } catch {
+                    // Conversation not found or no access — ignore
+                }
+            })()
 
         return () => { cancelled = true }
     }, [isChatsListRoute, chatIdParam, selectedChat, activeChats, openChat])
@@ -677,6 +682,7 @@ export default function ConversationsView() {
             hasScrolledToUnreadRef.current = false
             isAtBottomRef.current = true
             setVisitorTyping(false)
+            setSpectatorAgentTyping(null)
             loadChatData(selectedChat)
             loadConversationDetails(selectedChat)
         }
@@ -740,6 +746,20 @@ export default function ConversationsView() {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'visitor_left_website' && dataConversationId) {
                 fetchActiveChats({ showSpinner: false })
+            } else if (data.type === 'system_message' && dataConversationId) {
+                const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
+                if (eventType === 'visitor_left') {
+                    // Mark this conversation as visitor-ended in the active list
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], visitor_ended: true }
+                        setActiveChats(next)
+                    }
+                } else {
+                    fetchActiveChats({ showSpinner: false })
+                }
             } else if (data.type === 'visitor_socket_connected' && dataConversationId) {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'visitor_message' && dataConversationId) {
@@ -857,6 +877,10 @@ export default function ConversationsView() {
                 } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'conversation_assigned' && dataConversationId === selectedChat) {
+                // Keep joinedRef in sync: if someone else took over, we are no longer the handler.
+                const newAssignedId = Number((data as any)?.assigned_agent_id) || null
+                joinedRef.current = newAssignedId !== null && newAssignedId === user?.id
             } else if (data.type === 'conversation_team_changed' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'conversation_closed' && dataConversationId === selectedChat) {
@@ -865,6 +889,18 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
+                const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
+                if (eventType === 'visitor_left') {
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], visitor_ended: true }
+                        setActiveChats(next)
+                    }
+                }
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -887,6 +923,58 @@ export default function ConversationsView() {
                         clearTimeout(visitorTypingTimerRef.current)
                         visitorTypingTimerRef.current = null
                     }
+                }
+            } else if (data.type === 'agent_typing' && dataConversationId === selectedChat) {
+                // Another agent is typing in this conversation (spectator view).
+                const isTyping = Boolean((data as any)?.is_typing)
+                const agentName = String((data as any)?.agent_name || 'Agent')
+                if (isTyping) {
+                    setSpectatorAgentTyping(agentName)
+                    if (spectatorAgentTypingTimerRef.current) {
+                        clearTimeout(spectatorAgentTypingTimerRef.current)
+                    }
+                    spectatorAgentTypingTimerRef.current = setTimeout(() => {
+                        spectatorAgentTypingTimerRef.current = null
+                        setSpectatorAgentTyping(null)
+                    }, 3000)
+                } else {
+                    setSpectatorAgentTyping(null)
+                    if (spectatorAgentTypingTimerRef.current) {
+                        clearTimeout(spectatorAgentTypingTimerRef.current)
+                        spectatorAgentTypingTimerRef.current = null
+                    }
+                }
+            } else if (data.type === 'agent_message' && dataConversationId === selectedChat) {
+                // An assigned agent sent a message — spectating agents receive it here.
+                setSpectatorAgentTyping(null)
+                if (spectatorAgentTypingTimerRef.current) {
+                    clearTimeout(spectatorAgentTypingTimerRef.current)
+                    spectatorAgentTypingTimerRef.current = null
+                }
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    addMessage(dto)
+                    const content = String((dto as any)?.content ?? '').trim()
+                    const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
+                    if (content) {
+                        const latest = activeChatsRef.current
+                        const idx = latest.findIndex(c => c.id === dataConversationId)
+                        if (idx >= 0) {
+                            const next = [...latest]
+                            next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                            setActiveChats(next)
+                        }
+                    }
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+            } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
+                // System events (e.g. "Agent joined the chat.") broadcast to all spectating agents.
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    addMessage(dto)
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
                 getBrowsingHistory(selectedChat)
@@ -1357,7 +1445,21 @@ export default function ConversationsView() {
             }
 
             stopAgentTyping(selectedChat)
-            sendAgentMessage(content, selectedChat.toString())
+            const clientId = sendAgentMessage(content, selectedChat.toString())
+
+            // Optimistic UI — show the message immediately, same as handleSendMessage.
+            const optimisticCreatedAt = new Date().toISOString()
+            addMessage({
+                id: `tmp:${clientId}`,
+                conversation_id: selectedChat,
+                sender_type: 'agent',
+                actor: 'agent',
+                kind: 'chat',
+                content: content,
+                created_at: optimisticCreatedAt,
+                sender_name: user?.name || undefined,
+                sender_avatar_url: (user as any)?.avatar_url || undefined,
+            } as any)
         } catch (error) {
             console.error('Failed to takeover and send:', error)
             setInput(content)
@@ -1797,6 +1899,11 @@ export default function ConversationsView() {
 
                             {/* Header Actions */}
                             <div className="flex items-center gap-2 flex-shrink-0">
+                                {isVisitorEnded && !isResolvedSelected && (
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+                                        Visitor ended
+                                    </span>
+                                )}
                                 {!isResolvedSelected && (
                                     <Button
                                         variant="default"
@@ -2185,10 +2292,10 @@ export default function ConversationsView() {
                         conversationId={selectedChat}
                         onTyping={scheduleAgentTyping}
                         onSend={(content) => handleSendMessage(content)}
-                        disabled={isResolvedSelected}
+                        disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
-                        statusText={visitorTyping ? 'Visitor is typing…' : ''}
-                        readOnlyText="This conversation is resolved and read-only."
+                        statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
+                        readOnlyText={isVisitorEnded ? 'Visitor ended this conversation. You can still reply or resolve it when ready.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />

@@ -11,11 +11,18 @@ Phase 5 Audit — 3 items still pending:
 
 2) Assign team dropdown in chat page not having create team button same like Tag Conversation dropdown. ✅ FIXED — Added "Manage teams" link in team picker popover (visible to admins)
 
-3) Notification sounds on both side is not good, need to clone like smartsupp.
+3) Notification sounds on both side is not good, need to clone like smartsupp. ✅ FIXED — Full notification sound overhaul:
+- Dashboard: new Notifications page under Settings → Personal (Bell icon in sidebar). Push notification toggle moved here. Three configurable sound dropdowns (New chat / New message / New visitor on website) with live preview. 12 sound options + silent. Preferences stored in DB (`user.notification_preferences`) and synced to localStorage on login — works across devices/browsers.
+- Dashboard sounds: single global 1500ms gate prevents stacking; only `visitor_message` triggers sound (not `conversation_unread`) — fixes double-sound bug.
+- "New visitor on website" sound plays only when agent is on the Customers → Visitors tab (component-mounted gate).
+- Widget side: two per-website sound dropdowns in Website → Widget tab (sound when collapsed / sound when open). Only blackberry2.mp3 and notification.mp3 offered. Preview button on each. Config served from backend loader as `notificationSoundCollapsed` / `notificationSoundOpened`.
+- Widget sound timing fixed: collapsed sound fires together with popup (after 1200ms typing dots), not immediately. Open-widget sound fires immediately (visitor may be in another tab).
+- Sound files served from backend at `/sounds/*` (mounts `frontend/public/sounds/`), so widget URL `apiUrl/sounds/file.mp3` works in production without knowing the frontend URL.
+- In-app toasts removed entirely. Push notification scoped by org + website assignment + team membership.
 
-4) New message popup on widget's reply button icon should be same like smartsupp. Also this popup color should be same as widget theme color that defined in this page http://localhost:5173/dashboard/settings/websites/1?tab=widget
+4) New message popup on widget's reply button icon should be same like smartsupp. Also this popup color should be same as widget theme color that defined in this page http://localhost:5173/dashboard/settings/websites/1?tab=widget ✅ FIXED
 
-5) Widget's hover is slightly croppinmg the chat icon inside it. Try to replicate this design also same as smarstupp.
+5) Widget's hover is slightly croppinmg the chat icon inside it. Try to replicate this design also same as smarstupp. ✅ FIXED
 
 6) Widget CSS & JS need to be optimized.
 
@@ -27,7 +34,7 @@ Phase 5 Audit — 3 items still pending:
 
 10) Push notification & inapp notification should one come for assigned teams chat. If agents including owner is not assigned to any team, then for all chats it should come but only for assigned websites.
 
-11) Currently notification count badge is not working properly. When an agent is assigned to a website, then only he will get the chat. Also if a chat is joined by any agent, then for other agents un read cound need not to show. But always the chat list should get updated with live chats.
+11) Currently notification count badge is not working properly. When an agent is assigned to a website, then only he will get the chat. Also if a chat is joined by any agent, then for other agents un read cound need not to show. But always the chat list should get updated with live chats. ✅ FIXED — `GET /chats/active` now zeroes out `unread_count` for spectating agents: only the assigned agent (or any agent when the conversation is unassigned/open for pickup) gets the real unread count. Spectators still see the conversation in the list and it updates live, but their badge count is not inflated by chats they don't own.
 
 12) Chats page filter should be improved.
 
@@ -37,7 +44,15 @@ Phase 5 Audit — 3 items still pending:
 
 15) In the textarea always a Hi message is there when I open. It is due to ai_chatassist_draft_1_2 key in local storage. I guess the functionality is not working properly. ✅ FIXED — Draft and draft attachments are now cleared from localStorage after sending a message
 
-16) When the visitor ends chat, the rating is showing after that new conversation is starting. I guess this is not needed here. Why simply wasting a conversation. If a visitor resolved means his need is over. For better UX, after rated or skiped rating just minimize the widget. Basically next again the bot message should not trigger. So something needs to store in session storage. if the visitor closed the browser tabs and coming back even after immediately then we can start the new conversation silently and start the loop. Okey what if the visitor wants to start new conversation without closing the tabs??? Great idea, after minimized if the visitor clicks the widget, if history is enabled via website settings show the history by default andd there new conversation option should be there. What if history is disabled? then start the new conversation. Especially in this case what if the visitor sends message before the 1st bot message ? then if bot message comes it won't be nice. I think here we need to have one more automation message trigger for returning visitor within some time period. so without delay as soon as the conversation page opened before even the visitor sends message, the system bot message should trigger like welcome back. This is purely controlled from automations.
+16) When the visitor ends chat, the rating is showing after that new conversation is starting. I guess this is not needed here. Why simply wasting a conversation. If a visitor resolved means his need is over. For better UX, after rated or skiped rating just minimize the widget. Basically next again the bot message should not trigger. So something needs to store in session storage. if the visitor closed the browser tabs and coming back even after immediately then we can start the new conversation silently and start the loop. Okey what if the visitor wants to start new conversation without closing the tabs??? Great idea, after minimized if the visitor clicks the widget, if history is enabled via website settings show the history by default andd there new conversation option should be there. What if history is disabled? then start the new conversation. Especially in this case what if the visitor sends message before the 1st bot message ? then if bot message comes it won't be nice. I think here we need to have one more automation message trigger for returning visitor within some time period. so without delay as soon as the conversation page opened before even the visitor sends message, the system bot message should trigger like welcome back. This is purely controlled from automations. 🔶 PARTIAL — Core visitor-end flow now fully implemented:
+- After rating/skip → widget minimises (no new conversation started automatically)
+- History disabled: shows previous chat as read-only with "Start new chat" banner, survives page reload
+- History enabled: shows list view with "New Conversation" button at top + ended conv below with [Ended] badge (clickable, read-only)
+- Visitor-ended conversation stays in agent's All Chats (OPEN) with "Visitor ended" badge; agent must manually resolve
+- Agent dashboard reply input disabled + "Visitor ended this conversation. You can still reply or resolve it when ready." shown
+- "Start new chat" properly closes the old visitor-ended conv via orchestrator (broadcasts conversation_closed to agents) before creating a fresh one
+- Reload after visitor-ended + history disabled: loads thread history via conv-id WS route without firing noisy agent-side connected events
+- Still pending: dedicated "returning visitor" automation trigger (separate from visitor_connected cooldown logic)
 
 17) http://localhost:5173/dashboard/customers/visitors - visitor page conversation history and open conversation green button flows are not working. The id is wrong I guess. Also the conversation with just bot message is showing in the list, this is fine I guess. The agent can initiate the chat by clicking it right? but on clicking it is not opening any chat in chat page. just openinhg the chat page but the URL has chat id. ✅ VERIFIED — Navigation now uses short_id and matches the route pattern correctly
 
@@ -61,20 +76,29 @@ Phase 5 Audit — 3 items still pending:
 
 27) Currently if no agents online, there is a form popup, that needs to be impoved. Forms and form fields should not be via columns. We can create a form table and each form column can be stored as objects. Will this work out? Also form should be triggered via agent chat, automations.
 
-28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT."
+28) When the customer ends the chat from the widget, the Agent Dashboard displays the message: "YOU ENDED THE CHAT." ✅ FIXED — Backend stores "Visitor ended the chat." for agents; widget receives "You ended the chat." only for the visitor. System message content is rendered directly so agents see correct wording.
 
-29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent."
+29) When a user with the role of Owner or Manager is logged in, the Profile section displays only "Agent." ✅ FIXED — PersonalSettings.tsx has full role label mapping (Owner, Manager, System Manager, Agent).
 
-30) In the Profile section, the "Change Password" option is available for users with the Owner role, which should not be the case.
+30) In the Profile section, the "Change Password" option is available for users with the Owner role, which should not be the case. ✅ RESOLVED (by design) — Change Password in Profile is correct for ALL roles including Owner; it requires the current password (OWASP security control). Admin-level "Reset Password" (no current-password check) lives only in User List and is now restricted to Owner/System Manager only (not Manager, not self).
 
-31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner.
+31) In widget, the position is not based on the website settings. It is always showing in the bottom right corner. ✅ FIXED — Widget position now reads from website settings (commit e393e74)
 
-32) In User list, the manager should not get update password option, only owner should have that.However all other users can do it via profile page.
+32) In User list, the manager should not get update password option, only owner should have that.However all other users can do it via profile page. ✅ FIXED — "Reset Password" block in User List edit panel now hidden for Manager role and for own account. Backend `/users/{id}/password` endpoint returns 403 for Manager and for self-reset; self must use `/users/me/password` (requires current password).
 
-33) When a new user added in the organization, the email is not getting sent to them. Need to check the email configuration and flow once. After OTP verification only they should be able to login.
+33) When a new user added in the organization, the email is not getting sent to them. Need to check the email configuration and flow once. After OTP verification only they should be able to login. ✅ FIXED — /auth/register now sets is_email_verified=False, generates OTP, and sends a branded invite email via send_user_invite(). User must verify before first login. Re-invited (previously deleted) users also get a fresh OTP + invite email.
 
-34) Failed to fetch error, when new user is getting added in the organization. Need to check the API once.
+34) Failed to fetch error, when new user is getting added in the organization. Need to check the API once. ✅ FIXED — /auth/register had response_model=UserResponse but returned a dict of shape {message, user} causing a ResponseValidationError (500). Removed the response_model so FastAPI returns the dict directly.
+
+35) In chat page, if there is a new chat and 2 agents are just spectating the messages but not joined the conversation yet. Both of them properly getting the new chats in the conversation. But once an agent joined the conversation, then they other agent who spectates the conversation not geeting the new message via socket. Also when an agent is already joined and having the conversation. But then another agent joined the same conversation, here the old agent is not actively listening to the socket. Actually the push notification should only send to who joined recently but anyone can spectate the live converations. ✅ FIXED (fully) — Complete spectator broadcasting implemented across all event types:
+- Visitor message → assigned agent (direct) + all spectating agents (broadcast, exclude assigned) — push notification to assigned agent only
+- Agent message → visitor + all spectating agents (broadcast, exclude sender); spectators see message live in thread via new agent_message handler
+- Agent typing → visitor (only if sender is assigned agent; spectators' typing is never leaked to visitor) + all other agents via agent_typing broadcast; spectators see "Agent X is typing…" in status bar
+- Visitor typing → assigned agent (direct) + all spectating agents (broadcast, exclude assigned); both ws_chat.py code paths (new conv + reconnect) fixed
+- System messages (agent joined / takeover) → all agents via system_message broadcast; spectators see "Agent joined the chat." and date chips live in thread
+- joinedRef kept in sync via conversation_assigned WS event so the takeover popup triggers correctly even after mid-session ownership changes
+- confirmTakeoverAndSend now shows optimistic message immediately (same as handleSendMessage)
 
 Features:
 
-1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists. But if it is adding more load, then leave it.
+1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists.

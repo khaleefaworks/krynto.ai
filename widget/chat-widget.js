@@ -54,7 +54,9 @@
     showAttachments: globalConfig.showAttachments || false,
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist',
     popupName: globalConfig.popupName || 'Support',
-    popupButtonText: globalConfig.popupButtonText || 'Reply'
+    popupButtonText: globalConfig.popupButtonText || 'Reply',
+    notificationSoundCollapsed: globalConfig.notificationSoundCollapsed || 'notification.mp3',
+    notificationSoundOpened: globalConfig.notificationSoundOpened || 'notification.mp3'
   };
 
   // State
@@ -70,7 +72,6 @@
 
   let unreadCount = 0;
   let soundEnabled = false;
-  let notificationAudioCtx = null;
   const originalTitle = document.title;
   let firstUnreadMessageId = null;
   let historyQueue = null;
@@ -103,6 +104,9 @@
   // After a visitor ends the chat UI, hide the End (X) button until they send
   // another message. This prevents repeated end_chat triggers from reopen/close.
   let endChatDisabled = false;
+  // Set when the visitor intentionally clicks "End chat" so the rating overlay
+  // knows to minimise (not run afterConversationClose) on dismiss.
+  let ratingTriggeredByVisitorEnd = false;
 
   // --- Multi-conversation view state ---
   // viewMode: 'start' | 'list' | 'thread'
@@ -335,12 +339,21 @@
   }
 
   function notifyNewMessage(senderName, avatarUrl, messageText) {
-    if (isWidgetOpen() && !document.hidden) return;
+    var isOpen = isWidgetOpen();
+
+    if (isOpen) {
+      // Widget is open: play sound immediately (visitor may be in another tab)
+      // No popup/badge — the message already appears in the chat thread
+      playNotificationSound('opened');
+      return;
+    }
+
+    // Widget collapsed: show typing dots, then play sound + popup together
     bumpUnread();
-    playNotificationSound();
     showDotsPreview();
     dotsPreviewTimer = setTimeout(function () {
       hideDotsPreview();
+      playNotificationSound('collapsed');
       showMessagePopup(senderName, avatarUrl, messageText);
     }, 1200);
   }
@@ -410,8 +423,12 @@
       el.classList.remove('chatassist-rating-overlay-visible');
       el.style.display = 'none';
     }
-    // After the rating overlay is dismissed, transition away from the closed thread.
-    if (viewMode === 'thread' && !isReadOnlyThread) {
+    if (ratingTriggeredByVisitorEnd) {
+      // Visitor intentionally ended — transition view same as an agent-resolved close.
+      ratingTriggeredByVisitorEnd = false;
+      afterConversationClose();
+    } else if (viewMode === 'thread' && !isReadOnlyThread) {
+      // Agent resolved — transition view as usual.
       afterConversationClose();
     }
   }
@@ -460,41 +477,19 @@
 
   function enableNotificationSound() {
     soundEnabled = true;
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!notificationAudioCtx) notificationAudioCtx = new AC();
-      if (notificationAudioCtx.state !== 'running') {
-        notificationAudioCtx.resume().catch(() => { });
-      }
-      if (notificationAudioCtx.state === 'running') {
-        const osc = notificationAudioCtx.createOscillator();
-        const gain = notificationAudioCtx.createGain();
-        gain.gain.value = 0;
-        osc.connect(gain);
-        gain.connect(notificationAudioCtx.destination);
-        osc.start();
-        osc.stop(notificationAudioCtx.currentTime + 0.01);
-      }
-    } catch (e) { }
   }
 
-  function playNotificationSound() {
-    if (!soundEnabled || !notificationAudioCtx) return;
-    if (notificationAudioCtx.state !== 'running') {
-      notificationAudioCtx.resume().catch(() => { });
-      if (notificationAudioCtx.state !== 'running') return;
-    }
+  function playNotificationSound(mode) {
+    if (!soundEnabled) return;
+    var fileName = mode === 'opened'
+      ? (CONFIG.notificationSoundOpened || '')
+      : (CONFIG.notificationSoundCollapsed || '');
+    if (!fileName) return;
     try {
-      const osc = notificationAudioCtx.createOscillator();
-      const gain = notificationAudioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.value = 0.04;
-      osc.connect(gain);
-      gain.connect(notificationAudioCtx.destination);
-      osc.start();
-      osc.stop(notificationAudioCtx.currentTime + 0.14);
+      var baseUrl = (CONFIG.apiUrl || '').replace(/\/$/, '');
+      var a = new Audio(baseUrl + '/sounds/' + fileName);
+      a.volume = 1.0;
+      a.play().catch(function () { });
     } catch (e) { }
   }
 
@@ -663,9 +658,23 @@
 
     const history = (listData && listData.history) || [];
 
-    // Active (open) conversation at the top — visitor can resume it by clicking
+    // "New Conversation" button — always show when no active conv, or when active is ended.
+    // Rendered first so it appears at the top as the primary call-to-action.
+    if (!listData || !listData.active || (listData.active && listData.active.visitor_ended)) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'chatassist-conv-new-btn';
+      newBtn.type = 'button';
+      newBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>' +
+        '<span>New Conversation</span>';
+      newBtn.addEventListener('click', startNewConversation);
+      body.appendChild(newBtn);
+    }
+
+    // Ended / active conversation — rendered below the New Conversation button
     if (listData && listData.active) {
       const conv = listData.active;
+      const isEnded = Boolean(conv.visitor_ended);
       const activeItem = document.createElement('div');
       activeItem.className = 'chatassist-conv-item';
       activeItem.setAttribute('role', 'button');
@@ -688,32 +697,28 @@
       dateEl.textContent = dateText;
 
       const badgeEl = document.createElement('span');
-      badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
-      badgeEl.textContent = 'Active';
+      if (isEnded) {
+        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-ended';
+        badgeEl.textContent = 'Ended';
+      } else {
+        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
+        badgeEl.textContent = 'Active';
+      }
 
       metaEl.appendChild(dateEl);
       metaEl.appendChild(badgeEl);
       activeItem.appendChild(titleEl);
       activeItem.appendChild(metaEl);
 
-      const resumeFn = function () { enterThreadView(conv.id, false); };
+      // Ended conversations open as read-only; active ones are resumable.
+      const resumeFn = isEnded
+        ? function () { enterThreadView(conv.id, true); }
+        : function () { enterThreadView(conv.id, false); };
       activeItem.addEventListener('click', resumeFn);
       activeItem.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resumeFn(); }
       });
       body.appendChild(activeItem);
-    }
-
-    // "New Conversation" button — only when there is no active conversation
-    if (!listData || !listData.active) {
-      const newBtn = document.createElement('button');
-      newBtn.className = 'chatassist-conv-new-btn';
-      newBtn.type = 'button';
-      newBtn.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>' +
-        '<span>New Conversation</span>';
-      newBtn.addEventListener('click', startNewConversation);
-      body.appendChild(newBtn);
     }
 
     if (!history.length) {
@@ -791,6 +796,7 @@
   function enterStartView() {
     viewMode = 'start';
     isReadOnlyThread = false;
+    ratingTriggeredByVisitorEnd = false;
     CONFIG.conversationId = 0;
 
     // Ensure any existing WS is closed before connecting fresh
@@ -1110,6 +1116,7 @@
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
+          else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
           else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
         } else {
@@ -1131,7 +1138,8 @@
       // Re-inject the "Start new chat" banner if we're restoring a closed
       // conversation on reload (history disabled). The banner was wiped above
       // by container.innerHTML = '' but belongs at the bottom of the thread.
-      if (data.status === 'resolved' && isReadOnlyThread && !widgetShowHistory) {
+      const hasVisitorLeftMsg = data.messages.some(function (m) { return m.event_type === 'visitor_left'; });
+      if ((data.status === 'resolved' || hasVisitorLeftMsg) && isReadOnlyThread && !widgetShowHistory) {
         _appendClosedBanner();
       }
       return;
@@ -1168,14 +1176,26 @@
         return;
       }
 
+      // Visitor ended the chat — echo friendly message (not stored in DB).
+      if (actor === 'system' && eventType === 'visitor_left') {
+        const closedAt = data.created_at || (data.message_obj && data.message_obj.created_at) || null;
+        appendMessage('visitor', 'You ended the chat.', closedAt, null, null);
+        return;
+      }
+
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
         else showSystemMessage(data.message);
-        // When conversation is resolved by agent, show rating overlay (skip for inactivity closes)
+        // When conversation is resolved, show rating overlay (skip for inactivity closes)
         if (eventType === 'conversation_resolved') {
           const closedBy = (dto && dto.closed_by) || (data && data.closed_by) || null;
           const convId = (dto && dto.conversation_id) || (data && data.conversation_id) || ratingConversationId;
-          if (closedBy !== 'inactivity') {
+          if (ratingTriggeredByVisitorEnd) {
+            // Visitor's confirm-button click already showed the rating overlay and
+            // is handling the whole transition. Suppress the duplicate server echo.
+            // Silently update ratingConversationId in case it wasn't set yet.
+            if (convId) ratingConversationId = convId;
+          } else if (closedBy !== 'inactivity') {
             showRatingOverlay(convId);
           } else {
             // Inactivity: visitor was offline anyway; just transition view
@@ -1185,11 +1205,8 @@
       } else {
         // Bot/system chat message delivered as a system frame.
         appendMessage('ai', data.message, createdAt, null, dto && dto.id);
-        if (!isWidgetOpen() || document.hidden) {
-          notifyNewMessage(null, null, data.message);
-        } else if (isAtBottom) {
-          markRead();
-        }
+        notifyNewMessage(null, null, data.message);
+        if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
         showNewMsgIndicator();
       }
       smartScroll();
@@ -1202,11 +1219,8 @@
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
       appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(null, null, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(null, null, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
       // Restore widget state after bot prompt arrives (new sessions).
@@ -1217,11 +1231,8 @@
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(null, null, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(null, null, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'visitor_message_saved') {
@@ -1242,11 +1253,8 @@
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
-      if (!isWidgetOpen() || document.hidden) {
-        notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
-      } else if (isAtBottom) {
-        markRead();
-      }
+      notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'agent_joined') {
@@ -2237,8 +2245,9 @@
           <div class="chatassist-end-overlay-backdrop"></div>
           <div class="chatassist-end-overlay-panel">
             <div class="chatassist-end-overlay-title">End this chat?</div>
+            <div class="chatassist-end-overlay-desc">By ending this conversation you won&rsquo;t be able to continue it later.</div>
             <div class="chatassist-end-overlay-actions">
-              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Cancel</button>
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
               <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
             </div>
           </div>
@@ -2395,6 +2404,7 @@
 
     document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
       hideEndOverlay();
+      closeWidget(true);
     });
 
     document.getElementById('chatassist-new-msg-indicator').addEventListener('click', () => {
@@ -2409,6 +2419,16 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
+      // Show rating overlay so we capture feedback before the visitor leaves.
+      // Conversation stays OPEN on the server — agents follow up and resolve manually.
+      ratingTriggeredByVisitorEnd = true;
+      showRatingOverlay(CONFIG.conversationId || null);
+      // If the rating overlay was skipped because the visitor already rated
+      // (hasRatedSession=true), transition immediately — don't leave them stuck.
+      if (hasRatedSession) {
+        ratingTriggeredByVisitorEnd = false;
+        afterConversationClose();
+      }
     });
 
     // Rating overlay buttons
@@ -2821,8 +2841,22 @@
       widgetShowHistory = Boolean(listData && listData.show_conversation_history);
 
       if (listData && listData.active) {
-        // Resume the active (open) conversation directly.
-        await enterThreadView(listData.active.id, false);
+        if (listData.active.visitor_ended) {
+          // Visitor had ended this conversation — don't auto-resume it.
+          if (!widgetShowHistory) {
+            // History disabled: load the thread as read-only so the visitor can
+            // see their previous messages and the "Start new chat" banner.
+            // The conv_id WS route sends history without firing visitor_socket_connected
+            // or the welcome automation, avoiding noisy agent-side events.
+            await enterThreadView(listData.active.id, true);
+          } else {
+            // History enabled: show list so visitor can start a new one
+            enterListView(listData);
+          }
+        } else {
+          // Resume the active (open) conversation directly.
+          await enterThreadView(listData.active.id, false);
+        }
       } else if (!widgetShowHistory && _loadClosedState()) {
         // History is disabled and the visitor previously ended a chat.
         // Reload the closed conversation as read-only so they see their
@@ -2832,8 +2866,8 @@
         const closedId = _loadClosedState();
         await enterThreadView(closedId, true);
       } else {
-        // With no active conversation, always start a fresh thread entry flow.
-        // History remains available when the user navigates back from an active thread.
+        // No active conversation — start fresh so the bot welcome fires
+        // and the new-message popup can show for returning visitors.
         enterStartView();
       }
 
