@@ -247,18 +247,39 @@
   margin-right: 10px;
 }
 
-/* Unread badge should flip sides on left-aligned bubble */
-#chatassist-widget.chatassist-position-b-l #chatassist-bubble-unread,
-#chatassist-widget.chatassist-position-t-l #chatassist-bubble-unread {
-  right: auto;
-  left: -6px;
+/* Unread badge and online dot keep same positions on left-aligned bubble (no flipping) */
+
+/* Chat window opens from the bottom-left corner when widget is left-aligned */
+#chatassist-widget.chatassist-position-b-l #chatassist-window,
+#chatassist-widget.chatassist-position-t-l #chatassist-window {
+  transform-origin: bottom left;
+  animation-name: chatassist-window-open-left;
+}
+#chatassist-widget.chatassist-position-b-l #chatassist-window.chatassist-window-closing,
+#chatassist-widget.chatassist-position-t-l #chatassist-window.chatassist-window-closing {
+  animation-name: chatassist-window-close-left;
 }
 
-/* Online dot should flip to the opposite side for left-aligned bubble */
-#chatassist-widget.chatassist-position-b-l #chatassist-bubble-online-dot,
-#chatassist-widget.chatassist-position-t-l #chatassist-bubble-online-dot {
-  left: auto;
-  right: -2px;
+@keyframes chatassist-window-open-left {
+  from {
+    opacity: 0;
+    transform: scale(0.4) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes chatassist-window-close-left {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.4) translateY(20px);
+  }
 }
 
 /* Message popup and dots preview anchored on the bubble side */
@@ -1211,6 +1232,13 @@
   color: #111827;
 }
 
+.chatassist-end-overlay-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
 .chatassist-end-overlay-actions {
   margin-top: 12px;
   display: flex;
@@ -1919,6 +1947,10 @@
 
 .chatassist-theme-dark .chatassist-end-overlay-title {
   color: #f1f5f9;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-desc {
+  color: #94a3b8;
 }
 
 .chatassist-theme-dark .chatassist-end-overlay-cancel {

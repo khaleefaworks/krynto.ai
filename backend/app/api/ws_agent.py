@@ -216,16 +216,38 @@ async def agent_ws(
                         await websocket.send_json({"type": "error", "message": "Chat not available"})
                         continue
 
-                await ChatService.send_to_visitor(
-                    conversation_id,
-                    {
+                # Only forward typing to the visitor if this agent is assigned
+                # (or the conversation is unassigned and they may pick it up).
+                # Spectating agents' typing must never appear in the visitor widget.
+                is_assigned_agent = (
+                    conv.assigned_agent_id is None
+                    or conv.assigned_agent_id == agent_id
+                )
+                if is_assigned_agent:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {
+                            "type": "agent_typing",
+                            "conversation_id": conversation_id,
+                            "is_typing": is_typing,
+                            "agent_id": agent_id,
+                            "agent_name": user.name,
+                            "agent_avatar": user.avatar_url,
+                        },
+                    )
+
+                # Always broadcast to other agents so spectators see who is typing.
+                await agent_service.broadcast_to_active_agents(
+                    website_id=int(conv.website_id),
+                    message_data={
                         "type": "agent_typing",
                         "conversation_id": conversation_id,
                         "is_typing": is_typing,
                         "agent_id": agent_id,
                         "agent_name": user.name,
-                        "agent_avatar": user.avatar_url,
                     },
+                    include_global=True,
+                    exclude_agent_id=agent_id,
                 )
                 continue
             

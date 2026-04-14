@@ -565,7 +565,7 @@ async def reset_password(
     return {"message": "Password updated successfully. Please log in again."}
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
     request: Request,
     register_request: RegisterRequest,
@@ -597,19 +597,46 @@ async def register(
             existing_user.is_deleted = False
             existing_user.is_active = True
             existing_user.is_available = False
+            existing_user.is_email_verified = False
             existing_user.name = register_request.name
             existing_user.password_hash = get_password_hash(register_request.password)
             existing_user.role = register_request.role
+
+            # Fresh OTP for re-invited user
+            raw_otp = f"{random.randint(0, 999999):06d}"
+            otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+            otp_record = EmailOTP(
+                user_id=existing_user.id,
+                otp_hash=otp_hash,
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+            )
+            db.add(otp_record)
             db.commit()
             db.refresh(existing_user)
+
+            try:
+                from app.services.email_service import EmailService
+                from app.models.organization import Organization as OrgModel
+                org = db.query(OrgModel).filter_by(id=existing_user.organization_id).first()
+                org_name = org.name if org else "your organisation"
+                EmailService().send_user_invite(
+                    to_email=existing_user.email,
+                    name=existing_user.name,
+                    org_name=org_name,
+                    otp=raw_otp,
+                )
+            except Exception:
+                pass
+
             return {
-                "message": "User re-enabled successfully",
+                "needs_verification": True,
+                "message": "User re-enabled. An invite email with a verification code has been sent.",
                 "user": {
                     "id": existing_user.id,
                     "name": existing_user.name,
                     "email": existing_user.email,
                     "role": existing_user.role.value,
-                }
+                },
             }
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -641,7 +668,7 @@ async def register(
             detail="Cannot determine organisation — use /auth/signup to create an org first",
         )
 
-    # Create new user
+    # Create new user — requires email verification before first login.
     user = User(
         name=register_request.name,
         email=register_request.email,
@@ -650,20 +677,48 @@ async def register(
         organization_id=calling_admin.organization_id,  # inherits caller's org (None for superadmin)
         is_active=True,
         is_available=False,
+        is_email_verified=False,
     )
-    
+
     db.add(user)
+    db.flush()  # get user.id without committing
+
+    # Generate and store OTP for email verification
+    raw_otp = f"{random.randint(0, 999999):06d}"
+    otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+    otp_record = EmailOTP(
+        user_id=user.id,
+        otp_hash=otp_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+    )
+    db.add(otp_record)
     db.commit()
     db.refresh(user)
-    
+
+    # Send invite email with OTP (best-effort — failure must not block user creation)
+    try:
+        from app.services.email_service import EmailService
+        from app.models.organization import Organization as OrgModel
+        org = db.query(OrgModel).filter_by(id=user.organization_id).first()
+        org_name = org.name if org else "your organisation"
+        EmailService().send_user_invite(
+            to_email=user.email,
+            name=user.name,
+            org_name=org_name,
+            otp=raw_otp,
+        )
+    except Exception:
+        pass
+
     return {
-        "message": "User registered successfully",
+        "needs_verification": True,
+        "message": "User created. An invite email with a verification code has been sent.",
         "user": {
             "id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": user.role.value
-        }
+            "role": user.role.value,
+        },
     }
 
 

@@ -25,6 +25,8 @@ export type ActiveChat = {
   unread_count?: number
   created_at?: string
   closed_at?: string
+  closed_by?: string | null
+  visitor_ended?: boolean
 }
 
 export async function fetchActiveChats(): Promise<ActiveChat[]> {

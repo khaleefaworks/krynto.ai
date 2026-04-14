@@ -14,6 +14,7 @@ import {
   Tag as TagIcon,
   Trash2,
   Building2,
+  Bell,
 } from "lucide-react"
 
 
@@ -198,6 +199,15 @@ export default function Settings() {
               >
                 <UserIcon className="h-4 w-4 shrink-0" />
                 Profile
+              </Link>
+              <Link
+                to="/dashboard/settings/personal/notifications"
+                className={navLinkClass(
+                  isActive("/dashboard/settings/personal/notifications")
+                )}
+              >
+                <Bell className="h-4 w-4 shrink-0" />
+                Notifications
               </Link>
               <Link
                 to="/dashboard/settings/personal/shortcuts"

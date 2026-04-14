@@ -36,6 +36,95 @@ logger = get_logger(__name__)
 _waiting_bot_message_scheduled: set[int] = set()
 
 
+def _get_eligible_agent_ids_for_push(db: Session, *, website_id: int) -> set[int]:
+    """Return IDs of agents who should receive push notifications for the given website.
+
+    Scoping rules (org-aware, multi-tenant):
+    - SYSTEM_MANAGER: always eligible (cross-org administrator).
+    - OWNER/MANAGER of the website's org: always eligible.
+    - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
+      - If the website has teams WITH members → further restrict to team members only.
+      - If the website has no teams (or teams have no members) → all assigned agents.
+    - All candidates must be is_active=True AND is_available=True.
+    """
+    from app.models.user import UserRole
+    from app.models.website import Website
+    from app.models.agent_website_assignment import AgentWebsiteAssignment
+    from app.models.website_team import WebsiteTeam, WebsiteTeamMember
+
+    website = db.query(Website).filter_by(id=website_id).first()
+    if not website:
+        return set()
+
+    org_id = website.organization_id
+    eligible: set[int] = set()
+
+    # SYSTEM_MANAGER — active + available system managers (cross-org)
+    sys_mgrs = (
+        db.query(User)
+        .filter(
+            User.is_active == True,   # noqa: E712
+            User.is_available == True,  # noqa: E712
+            User.role == UserRole.SYSTEM_MANAGER,
+        )
+        .all()
+    )
+    eligible.update(int(u.id) for u in sys_mgrs)
+
+    if org_id is not None:
+        # OWNER/MANAGER in same org
+        org_admins = (
+            db.query(User)
+            .filter(
+                User.is_active == True,   # noqa: E712
+                User.is_available == True,  # noqa: E712
+                User.organization_id == org_id,
+                User.role.in_([UserRole.OWNER, UserRole.MANAGER]),
+            )
+            .all()
+        )
+        eligible.update(int(u.id) for u in org_admins)
+
+    # AGENT: must be directly assigned to this website
+    assigned_rows = (
+        db.query(AgentWebsiteAssignment.agent_id)
+        .filter(AgentWebsiteAssignment.website_id == website_id)
+        .all()
+    )
+    assigned_agent_ids = {int(r[0]) for r in assigned_rows}
+
+    if assigned_agent_ids:
+        # If website has teams with members, restrict agents to those team members
+        team_member_rows = (
+            db.query(WebsiteTeamMember.user_id)
+            .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+            .filter(WebsiteTeam.website_id == website_id)
+            .all()
+        )
+        team_member_ids = {int(r[0]) for r in team_member_rows}
+
+        if team_member_ids:
+            # Teams exist with members → only team members who are also assigned
+            agent_candidates = assigned_agent_ids & team_member_ids
+        else:
+            # No teams configured → all directly assigned agents are eligible
+            agent_candidates = assigned_agent_ids
+
+        if agent_candidates:
+            agents = (
+                db.query(User)
+                .filter(
+                    User.id.in_(agent_candidates),
+                    User.is_active == True,   # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                )
+                .all()
+            )
+            eligible.update(int(u.id) for u in agents)
+
+    return eligible
+
+
 def _should_skip_due_to_repeat(
     *,
     db: Session,
@@ -317,6 +406,25 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.error("assigned_agent_push_failed", error=str(e))
 
+            # Also broadcast to all other connected agents so they can spectate live.
+            # The assigned agent already received the message above; exclude them to avoid
+            # double-delivery. Spectators receive visitor_message events but not push notifications.
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_message",
+                    "conversation_id": conversation.id,
+                    "website_id": website_id,
+                    "message": message,
+                    "message_obj": serialize_message(self.db, msg),
+                    # Clients use this to skip rendering if they are the assigned agent
+                    # (they already have the message from send_to_agent above).
+                    "_assigned_agent_id": conversation.assigned_agent_id,
+                },
+                include_global=True,
+                exclude_agent_id=conversation.assigned_agent_id,
+            )
+
             return None
 
         # Unassigned: still notify agents in realtime so inbox updates immediately.
@@ -333,22 +441,12 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push for unassigned: notify all available agents (non-blocking)
+        # Web Push for unassigned: notify eligible agents scoped to this website (non-blocking)
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
-            from app.models.user import User, UserRole
 
-            candidates = (
-                self.db.query(User)
-                .filter(
-                    User.is_active == True,  # noqa: E712
-                    User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
-                )
-                .all()
-            )
-            agent_ids = {int(u.id) for u in candidates}
+            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=website_id)
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
             if subs:
                 loop = asyncio.get_event_loop()
@@ -485,25 +583,13 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
-        # Web Push: notify all available agents.
+        # Web Push: notify eligible agents (scoped to this website's org + teams).
         # This is best-effort and requires VAPID keys to be configured.
         try:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
 
-            from app.models.user import User, UserRole
-
-            candidates = (
-                self.db.query(User)
-                .filter(
-                    User.is_active == True,  # noqa: E712
-                    User.is_available == True,  # noqa: E712
-                    User.role.in_([UserRole.AGENT, UserRole.MANAGER, UserRole.OWNER, UserRole.SYSTEM_MANAGER]),
-                )
-                .all()
-            )
-
-            agent_ids = {int(u.id) for u in candidates}
+            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=int(conversation.website_id))
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
@@ -818,6 +904,18 @@ class ConversationOrchestrator:
             }
         )
 
+        # Push the system message to all agents' open threads in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "message_obj": serialize_message(self.db, saved),
+            },
+            include_global=True,
+        )
+
         # Notify dashboards so lists refresh and unread can clear.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -877,6 +975,18 @@ class ConversationOrchestrator:
                 "agent_name": agent_name,
                 "previous_agent_id": previous_agent_id,
             },
+        )
+
+        # Push the system message to all agents' open threads in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=conversation.website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": conversation.website_id,
+                "message_obj": serialize_message(self.db, saved),
+            },
+            include_global=True,
         )
 
         await self.agent_service.broadcast_to_active_agents(
@@ -947,6 +1057,23 @@ class ConversationOrchestrator:
             }
         )
 
+        # Broadcast to spectating agents (exclude the sender – they get `message_sent` via ws_agent.py).
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=int(conversation.website_id),
+            message_data={
+                "type": "agent_message",
+                "conversation_id": conversation_id,
+                "website_id": int(conversation.website_id),
+                "message": content,
+                "message_obj": message_obj,
+                "agent_name": agent_name,
+                "agent_avatar": agent.avatar_url if agent else None,
+                "agent_id": agent_id,
+            },
+            include_global=True,
+            exclude_agent_id=agent_id,
+        )
+
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),
@@ -978,7 +1105,7 @@ class ConversationOrchestrator:
             log_key="conversation_resolve_automation_failed",
             ensure_system_event=True,
             fallback_system_content=(
-                "You ended the chat."
+                "Visitor ended the chat."
                 if closed_by == "visitor"
                 else "This conversation has been resolved."
             ),
@@ -1010,6 +1137,68 @@ class ConversationOrchestrator:
         This resolves the active conversation with `closed_by='visitor'`.
         """
         return await self.close_conversation(conversation_id=conversation_id, closed_by="visitor")
+
+    async def visitor_left_chat(self, *, conversation_id: int) -> dict:
+        """Visitor clicked 'End chat' — records a timeline event but keeps the
+        conversation OPEN so agents can still follow up and no lead is lost.
+
+        The conversation status is NOT changed. Agents must manually resolve it.
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        # Persist agent-facing system message (content seen in agent dashboard).
+        saved = self.conversation_service.add_system_message(
+            conversation_id,
+            "Visitor ended the chat.",
+            event_type="visitor_left",
+        )
+
+        message_obj = serialize_message(self.db, saved)
+
+        # Echo to visitor WS with visitor-friendly wording.
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "system",
+                "event_type": "visitor_left",
+                "message": "You ended the chat.",
+                "message_obj": message_obj,
+                "conversation_id": conversation_id,
+            },
+        )
+
+        # Notify agent dashboards so the timeline updates in real-time.
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "system_message",
+                "conversation_id": conversation_id,
+                "website_id": website_id,
+                "message_obj": message_obj,
+                "visitor_ended": True,
+            },
+            include_global=True,
+        )
+
+        # Fire visitor_left automation trigger so agents can configure an
+        # automatic bot message like "Visitor ended the chat. You may now resolve it."
+        if website_id:
+            await self._run_automation_trigger(
+                conversation_id=conversation_id,
+                website_id=website_id,
+                trigger="visitor_left",
+                default_system_event_type=None,
+                default_bot_event_type="bot_visitor_left",
+                log_key="visitor_left_automation_failed",
+                send_system_events_to_visitor=False,
+                send_bot_messages_to_visitor=False,
+            )
+
+        return {"success": True}
 
     async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
         """Visitor websocket connected for an existing conversation.
@@ -1066,6 +1255,19 @@ class ConversationOrchestrator:
 
         if not conversation:
             return {"error": "Conversation not found"}
+
+        # If the visitor intentionally ended the chat, don't add a redundant
+        # "Visitor left website." noise — the visitor_left event already tells the story.
+        visitor_left_exists = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.event_type == "visitor_left",
+            )
+            .first()
+        )
+        if visitor_left_exists:
+            return {"success": True}
 
         if not self._should_record_presence_event(conversation=conversation):
             return {"success": True}
@@ -1153,6 +1355,17 @@ class ConversationOrchestrator:
                         "conversation_id": conversation_id,
                         "website_id": website_id,
                     }
+                    # If this system event resolves the conversation CLOSED_BY=visitor,
+                    # present a visitor-friendly message when delivering to the widget.
+                    try:
+                        if message_obj and message_obj.get("closed_by") == "visitor":
+                            visitor_friendly = "You ended the chat."
+                            payload["message"] = visitor_friendly
+                            # Also patch the message_obj content so the widget displays
+                            # the visitor-friendly text consistently for live frames.
+                            payload["message_obj"]["content"] = visitor_friendly
+                    except Exception:
+                        pass
                     if message_obj.get("closed_by"):
                         payload["closed_by"] = message_obj["closed_by"]
                     await ChatService.send_to_visitor(
@@ -1175,6 +1388,14 @@ class ConversationOrchestrator:
                         "conversation_id": conversation_id,
                         "website_id": website_id,
                     }
+                    # Adjust visitor-facing wording when the conversation was closed by the visitor.
+                    try:
+                        if message_obj and message_obj.get("closed_by") == "visitor":
+                            visitor_friendly = "You ended the chat."
+                            payload["message"] = visitor_friendly
+                            payload["message_obj"]["content"] = visitor_friendly
+                    except Exception:
+                        pass
                     if message_obj.get("closed_by"):
                         payload["closed_by"] = message_obj["closed_by"]
                     await ChatService.send_to_visitor(conversation_id, payload)
