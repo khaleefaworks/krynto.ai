@@ -2178,6 +2178,7 @@ export default function ConversationsView() {
                                             || (actor === 'system' && kind === 'chat')
                                             || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))
                                         const isAgent = actor === 'agent' || senderType === 'agent'
+                                        const isVisitor = !isAgent && !isBot && !isSystemEvent && (senderType === 'visitor' || actor === 'visitor')
                                         const msgTimestamp = (msg as any).timestamp || msg.created_at
                                         const showTimestamp = index === 0 ||
                                             (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
@@ -2248,7 +2249,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-inherit" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (

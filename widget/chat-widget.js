@@ -1579,6 +1579,11 @@
     };
   }
 
+  function unescapeMarkdown(str) {
+    // Reverse markdown backslash escapes (e.g. \* → *, \\ → \, \_ → _)
+    return String(str || '').replace(/\\([\\`*_\[\]()/])/g, '$1');
+  }
+
   function renderInlineMarkdown(text) {
     const frag = document.createDocumentFragment();
     const s = String(text || '');
@@ -1844,7 +1849,9 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    renderMarkdownInto(bubble, content);
+    // Agent/bot messages use markdown escaping from the composer; unescape before rendering.
+    const displayContent = (sender === 'agent' || sender === 'ai') ? unescapeMarkdown(content) : content;
+    renderMarkdownInto(bubble, displayContent);
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
@@ -1927,7 +1934,7 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    renderMarkdownInto(bubble, content);
+    renderMarkdownInto(bubble, unescapeMarkdown(content));
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
