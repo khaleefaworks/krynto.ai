@@ -45,6 +45,7 @@ export interface Conversation {
   closed_at?: string
   short_id?: string | null
   title?: string | null
+  visitor_ended?: boolean
 }
 
 export interface Message {
