@@ -2296,7 +2296,7 @@ export default function ConversationsView() {
                         disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
-                        readOnlyText={isVisitorEnded ? 'Visitor ended this conversation. You can still reply or resolve it when ready.' : 'This conversation is resolved and read-only.'}
+                        readOnlyText={isVisitorEnded ? 'The visitor has ended the conversation. You can now close or resolve it.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />

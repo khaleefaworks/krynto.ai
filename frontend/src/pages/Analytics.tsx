@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { apiRequest } from '@/services/api'
+import { Button } from '@/components/ui/button'
+import { API_BASE } from '@/config/endpoints'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
@@ -230,6 +232,11 @@ export default function Analytics() {
   const [tags, setTags] = useState<TagStat[]>([])
   const [ratings, setRatings] = useState<RatingSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [modalWebsite, setModalWebsite] = useState<number | ''>(selectedWebsite)
+  const [modalStartDate, setModalStartDate] = useState<string>('')
+  const [modalEndDate, setModalEndDate] = useState<string>('')
+  const [downloading, setDownloading] = useState(false)
 
   const startDate = dateNDaysAgo(dateRange - 1)
   const endDate = todayStr()
@@ -278,7 +285,8 @@ export default function Analytics() {
   }, [qs])
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-gray-900">
+    <>
+      <div className="h-full overflow-y-auto bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="sticky top-0 z-10 h-16 flex items-center bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700">
         <div className="px-4 w-full">
@@ -311,6 +319,17 @@ export default function Analytics() {
                   <option key={r.days} value={r.days}>{r.label}</option>
                 ))}
               </select>
+              <button
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onClick={() => {
+                  setModalWebsite(selectedWebsite)
+                  setModalStartDate(startDate)
+                  setModalEndDate(endDate)
+                  setShowDownloadModal(true)
+                }}
+              >
+                Download
+              </button>
             </div>
           </div>
         </div>
@@ -586,5 +605,93 @@ export default function Analytics() {
         )}
       </div>
     </div>
+
+      {/* Download Modal */}
+      {showDownloadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setShowDownloadModal(false)} />
+          <div className="relative z-60 w-full max-w-md mx-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Analytics</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose website and date range to export.</p>
+
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Website</label>
+                  <select
+                    value={modalWebsite}
+                    onChange={e => setModalWebsite(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All Websites</option>
+                    {websites.map(w => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">From</label>
+                  <input type="date" value={modalStartDate} onChange={e => setModalStartDate(e.target.value)} className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">To</label>
+                  <input type="date" value={modalEndDate} onChange={e => setModalEndDate(e.target.value)} className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end gap-3">
+                <button onClick={() => setShowDownloadModal(false)} className="px-4 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-200">Cancel</button>
+                <Button
+                  onClick={async () => {
+                    try {
+                      setDownloading(true)
+                      const params = new URLSearchParams()
+                      params.set('start', modalStartDate)
+                      params.set('end', modalEndDate)
+                      if (modalWebsite) params.set('website_id', String(modalWebsite))
+
+                      const token = localStorage.getItem('auth_token')
+                      const res = await fetch(`${API_BASE}/analytics/export_xlsx?${params.toString()}`, {
+                        method: 'GET',
+                        headers: {
+                          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                        },
+                      })
+
+                      if (!res.ok) {
+                        const txt = await res.text().catch(() => '')
+                        alert('Export failed: ' + (txt || res.statusText))
+                        return
+                      }
+
+                      const blob = await res.blob()
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `analytics_${modalStartDate}_${modalEndDate}.xlsx`
+                      document.body.appendChild(a)
+                      a.click()
+                      a.remove()
+                      URL.revokeObjectURL(url)
+                      setShowDownloadModal(false)
+                    } catch (err) {
+                      console.error(err)
+                      alert('Export failed')
+                    } finally {
+                      setDownloading(false)
+                    }
+                  }}
+                  disabled={downloading}
+                >
+                  {downloading ? 'Preparing…' : 'Download'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
