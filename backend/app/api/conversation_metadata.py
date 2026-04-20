@@ -184,6 +184,18 @@ def get_browsing_history(
     limit_int = max(1, min(200, limit_int))
 
     rows = page_views_repo.list_page_views_for_conversation(db, conversation_id, limit=limit_int)
+    # If there are no conversation-scoped page-views, fall back to the session-level
+    # page-views so agents can still see the visitor's browsing history even if the
+    # events were recorded before the conversation existed or attached to another conv.
+    if not rows:
+        conv = db.query(Conversation).filter_by(id=conversation_id).first()
+        if conv:
+            try:
+                rows = page_views_repo.list_page_views_for_session(
+                    db, website_id=conv.website_id, session_id=conv.session_id, limit=limit_int
+                )
+            except Exception:
+                rows = []
     return rows
 
 

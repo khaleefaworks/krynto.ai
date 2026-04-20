@@ -66,6 +66,40 @@ def initiate_conversation_for_visitor(
             )
         except Exception:
             pass
+        # Best-effort: attach any pre-conversation page views to this conversation
+        try:
+            from app.repos import page_views as page_views_repo
+
+            latest = page_views_repo.attach_session_page_views_to_conversation(
+                db,
+                website_id=website_id_int,
+                session_id=session_id_str,
+                conversation_id=cid,
+            )
+
+            # Backfill device/browser info onto the conversation if available.
+            if latest:
+                changed = False
+                if latest.device_info and not getattr(existing, "device_info", None):
+                    existing.device_info = latest.device_info
+                    changed = True
+                if latest.browser_info and not getattr(existing, "browser_info", None):
+                    existing.browser_info = latest.browser_info
+                    changed = True
+                if changed:
+                    try:
+                        db.commit()
+                        db.refresh(existing)
+                    except Exception:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return {"conversation_id": cid, "website_id": website_id_int, "session_id": session_id_str}
 
     # Create a new open conversation.
@@ -91,6 +125,40 @@ def initiate_conversation_for_visitor(
         )
     except Exception:
         pass
+
+    # Best-effort: attach any pre-conversation page views to this newly-created conversation
+    try:
+        from app.repos import page_views as page_views_repo
+
+        latest = page_views_repo.attach_session_page_views_to_conversation(
+            db,
+            website_id=website_id_int,
+            session_id=session_id_str,
+            conversation_id=int(conv.id),
+        )
+
+        if latest:
+            changed = False
+            if latest.device_info and not getattr(conv, "device_info", None):
+                conv.device_info = latest.device_info
+                changed = True
+            if latest.browser_info and not getattr(conv, "browser_info", None):
+                conv.browser_info = latest.browser_info
+                changed = True
+            if changed:
+                try:
+                    db.commit()
+                    db.refresh(conv)
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     return {"conversation_id": int(conv.id), "website_id": website_id_int, "session_id": session_id_str}
 
