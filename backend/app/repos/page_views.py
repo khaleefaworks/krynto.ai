@@ -81,6 +81,17 @@ def list_page_views_for_conversation(db: Session, conversation_id: int, *, limit
     )
 
 
+def list_page_views_for_session(db: Session, website_id: int, session_id: str, *, limit: int = 50) -> List[ConversationPageView]:
+    """List recent page views for a visitor session (website_id + session_id)."""
+    return (
+        db.query(ConversationPageView)
+        .filter_by(website_id=website_id, session_id=session_id)
+        .order_by(desc(ConversationPageView.created_at))
+        .limit(int(limit))
+        .all()
+    )
+
+
 def attach_session_page_views_to_conversation(
     db: Session,
     *,

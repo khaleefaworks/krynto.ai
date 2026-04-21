@@ -21,3 +21,4 @@ slowapi
 redis
 pywebpush
 resend
+openpyxl

@@ -135,7 +135,7 @@ export default function VisitorDetailsPanel({
   }
 
   return (
-    <div className="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0">
+    <div className="w-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
       {/* Visitor Profile */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col items-center">

@@ -311,6 +311,9 @@ class ConversationOrchestrator:
         visitor_ws: Any | None = None,
         client_message_id: str | None = None,
         visitor_ip: str | None = None,
+        visitor_name: str | None = None,
+        visitor_email: str | None = None,
+        visitor_phone: str | None = None,
     ) -> Optional[str]:
         """Process a visitor message and route appropriately.
 
@@ -321,6 +324,26 @@ class ConversationOrchestrator:
             session_id=session_id,
             visitor_ip=visitor_ip,
         )
+
+        # Save visitor contact metadata *before* broadcasting so that when agents'
+        # fetchActiveChats() fires in response to the visitor_message event the DB
+        # already contains the up-to-date visitor profile.
+        if visitor_name or visitor_email or visitor_phone:
+            try:
+                changed = False
+                if visitor_name and not conversation.visitor_name:
+                    conversation.visitor_name = str(visitor_name)
+                    changed = True
+                if visitor_email and not conversation.visitor_email:
+                    conversation.visitor_email = str(visitor_email)
+                    changed = True
+                if visitor_phone and not conversation.visitor_phone:
+                    conversation.visitor_phone = str(visitor_phone)
+                    changed = True
+                if changed:
+                    self.db.commit()
+            except Exception:
+                pass
 
         # Track the live visitor socket for downstream forwarding
         if visitor_ws:

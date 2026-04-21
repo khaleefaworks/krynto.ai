@@ -2296,7 +2296,7 @@ export default function ConversationsView() {
                         disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
-                        readOnlyText={isVisitorEnded ? 'Visitor ended this conversation. You can still reply or resolve it when ready.' : 'This conversation is resolved and read-only.'}
+                        readOnlyText={isVisitorEnded ? 'The visitor has ended the conversation. You can now close or resolve it.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />
@@ -2319,7 +2319,7 @@ export default function ConversationsView() {
             {/* COLUMN 4: Visitor Details (Collapsible) */}
             {selectedChat && conversation && (
                 <div
-                    className={`bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} flex`}
+                    className={`bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} flex h-full min-h-0`}
                 >
                     {rightSidebarCollapsed ? (
                         <div className="h-full flex flex-col items-center gap-4 py-4 px-2">
@@ -2354,7 +2354,7 @@ export default function ConversationsView() {
                                 </Button>
                             </div>
 
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-h-0 overflow-y-auto">
                                 <VisitorDetailsPanel
                                     conversation={conversation}
                                     notes={notes.map(note => ({

@@ -472,7 +472,7 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 pt-16 md:pt-0 overflow-hidden">
+      <main className="flex-1 pt-16 md:pt-0 overflow-hidden min-h-0">
         <Outlet />
       </main>
 

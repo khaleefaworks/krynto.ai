@@ -277,6 +277,40 @@ async def widget_upload_attachment(
         db.commit()
         db.refresh(conv)
 
+        # Best-effort: attach any pre-conversation browsing events captured before the first message.
+        try:
+            from app.repos import page_views as page_views_repo
+
+            latest = page_views_repo.attach_session_page_views_to_conversation(
+                db,
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=int(conv.id),
+            )
+
+            if latest:
+                changed = False
+                if latest.device_info and not getattr(conv, "device_info", None):
+                    conv.device_info = latest.device_info
+                    changed = True
+                if latest.browser_info and not getattr(conv, "browser_info", None):
+                    conv.browser_info = latest.browser_info
+                    changed = True
+                if changed:
+                    try:
+                        db.commit()
+                        db.refresh(conv)
+                    except Exception:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
     ext = validate_attachment_upload(file)
 
     upload_dir = get_uploads_root() / "attachments" / str(conv.id)
@@ -726,6 +760,40 @@ async def create_new_widget_conversation(
     db.add(new_conv)
     db.commit()
     db.refresh(new_conv)
+
+    # Best-effort: attach any pre-conversation browsing events captured before the first message.
+    try:
+        from app.repos import page_views as page_views_repo
+
+        latest = page_views_repo.attach_session_page_views_to_conversation(
+            db,
+            website_id=website_id,
+            session_id=session_id,
+            conversation_id=new_conv.id,
+        )
+
+        if latest:
+            changed = False
+            if latest.device_info and not getattr(new_conv, "device_info", None):
+                new_conv.device_info = latest.device_info
+                changed = True
+            if latest.browser_info and not getattr(new_conv, "browser_info", None):
+                new_conv.browser_info = latest.browser_info
+                changed = True
+            if changed:
+                try:
+                    db.commit()
+                    db.refresh(new_conv)
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     return {"conversation_id": new_conv.id}
 

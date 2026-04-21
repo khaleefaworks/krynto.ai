@@ -883,6 +883,7 @@ async def chat_ws(
 
             visitor_name = payload.get("visitor_name")
             visitor_email = payload.get("visitor_email")
+            visitor_phone = payload.get("visitor_phone")
             
             # Rate limiting: multi-worker safe when REDIS_URL is configured.
             exceeded = False
@@ -928,6 +929,9 @@ async def chat_ws(
                 visitor_ws=websocket,
                 client_message_id=str(client_message_id) if client_message_id else None,
                 visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
+                visitor_name=visitor_name,
+                visitor_email=visitor_email,
+                visitor_phone=visitor_phone,
             )
 
             # Conversation may have been created on first message; register for cleanup.
@@ -956,28 +960,6 @@ async def chat_ws(
                         except Exception:
                             pass
                 except Exception:
-                    pass
-
-            # Store visitor contact info if provided (conversation exists now after first message)
-            if visitor_name or visitor_email:
-                try:
-                    conv = conversations_repo.get_open_conversation_by_session(
-                        db,
-                        website_id=website_id,
-                        session_id=session_id,
-                    )
-                    if conv:
-                        changed = False
-                        if visitor_name and not conv.visitor_name:
-                            conv.visitor_name = str(visitor_name)
-                            changed = True
-                        if visitor_email and not conv.visitor_email:
-                            conv.visitor_email = str(visitor_email)
-                            changed = True
-                        if changed:
-                            db.commit()
-                except Exception:
-                    # Don't fail chat delivery if metadata storage fails
                     pass
 
             # Orchestrator may return immediate text; keep backwards-compatible.
