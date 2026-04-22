@@ -99,6 +99,37 @@ Phase 5 Audit — 3 items still pending:
 - joinedRef kept in sync via conversation_assigned WS event so the takeover popup triggers correctly even after mid-session ownership changes
 - confirmTakeoverAndSend now shows optimistic message immediately (same as handleSendMessage)
 
+36) Form fields when offline — the offline form (shown when no agents are online) needs a full UX rework. Fields should be configurable per website (label, type, required), stored as JSON objects in a form_fields column, and rendered dynamically. Related to #27. Also consider triggering the form via automations instead of hardcoding it to the agent-offline state.
+
+37) Agent avatar & visitor avatar drop in chat list — the chat list sidebar should show the assigned agent's avatar and the visitor's avatar (or initials fallback) inline on each row for quick visual scanning.
+
+38) For returning visitors — don't show a "choose" option; too many scenarios. Think through all cases: history enabled/disabled, previous conv resolved vs visitor-ended vs open, visitor returning in same tab vs new tab vs new browser session. Design a seamless auto-resume or auto-start flow without forcing the visitor to pick. Related to #16 (returning visitor automation trigger still pending).
+
+39) Reduce font size in chat page and include more details — the conversation thread / chat list feels too large; reduce font sizes, tighten spacing, and surface more useful metadata (e.g., time since last message, visitor location, assigned agent, tags) at a glance without needing to open a side panel.
+
+40) Mobile app — native or PWA mobile app for agents to handle chats on the go. Low priority. Before starting, migrate to pnpm monorepo structure first — see `docs/MONOREPO_PLAN.md`.
+
 Features:
 
 1) Administrator's superadmin portal needs to be improved. light/dark mode, list view for users and orgs. If possible, same like frappe the superadmin portal is actually should have all possible lists.
+
+2) Documentation milestone — README overhaul + public docs portal. Single milestone, ship together.
+
+   **Part A — README overhaul (developer + AI reference)**
+   - Root `README.md`: full architecture diagram, feature list, links to sub-package READMEs, deployment overview
+   - `backend/README.md`: env vars table, all API routes, services architecture, models, Alembic guide, running tests
+   - `frontend/README.md`: Zustand store docs, component guide, service functions, routing, env vars
+   - `mobile/README.md`: created when mobile app starts
+
+   **Part B — Public docs portal (`/docs`)**
+   - Built inside the existing frontend Vite app as a new public route — no separate app, no auth required
+   - Content stored as `.md` files in a new `docs-content/` folder at repo root, version-controlled
+   - Sidebar nav auto-generated from a single `nav.ts` config file (sections → pages → file paths)
+   - `react-markdown` already installed — use it to render content pages
+   - Separate layout from `/dashboard` (no sidebar, no auth, public access)
+   - Dark mode support, breadcrumbs, per-page TOC
+   - Sections: Getting Started, Agent Guide, Admin Guide, Widget Embed, API Reference
+   - Future upgrade path: swap `.md` files for DB-stored Tiptap content (Tiptap also already installed) — no route or component changes needed
+
+   **Part C — Dashboard integration**
+   - "How it works" / `?` contextual link on each major feature page pointing to the relevant `/docs` page
