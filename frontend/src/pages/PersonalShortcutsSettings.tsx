@@ -203,8 +203,8 @@ export default function PersonalShortcutsSettings() {
                     <div className="py-16 text-center text-sm text-gray-400">No shortcuts matching "{search}"</div>
                 ) : (
                     /* Table */
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <table className="w-full text-sm">
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+                        <table className="w-full text-sm min-w-[420px]">
                             <thead>
                                 <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                                     <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 w-40">Trigger</th>

@@ -692,12 +692,12 @@ export default function ChatComposer({
                             type="button"
                             onClick={sendNow}
                             disabled={(isEmpty && attachments.length === 0) || disabled || !conversationId || !editor || uploadingAttachment}
-                            className="bg-blue-600 hover:bg-blue-700 rounded-full h-9 px-4"
+                            className="bg-blue-600 hover:bg-blue-700 rounded-full h-8 px-2 sm:px-3"
                             title="Send"
                         >
                             <div className="flex items-center gap-2">
                                 <Send className="h-4 w-4" />
-                                <span className="text-sm">Send</span>
+                                <span className="hidden sm:inline text-sm">Send</span>
                             </div>
                         </Button>
                     </div>

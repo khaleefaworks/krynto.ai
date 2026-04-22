@@ -563,13 +563,13 @@ export default function WebsiteManagement() {
       )}
 
       {/* Websites Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
         {websites.length === 0 ? (
           <p className="p-6 text-gray-600 dark:text-gray-400 text-center">
             No websites yet. Click "Add Website" to create your first website.
           </p>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[360px]">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700">
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">

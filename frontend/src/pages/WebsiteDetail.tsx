@@ -1170,11 +1170,12 @@ export default function WebsiteDetail() {
                           const existing = getAutomationByTemplate(t)
                           return (
                             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                              <div className="flex items-center justify-between gap-3">
-                                <div>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
                                   <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {t.trigger}</div>
                                 </div>
+                                <div className="flex-shrink-0">
                                 {existing ? (
                                   <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
                                     Edit
@@ -1184,6 +1185,7 @@ export default function WebsiteDetail() {
                                     Use template
                                   </Button>
                                 )}
+                                </div>
                               </div>
                               <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
                               <div className="text-xs text-gray-500 dark:text-gray-500">
@@ -1290,11 +1292,12 @@ export default function WebsiteDetail() {
                               key={`${t.trigger}:${t.action_type}:${t.event_type || ''}`}
                               className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <div>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
                                   <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {t.trigger}</div>
                                 </div>
+                                <div className="flex-shrink-0">
                                 {existing ? (
                                   <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
                                     Edit
@@ -1304,6 +1307,7 @@ export default function WebsiteDetail() {
                                     Use template
                                   </Button>
                                 )}
+                                </div>
                               </div>
                               <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
                               <div className="text-xs text-gray-500 dark:text-gray-500">
@@ -1351,10 +1355,10 @@ export default function WebsiteDetail() {
                                 key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
                                 className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
                               >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="min-w-0 flex-1">
                                     <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {automation.trigger}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {automation.trigger}</div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400">Action: {actionTypeLabel}{eventType ? ` • event_type: ${eventType}` : ''}</div>
                                     {hasCollision && (
                                       <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
@@ -1372,7 +1376,7 @@ export default function WebsiteDetail() {
                                     {text && <div className="text-xs text-gray-600 dark:text-gray-400">{text}</div>}
                                   </div>
 
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
                                     {showControls ? (
                                       <Switch
                                         checked={automation.enabled}
@@ -2206,31 +2210,34 @@ export default function WebsiteDetail() {
                         const disabled = !current.enabled
 
                         return (
-                          <div key={day.key} className="flex items-start gap-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
-                            <div className="w-24 shrink-0 pt-1">
-                              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</span>
+                          <div key={day.key} className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                            {/* Day label + toggle — inline on mobile, acts as two flex items on sm+ */}
+                            <div className="flex items-center gap-3 sm:contents">
+                              <div className="w-24 shrink-0 sm:pt-1">
+                                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{day.label}</span>
+                              </div>
+                              <Switch
+                                checked={dayEnabled}
+                                disabled={disabled}
+                                onCheckedChange={(checked) => {
+                                  const next = coerceOfficeHours((formData.widget_config as any).office_hours)
+                                  const nextSchedule = { ...next.schedule }
+                                  nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
+                                  setFormData({
+                                    ...formData,
+                                    widget_config: {
+                                      ...formData.widget_config,
+                                      office_hours: { ...next, schedule: nextSchedule },
+                                    },
+                                  })
+                                }}
+                              />
                             </div>
-                            <Switch
-                              checked={dayEnabled}
-                              disabled={disabled}
-                              onCheckedChange={(checked) => {
-                                const next = coerceOfficeHours((formData.widget_config as any).office_hours)
-                                const nextSchedule = { ...next.schedule }
-                                nextSchedule[day.key] = checked ? [{ start: '08:00', end: '17:00' }] : []
-                                setFormData({
-                                  ...formData,
-                                  widget_config: {
-                                    ...formData.widget_config,
-                                    office_hours: { ...next, schedule: nextSchedule },
-                                  },
-                                })
-                              }}
-                            />
-                            <div className="flex-1">
+                            <div className="flex-1 pl-1 sm:pl-0">
                               {dayEnabled ? (
                                 <div className="space-y-2">
                                   {intervals.map((interval, idx) => (
-                                    <div key={idx} className="flex items-center gap-2">
+                                    <div key={idx} className="flex items-center gap-2 flex-wrap">
                                       <input
                                         type="time"
                                         value={interval.start}
@@ -2249,7 +2256,7 @@ export default function WebsiteDetail() {
                                             },
                                           })
                                         }}
-                                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        className="w-32 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                                       />
                                       <span className="text-xs text-gray-400">–</span>
                                       <input
@@ -2270,7 +2277,7 @@ export default function WebsiteDetail() {
                                             },
                                           })
                                         }}
-                                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        className="w-32 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                                       />
                                       <button
                                         type="button"
