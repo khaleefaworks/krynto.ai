@@ -19,8 +19,6 @@ export const docsNav: DocSection[] = [
     slug: 'getting-started',
     pages: [
       { title: 'Introduction', slug: 'getting-started/introduction' },
-      { title: 'Quick Start', slug: 'getting-started/quick-start' },
-      { title: 'Installation', slug: 'getting-started/installation' },
     ],
   },
   {
@@ -48,13 +46,6 @@ export const docsNav: DocSection[] = [
     pages: [
       { title: 'Embedding the Widget', slug: 'widget/embedding' },
       { title: 'Customisation', slug: 'widget/customisation' },
-    ],
-  },
-  {
-    title: 'API Reference',
-    slug: 'api-reference',
-    pages: [
-      { title: 'Overview', slug: 'api-reference/overview' },
     ],
   },
 ]
