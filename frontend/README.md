@@ -1,372 +1,168 @@
-# Agent Dashboard - Frontend
+# Frontend — AI ChatAssist
 
-React 19 + TypeScript agent dashboard for AI ChatAssist.
+React 19 + TypeScript agent dashboard. Handles conversations, settings, customers, analytics, and the public docs portal.
 
-## Tech Stack
+## Stack
 
-- **React 19** with TypeScript
-- **Vite** for build tooling
-- **Tailwind CSS** for styling
-- **shadcn/ui** for UI components
-- **Zustand** for state management
-- **React Router** for routing
-- **React Hook Form + Zod** for form validation
-- **WebSocket** for real-time communication
-- **Lucide React** for icons
+- **React 19**, TypeScript, Vite 7
+- **Tailwind CSS v3** + `@tailwindcss/typography`
+- **Zustand v5** — global state
+- **react-router-dom v7** — client-side routing
+- **Tiptap v3** — rich text message composer
+- **react-hook-form + zod** — form validation
+- **react-markdown + remark-gfm** — markdown rendering (docs portal + chat)
+- **Recharts** — analytics charts
+- **Radix UI** — headless accessible primitives
+- **Lucide React** — icons
 
-## Features
-
-### ✅ Authentication
-- JWT-based login system
-- Token persistence in localStorage
-- Automatic token restoration on page refresh
-- Protected routes (redirect to login if not authenticated)
-- Secure logout with token cleanup
-
-### ✅ Dashboard Layout
-- Responsive header with navigation
-- Agent email display
-- Tabbed navigation (Active Chats, Websites)
-- Logout functionality
-
-### ✅ Active Chats Management
-- Real-time list of active conversations
-- Website name and message count display
-- Join chat functionality
-- Navigation to chat view
-
-### ✅ Chat Interface
-- Real-time WebSocket messaging
-- Full conversation history
-- Message type differentiation (visitor/AI/agent)
-- Auto-scroll to latest message
-- Send messages as agent
-- Confidence score display for AI messages
-
-### ✅ Website Management
-- List all websites
-- Create new websites with domain and AI instructions
-- Edit existing websites
-- Delete websites with confirmation
-- Domain uniqueness validation
-- Widget configuration preview
-
-## Project Structure
+## Directory structure
 
 ```
-src/
-├── components/
-│   └── ui/                      # shadcn/ui components
-│       ├── button.tsx
-│       ├── card.tsx
-│       └── input.tsx
+frontend/src/
+├── App.tsx               # Route definitions, auth init, global WS setup
+├── main.tsx              # React entry point
+├── index.css             # Tailwind imports + CSS variables (light/dark)
+├── assets/               # Static assets
+├── components/           # Shared UI components
+│   ├── Logo.tsx
+│   ├── ChatComposer.tsx
+│   ├── MarkdownMessage.tsx
+│   ├── UserAvatar.tsx
+│   ├── NotificationPermissionPrompt.tsx
+│   └── ui/               # Headless primitives (button, badge, popover, etc.)
+├── config/
+│   ├── endpoints.ts      # API_BASE — derived from VITE_API_BASE or hostname
+│   └── docsNav.ts        # Docs portal nav config (sections → pages → slugs)
 ├── lib/
-│   └── utils.ts                 # Utility functions (cn)
-├── pages/
-│   ├── LoginPage.tsx            # JWT authentication
-│   ├── DashboardLayout.tsx      # Main layout with nav
-│   ├── ActiveChats.tsx          # Chat list view
-│   ├── ChatView.tsx             # Real-time chat interface
-│   └── WebsiteManagement.tsx    # Website CRUD interface
-├── services/
-│   ├── api.ts                   # Base API client with JWT
-│   ├── auth.ts                  # Authentication services
-│   ├── chats.ts                 # Chat API functions
-│   ├── messages.ts              # Message API functions
-│   ├── websites.ts              # Website API functions
-│   └── agentSocket.ts           # Agent WebSocket client
-├── store/
-│   ├── appStore.ts              # Global Zustand store
-│   └── messages.ts              # Message store
-├── types/
-│   └── index.ts                 # TypeScript interfaces
-├── App.tsx                      # Router and auth provider
-├── main.tsx                     # App entry point
-└── index.css                    # Global styles
+│   ├── roles.ts          # Role helpers: isAdmin(), isSuperAdmin(), isOrgOwner()
+│   ├── notificationSound.ts  # Sound playback + preferences
+│   └── utils.ts          # cn() class merger
+├── pages/                # Route-level components (one file per page/layout)
+│   ├── DashboardLayout.tsx       # Main shell: sidebar, availability toggle
+│   ├── ConversationsView.tsx     # Agent inbox (3-column)
+│   ├── ConversationHistory.tsx   # Chat thread + visitor details panel
+│   ├── ClosedChatView.tsx        # Read-only resolved conversation
+│   ├── WebsitesList.tsx / WebsiteDetail.tsx / WebsiteManagement.tsx
+│   ├── WebsiteWidgetTab.tsx      # Widget customisation + live preview
+│   ├── WebsiteTeamsTab.tsx / WebsiteTagsTab.tsx / WebsiteShortcutsTab.tsx
+│   ├── AgentsList.tsx / AgentsManagement.tsx
+│   ├── Teams.tsx
+│   ├── Customers.tsx / CustomersVisitors.tsx / CustomersContacts.tsx
+│   ├── Analytics.tsx
+│   ├── Settings.tsx              # Settings shell
+│   ├── OrgSettings.tsx
+│   ├── PersonalSettings.tsx
+│   ├── PersonalShortcutsSettings.tsx
+│   ├── NotificationSettings.tsx
+│   ├── TagsSettings.tsx
+│   ├── SuperAdminLayout.tsx / SuperAdminOrgs.tsx / SuperAdminOrgDetail.tsx / SuperAdminStats.tsx
+│   ├── DocsLayout.tsx            # Public /docs layout (no auth)
+│   ├── DocsPage.tsx              # Markdown page renderer
+│   ├── LoginPage.tsx / SignupPage.tsx / ForgotPasswordPage.tsx / ResetPasswordPage.tsx
+│   └── OnboardingPage.tsx        # First-run setup wizard
+├── services/             # HTTP API clients + WebSocket
+│   ├── api.ts            # Base fetch wrapper (auth header, error handling)
+│   ├── auth.ts           # Login, logout, getCurrentUser, availability toggle
+│   ├── chats.ts          # fetchActiveChats, joinChat, resolveChat, markRead
+│   ├── messages.ts       # fetchMessages
+│   ├── agentSocket.ts    # Agent WS singleton — connect, send, addMessageHandler
+│   ├── websites.ts       # CRUD websites
+│   ├── automations.ts
+│   ├── teams.ts
+│   ├── customers.ts
+│   ├── push.ts           # Web Push subscription
+│   ├── notificationPrefs.ts
+│   ├── conversationMetadata.ts
+│   └── shortcuts.ts
+└── store/
+    ├── appStore.ts       # Auth, chats, unread counts, WS state, notifications
+    └── messages.ts       # Per-conversation message cache
 ```
+
+## Key state (Zustand — appStore)
+
+| Slice | Description |
+|-------|-------------|
+| `token` / `user` | Auth state — persisted in localStorage |
+| `organization` | Current org data |
+| `activeChats` | Live conversation list |
+| `unreadChatsCount` | Global unread badge (sidebar) |
+| `unreadByConversationId` | Per-conversation unread count |
+| `currentChat` / `messages` | Active thread data |
+| `isConnected` | Agent WS connection state |
+
+## Routing
+
+All routes defined in `App.tsx`:
+
+```
+/login, /signup, /forgot-password, /reset-password   — public auth
+/docs/*                                               — public docs portal (no auth)
+/setup                                                — first-run onboarding
+/dashboard/*                                          — protected, OWNER/MANAGER/AGENT
+/superadmin/*                                         — protected, SYSTEM_MANAGER only
+```
+
+Dark mode is controlled by `"class"` strategy in `tailwind.config.js` — the `dark` class is toggled on `<html>` by the dashboard layout and docs layout independently, each persisting their preference in localStorage under separate keys.
+
+## Environment variables
+
+Create `frontend/.env.local`:
+
+| Variable | Description |
+|----------|-------------|
+| `VITE_API_BASE` | Backend URL — e.g. `http://localhost:8000` or `https://api.example.com` |
+
+If not set, the frontend auto-derives the API base from the current hostname (replaces port 5173 → 8000 in development).
 
 ## Development
 
-### Prerequisites
-
-- Node.js 18+
-- Backend server running on `http://localhost:8000`
-
-### Setup
-
 ```bash
-# Install dependencies
 npm install
-
-# Start development server
-npm run dev
+npm run dev        # http://localhost:5173
+npm run build      # Production build → dist/
+npm run typecheck  # Type-check without emitting
+npm run lint       # ESLint
 ```
 
-Development server runs at `http://localhost:5173`
+## Docs portal
 
-### Build
+The `/docs` route is a public, no-auth page serving end-user documentation.
 
-```bash
-# Production build
-npm run build
+- Content: `frontend/public/docs-content/**/*.md` (served as static assets)
+- Nav config: `frontend/src/config/docsNav.ts`
+- Layout: `DocsLayout.tsx` — sticky header, responsive sidebar, dark mode toggle
+- Renderer: `DocsPage.tsx` — fetches `.md` at runtime, renders with `react-markdown`
 
-# Preview production build
-npm run preview
+**Adding a new doc page:**
+1. Create `frontend/public/docs-content/<section>/<slug>.md`
+2. Add `{ title: '...', slug: '<section>/<slug>' }` to the relevant section in `docsNav.ts`
 
-# Lint code
-npm run lint
+## agentSocket singleton
+
+`src/services/agentSocket.ts` manages a single persistent WebSocket to `/ws/agent/0`:
+
+- Auto-reconnects with exponential backoff (max 30 s)
+- Sends `heartbeat` every 25 s to keep the connection alive
+- Queues outgoing messages while disconnected and flushes on reconnect
+- `addMessageHandler(fn)` — register a callback for all incoming events; returns an unsubscribe function
+
+Usage:
+```ts
+import { connectAgentSocket, addMessageHandler, sendAgentMessage } from '@/services/agentSocket'
+
+connectAgentSocket(0, user.id)
+const unsubscribe = addMessageHandler((data) => { /* handle event */ })
+sendAgentMessage(conversationId, 'Hello!')
 ```
 
-## Environment Variables
+## Role helpers (src/lib/roles.ts)
 
-Create `.env` file (optional - defaults work for local development):
-
-```env
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000
+```ts
+isAdmin(user)       // OWNER or MANAGER
+isOrgOwner(user)    // OWNER only
+isSuperAdmin(user)  // SYSTEM_MANAGER only
+canManageUsers(user)// OWNER only
 ```
 
-## Default Login Credentials
-
-- **Email:** `agent@test.com`
-- **Password:** `password`
-
-## API Integration
-
-### Authentication Flow
-
-1. User submits login form
-2. POST `/auth/login` with email/password
-3. Backend returns JWT token
-4. Token saved to localStorage
-5. Token included in all subsequent API requests via `Authorization: Bearer {token}` header
-6. Token restored from localStorage on page refresh
-7. GET `/auth/me` fetches current agent details
-
-### REST API Endpoints Used
-
-```typescript
-// Authentication
-POST   /auth/login        // Login and get JWT token
-GET    /auth/me           // Get current agent details
-
-// Websites
-GET    /websites          // List all websites
-POST   /websites          // Create website
-GET    /websites/{id}     // Get specific website
-PUT    /websites/{id}     // Update website
-DELETE /websites/{id}     // Delete website
-
-// Chats
-GET    /chats             // List active chats
-POST   /chats/{id}/join   // Join chat as agent
-GET    /chats/{id}        // Get chat details
-
-// Messages
-GET    /chats/{id}/messages  // Get message history
-POST   /chats/{id}/messages  // Send message
-```
-
-## WebSocket Flow
-
-### Agent Connection
-
-1. Agent logs in and navigates to Active Chats
-2. Agent clicks chat to view conversation
-3. POST `/chats/{id}/join` to mark agent joining
-4. WebSocket connects to `/ws/agent/{agent_id}`
-5. Send `join_chat` message with conversation_id
-6. Receive conversation history
-7. Real-time bidirectional messaging begins
-8. AI automatically pauses when agent joins
-
-### Message Format
-
-```typescript
-// Outgoing (Agent → Backend)
-{
-  type: 'message',
-  conversation_id: number,
-  content: string
-}
-
-// Incoming (Backend → Agent)
-{
-  type: 'history' | 'new_message',
-  conversation_id?: number,
-  messages?: Message[],
-  message?: Message
-}
-```
-
-## State Management
-
-### appStore (Zustand)
-
-```typescript
-interface AppStore {
-  token: string | null
-  agent: Agent | null
-  setToken: (token: string | null) => void
-  setAgent: (agent: Agent | null) => void
-}
-```
-
-### messages Store (Zustand)
-
-```typescript
-interface MessagesStore {
-  messages: Record<number, Message[]>
-  addMessage: (conversationId: number, message: Message) => void
-  setMessages: (conversationId: number, messages: Message[]) => void
-}
-```
-
-## Component Overview
-
-### LoginPage
-- Email/password form with React Hook Form
-- Zod validation schema
-- JWT token storage
-- Automatic redirect on success
-
-### DashboardLayout
-- Persistent header across all dashboard pages
-- Tab navigation (Active Chats, Websites)
-- Agent info display
-- Logout with token cleanup
-
-### ActiveChats
-- Fetches conversations via REST API
-- Card-based chat list
-- Click to navigate to chat view
-- Shows website name, message count, session ID
-
-### ChatView
-- WebSocket connection for real-time updates
-- Message history with scroll behavior
-- Input field with send button
-- Message type styling (visitor/AI/agent)
-- Confidence score badges for AI messages
-
-### WebsiteManagement
-- List view of all websites
-- Create form with validation
-- Edit form (inline or modal)
-- Delete with confirmation dialog
-- Domain uniqueness checking
-- AI instructions text area
-
-## Styling
-
-- **Tailwind CSS** utility classes
-- **shadcn/ui** component system
-- Custom color scheme via `index.css`
-- Responsive design with mobile breakpoints
-- Dark mode support (future enhancement)
-
-## Type Safety
-
-Full TypeScript coverage with interfaces for:
-- Agent
-- Website
-- Conversation
-- Message
-- WebSocket message types
-- API request/response types
-
-## Error Handling
-
-- API request errors displayed in UI
-- Form validation errors shown inline
-- WebSocket connection retry logic
-- Token expiration handling (redirect to login)
-- Graceful fallback for failed operations
-
-## Performance Optimizations
-
-- React memo for expensive renders
-- Debounced search inputs (future)
-- Lazy loading for routes (future)
-- WebSocket connection pooling
-- Optimistic UI updates
-
-## Security
-
-- JWT tokens stored in localStorage
-- Tokens included in all authenticated requests
-- Protected routes with automatic redirects
-- Token cleared on logout
-- No sensitive data in state after logout
-
-## Testing
-
-```bash
-# Run tests (when implemented)
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Generate coverage report
-npm run test:coverage
-```
-
-## Troubleshooting
-
-### TypeScript Import Errors
-
-If you see "does not provide an export named" errors:
-- Use `import type` for type-only imports
-- Restart the Vite dev server
-- Clear browser cache
-
-### WebSocket Connection Failed
-
-- Verify backend is running on port 8000
-- Check CORS configuration in backend
-- Ensure WebSocket URL is correct
-- Check browser console for error details
-
-### Authentication Issues
-
-- Verify token is saved to localStorage (check DevTools → Application → Local Storage)
-- Check token expiration (24 hours)
-- Ensure backend `/auth/me` endpoint is accessible
-- Clear localStorage and login again
-
-### Build Errors
-
-```bash
-# Clear node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
-
-# Clear Vite cache
-rm -rf node_modules/.vite
-```
-
-## Browser Support
-
-- Chrome/Edge 90+
-- Firefox 88+
-- Safari 14+
-- Modern mobile browsers
-
-## Future Enhancements
-
-- [ ] Typing indicators
-- [ ] Read receipts
-- [ ] Message search
-- [ ] Conversation filters
-- [ ] Dark mode toggle
-- [ ] Agent status (online/away/busy)
-- [ ] Multiple chat windows
-- [ ] Desktop notifications
-- [ ] File attachments
-- [ ] Conversation notes
-- [ ] Chat analytics dashboard
-
----
-
-**For complete project documentation, see the main [README.md](../README.md)**
+Used in route guards and conditional UI rendering throughout the dashboard.

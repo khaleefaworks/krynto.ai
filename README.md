@@ -1,345 +1,486 @@
 # AI ChatAssist
 
-Self-hosted live chat + human agent support system for multi-website customer support.
+Self-hosted, multi-tenant live chat platform. Visitors chat via an embeddable JS widget; agents respond in real time from a React dashboard.
 
-## 🎯 Overview
+## Stack
 
-AI ChatAssist is a real-time live chat system with an agent dashboard and an embeddable website widget. Deploy once, manage multiple websites from a single dashboard.
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.12, FastAPI, SQLAlchemy (sync), PostgreSQL, Alembic, WebSockets |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v3, Zustand v5, react-router-dom v7 |
+| Widget | Vanilla JS (IIFE, zero dependencies) |
+| Realtime | WebSockets (single worker) + Redis Pub/Sub (multi-worker) |
+| Auth | JWT HS256 + bcrypt, 24 h TTL, iat-based invalidation |
 
-### Key Features
-
-- 👥 **Human Agent Live Chat** - Real-time conversations via WebSockets
-- 🧑‍💼 **Agent Assignment** - Assign/close conversations from the dashboard
-- 🌐 **Multi-Website Support** - Manage multiple sites from single dashboard
-- 💬 **Real-Time Chat** - WebSocket-based instant messaging
-- 🎨 **Customizable Widget** - Theme colors, position, welcome messages per site
-- 🔐 **Secure by Default** - JWT authentication, bcrypt password hashing
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AI ChatAssist System                      │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐      ┌──────────────┐      ┌───────────┐ │
-│  │   Visitor    │      │    Agent     │      │   Admin   │ │
-│  │   Widget     │◄────►│  Dashboard   │◄────►│  Portal   │ │
-│  │ (Vanilla JS) │      │   (React)    │      │  (React)  │ │
-│  └──────┬───────┘      └──────┬───────┘      └─────┬─────┘ │
-│         │ WebSocket            │ WebSocket          │ HTTP  │
-│         └──────────────────────┼────────────────────┘       │
-│                                ▼                             │
-│                    ┌────────────────────┐                    │
-│                    │   FastAPI Backend  │                    │
-│                    │   ┌────────────┐   │                    │
-│                    │   │   Chat     │   │                    │
-│                    │   │Orchestrator│   │                    │
-│                    │   └─────┬──────┘   │                    │
-│                    │         │          │                    │
-│         ┌──────────┼─────────┼──────────┐                 │
-│         ▼          ▼         ▼          ▼                 │
-│    ┌────────┐  ┌────────┐ ┌────────┐ ┌────────┐          │
-│    │Postgres│  │Redis   │ │Widget  │ │Uploads │          │
-│    │  DB    │  │(opt.)  │ │Assets  │ │Storage │          │
-│    └────────┘  └────────┘ └────────┘ └────────┘          │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 🛠️ Tech Stack
-
-### Backend
-- **FastAPI** - Modern async Python web framework
-- **PostgreSQL** - Primary database
-- **SQLAlchemy** - ORM with Alembic migrations
-- **Redis** - Optional realtime Pub/Sub bridge + rate limiting
-- **JWT** - Authentication tokens
-- **WebSocket** - Real-time bidirectional communication
-
-### Frontend (Agent Dashboard)
-- **React 19** with TypeScript
-- **Vite** - Fast build tooling
-- **Tailwind CSS** - Utility-first styling
-- **shadcn/ui** - High-quality component library
-- **Zustand** - Lightweight state management
-- **React Router** - Client-side routing
-- **React Hook Form + Zod** - Form handling and validation
-
-### Chat Widget (Visitor)
-- **Vanilla JavaScript** - No framework dependencies
-- **Plain CSS** - Minimal, performant styling
-- **WebSocket** - Direct connection to backend
-
-## 📦 Project Structure
+## Repository layout
 
 ```
 ai-chatassist/
-├── backend/           # FastAPI application
-│   ├── alembic/      # Database migrations
+├── backend/                  # FastAPI app — see backend/README.md
+│   ├── alembic/              # DB migrations
 │   ├── app/
-│   │   ├── api/      # REST & WebSocket endpoints
-│   │   ├── core/     # Config, DB, security
-│   │   ├── models/   # SQLAlchemy models
-│   │   └── services/ # Business logic
+│   │   ├── api/              # Routers (REST + WebSocket)
+│   │   ├── core/             # Config, DB engine, security, limiter, logging
+│   │   ├── infra/            # RealtimeBus (Redis Pub/Sub), metrics
+│   │   ├── models/           # SQLAlchemy ORM models
+│   │   ├── repos/            # Thin query functions (accept db: Session)
+│   │   └── services/         # Business logic (ConversationOrchestrator, etc.)
+│   ├── tests/                # ~20 pytest modules (SQLite in-memory)
 │   ├── requirements.txt
-│   └── README.md
-├── frontend/          # React agent dashboard
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   └── store/
-│   ├── package.json
-│   └── README.md
-├── widget/            # Embeddable chat widget
-│   ├── chat-widget.js
+│   └── start_server.sh
+├── frontend/                 # React agent dashboard — see frontend/README.md
+│   ├── public/
+│   │   └── docs-content/     # End-user docs (.md files served as static assets)
+│   └── src/
+│       ├── components/       # Shared UI components
+│       ├── config/           # API base URL, docsNav config
+│       ├── lib/              # Role helpers, notification sounds
+│       ├── pages/            # Route-level page components + layouts
+│       ├── services/         # HTTP API clients + agentSocket singleton
+│       └── store/            # Zustand stores (appStore, messages)
+├── widget/                   # Embeddable visitor chat widget
+│   ├── chat-widget.js        # Self-contained IIFE
 │   ├── chat-widget.css
-│   ├── demo.html
-│   └── README.md
-└── docs/
-    └── PRD.md        # Product Requirements Document
+│   └── demo.html
+├── deploy/                   # Nginx configs, systemd units, backup scripts
+├── docs/                     # Internal planning documents
+└── uploads/                  # Uploaded files (avatars, website assets)
 ```
 
-## 🚀 Quick Start
+## Architecture overview
 
-### Prerequisites
-
-- Python 3.12+
-- Node.js 18+
-- PostgreSQL 16+
-- Redis 7+
-
-### 1. Backend Setup
-
-```bash
-# Install PostgreSQL
-sudo apt install -y postgresql postgresql-contrib
-
-# Create database
-sudo -u postgres psql -c "CREATE USER chatassist WITH PASSWORD 'chatassist';"
-sudo -u postgres psql -c "CREATE DATABASE chatassist OWNER chatassist;"
-
-# Setup backend
-cd backend
-python -m venv ../.venv
-source ../.venv/bin/activate
-pip install -r requirements.txt
-
-# Configure environment
-cat > .env << EOF
-DATABASE_URL=postgresql+psycopg2://chatassist:chatassist@localhost:5432/chatassist
-SECRET_KEY=$(openssl rand -hex 32)
-ENV=development
-EOF
-
-# Run migrations
-alembic upgrade head
-
-# Start server
-./start_server.sh
+```
+Visitor browser          Agent browser            System Manager
+     │                        │                        │
+     │ WS /ws/chat/{id}        │ WS /ws/agent/0          │ HTTP /superadmin/*
+     │ HTTP /widget/*          │ HTTP /dashboard/*        │
+     └────────────────────────┴────────────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   FastAPI backend  │
+                    │                   │
+                    │  ConversationOrchestrator
+                    │  ├── ChatService  (visitor WS registry)
+                    │  ├── AgentService (agent WS registry)
+                    │  ├── AutomationService
+                    │  ├── AgentResolverService
+                    │  └── WebsiteResolverService
+                    └──────┬────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         PostgreSQL      Redis       uploads/
+         (primary DB)  (optional     (static
+                        Pub/Sub)      files)
 ```
 
-Backend runs at `http://localhost:8000`
+**Multi-worker delivery:** each Gunicorn worker holds its own in-memory WS registries. Redis Pub/Sub (RealtimeBus) bridges cross-worker delivery. Single-worker deployments skip Redis entirely.
 
-### Production run (no Docker)
+## Roles
 
-- Set `ENV=production`, `SECRET_KEY`, `PUBLIC_BASE_URL`, and `CORS_ALLOWED_ORIGINS` in `backend/.env`
-- Run `alembic upgrade head` during deploy
-- Start with gunicorn (example):
-
-```bash
-cd backend
-gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 app.main:app
 ```
-
-### 2. Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev
+SYSTEM_MANAGER  (org_id = NULL)  — platform-wide, /superadmin/* only
+OWNER           (org scope)      — full org control
+MANAGER         (org scope)      — manage agents + conversations
+AGENT           (website scope)  — assigned websites only
 ```
-
-Agent dashboard runs at `http://localhost:5173`
-
-### 3. Widget Setup
-
-Add to your website (recommended):
-
-```html
-<!-- AI ChatAssist Live Chat script -->
-<script type="text/javascript">
-  var _aichatassist = _aichatassist || {};
-  _aichatassist.key = "YOUR_WIDGET_KEY";
-  window.aichatassist||(function(d) {
-    var s,c,o=aichatassist=function(){ o._.push(arguments)}; o._=[];
-    s=d.getElementsByTagName('script')[0];c=d.createElement('script');
-    c.type='text/javascript';c.charset='utf-8';c.async=true;
-    c.src='http://localhost:8000/widget/loader.js?key=' + _aichatassist.key;
-    s.parentNode.insertBefore(c,s);
-  })(document);
-</script>
-```
-
-## 📖 Usage
-
-### Default Login Credentials
-
-- **Email:** `agent@test.com`
-- **Password:** `password`
-
-### Managing Websites
-
-1. Log in to agent dashboard
-2. Navigate to "Websites" tab
-3. Click "Add Website"
-4. Enter name and domain
-5. Configure widget appearance
-
-### Handling Chats
-
-1. Active chats appear in "Active Chats" tab
-2. Click conversation to view full history
-3. Type and send replies in real-time
-
-## 🔧 Configuration
-
-### Environment Variables (Backend)
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `SECRET_KEY` | JWT signing key (generate with `openssl rand -hex 32`) | Yes |
-| `ENV` | Environment (`development` or `production`) | Yes |
-| `REDIS_URL` | Redis connection string | No |
-| `CORS_ORIGINS` | Allowed CORS origins (comma-separated) | No |
-
-### Widget Configuration
-
-Per-website configuration via dashboard:
-
-- **Theme:** `light` or `dark`
-- **Position:** `bottom-right`, `bottom-left`, `top-right`, `top-left`
-- **Primary Color:** Hex color code
-- **Welcome Message:** Initial greeting text
-
-## 🔐 Security
-
-- **Authentication:** JWT tokens with 24-hour expiration
-- **Password Hashing:** bcrypt with automatic salt generation
-- **HTTPS:** Recommended for production deployments
-- **Rate Limiting:** Built-in request throttling
-- **Input Validation:** Pydantic models on all endpoints
-
-## 📊 Database Migrations
-
-```bash
-# Create new migration
-cd backend
-alembic revision --autogenerate -m "description"
-
-# Apply migrations
-alembic upgrade head
-
-# Rollback one version
-alembic downgrade -1
-```
-
-## 🧪 Testing
-
-### Backend Tests
-
-```bash
-cd backend
-pytest
-```
-
-### Frontend Tests
-
-```bash
-cd frontend
-npm test
-```
-
-## 📈 Monitoring
-
-### Logs
-
-```bash
-# Backend logs
-tail -f backend/logs/app.log
-
-# Frontend dev server logs
-npm run dev
-```
-
-### Metrics
-
-- WebSocket connection status
-- Active conversations count
-- Agent response times
-
-## 🐳 Docker Deployment
-
-```bash
-# Build and start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-```
-
-Services available at:
-- Backend: `http://localhost:8000`
-- Frontend: `http://localhost:3000`
-- Widget: `http://localhost:8000/widget/`
-
-## 🤝 Contributing
-
-This is a self-hosted project for personal/internal use. Fork and customize as needed.
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
-## 🔗 Resources
-
-- [Product Requirements Document](docs/PRD.md)
-- [Backend Documentation](backend/README.md)
-- [Frontend Documentation](frontend/README.md)
-- [Widget Documentation](widget/README.md)
-
-## 🆘 Troubleshooting
-
-### WebSocket Connection Failed
-
-- Check backend is running on port 8000
-- Verify CORS origins include your frontend URL
-- Ensure Redis is running for session management
-
-### Widget Not Loading
-
-- Verify the widget loader snippet uses the correct widget key
-- Check browser console for CORS errors
-- Ensure backend serves static files at `/widget/`
-
-### Database Connection Error
-
-- Verify PostgreSQL is running: `sudo systemctl status postgresql`
-- Check credentials in `DATABASE_URL`
-- Ensure database exists: `psql -U chatassist -d chatassist`
-
-## 📞 Support
-
-For issues and questions:
-1. Check documentation in `docs/`
-2. Review backend logs
-3. Inspect browser console for frontend errors
 
 ---
 
-**Built with ❤️ for seamless customer support**
+## Quick Start (Local Development)
+
+### Table of Contents
+
+1. [Prerequisites](#1-prerequisites)
+2. [Clone the Repository](#2-clone-the-repository)
+3. [Database Setup](#3-database-setup-postgresql)
+4. [Backend Setup](#4-backend-setup)
+5. [Frontend Dashboard](#5-frontend-dashboard)
+6. [Widget Demo](#6-widget-demo)
+7. [Optional Services](#7-optional-services)
+8. [Health Checks](#8-health-checks)
+9. [Running Tests](#9-running-tests)
+10. [Reset Application](#10-reset-application-development-only)
+11. [Troubleshooting](#11-troubleshooting)
+
+---
+
+### 1. Prerequisites
+
+Install system dependencies (Ubuntu/Debian):
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential python3 python3-venv python3-pip nodejs npm postgresql postgresql-contrib
+```
+
+> **Tip:** Use [nvm](https://github.com/nvm-sh/nvm) to manage Node.js (LTS recommended).
+
+Make sure PostgreSQL is running:
+
+```bash
+sudo systemctl enable --now postgresql
+```
+
+---
+
+### 2. Clone the Repository
+
+```bash
+git clone <your-repo-url> ~/Applications/ai-chatassist
+cd ~/Applications/ai-chatassist
+```
+
+---
+
+### 3. Database Setup (PostgreSQL)
+
+```bash
+sudo -u postgres createuser -P chatassist       # enter a password when prompted
+sudo -u postgres createdb -O chatassist chatassist
+```
+
+Verify connectivity:
+
+```bash
+psql "postgresql://chatassist:<your_password>@localhost:5432/chatassist" -c "SELECT 1;"
+```
+
+---
+
+### 4. Backend Setup
+
+#### 4.1 Create virtualenv and install dependencies
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.lock.txt || pip install -r requirements.txt
+```
+
+#### 4.2 Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Open `backend/.env` and set **at minimum** these values:
+
+| Variable | Example | Required? |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+psycopg2://chatassist:<password>@localhost:5432/chatassist` | **Yes** |
+| `SECRET_KEY` | `dev-only-change-me` | **Yes** |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | **Yes** |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | No (see [Redis](#73-redis)) |
+| `VAPID_PUBLIC_KEY` | *(generated — see section 7)* | No |
+| `VAPID_PRIVATE_KEY` | *(generated — see section 7)* | No |
+| `RESEND_API_KEY` | *(from Resend dashboard)* | No (see [Email](#72-email-via-resend)) |
+
+> See `backend/.env.example` for the full list of available keys and their defaults.
+
+#### 4.3 Run migrations and start the server
+
+**Option A — Auto-migrate on start (recommended):**
+
+```bash
+RUN_MIGRATIONS=1 ./start_server.sh
+```
+
+**Option B — Manual migrations then start:**
+
+```bash
+alembic upgrade head
+./start_server.sh
+```
+
+`start_server.sh` performs preflight checks (virtualenv, DB connectivity) and starts Uvicorn on port **8000**.
+
+> API docs: http://localhost:8000/docs
+
+---
+
+### 5. Frontend Dashboard
+
+Open a **new terminal**:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+> Dashboard: http://localhost:5173
+
+---
+
+### 6. Widget Demo
+
+Open a **new terminal**:
+
+```bash
+cd widget
+python3 -m http.server 8080
+```
+
+> Widget demo: http://localhost:8080/demo.html
+
+---
+
+### 7. Optional Services
+
+#### 7.1 Push Notifications (VAPID)
+
+```bash
+cd frontend
+npx --yes web-push generate-vapid-keys
+```
+
+Copy the output into `backend/.env`:
+
+```env
+VAPID_PUBLIC_KEY=<generated-public-key>
+VAPID_PRIVATE_KEY=<generated-private-key>
+VAPID_SUBJECT=mailto:dev@localhost
+```
+
+Restart the backend after updating.
+
+#### 7.2 Email via Resend
+
+The app uses [Resend](https://resend.com) for transactional email (OTP, password reset, welcome).
+
+1. Sign up at https://resend.com and create an API key.
+2. Add to `backend/.env`:
+
+```env
+RESEND_API_KEY=your-resend-api-key
+FROM_EMAIL="AI ChatAssist <onboarding@resend.dev>"
+FRONTEND_URL=http://localhost:5173
+RESEND_OVERRIDE_TO_EMAIL=your-email@example.com
+```
+
+> **Development note:** When using Resend's shared test domain (`onboarding@resend.dev`), set `RESEND_OVERRIDE_TO_EMAIL` to your verified Resend email. Remove it once you verify a custom domain.
+
+#### 7.3 Redis
+
+Redis enables WebSocket rate-limiting and multi-worker pub/sub. Without it the app uses in-memory mode (fine for single-process local dev).
+
+```bash
+# Install
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+
+# Verify
+redis-cli PING   # should return PONG
+```
+
+Set in `backend/.env`:
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+---
+
+### 8. Health Checks
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health/live` | Basic liveness probe |
+| `GET /health/ready` | Checks DB + Redis (if configured) |
+
+```bash
+curl http://localhost:8000/health/ready
+```
+
+> When `REDIS_URL` is not set, the response shows `"redis": "disabled"`.
+
+---
+
+### 9. Running Tests
+
+From `backend/` with the virtualenv active:
+
+```bash
+pytest -q
+```
+
+Tests use SQLite in-memory — no PostgreSQL, Redis, or email services needed.
+
+---
+
+### 10. Reset Application (Development Only)
+
+```bash
+# Backup first
+sudo -u postgres pg_dump -Fc -f backup.dump chatassist
+
+# ⚠️ Destructive — deletes uploads, truncates tables, resets sequences
+cd backend
+source .venv/bin/activate
+python3 reset_application.py            # interactive — type YES to confirm
+python3 reset_application.py --seed     # reset + seed test data
+```
+
+---
+
+### 11. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `start_server.sh` reports missing virtualenv | Create it: `python3 -m venv backend/.venv` |
+| DB connectivity fails | Check `DATABASE_URL` in `.env`; verify Postgres is running |
+| Email sending fails in dev | Set `RESEND_OVERRIDE_TO_EMAIL` when using Resend's shared test domain |
+| Frontend build errors | Delete `node_modules/` and run `npm ci` |
+| Push notifications not working | Ensure VAPID keys are set in `.env` and backend is restarted |
+
+---
+
+## Production Deployment
+
+See `deploy/` for Nginx configs and systemd service files.
+
+### Server Layout
+
+| Path | Purpose |
+|---|---|
+| `/home/frappe/ai-chatassist` | Git repo — single source of truth |
+| `/home/frappe/ai-chatassist/.venv` | Python virtualenv |
+| `/var/www/aichatassist-dashboard` | Built frontend assets served by Nginx |
+| `/home/frappe/aichatassist-data/uploads` | Persistent uploads (survives redeploys) |
+| `/home/frappe/ai-chatassist/uploads` | Symlink → persistent uploads above |
+| `/etc/aichatassist/backend.env` | Production environment variables |
+| `/home/frappe/aichatassist-data/backups/` | Timestamped DB + uploads backups |
+
+### Running Services
+
+| Service | Notes |
+|---|---|
+| **Backend** | `aichatassist-backend.service` — Gunicorn + Uvicorn, 2 workers, `127.0.0.1:8000` |
+| **Nginx** | Proxies `api.*` → backend; serves `dashboard.*` as static files |
+| **PostgreSQL** | System systemd service, auto-starts on reboot |
+| **Redis** | Required in production for multi-worker WebSocket pub/sub |
+
+### Deploying a New Release
+
+#### Step 1 — Assess incoming changes
+
+```bash
+cd /home/frappe/ai-chatassist
+git fetch origin
+git log --oneline HEAD..origin/main
+git diff --stat HEAD..origin/main
+
+# Check for new migrations / package changes
+git diff --name-only HEAD..origin/main -- backend/alembic/versions/
+git diff HEAD..origin/main -- backend/requirements.txt frontend/package.json
+```
+
+#### Step 2 — Backup (always, before touching anything)
+
+```bash
+git branch prod-backup-$(date +%Y%m%d-%H%M%S) HEAD
+
+BKDIR=/home/frappe/aichatassist-data/backups/rollout-$(date +%Y%m%d-%H%M%S)
+mkdir -p "$BKDIR"
+set -a && source /etc/aichatassist/backend.env && set +a
+PG_DSN=${DATABASE_URL/postgresql+psycopg2:\/\//postgresql:\/\/}
+pg_dump "$PG_DSN" | gzip -c > "$BKDIR/db.sql.gz"
+rsync -a --numeric-ids /home/frappe/aichatassist-data/uploads/ "$BKDIR/uploads/"
+```
+
+#### Step 3 — Pull latest code
+
+```bash
+git stash push -u -m "pre-deploy $(date -Is)" || true
+git reset --hard origin/main
+```
+
+#### Step 4 — Backend dependencies (if `requirements.txt` changed)
+
+```bash
+/home/frappe/ai-chatassist/.venv/bin/pip install -r /home/frappe/ai-chatassist/backend/requirements.txt
+```
+
+#### Step 5 — DB migrations (if new migration files)
+
+```bash
+sudo systemctl stop aichatassist-backend
+set -a && source /etc/aichatassist/backend.env && set +a
+cd /home/frappe/ai-chatassist/backend
+/home/frappe/ai-chatassist/.venv/bin/alembic upgrade head
+sudo systemctl start aichatassist-backend
+curl http://127.0.0.1:8000/health   # must return {"status":"ok"}
+```
+
+> If no new migrations, just restart: `sudo systemctl restart aichatassist-backend`
+
+#### Step 6 — Frontend (if any frontend files changed)
+
+```bash
+cd /home/frappe/ai-chatassist/frontend
+npm ci
+npm run build
+sudo rsync -a --delete /home/frappe/ai-chatassist/frontend/dist/ /var/www/aichatassist-dashboard/
+```
+
+> **Widget files** (`widget/chat-widget.js`, `widget/chat-widget.css`) are served via the backend's `StaticFiles` mount. A backend restart is enough — no separate build step.
+
+#### Step 7 — Smoke Tests
+
+```bash
+curl https://api.novelofficespace.com/health
+curl -o /dev/null -w "%{http_code}" https://dashboard.novelofficespace.com/
+curl -I 'https://api.novelofficespace.com/widget/loader.js?key=INVALID'
+journalctl -u aichatassist-backend --since '5 min ago' --no-pager -p err
+```
+
+### Minimal Deploy Reference
+
+| What changed | Steps needed |
+|---|---|
+| Widget CSS/JS only | Pull + restart backend |
+| Backend code, no new migrations | Pull + restart backend |
+| New DB migrations | Pull → stop → `alembic upgrade head` → start |
+| Frontend only | Pull → `npm ci && npm run build` → rsync |
+| Full release | All of Steps 1–7 |
+
+### Rollback
+
+```bash
+git reset --hard prod-backup-YYYYMMDD-HHMMSS
+sudo systemctl restart aichatassist-backend
+
+# If frontend was deployed
+cd /home/frappe/ai-chatassist/frontend
+npm ci && npm run build
+sudo rsync -a --delete dist/ /var/www/aichatassist-dashboard/
+
+# If DB migrations were applied
+PG_DSN=...
+gunzip -c /home/frappe/aichatassist-data/backups/rollout-TIMESTAMP/db.sql.gz | psql "$PG_DSN"
+```
+
+---
+
+## Docs Portal
+
+End-user documentation is available at `/docs` (public, no login required).  
+Content lives in `frontend/public/docs-content/` as Markdown files.  
+Navigation is configured in `frontend/src/config/docsNav.ts`.
+
+To add a new page:
+1. Create `frontend/public/docs-content/<section>/<slug>.md`
+2. Add an entry to `docsNav.ts`
+
+---
+
+## Quick Reference
+
+| Service | URL |
+|---|---|
+| **Dashboard** | http://localhost:5173 |
+| **API Docs** | http://localhost:8000/docs |
+| **Widget Demo** | http://localhost:8080/demo.html |
