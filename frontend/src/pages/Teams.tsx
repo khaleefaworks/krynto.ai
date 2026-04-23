@@ -150,7 +150,8 @@ export default function Teams() {
         if (loading) return
         if (selectedWebsiteId != null && sorted.some((w) => Number(w.id) === Number(selectedWebsiteId))) return
         const first = sorted[0]
-        setSelectedWebsiteId(first ? Number(first.id) : null)
+        const shouldAutoSelect = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+        setSelectedWebsiteId(shouldAutoSelect ? (first ? Number(first.id) : null) : null)
     }, [loading, sorted, selectedWebsiteId])
 
     const selected = useMemo(() => {
