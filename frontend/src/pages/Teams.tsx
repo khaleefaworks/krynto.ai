@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Users, ChevronLeft } from 'lucide-react'
+import { Users, ChevronLeft, HelpCircle } from 'lucide-react'
 
 import { API_BASE } from '@/config/endpoints'
 import UserAvatar from '@/components/UserAvatar'
@@ -163,7 +163,12 @@ export default function Teams() {
         <div className="bg-gray-50 dark:bg-gray-900 overflow-y-auto md:overflow-hidden md:h-screen">
             <div className="flex items-center justify-between mb-4 h-16 border-b dark:border-gray-700 px-4">
                 <div>
-                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Teams</h1>
+                    <div className="flex items-center gap-2">
+                        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Teams</h1>
+                        <a href="/docs/admin-guide/teams" target="_blank" rel="noreferrer" title="View teams guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+                            <HelpCircle className="w-4 h-4" />
+                        </a>
+                    </div>
                     <p className="text-xs text-gray-600 dark:text-gray-400">Agent availability by website</p>
                 </div>
             </div>

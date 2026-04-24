@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin, isAdministrator } from '@/lib/roles'
-import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Save, Trash2, Globe, Copy, Check, Plus, X, Code, ExternalLink, AlertTriangle, HelpCircle } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import { automationsApi, type Automation, type AutomationAction } from '@/services/automations'
 import WebsiteShortcutsTab from './WebsiteShortcutsTab'
@@ -1116,7 +1116,12 @@ export default function WebsiteDetail() {
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-base font-semibold text-gray-900 dark:text-white">Automations</h2>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Automations</h2>
+                        <a href="/docs/admin-guide/automations" target="_blank" rel="noreferrer" title="View automations guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+                          <HelpCircle className="w-4 h-4" />
+                        </a>
+                      </div>
                       <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure per-website auto messages and triggers.</p>
                     </div>
                     <Button type="button" size="sm" onClick={openBuilderPickType} className="gap-2">
