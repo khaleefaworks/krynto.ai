@@ -225,7 +225,12 @@ export default function WebsiteManagement() {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Websites</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Websites</h1>
+            <a href="/docs/admin-guide/websites" target="_blank" rel="noreferrer" title="View websites guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            </a>
+          </div>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
             Manage your website integrations and chat widget configurations
           </p>

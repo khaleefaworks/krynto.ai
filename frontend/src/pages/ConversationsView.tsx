@@ -41,7 +41,8 @@ import {
     Users,
     Bot,
     Plus,
-    X
+    X,
+    HelpCircle
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -1784,11 +1785,14 @@ export default function ConversationsView() {
             <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
                 {/* Header */}
                 <div>
-                    <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700'>
+                    <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between'>
                         <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             {getFilterIcon()}
                             {getFilterHeaderText()}
                         </h2>
+                        <a href="/docs/agent-guide/conversations" target="_blank" rel="noreferrer" title="View conversations guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+                            <HelpCircle className="w-4 h-4" />
+                        </a>
                     </div>
 
                     {/* Search */}
