@@ -6,12 +6,27 @@ AI ChatAssist notifies agents through two channels: **browser push notifications
 
 Push notifications appear as system-level browser notifications. They fire when:
 - A new visitor starts a chat on one of your assigned websites
-- A visitor sends a message in a conversation assigned to you
+- A visitor sends a message in a conversation you are responsible for
 
-**Scope rules:**
-- You only receive push notifications for websites you are assigned to.
-- If your website uses teams, you only receive notifications for conversations in your team.
-- Spectating agents do not receive push notifications — only the assigned agent does.
+### Who receives push notifications
+
+**Website without teams:**
+- All agents assigned to that website receive push for every new and unassigned conversation.
+- Once an agent joins a conversation, only that agent receives push for subsequent messages.
+
+**Website with teams:**
+
+| Your situation | When you get push |
+|---|---|
+| Member of Team A | Unassigned conversations + Team A conversations (until an agent joins) |
+| No team membership on this website | Unassigned conversations only |
+| Owner / Manager | All conversations on all your organisation's websites |
+
+> **Spectating:** If you open a conversation you are not responsible for (different team, or you're not the assigned agent), you see live updates but receive no push notification and no unread count.
+
+### Unread counts
+
+Unread counts follow the same rules as push notifications — they increment only when you are responsible for the conversation. Spectating agents always see an unread count of 0.
 
 ### Enable push notifications
 

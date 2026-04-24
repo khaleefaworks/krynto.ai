@@ -23,7 +23,7 @@ Each row shows:
 
 | Filter | Shows |
 |--------|-------|
-| **All** | Every open conversation on your assigned websites |
+| **All** | Every open conversation visible to you — your team's chats plus any unassigned (no-team) conversations on your websites |
 | **Mine** | Conversations assigned to you |
 | **Unassigned** | No agent has joined yet — available for pickup |
 | **Resolved** | Closed conversations (read-only) |

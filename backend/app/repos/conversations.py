@@ -125,7 +125,15 @@ def active_conversations_with_counts_and_last_message(
         if not team_ids_norm:
             rows_query = rows_query.filter(sa.literal(False))
         else:
-            rows_query = rows_query.filter(Conversation.team_id.in_(team_ids_norm))
+            # Include conversations assigned to the agent's teams AND conversations
+            # not yet assigned to any team (team_id IS NULL) — those are claimable
+            # by anyone on the website.
+            rows_query = rows_query.filter(
+                sa.or_(
+                    Conversation.team_id.in_(team_ids_norm),
+                    Conversation.team_id.is_(None),
+                )
+            )
 
     try:
         rows_query = rows_query.order_by(Conversation.updated_at.desc())

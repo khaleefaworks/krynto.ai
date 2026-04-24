@@ -23,6 +23,7 @@ class BusEvent:
     website_id: int | None = None
     include_global: bool | None = None
     exclude_agent_id: int | None = None
+    conversation_team_id: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -34,6 +35,7 @@ class BusEvent:
             "website_id": self.website_id,
             "include_global": self.include_global,
             "exclude_agent_id": self.exclude_agent_id,
+            "conversation_team_id": self.conversation_team_id,
         }
 
 

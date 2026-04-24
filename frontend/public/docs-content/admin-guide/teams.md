@@ -1,6 +1,6 @@
 # Teams
 
-Teams let you organise agents into groups and route chats from specific websites to specific groups.
+Teams let you organise agents into groups and route individual conversations to specific groups within a website.
 
 ## When to use teams
 
@@ -13,19 +13,39 @@ Teams let you organise agents into groups and route chats from specific websites
 2. Enter a team name.
 3. Add members by searching for agents in your organisation.
 
-## Assigning a team to a website
+## Assigning a conversation to a team
 
-1. Go to **Settings → Websites → [your website] → Teams**.
-2. Select one or more teams.
+From inside any open conversation, an agent or manager can assign it to a team using the **Team** selector in the conversation detail panel. Once assigned:
 
-Once a team is assigned, only members of that team receive chats from that website. Agents not in any assigned team are excluded from the routing pool — they can still spectate but won't receive push notifications.
+- Only members of that team see the conversation in their inbox.
+- Only team members receive push notifications and unread counts for it.
+- Agents on the same website but not in that team become spectators — they can open the conversation but won't be notified.
 
-## Agents with no team assignment
+## Unassigned conversations (no team)
 
-If a website has **no teams assigned**, all agents assigned to that website are in the routing pool.
+If a conversation has **no team assigned**, it is visible to **all agents on that website** regardless of their team membership. Everyone gets push notifications and unread counts so any agent can claim it.
 
-If an agent is not a member of any team on a website that has teams configured, they won't receive chats from that website at all.
+This is intentional — unassigned conversations are in an open pickup state until a team or agent is assigned.
 
-## Team-based notifications
+## Agents with no team membership
 
-Push notifications respect team membership. You only receive notifications for conversations on websites where you are a team member (or where there are no teams configured).
+An agent assigned to a website but not a member of any team on that website is **unrestricted**:
+
+- They see all conversations on that website (both team-assigned and unassigned).
+- They receive push notifications and unread counts only for **unassigned** conversations.
+- For team-assigned conversations they are spectators — live updates appear but no push or unread badge.
+
+## Websites with no teams configured
+
+If a website has **no teams at all**, all agents assigned to that website are in the full routing pool — they all receive push notifications and unread counts for every conversation.
+
+## Notification routing summary
+
+| Conversation state | Who gets push + unread |
+|---|---|
+| No team assigned | All agents on the website |
+| Assigned to Team A, no agent joined | Team A members only |
+| Assigned to Team A, Agent X joined | Agent X only |
+| Website has no teams | All agents on the website |
+
+Owners and Managers always receive notifications for all conversations across their organisation's websites, regardless of team configuration.
