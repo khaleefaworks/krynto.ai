@@ -3,7 +3,12 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { findPage, getAdjacentPages } from '../config/docsNav'
+import { docsNav, findPage, getAdjacentPages } from '../config/docsNav'
+
+/** Only slugs present in the docsNav allowlist are considered valid. */
+function isValidSlug(slug: string): boolean {
+  return docsNav.some((section) => section.pages.some((page) => page.slug === slug))
+}
 
 export default function DocsPage() {
   const { '*': slug } = useParams()
@@ -17,10 +22,19 @@ export default function DocsPage() {
 
   useEffect(() => {
     if (!pageSlug) return
+
+    // Reject slugs that are not in the known allowlist to prevent path traversal
+    if (!isValidSlug(pageSlug)) {
+      setError(true)
+      return
+    }
+
     setContent(null)
     setError(false)
 
-    fetch(`/docs-content/${pageSlug}.md`)
+    const controller = new AbortController()
+
+    fetch(`/docs-content/${pageSlug}.md`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`)
         const ct = res.headers.get('content-type') || ''
@@ -33,7 +47,12 @@ export default function DocsPage() {
         if (text.trimStart().startsWith('<!')) throw new Error('not-found')
         setContent(text)
       })
-      .catch(() => setError(true))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError(true)
+      })
+
+    return () => controller.abort()
   }, [pageSlug])
 
   if (error) {
