@@ -23,7 +23,7 @@ from app.services.agent_service import AgentService
 from app.services.chat_service import ChatService
 from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
-from app.models.message import Message
+from app.models.message import Message, MessageSenderType
 from app.models.automation import Automation
 from app.core.logging import get_logger
 from app.services.website_resolver import is_website_online
@@ -360,9 +360,17 @@ class ConversationOrchestrator:
         if visitor_ws:
             ChatService.register_visitor(conversation.id, visitor_ws)
 
-        # Determine if this is the first message before persisting
+        # Determine if this is the first *visitor* message before persisting.
+        # Bot welcome / system messages must NOT count — if they did, a bot
+        # welcome sent before the visitor types would suppress the new_chat
+        # broadcast and the agent would never hear the "New chat" sound.
         prior_message_count = (
-            self.db.query(Message).filter_by(conversation_id=conversation.id).count()
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.sender_type == MessageSenderType.VISITOR,
+            )
+            .count()
         )
 
         # Persist visitor message
@@ -478,28 +486,32 @@ class ConversationOrchestrator:
             conversation_team_id=_conv_team_id,
         )
 
-        # Web Push for unassigned: notify eligible agents scoped to this website (non-blocking)
-        try:
-            from app.repos import push_subscriptions as push_subs_repo
-            from app.services.push_service import send_web_push_to_subscriptions
+        # Web Push for unassigned subsequent messages (non-blocking).
+        # Skipped for the first visitor message (prior_message_count == 0) because
+        # _broadcast_new_chat_to_agents() already sends a "New chat" push for that case.
+        # Sending both would result in duplicate OS notifications for the agent.
+        if prior_message_count > 0:
+            try:
+                from app.repos import push_subscriptions as push_subs_repo
+                from app.services.push_service import send_web_push_to_subscriptions
 
-            agent_ids = _get_eligible_agent_ids_for_push(
-                self.db, website_id=website_id, conversation_team_id=_conv_team_id
-            )
-            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
-            if subs:
-                loop = asyncio.get_event_loop()
-                loop.run_in_executor(
-                    None,
-                    lambda: send_web_push_to_subscriptions(
-                        subscriptions=subs,
-                        title=f"Unassigned message - Website {website_id}",
-                        body=(message or "New message")[:120],
-                        url=f"/dashboard/chats/{conversation.short_id}",
-                    ),
+                agent_ids = _get_eligible_agent_ids_for_push(
+                    self.db, website_id=website_id, conversation_team_id=_conv_team_id
                 )
-        except Exception:
-            pass
+                subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
+                if subs:
+                    loop = asyncio.get_event_loop()
+                    loop.run_in_executor(
+                        None,
+                        lambda: send_web_push_to_subscriptions(
+                            subscriptions=subs,
+                            title="New message",
+                            body=(message or "New message")[:120],
+                            url=f"/dashboard/chats/{conversation.short_id}",
+                        ),
+                    )
+            except Exception:
+                pass
 
         # Explicit unread event type for inbox badges.
         await self.agent_service.broadcast_to_active_agents(
@@ -513,6 +525,13 @@ class ConversationOrchestrator:
             include_global=True,
             conversation_team_id=_conv_team_id,
         )
+
+        # Always notify agents of new unassigned conversations regardless of
+        # online/offline status.  The is_website_online gate below is only for
+        # the bot offline automation — not for whether agents hear the sound /
+        # receive a push notification.
+        if prior_message_count == 0:
+            await self._broadcast_new_chat_to_agents(conversation)
 
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
@@ -556,11 +575,8 @@ class ConversationOrchestrator:
             return None
 
         # Someone is online.
-        # Broadcast new chat notification only once (on first message).
+        # Fire "conversation_created" automations (e.g., team routing chatbot).
         if prior_message_count == 0:
-            await self._broadcast_new_chat_to_agents(conversation)
-
-            # Fire "conversation_created" automations (e.g., team routing chatbot).
             try:
                 await self._fire_conversation_created_automations(
                     conversation=conversation,
@@ -639,11 +655,15 @@ class ConversationOrchestrator:
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
-                send_web_push_to_subscriptions(
-                    subscriptions=subs,
-                    title="New chat",
-                    body=(last_message or "New conversation")[:120],
-                    url="/dashboard/chats",
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(
+                    None,
+                    lambda: send_web_push_to_subscriptions(
+                        subscriptions=subs,
+                        title="New chat",
+                        body=(last_message or "New conversation")[:120],
+                        url="/dashboard/chats",
+                    ),
                 )
         except Exception:
             pass
@@ -804,11 +824,30 @@ class ConversationOrchestrator:
             "team_name": None,
         }
 
+        # Count prior visitor messages BEFORE persisting so we can detect whether
+        # this button click is the visitor's first message (e.g., buttons were shown
+        # on connect before the visitor typed anything).
+        prior_visitor_msg_count = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.sender_type == MessageSenderType.VISITOR,
+            )
+            .count()
+        )
+
         # Persist the visitor's button selection as a visitor message
         visitor_selection_msg = self.conversation_service.add_visitor_message(
             conversation_id=conversation.id,
             content=str(label),
         )
+
+        # If this is the visitor's first message, send new_chat notification
+        # (sound + push) to agents instead of — or in addition to — visitor_message.
+        # This covers the common flow where chatbot buttons are shown on connect
+        # and the button click is the visitor's opening action.
+        if prior_visitor_msg_count == 0:
+            await self._broadcast_new_chat_to_agents(conversation)
 
         # Broadcast the visitor's button click to agents
         if visitor_selection_msg:
