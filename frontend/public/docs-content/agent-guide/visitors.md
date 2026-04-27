@@ -44,12 +44,10 @@ The Visitors page serves as a gateway to the inbox:
 
 The **Contacts** view is a curated list of visitors who have been "identified." This occurs when a user provides their information through an offline form, a lead-capture automation, or when an agent manually updates their profile.
 
-> [!NOTE]
 > **Data Relationship**: In AI ChatAssist, a Contact is not a separate entity from a Visitor. Rather, it is a Visitor record that has been enriched with identifiable data. This ensures that the entire history of an anonymous user is preserved once they become a known lead.
 
 ---
 
 ## Proactive Management Tips
 
-> [!TIP]
 > **Monitor Browsing History**: Before joining a chat, review the visitor's browsing journey in the Detail Panel. Understanding which pages they viewed (e.g., Pricing or Documentation) allows you to provide more relevant and personalized support.

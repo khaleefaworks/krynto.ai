@@ -38,7 +38,6 @@ All widget behavior is initialized via the `window.AIChatConfig` object.
 | `apiUrl` | string | **Required** | Defines the endpoint for configuration fetching and real-time communication. |
 | `position` | string | Optional | Overrides the default dashboard-configured position (`bottom-right` or `bottom-left`). |
 
-> [!NOTE]
 > **Dynamic Updates**: Most visual and behavioral settings (colors, titles, sounds) are managed directly from the dashboard. This allows you to update the widget's appearance in real-time without modifying your website's source code.
 
 ---
@@ -69,5 +68,4 @@ To provide a seamless user experience, the widget utilizes standard browser stor
 
 AI ChatAssist employs strict **Origin-Based Security**. The widget is only permitted to initialize and communicate with the API if it is loaded from a domain explicitly whitelisted in your Website Settings. Requests from unauthorized origins are automatically rejected by the backend to prevent unauthorized use of your widget key.
 
-> [!TIP]
 > **Development Testing**: When testing the widget on a local or staging environment, ensure that those specific domains (e.g., `localhost:3000` or `staging.example.com`) are added to the allowed domains list in the dashboard.

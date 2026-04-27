@@ -70,5 +70,4 @@ Define the operational window for each website. During "Off" hours, the widget w
 ### Response Shortcuts
 Configure canned responses (Shortcuts) tailored to the specific needs of the website's audience, allowing agents to respond to common queries with greater speed and consistency.
 
-> [!TIP]
 > **Domain Enforcement**: Ensure the **Domain** setting matches exactly where the widget is hosted. If the domains do not match, the browser will block the widget from communicating with the AI ChatAssist API.

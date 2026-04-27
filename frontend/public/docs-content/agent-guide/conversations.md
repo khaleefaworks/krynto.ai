@@ -40,7 +40,6 @@ Stay focused by using built-in filters:
 ### Joining a Chat
 When a new query arrives, it will appear in the **Unassigned** filter. Click the **Join** button to claim the conversation. You are now the primary point of contact for that visitor.
 
-> [!NOTE]
 > **First Come, First Served**: If multiple agents try to join at once, the system ensures only one agent succeeds to prevent duplicate responses.
 ---
 
@@ -67,5 +66,4 @@ Once a visitor's needs are met, click the **Resolve** button. This closes the se
 *   **Keyboard Shortcuts**: Use `Settings → Shortcuts` to master the dashboard without touching your mouse.
 *   **Quick Replies**: (Coming Soon) Set up canned responses for common questions.
 
-> [!TIP]
 > **Stay Notified**: Ensure your [Notifications](./notifications) are enabled so you never miss a new visitor query!

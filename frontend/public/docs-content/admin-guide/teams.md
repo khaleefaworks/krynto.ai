@@ -63,5 +63,4 @@ For organizations that do not require specialized routing, websites can operate 
 | **Agent Joined** | Only the assigned agent. |
 | **No Teams Configured** | All agents assigned to the website. |
 
-> [!NOTE]
 > **Administrative Oversight**: Owners and Managers are exempt from standard routing rules and will receive notifications for all organizational activity to ensure full operational visibility.

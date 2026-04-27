@@ -23,7 +23,6 @@ To prevent alert fatigue, notifications are routed based on your role and team m
 | **Individual Agent** | Receive alerts for all unassigned conversations on your assigned websites. |
 | **Assigned Agent** | Once you join a chat, you are the exclusive recipient of notifications for that thread. |
 
-> [!NOTE]
 > **Spectating**: If you view a conversation that you are not responsible for, you will see real-time updates within the dashboard, but you will not receive system push notifications or unread count increments.
 
 ---
@@ -59,7 +58,6 @@ Follow these steps to enable push notifications:
 - **Step 2**: Toggle the **Enable push notifications** switch to the ON position.
 - **Step 3**: When the browser prompts for permission, click **Allow**.
 
-> [!IMPORTANT]
 > If you previously blocked notification permissions, you must manually reset them in your browser's site settings (usually found by clicking the lock icon in the address bar).
 
 ---
@@ -68,5 +66,4 @@ Follow these steps to enable push notifications:
 
 Your notification preferences are securely stored in the cloud and synchronized across all your devices. When you log in on a new browser or machine, your custom sound profiles and alert toggles are automatically applied.
 
-> [!TIP]
 > **Test Your Setup**: Use the "Test Notification" button in the settings panel to ensure your browser and operating system are correctly delivering alerts.

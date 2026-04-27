@@ -26,7 +26,6 @@ Follow these steps to add a new agent to your team:
 - **Step 3**: Assign the appropriate **Role** based on their responsibilities.
 - **Step 4**: Send the invite; an email with a verification link will be dispatched.
 
-> [!IMPORTANT]
 > **Email Verification**: For security purposes, invited users must verify their email address before they are granted access to the dashboard.
 
 ---
@@ -66,5 +65,4 @@ Owners and Managers can deactivate user accounts at any time. A deactivated acco
 - **Self-Service**: Users can update their own passwords through the **Settings > Profile** panel.
 - **Administrative Reset**: Owners can trigger a password reset for any user within their organization through the **User Management** panel.
 
-> [!NOTE]
 > **Owner Protection**: To prevent accidental lockouts, Owners cannot deactivate their own accounts. To transfer ownership, another user must first be promoted to the Owner role.

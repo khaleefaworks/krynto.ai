@@ -55,5 +55,4 @@ Automations can be temporarily paused using the status toggle. This allows you t
 
 Messages sent via automation are rendered as **System Messages** in both the visitor's widget and the agent dashboard. This clearly distinguishes between automated responses and human agent interactions, ensuring a transparent experience for the user.
 
-> [!TIP]
 > **Avoid Collision**: When setting up multiple automations for the same trigger, ensure their messages do not conflict. Use the **Delay** feature to space out automated interactions for a more natural conversational flow.

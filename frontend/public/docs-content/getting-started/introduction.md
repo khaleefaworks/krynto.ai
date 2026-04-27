@@ -52,5 +52,5 @@ Depending on your role, we recommend starting with these guides:
 *   **For Admins**: Follow our guide to [Setting up Websites](../admin-guide/websites) and embedding the widget.
 *   **For Everyone**: Make sure your [Notifications](../agent-guide/notifications) are correctly configured.
 
-> [!TIP]
+
 > **Need more help?** Our support team is always just a chat away. Look for the widget on our own help center!

@@ -68,5 +68,4 @@ Configure distinct audio cues to alert visitors of incoming messages based on th
 
 Changes saved in the dashboard are pushed to the AI ChatAssist cloud immediately. The widget on your website will automatically reflect the updated configuration upon the next page initialization, ensuring your visitor experience is always up to date.
 
-> [!TIP]
 > **Accessibility First**: When selecting a **Theme Color**, ensure there is sufficient contrast between the background and the text to maintain readability for all users.

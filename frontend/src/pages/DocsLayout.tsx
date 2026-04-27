@@ -35,6 +35,10 @@ export default function DocsLayout() {
     setSidebarOpen(false)
   }, [location.pathname])
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [location.pathname])
+
   // Redirect /docs → /docs/getting-started/introduction
   useEffect(() => {
     if (location.pathname === '/docs' || location.pathname === '/docs/') {
