@@ -11,6 +11,8 @@ export type AutomationTrigger =
   | 'conversation_reopened'
   | 'conversation_created'
 
+export type AutomationCategory = 'auto_message' | 'chatbot_flow' | 'ai_agent'
+
 export interface BotPromptButton {
   label: string
   team_id?: number | null
@@ -22,6 +24,7 @@ export interface AutomationAction {
   message?: string
   content?: string
   event_type?: string
+  allow_input?: boolean
   buttons?: BotPromptButton[]
 }
 
@@ -31,6 +34,7 @@ export interface Automation {
   name: string
   trigger: AutomationTrigger | string
   enabled: boolean
+  category: AutomationCategory | string
   conditions: Record<string, any>
   actions: AutomationAction[] | Record<string, any> | null
   created_at: string
@@ -42,6 +46,7 @@ export interface AutomationCreatePayload {
   name: string
   trigger: AutomationTrigger | string
   enabled?: boolean
+  category?: AutomationCategory | string
   conditions?: Record<string, any>
   actions?: any
 }
@@ -50,6 +55,7 @@ export interface AutomationUpdatePayload {
   name?: string
   trigger?: AutomationTrigger | string
   enabled?: boolean
+  category?: AutomationCategory | string
   conditions?: Record<string, any>
   actions?: any
 }

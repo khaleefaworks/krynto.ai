@@ -13,6 +13,7 @@ class Automation(Base, TimestampMixin):
     name = Column(String(255), nullable=False)
     trigger = Column(String(100), nullable=False, index=True)
     enabled = Column(Boolean, nullable=False, default=True)
+    category = Column(String(50), nullable=False, default='auto_message', server_default='auto_message', index=True)
     conditions = Column(JSON, nullable=True, default={})
     actions = Column(JSON, nullable=True, default={})
 

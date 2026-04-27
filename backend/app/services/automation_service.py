@@ -286,11 +286,13 @@ class AutomationService:
                 "name": "Team routing chatbot",
                 "trigger": "conversation_created",
                 "enabled": False,
+                "category": "chatbot_flow",
                 "conditions": {},
                 "actions": [
                     {
                         "type": "bot_prompt_buttons",
                         "message": "Welcome! What are you looking for?",
+                        "allow_input": False,
                         "buttons": [],
                     }
                 ],
@@ -324,6 +326,7 @@ class AutomationService:
                     name=str(name),
                     trigger=str(trigger),
                     enabled=bool(payload.get("enabled", True)),
+                    category=str(payload.get("category") or "auto_message"),
                     conditions=payload.get("conditions") or {},
                     actions=payload.get("actions") or {},
                 )

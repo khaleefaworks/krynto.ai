@@ -83,6 +83,12 @@
   let presenceOnline = true;
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
+
+  // Input reveal state machine.
+  // The input container starts hidden. It is revealed after 2500ms if no
+  // chatbot_pending / bot_prompt message arrives first. On bot_prompt the
+  // visitor must click a button (or allow_input=true) to reveal it.
+  let _inputRevealTimer = null;
   let pendingOfflineMessage = null;
   let pendingOfflineAttachments = [];
 
@@ -499,7 +505,16 @@
       document.addEventListener('pointerdown', _arm, { once: true, passive: true });
       document.addEventListener('keydown', _arm, { once: true });
       document.addEventListener('touchstart', _arm, { once: true, passive: true });
+      document.addEventListener('scroll', _arm, { once: true, passive: true });
+      document.addEventListener('mousemove', _arm, { once: true, passive: true });
     } catch (e) { }
+  }
+
+  function showInputContainer() {
+    clearTimeout(_inputRevealTimer);
+    _inputRevealTimer = null;
+    const inputCont = document.getElementById('chatassist-input-container');
+    if (inputCont) inputCont.style.display = '';
   }
 
   // --- API & State Management ---
@@ -1013,6 +1028,10 @@
           clearTimeout(reconnectTimeout);
           reconnectTimeout = null;
         }
+        // Start the input reveal timer. If no chatbot_pending / bot_prompt
+        // arrives within 2500ms the input area is revealed (no chatbot active).
+        clearTimeout(_inputRevealTimer);
+        _inputRevealTimer = setTimeout(showInputContainer, 2500);
       };
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -1073,6 +1092,7 @@
       container.innerHTML = '';
       lastAppendedDateStr = null;
       container.classList.add('chatassist-no-animate');
+      var hasPendingBotPrompt = false;
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -1109,6 +1129,7 @@
           if (!hasResponse && pButtons.length > 0) {
             // Pending prompt: show interactive buttons + hide input.
             appendBotPromptWithButtons(displayText, m.created_at, pButtons, pAutoId, m.id);
+            hasPendingBotPrompt = true;
           } else {
             // Already responded: show as plain text.
             appendMessage('ai', displayText, m.created_at, null, m.id);
@@ -1134,7 +1155,14 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
+        // Reveal input unless a bot_prompt is still pending a visitor selection.
+        if (!hasPendingBotPrompt) {
+          showInputContainer();
+        }
       }
+      // If 0 history messages (brand-new session): keep the _inputRevealTimer
+      // running. The chatbot_pending signal (if any) will cancel it; otherwise
+      // it fires after 2500ms and shows the input.
 
       // Re-inject the "Start new chat" banner if we're restoring a closed
       // conversation on reload (history disabled). The banner was wiped above
@@ -1151,6 +1179,15 @@
     // rendered as a plain AI message via the generic fallback below.
     if (data.type === 'resolved') {
       // Banner already appended by the history handler above; nothing to do.
+      return;
+    }
+
+    // Chatbot is about to send a prompt — keep input hidden until button click.
+    if (data.type === 'chatbot_pending') {
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      const inputCont = document.getElementById('chatassist-input-container');
+      if (inputCont) inputCont.style.display = 'none';
       return;
     }
 
@@ -1219,7 +1256,11 @@
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
-      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
+      const allowInput = data.allow_input === true;
+      // Cancel any pending input-reveal timer — buttons control input visibility.
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput);
       notifyNewMessage(null, null, data.message);
       if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
@@ -1892,7 +1933,7 @@
     } catch (e) { }
   }
 
-  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId) {
+  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput) {
     const container = document.getElementById('chatassist-messages');
     if (!container) return;
 
@@ -1964,9 +2005,8 @@
           // Highlight selected
           btnEl.classList.add('chatassist-prompt-btn-selected');
 
-          // Show the input area now that user has made a selection
-          const inputCont = document.getElementById('chatassist-input-container');
-          if (inputCont) inputCont.style.display = '';
+          // Reveal the input area now that user has made a selection
+          showInputContainer();
           const inputEl = document.getElementById('chatassist-input');
           if (inputEl) inputEl.focus();
 
@@ -1988,10 +2028,16 @@
     messageDiv.appendChild(row);
     container.appendChild(messageDiv);
 
-    // Hide input area until visitor selects an option
+    // Manage input visibility based on buttons and allow_input flag.
     if (Array.isArray(buttons) && buttons.length > 0) {
-      const inputCont = document.getElementById('chatassist-input-container');
-      if (inputCont) inputCont.style.display = 'none';
+      if (allowInput) {
+        // Chatbot step allows free-form input alongside buttons.
+        showInputContainer();
+      } else {
+        // Hide input until visitor clicks a button.
+        const inputCont = document.getElementById('chatassist-input-container');
+        if (inputCont) inputCont.style.display = 'none';
+      }
     }
   }
 
@@ -2340,7 +2386,7 @@
               <span></span><span></span><span></span>
             </span>
           </div>
-          <div id="chatassist-input-container">
+          <div id="chatassist-input-container" style="display:none;">
             <div id="chatassist-attachments" style="display:none;"></div>
             <div id="chatassist-input-row">
             ${CONFIG.showAttachments ? `
@@ -2911,9 +2957,9 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 1000));
+    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 3500));
   } else {
-    setTimeout(init, 1000);
+    setTimeout(init, 3500);
   }
 
 })();

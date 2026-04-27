@@ -111,7 +111,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
 
 type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'danger'
 
-type AutomationsSubTab = 'templates' | 'auto_messages' | 'chatbots'
+type AutomationsSubTab = 'library' | 'messages' | 'chatbots' | 'ai_agents'
 
 type BuilderStep = 'pick_type' | 'edit_auto_message'
 
@@ -154,7 +154,7 @@ export default function WebsiteDetail() {
   const [automationsError, setAutomationsError] = useState<string | null>(null)
   const [savingAutomationId, setSavingAutomationId] = useState<number | null>(null)
   const [deletingAutomationId, setDeletingAutomationId] = useState<number | null>(null)
-  const [automationsSubTab, setAutomationsSubTab] = useState<AutomationsSubTab>('templates')
+  const [automationsSubTab, setAutomationsSubTab] = useState<AutomationsSubTab>('library')
   const [builderOpen, setBuilderOpen] = useState(false)
   const [builderStep, setBuilderStep] = useState<BuilderStep>('pick_type')
   const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
@@ -169,6 +169,7 @@ export default function WebsiteDetail() {
     id?: number
     enabled: boolean
     message: string
+    allow_input: boolean
     buttons: { label: string; team_id: number | null; reply: string }[]
   } | null>(null)
 
@@ -232,8 +233,8 @@ export default function WebsiteDetail() {
 
   useEffect(() => {
     if (activeTab !== 'automations') return
-    // Keep the last sub-tab selection, but default to Templates.
-    if (!automationsSubTab) setAutomationsSubTab('templates')
+    // Keep the last sub-tab selection, but default to Library.
+    if (!automationsSubTab) setAutomationsSubTab('library')
   }, [activeTab])
 
   const loadAutomations = async () => {
@@ -653,6 +654,7 @@ export default function WebsiteDetail() {
         id: existing.id,
         enabled: existing.enabled,
         message: promptAction?.message || 'Welcome! What are you looking for?',
+        allow_input: promptAction?.allow_input === true,
         buttons: Array.isArray(promptAction?.buttons)
           ? promptAction.buttons.map((b: any) => ({
             label: b.label || '',
@@ -665,6 +667,7 @@ export default function WebsiteDetail() {
       setChatbotDraft({
         enabled: true,
         message: 'Welcome! What are you looking for?',
+        allow_input: false,
         buttons: [{ label: '', team_id: null, reply: '' }],
       })
     }
@@ -695,11 +698,13 @@ export default function WebsiteDetail() {
       name: 'Team routing chatbot',
       trigger: 'conversation_created',
       enabled: chatbotDraft.enabled,
+      category: 'chatbot_flow',
       conditions: {},
       actions: [
         {
           type: 'bot_prompt_buttons',
           message: chatbotDraft.message.trim(),
+          allow_input: chatbotDraft.allow_input,
           buttons: validButtons.map((b) => ({
             label: b.label.trim(),
             team_id: b.team_id,
@@ -1132,8 +1137,13 @@ export default function WebsiteDetail() {
 
                   {/* Sub-tab pills */}
                   <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
-                    {(['templates', 'auto_messages', 'chatbots'] as const).map((tab) => {
-                      const labels = { templates: 'Templates', auto_messages: 'Auto Messages', chatbots: 'Chatbots' }
+                    {(['library', 'messages', 'chatbots', 'ai_agents'] as const).map((tab) => {
+                      const labels: Record<string, string> = {
+                        library: 'Library',
+                        messages: 'Messages',
+                        chatbots: 'Chatbots',
+                        ai_agents: 'AI Agents',
+                      }
                       return (
                         <button
                           key={tab}
@@ -1158,7 +1168,7 @@ export default function WebsiteDetail() {
 
                   {automationsLoading ? (
                     <div className="text-sm text-gray-500 dark:text-gray-400">Loading automations…</div>
-                  ) : automationsSubTab === 'templates' ? (
+                  ) : automationsSubTab === 'library' ? (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {(() => {
@@ -1323,111 +1333,138 @@ export default function WebsiteDetail() {
                         })}
                       </div>
                     </div>
-                  ) : automationsSubTab === 'auto_messages' ? (
-                    automations.length === 0 ? (
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        No DB-backed auto messages found. Use Templates or Build from scratch.
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {(() => {
-                          const rows = automations.flatMap((automation) => {
-                            const actions = normalizeAutomationActions(automation)
-                            if (actions.length === 0) {
-                              return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
-                            }
-                            return actions.map((action, idx) => ({
-                              automation,
-                              action,
-                              idx,
-                              showControls: idx === 0,
-                            }))
-                          })
+                  ) : automationsSubTab === 'messages' ? (
+                    (() => {
+                      // Filter: show only non-chatbot automations in the Messages tab.
+                      const messageAutomations = automations.filter((a) => {
+                        if (a.category === 'chatbot_flow') return false
+                        const acts = Array.isArray(a.actions) ? a.actions : []
+                        if (acts.length > 0 && (acts as any[]).every((act: any) => act?.type === 'bot_prompt_buttons')) return false
+                        return true
+                      })
+                      const TRIGGER_GROUPS: { label: string; triggers: string[] }[] = [
+                        { label: 'On visitor connect', triggers: ['visitor_connected', 'visitor_socket_connected'] },
+                        { label: 'During conversation', triggers: ['no_agent_assigned_for', 'website_offline_first_message'] },
+                        { label: 'On conversation close', triggers: ['visitor_closed_chat', 'visitor_left_website', 'conversation_resolved', 'conversation_reopened'] },
+                      ]
+                      const groupedTriggers = new Set(TRIGGER_GROUPS.flatMap((g) => g.triggers))
+                      const otherAutomations = messageAutomations.filter((a) => !groupedTriggers.has(a.trigger))
+                      const allGroups = [
+                        ...TRIGGER_GROUPS,
+                        ...(otherAutomations.length > 0 ? [{ label: 'Other', triggers: [] as string[] }] : []),
+                      ]
 
-                          return rows.map(({ automation, action, idx, showControls }) => {
-                            const delay = Number(automation.conditions?.delay_seconds ?? 60)
-                            const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
-                            const actionTypeLabel = action?.type === 'emit_system_event' ? 'System event' : 'Bot message'
-                            const text = extractActionText(action)
-                            const eventType = action?.event_type ? String(action.event_type) : ''
-                            const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
-                            const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
-                            const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
-                            const hasCollision = collisions.length > 1
+                      if (messageAutomations.length === 0) {
+                        return (
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            No auto messages found. Use the Library tab or Build from scratch.
+                          </div>
+                        )
+                      }
 
+                      return (
+                        <div className="space-y-8">
+                          {allGroups.map((group) => {
+                            const groupItems = group.label === 'Other'
+                              ? otherAutomations
+                              : messageAutomations.filter((a) => group.triggers.includes(a.trigger))
+                            if (groupItems.length === 0) return null
+                            const rows = groupItems.flatMap((automation) => {
+                              const actions = normalizeAutomationActions(automation)
+                              if (actions.length === 0) {
+                                return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
+                              }
+                              return actions.map((action, idx) => ({ automation, action, idx, showControls: idx === 0 }))
+                            })
                             return (
-                              <div
-                                key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
-                                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
-                              >
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {automation.trigger}</div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400">Action: {actionTypeLabel}{eventType ? ` • event_type: ${eventType}` : ''}</div>
-                                    {hasCollision && (
-                                      <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
-                                        <span className="font-medium">Warning:</span> Duplicate event_type for this trigger. Only one message/event may fire per conversation due to idempotency.
-                                      </div>
-                                    )}
-                                    {automation.trigger === 'no_agent_assigned_for' && (
-                                      <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
-                                    )}
-                                    {automation.trigger === 'visitor_connected' && (
-                                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                                        Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h
-                                      </div>
-                                    )}
-                                    {text && <div className="text-xs text-gray-600 dark:text-gray-400">{text}</div>}
-                                  </div>
-
-                                  <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-                                    {showControls ? (
-                                      <Switch
-                                        checked={automation.enabled}
-                                        onCheckedChange={(checked) => {
-                                          const next = { ...automation, enabled: checked }
-                                          updateAutomationLocal(automation.id, { enabled: checked })
-                                          saveAutomation(next)
-                                        }}
-                                      />
-                                    ) : (
-                                      <div className="w-10" />
-                                    )}
-
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => openBuilderForAutomationAction(automation, action, idx)}
-                                    >
-                                      Edit
-                                    </Button>
-
-                                    {showControls ? (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={() => deleteAutomation(automation)}
-                                        disabled={deletingAutomationId === automation.id}
-                                        className="gap-2"
+                              <div key={group.label} className="space-y-3">
+                                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{group.label}</div>
+                                <div className="space-y-2">
+                                  {rows.map(({ automation, action, idx, showControls }) => {
+                                    const delay = Number(automation.conditions?.delay_seconds ?? 60)
+                                    const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
+                                    const isEvent = action?.type === 'emit_system_event'
+                                    const text = extractActionText(action)
+                                    const eventType = action?.event_type ? String(action.event_type) : ''
+                                    const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
+                                    const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
+                                    const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
+                                    const hasCollision = collisions.length > 1
+                                    return (
+                                      <div
+                                        key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
+                                        className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
                                       >
-                                        <Trash2 className="w-4 h-4" />
-                                        {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
-                                      </Button>
-                                    ) : (
-                                      <div className="w-[92px]" />
-                                    )}
-                                  </div>
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{automation.name}</div>
+                                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${isEvent ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'}`}>
+                                                {isEvent ? 'Event' : 'Bot'}
+                                              </span>
+                                            </div>
+                                            {hasCollision && (
+                                              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 rounded-md p-2">
+                                                <span className="font-medium">Warning:</span> Duplicate event_type for this trigger.
+                                              </div>
+                                            )}
+                                            {automation.trigger === 'no_agent_assigned_for' && (
+                                              <div className="text-xs text-gray-500 dark:text-gray-400">Delay: {Number.isFinite(delay) ? delay : 60}s</div>
+                                            )}
+                                            {automation.trigger === 'visitor_connected' && (
+                                              <div className="text-xs text-gray-500 dark:text-gray-400">Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h</div>
+                                            )}
+                                            {text && <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">{text}</div>}
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                                            {showControls ? (
+                                              <Switch
+                                                checked={automation.enabled}
+                                                onCheckedChange={(checked) => {
+                                                  const next = { ...automation, enabled: checked }
+                                                  updateAutomationLocal(automation.id, { enabled: checked })
+                                                  saveAutomation(next)
+                                                }}
+                                              />
+                                            ) : (
+                                              <div className="w-10" />
+                                            )}
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => openBuilderForAutomationAction(automation, action, idx)}
+                                            >
+                                              Edit
+                                            </Button>
+                                            {showControls ? (
+                                              <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="destructive"
+                                                onClick={() => deleteAutomation(automation)}
+                                                disabled={deletingAutomationId === automation.id}
+                                                className="gap-2"
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                                {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
+                                              </Button>
+                                            ) : (
+                                              <div className="w-[92px]" />
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )
-                          })
-                        })()}
-                      </div>
-                    )
-                  ) : (
+                          })}
+                        </div>
+                      )
+                    })()
+                  ) : automationsSubTab === 'chatbots' ? (
                     <div className="space-y-4">
                       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1512,6 +1549,13 @@ export default function WebsiteDetail() {
                             </Button>
                           )
                         })()}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-8 text-center space-y-2">
+                      <div className="text-sm font-semibold text-gray-500 dark:text-gray-400">AI Agents</div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500 max-w-xs mx-auto">
+                        Coming soon — AI-powered agents that handle conversations autonomously, with full knowledge of your product and team.
                       </div>
                     </div>
                   )}
@@ -1950,6 +1994,20 @@ export default function WebsiteDetail() {
                           />
                           <div className="text-[11px] text-gray-500 dark:text-gray-400">
                             This message is shown to the visitor along with the buttons below.
+                          </div>
+                        </div>
+
+                        {/* Allow free-form input alongside buttons */}
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Allow free-form input</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Show the text input alongside the buttons so visitors can also type a message.</div>
+                            </div>
+                            <Switch
+                              checked={chatbotDraft.allow_input}
+                              onCheckedChange={(checked) => setChatbotDraft({ ...chatbotDraft, allow_input: checked })}
+                            />
                           </div>
                         </div>
 

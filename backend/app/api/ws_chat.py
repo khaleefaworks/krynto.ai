@@ -129,6 +129,7 @@ async def _send_delayed_welcome(
     delay_seconds: float = 4.0,
     chatbot_buttons: list | None = None,
     chatbot_automation_id: int | None = None,
+    chatbot_allow_input: bool = False,
 ) -> None:
     """Send the welcome automation message after a short delay.
 
@@ -184,6 +185,7 @@ async def _send_delayed_welcome(
                         "conversation_id": conversation.id,
                         "automation_id": chatbot_automation_id,
                         "buttons": chatbot_buttons,
+                        "allow_input": chatbot_allow_input,
                         "message_obj": serialize_message(db2, saved),
                     }
                 )
@@ -454,6 +456,7 @@ async def chat_ws(
             # Check for team routing chatbot (overrides welcome if active).
             chatbot_buttons = None
             chatbot_automation_id = None
+            chatbot_allow_input = False
             try:
                 chatbot_actions = automation_service.get_actions_by_type(
                     website_id=website_id,
@@ -478,6 +481,7 @@ async def chat_ws(
                             welcome_message = _cb_msg
                             chatbot_buttons = _validated
                             chatbot_automation_id = _cb_auto_id
+                            chatbot_allow_input = bool(_ca.get("allow_input", False))
                             should_send = True
             except Exception:
                 pass
@@ -541,8 +545,16 @@ async def chat_ws(
                         delay_seconds=welcome_delay,
                         chatbot_buttons=chatbot_buttons,
                         chatbot_automation_id=chatbot_automation_id,
+                        chatbot_allow_input=chatbot_allow_input,
                     )
                 )
+                # Immediately tell the widget that a chatbot prompt is coming so it
+                # can keep the text input hidden until the visitor makes a selection.
+                if chatbot_buttons:
+                    try:
+                        await websocket.send_json({"type": "chatbot_pending"})
+                    except Exception:
+                        pass
         except Exception as e:
             try:
                 db.rollback()

@@ -100,6 +100,7 @@ def create_automation(
     name: str,
     trigger: str,
     enabled: bool = True,
+    category: str = 'auto_message',
     conditions: dict | None = None,
     actions: dict | list | None = None,
 ) -> Automation:
@@ -109,6 +110,7 @@ def create_automation(
         name=name,
         trigger=trigger,
         enabled=bool(enabled),
+        category=str(category or 'auto_message'),
         conditions=conditions or {},
         actions=actions or {},
     )
@@ -125,6 +127,7 @@ def update_automation(
     name: str | None = None,
     trigger: str | None = None,
     enabled: bool | None = None,
+    category: str | None = None,
     conditions: dict | None = None,
     actions: dict | list | None = None,
 ) -> Automation:
@@ -134,6 +137,8 @@ def update_automation(
         automation.trigger = trigger
     if enabled is not None:
         automation.enabled = bool(enabled)
+    if category is not None:
+        automation.category = str(category)
     if conditions is not None:
         automation.conditions = conditions
     if actions is not None:

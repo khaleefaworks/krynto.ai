@@ -28,6 +28,7 @@ class AutomationCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     trigger: str = Field(..., min_length=1, max_length=100)
     enabled: bool = True
+    category: str = Field('auto_message', max_length=50)
     conditions: dict | None = None
     actions: Any | None = None
 
@@ -36,6 +37,7 @@ class AutomationUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     trigger: Optional[str] = Field(None, min_length=1, max_length=100)
     enabled: Optional[bool] = None
+    category: Optional[str] = Field(None, max_length=50)
     conditions: Optional[dict] = None
     actions: Any | None = None
 
@@ -46,6 +48,7 @@ class AutomationResponse(BaseModel):
     name: str
     trigger: str
     enabled: bool
+    category: str = 'auto_message'
     conditions: dict | None
     actions: Any | None
     created_at: datetime
@@ -88,6 +91,7 @@ def create_automation(
         name=payload.name,
         trigger=payload.trigger,
         enabled=payload.enabled,
+        category=payload.category,
         conditions=payload.conditions,
         actions=payload.actions,
     )
@@ -124,6 +128,7 @@ def update_automation(
         name=payload.name,
         trigger=payload.trigger,
         enabled=payload.enabled,
+        category=payload.category,
         conditions=payload.conditions,
         actions=payload.actions,
     )
