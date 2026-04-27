@@ -1,51 +1,67 @@
-# Teams
+# Managing Teams
 
-Teams let you organise agents into groups and route individual conversations to specific groups within a website.
+Teams allow you to organize your agent pool into specialized groups to ensure that incoming inquiries are routed to the most qualified personnel.
 
-## When to use teams
+---
 
-- You have a large agent pool and want to route chats by department (e.g. Sales, Support, Billing)
-- Different websites need different agent groups
+## Team Configuration
 
-## Creating a team
+### Creating a Team
+Follow these steps to create a new team:
+- **Step 1**: Navigate to **Settings > Teams** and select **New Team**.
+- **Step 2**: Enter a descriptive **Name** for the group (e.g., Sales or Support).
+- **Step 3**: Search for and select **Members** from your organization to add to the team.
 
-1. Go to **Settings → Teams** and click **New team**.
-2. Enter a team name.
-3. Add members by searching for agents in your organisation.
+### Assignment Logic
+An agent can be a member of multiple teams across different websites, allowing for flexible organizational structures.
 
-## Assigning a conversation to a team
+---
 
-From inside any open conversation, an agent or manager can assign it to a team using the **Team** selector in the conversation detail panel. Once assigned:
+## Conversation Routing and Ownership
 
-- Only members of that team see the conversation in their inbox.
-- Only team members receive push notifications and unread counts for it.
-- Agents on the same website but not in that team become spectators — they can open the conversation but won't be notified.
+Assigning a conversation to a team ensures that only the relevant specialists are notified of the visitor's needs.
 
-## Unassigned conversations (no team)
+### Team Assignment Workflow
+Agents or Managers can assign any active conversation to a team using the **Team Selector** in the conversation detail panel.
 
-If a conversation has **no team assigned**, it is visible to **all agents on that website** regardless of their team membership. Everyone gets push notifications and unread counts so any agent can claim it.
+### Operational Impact of Team Assignment
+Once a conversation is assigned to a specific team:
+- **Visibility**: Only members of the assigned team will see the conversation in their primary inbox view.
+- **Notifications**: System-level alerts and unread counts are exclusively dispatched to team members.
+- **Spectating**: Agents assigned to the same website who are NOT in the assigned team transition to a "spectator" role. They can still view the chat history but will not be actively notified of updates.
 
-This is intentional — unassigned conversations are in an open pickup state until a team or agent is assigned.
+---
 
-## Agents with no team membership
+## Handling Unassigned Conversations
 
-An agent assigned to a website but not a member of any team on that website is **unrestricted**:
+Conversations that have not yet been assigned to a specific team are considered to be in an "Open Pickup" state.
 
-- They see all conversations on that website (both team-assigned and unassigned).
-- They receive push notifications and unread counts only for **unassigned** conversations.
-- For team-assigned conversations they are spectators — live updates appear but no push or unread badge.
+- **Global Visibility**: Unassigned conversations are visible to all agents assigned to the website.
+- **Unified Alerts**: All agents on the website receive notifications for unassigned chats to ensure rapid initial response times.
+- **Claiming Logic**: Once any agent or manager assigns a team or joins the chat, the conversation is moved out of the open pickup state.
 
-## Websites with no teams configured
+---
 
-If a website has **no teams at all**, all agents assigned to that website are in the full routing pool — they all receive push notifications and unread counts for every conversation.
+## Complex Routing Scenarios
 
-## Notification routing summary
+### Agents Without Team Membership
+If an agent is assigned to a website but does not belong to any specific team on that property, they are granted **Unrestricted Visibility**:
+- They can monitor all conversations on the website.
+- They only receive proactive alerts for **Unassigned** conversations.
 
-| Conversation state | Who gets push + unread |
-|---|---|
-| No team assigned | All agents on the website |
-| Assigned to Team A, no agent joined | Team A members only |
-| Assigned to Team A, Agent X joined | Agent X only |
-| Website has no teams | All agents on the website |
+### Websites Without Teams
+For organizations that do not require specialized routing, websites can operate without any teams. In this configuration, all agents assigned to the website act as a single, unified group, receiving alerts for every conversation.
 
-Owners and Managers always receive notifications for all conversations across their organisation's websites, regardless of team configuration.
+---
+
+## Notification Routing Matrix
+
+| Conversation State | Notification Recipients |
+| :--- | :--- |
+| **No Team Assigned** | All agents assigned to the website. |
+| **Team Assigned (Unclaimed)** | Only members of the assigned team. |
+| **Agent Joined** | Only the assigned agent. |
+| **No Teams Configured** | All agents assigned to the website. |
+
+> [!NOTE]
+> **Administrative Oversight**: Owners and Managers are exempt from standard routing rules and will receive notifications for all organizational activity to ensure full operational visibility.

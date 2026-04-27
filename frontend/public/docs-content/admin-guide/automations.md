@@ -1,47 +1,59 @@
-# Automations
+# Automations and Workflows
 
-Automations are rule-based messages sent by the system automatically when specific events occur. They let you greet visitors, collect information, or guide conversations without any agent involvement.
+Automations are rule-based actions that enable AI ChatAssist to interact with visitors proactively based on specific triggers and conditions.
 
-## How automations work
+---
 
-Each automation has:
-- A **trigger** — the event that fires it
-- **Conditions** (optional) — filters that must be true for it to fire
-- **Actions** — what happens (currently: send a message with an optional delay)
-- A **cooldown** — minimum time between fires for the same visitor
+## Anatomy of an Automation
 
-## Triggers
+Every automation is built from four core components:
 
-| Trigger | When it fires |
-|---------|--------------|
-| `visitor_message_received` | The visitor sends their first (or any) message |
-| `conversation_assigned` | An agent joins/is assigned to the conversation |
-| `agent_join` | An agent opens the conversation thread |
-| `visitor_connected` | The visitor's widget connects to the website |
+- **Trigger**: The specific system event that initiates the automation.
+- **Conditions**: Optional filters that refine when the automation should fire (e.g., only during office hours).
+- **Actions**: The system response, such as delivering a message after a specified delay.
+- **Cooldown**: A safety mechanism that prevents the same automation from firing multiple times for the same visitor within a set timeframe.
 
-## Example: welcome message
+---
 
-A typical setup:
-- **Trigger:** `visitor_connected`
-- **Delay:** 2 seconds
-- **Message:** "Hi there! 👋 How can we help you today?"
-- **Cooldown:** 1 hour (so returning visitors within an hour don't see it again)
+## Trigger Reference
 
-## Example: offline message
+The system monitors several key events to drive automated workflows:
 
-When no agents are online, an automation can fire immediately on `visitor_connected`:
-- **Message:** "We're away right now. Leave your details and we'll get back to you."
+| Trigger Event | Activation Point |
+| :--- | :--- |
+| **Visitor Connected** | Activated as soon as the chat widget successfully loads on the visitor's page. |
+| **Message Received** | Fired when a visitor sends their first message in a new session. |
+| **Conversation Assigned** | Triggered when a specific agent or team is assigned to the conversation. |
+| **Agent Joined** | Activated when an agent actively opens the conversation thread. |
 
-## Managing automations
+---
 
-1. Go to **Settings → Websites → [your website] → Automations**.
-2. Choose from templates or create a custom automation.
-3. Enable/disable without deleting using the toggle.
+## Standard Use Cases
 
-## Order of execution
+### Proactive Welcome Greetings
+Set a **Visitor Connected** trigger with a 2-second delay and a 1-hour cooldown. This creates a welcoming environment for new visitors without being intrusive for frequent returners.
 
-Multiple automations can be active for the same trigger. They fire in the order they are listed. Use drag-to-reorder to control priority.
+### Offline Support Acknowledgement
+During non-office hours, use a **Visitor Connected** trigger to immediately inform the user that the team is away and provide a timeline for a response.
 
-## System messages in the chat
+---
 
-Automation messages appear in the visitor's widget as system messages (not attributed to a specific agent). In the agent dashboard they appear as SYSTEM sender messages.
+## Management and Orchestration
+
+### Creating and Priority
+Follow these steps to manage your automations:
+- **Step 1**: Navigate to **Settings > Websites > [Target Website] > Automations**.
+- **Step 2**: Utilize pre-built templates or design a custom workflow from scratch.
+- **Step 3**: Reorder automations to control their execution priority if they share the same trigger.
+
+### Toggling Status
+Automations can be temporarily paused using the status toggle. This allows you to disable seasonal or experimental workflows without deleting their configuration.
+
+---
+
+## System Attribution
+
+Messages sent via automation are rendered as **System Messages** in both the visitor's widget and the agent dashboard. This clearly distinguishes between automated responses and human agent interactions, ensuring a transparent experience for the user.
+
+> [!TIP]
+> **Avoid Collision**: When setting up multiple automations for the same trigger, ensure their messages do not conflict. Use the **Delay** feature to space out automated interactions for a more natural conversational flow.
