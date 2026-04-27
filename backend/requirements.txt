@@ -21,4 +21,4 @@ slowapi
 redis
 pywebpush
 resend
-openpyxl
+openpyxl==3.1.5

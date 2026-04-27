@@ -610,7 +610,7 @@ export default function Analytics() {
       {showDownloadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="fixed inset-0 bg-black/40" onClick={() => setShowDownloadModal(false)} />
-          <div className="relative z-60 w-full max-w-md mx-4">
+          <div className="relative z-[60] w-full max-w-md mx-4">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Analytics</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose website and date range to export.</p>

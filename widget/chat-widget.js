@@ -2259,7 +2259,7 @@
             <div id="chatassist-contact-msg-preview" class="chatassist-contact-msg-preview" style="display:none;"></div>
             <div class="chatassist-contact-form">
               <input type="text" id="chatassist-contact-name" placeholder="Your name *" autocomplete="name" />
-              <input type="tel" id="chatassist-contact-phone" placeholder="Your phone number *" autocomplete="tel" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)" />
+              <input type="tel" id="chatassist-contact-phone" placeholder="Your phone number *" autocomplete="tel" maxlength="10" />
               <input type="email" id="chatassist-contact-email" placeholder="Your email (optional)" autocomplete="email" />
             </div>
             <div class="chatassist-contact-overlay-actions">
@@ -2472,6 +2472,9 @@
 
     document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
+    document.getElementById('chatassist-contact-phone').addEventListener('input', function () {
+      this.value = this.value.replace(/\D/g, '').slice(0, 10);
+    });
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
 
     // Popup notification buttons

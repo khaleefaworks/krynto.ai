@@ -351,7 +351,10 @@ class ConversationOrchestrator:
                 if changed:
                     self.db.commit()
             except Exception:
-                pass
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
 
         # Track the live visitor socket for downstream forwarding
         if visitor_ws:
