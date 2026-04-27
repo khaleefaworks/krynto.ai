@@ -41,7 +41,8 @@ import {
     Users,
     Bot,
     Plus,
-    X
+    X,
+    HelpCircle
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -272,6 +273,9 @@ export default function ConversationsView() {
         return saved ? saved === 'true' : true
     })
 
+    // Mobile visitor details overlay (below lg breakpoint)
+    const [showMobileDetails, setShowMobileDetails] = useState(false)
+
     // List state
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
@@ -361,6 +365,11 @@ export default function ConversationsView() {
     useEffect(() => {
         localStorage.setItem('chat_right_sidebar_collapsed', String(rightSidebarCollapsed))
     }, [rightSidebarCollapsed])
+
+    // Close mobile visitor details overlay when switching conversations
+    useEffect(() => {
+        setShowMobileDetails(false)
+    }, [selectedChat])
 
     // Load chats list (show spinner only on first load)
     useEffect(() => {
@@ -1618,7 +1627,7 @@ export default function ConversationsView() {
                 </div>
             )}
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
+            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
                 }`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -1781,14 +1790,17 @@ export default function ConversationsView() {
             </div>
 
             {/* COLUMN 2: Conversations List */}
-            <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+            <div className={`${selectedChat !== null ? 'hidden md:flex' : 'flex'} flex-col flex-shrink-0 w-full md:w-72 lg:w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700`}>
                 {/* Header */}
                 <div>
-                    <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700'>
+                    <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between'>
                         <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             {getFilterIcon()}
                             {getFilterHeaderText()}
                         </h2>
+                        <a href="/docs/agent-guide/conversations" target="_blank" rel="noreferrer" title="View conversations guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+                            <HelpCircle className="w-4 h-4" />
+                        </a>
                     </div>
 
                     {/* Search */}
@@ -1800,6 +1812,31 @@ export default function ConversationsView() {
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="pl-10 dark:bg-gray-700 dark:border-gray-600"
                         />
+                    </div>
+
+                    {/* Filter tabs — visible below lg (when Col1 sidebar is hidden) */}
+                    <div className="lg:hidden flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
+                        {([
+                            { key: 'all' as FilterCategory, label: 'All', count: activeChats.filter(c => c.status === 'open').length },
+                            { key: 'mine' as FilterCategory, label: 'Mine', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length },
+                            { key: 'unassigned' as FilterCategory, label: 'Unassigned', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length },
+                            { key: 'resolved' as FilterCategory, label: 'Resolved', count: resolvedChats.length },
+                        ]).map(tab => (
+                            <button
+                                key={tab.key}
+                                onClick={() => setActiveFilter(tab.key)}
+                                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                                    activeFilter === tab.key
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                }`}
+                            >
+                                {tab.label}
+                                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${
+                                    activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                                }`}>{tab.count}</span>
+                            </button>
+                        ))}
                     </div>
 
                     <p className="text-sm text-gray-500 dark:text-gray-400 px-4 py-2">
@@ -1878,6 +1915,13 @@ export default function ConversationsView() {
                     <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 min-w-0">
+                                <button
+                                    className="md:hidden flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+                                    onClick={() => navigate('/dashboard/chats')}
+                                    aria-label="Back to conversations"
+                                >
+                                    <ChevronLeft className="h-5 w-5" />
+                                </button>
                                 <UserAvatar
                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
                                     bgColor={conversation?.visitor_avatar_color}
@@ -1886,11 +1930,16 @@ export default function ConversationsView() {
                                     title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
-                                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                                    <h2 className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
                                         {conversationDisplayName(conversation as any)}
                                     </h2>
+                                    {isVisitorEnded && !isResolvedSelected && (
+                                        <span className="sm:hidden inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+                                            Visitor ended
+                                        </span>
+                                    )}
                                     {conversation?.last_seen_at && (
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                        <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
                                             Last seen {formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}
                                         </p>
                                     )}
@@ -1900,7 +1949,7 @@ export default function ConversationsView() {
                             {/* Header Actions */}
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 {isVisitorEnded && !isResolvedSelected && (
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+                                    <span className="hidden sm:inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
                                         Visitor ended
                                     </span>
                                 )}
@@ -1912,10 +1961,19 @@ export default function ConversationsView() {
                                         disabled={resolving}
                                         className="bg-green-600 hover:bg-green-700 text-white"
                                     >
-                                        <Check className="h-4 w-4 mr-1" />
-                                        {resolving ? "Resolving..." : "Resolve"}
+                                        <Check className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">{resolving ? "Resolving..." : "Resolve"}</span>
                                     </Button>
                                 )}
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="lg:hidden dark:text-gray-300"
+                                    onClick={() => setShowMobileDetails(true)}
+                                    title="Visitor details"
+                                >
+                                    <PanelRightOpen className="h-4 w-4" />
+                                </Button>
                             </div>
                         </div>
 
@@ -2178,6 +2236,7 @@ export default function ConversationsView() {
                                             || (actor === 'system' && kind === 'chat')
                                             || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))
                                         const isAgent = actor === 'agent' || senderType === 'agent'
+                                        const isVisitor = !isAgent && !isBot && !isSystemEvent && (senderType === 'visitor' || actor === 'visitor')
                                         const msgTimestamp = (msg as any).timestamp || msg.created_at
                                         const showTimestamp = index === 0 ||
                                             (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
@@ -2248,7 +2307,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-inherit" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (
@@ -2295,14 +2354,14 @@ export default function ConversationsView() {
                         disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
-                        readOnlyText={isVisitorEnded ? 'Visitor ended this conversation. You can still reply or resolve it when ready.' : 'This conversation is resolved and read-only.'}
+                        readOnlyText={isVisitorEnded ? 'The visitor has ended the conversation. You can now close or resolve it.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />
                 </div>
             ) : (
                 /* Empty State */
-                <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                <div className="hidden md:flex flex-1 items-center justify-center bg-gray-50 dark:bg-gray-900">
                     <div className="text-center max-w-2xl px-8">
                         <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center">
                             <Logo size={56} dotColor={user?.is_available ? '#22c55e' : '#ef4444'} />
@@ -2318,7 +2377,7 @@ export default function ConversationsView() {
             {/* COLUMN 4: Visitor Details (Collapsible) */}
             {selectedChat && conversation && (
                 <div
-                    className={`bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} flex`}
+                    className={`hidden lg:flex bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} h-full min-h-0`}
                 >
                     {rightSidebarCollapsed ? (
                         <div className="h-full flex flex-col items-center gap-4 py-4 px-2">
@@ -2353,7 +2412,7 @@ export default function ConversationsView() {
                                 </Button>
                             </div>
 
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-h-0 overflow-y-auto">
                                 <VisitorDetailsPanel
                                     conversation={conversation}
                                     notes={notes.map(note => ({
@@ -2455,6 +2514,120 @@ export default function ConversationsView() {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Mobile Visitor Details Overlay (below lg breakpoint) */}
+            {showMobileDetails && selectedChat && conversation && (
+                <div className="lg:hidden fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col bg-white dark:bg-gray-800">
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowMobileDetails(false)}
+                            className="dark:text-gray-300 flex-shrink-0"
+                        >
+                            <ChevronLeft className="h-5 w-5" />
+                        </Button>
+                        <h3 className="font-semibold text-sm text-gray-900 dark:text-white">Visitor Details</h3>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                        <VisitorDetailsPanel
+                            conversation={conversation}
+                            notes={notes.map(note => ({
+                                ...note,
+                                creator_name: note.creator_name || 'Unknown'
+                            }))}
+                            browsingHistory={browsingHistory}
+                            rating={conversationRating}
+                            onUpdateMetadata={async (data) => {
+                                if (!conversation?.id) return
+                                try {
+                                    const resp = (await updateConversationMetadata(conversation.id, data)) as {
+                                        visitor_name?: string | null
+                                        visitor_email?: string | null
+                                        visitor_phone?: string | null
+                                    }
+                                    const updates: Partial<ConversationDetails> = {
+                                        visitor_name: resp?.visitor_name ?? undefined,
+                                        visitor_email: resp?.visitor_email ?? undefined,
+                                        visitor_phone: resp?.visitor_phone ?? undefined,
+                                    }
+                                    setConversation((prev) => (prev ? ({ ...prev, ...updates } as any) : prev))
+                                    setActiveChats(
+                                        activeChats.map((c) =>
+                                            c.id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
+                                        )
+                                    )
+                                    setResolvedChats((prev) =>
+                                        (Array.isArray(prev) ? prev : []).map((c) =>
+                                            (c as any).id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
+                                        )
+                                    )
+                                } catch (e) {
+                                    console.error('Failed to update visitor metadata:', e)
+                                }
+                            }}
+                            onAddNote={handleAddNote}
+                            onDeleteNote={handleDeleteNote}
+                        />
+
+                        {/* Closed by label (only for resolved conversations) */}
+                        {conversation.closed_by && conversation.status === 'resolved' && (
+                            <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
+                                <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${conversation.closed_by === 'agent'
+                                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                    : conversation.closed_by === 'visitor'
+                                        ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                                    }`}>
+                                    {conversation.closed_by === 'agent' ? 'Agent' : conversation.closed_by === 'visitor' ? 'Visitor' : 'Inactivity'}
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Other conversations from this visitor */}
+                        {visitorConversations.length > 0 && (
+                            <div className="border-t border-gray-100 dark:border-gray-700/50">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-4 pt-3 pb-2">
+                                    Other conversations ({visitorConversations.length})
+                                </p>
+                                <div className="space-y-0.5 pb-2">
+                                    {visitorConversations
+                                        .slice()
+                                        .sort((a, b) => (b.id) - (a.id))
+                                        .map((vc) => (
+                                            <button
+                                                key={vc.id}
+                                                onClick={() => {
+                                                    openChat(vc.id)
+                                                    setShowMobileDetails(false)
+                                                }}
+                                                className={`w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group ${selectedChat === vc.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                            >
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                                        {vc.title || `Conversation #${vc.id}`}
+                                                    </p>
+                                                    <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                                        }`}>
+                                                        {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                    </span>
+                                                </div>
+                                                {vc.created_at && (
+                                                    <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                                        {new Date(vc.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                                                    </p>
+                                                )}
+                                            </button>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

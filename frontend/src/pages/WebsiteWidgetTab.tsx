@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useAppStore } from '@/store/appStore'
 import { isAdmin } from '@/lib/roles'
-import { Image, Palette, ToggleRight, Upload, MessageCircle, Sparkles, Bell, AlignLeft, AlignRight, Volume2, Play } from 'lucide-react'
+import { Image, Palette, ToggleRight, Upload, MessageCircle, Sparkles, Bell, AlignLeft, AlignRight, Volume2, Play, HelpCircle } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 
 /* ── Types ────────────────────────────────────────────── */
@@ -372,11 +372,16 @@ export default function WebsiteWidgetTab({
     return (
         <div className="space-y-6">
             {/* Page heading */}
-            <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Widget Customization</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    Configure how the chat widget looks and behaves on your site.
-                </p>
+            <div className="flex items-start justify-between gap-2">
+                <div>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">Widget Customization</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Configure how the chat widget looks and behaves on your site.
+                    </p>
+                </div>
+                <a href="/docs/widget/customisation" target="_blank" rel="noreferrer" title="View widget customisation guide" className="mt-0.5 text-gray-400 hover:text-blue-500 transition-colors flex-shrink-0">
+                    <HelpCircle className="w-4 h-4" />
+                </a>
             </div>
 
             {/* Two-column layout: config left, previews right */}

@@ -36,15 +36,21 @@ logger = get_logger(__name__)
 _waiting_bot_message_scheduled: set[int] = set()
 
 
-def _get_eligible_agent_ids_for_push(db: Session, *, website_id: int) -> set[int]:
-    """Return IDs of agents who should receive push notifications for the given website.
+def _get_eligible_agent_ids_for_push(
+    db: Session, *, website_id: int, conversation_team_id: int | None = None
+) -> set[int]:
+    """Return IDs of agents who should receive push notifications.
 
     Scoping rules (org-aware, multi-tenant):
     - SYSTEM_MANAGER: always eligible (cross-org administrator).
     - OWNER/MANAGER of the website's org: always eligible.
     - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
-      - If the website has teams WITH members → further restrict to team members only.
-      - If the website has no teams (or teams have no members) → all assigned agents.
+      - If conversation_team_id is set:
+        * Only members of that specific team → eligible.
+        * Agents in a different team or in no team → excluded.
+        * No-team agents are spectators for team-assigned chats (no push, no unread).
+      - If conversation_team_id is None (unassigned conversation):
+        * All assigned agents on the website → eligible (any can claim it).
     - All candidates must be is_active=True AND is_available=True.
     """
     from app.models.user import UserRole
@@ -94,20 +100,22 @@ def _get_eligible_agent_ids_for_push(db: Session, *, website_id: int) -> set[int
     assigned_agent_ids = {int(r[0]) for r in assigned_rows}
 
     if assigned_agent_ids:
-        # If website has teams with members, restrict agents to those team members
-        team_member_rows = (
-            db.query(WebsiteTeamMember.user_id)
-            .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
-            .filter(WebsiteTeam.website_id == website_id)
-            .all()
-        )
-        team_member_ids = {int(r[0]) for r in team_member_rows}
-
-        if team_member_ids:
-            # Teams exist with members → only team members who are also assigned
-            agent_candidates = assigned_agent_ids & team_member_ids
+        if conversation_team_id is not None:
+            # Conversation is assigned to a specific team.
+            # Only members of that exact team get push — no-team agents are spectators.
+            specific_team_member_rows = (
+                db.query(WebsiteTeamMember.user_id)
+                .filter(WebsiteTeamMember.team_id == conversation_team_id)
+                .all()
+            )
+            specific_team_member_ids = {int(r[0]) for r in specific_team_member_rows}
+            agent_candidates = assigned_agent_ids & specific_team_member_ids
         else:
-            # No teams configured → all directly assigned agents are eligible
+            # No conversation team (unassigned conversation) → all assigned agents are
+            # candidates, regardless of team membership. Agents not in any team are
+            # unrestricted (see all conversations for their website). Agents in teams also
+            # receive this because the conversation isn't assigned to a team yet — any
+            # agent can claim/assign it.
             agent_candidates = assigned_agent_ids
 
         if agent_candidates:
@@ -311,6 +319,9 @@ class ConversationOrchestrator:
         visitor_ws: Any | None = None,
         client_message_id: str | None = None,
         visitor_ip: str | None = None,
+        visitor_name: str | None = None,
+        visitor_email: str | None = None,
+        visitor_phone: str | None = None,
     ) -> Optional[str]:
         """Process a visitor message and route appropriately.
 
@@ -321,6 +332,29 @@ class ConversationOrchestrator:
             session_id=session_id,
             visitor_ip=visitor_ip,
         )
+
+        # Save visitor contact metadata *before* broadcasting so that when agents'
+        # fetchActiveChats() fires in response to the visitor_message event the DB
+        # already contains the up-to-date visitor profile.
+        if visitor_name or visitor_email or visitor_phone:
+            try:
+                changed = False
+                if visitor_name and not conversation.visitor_name:
+                    conversation.visitor_name = str(visitor_name)
+                    changed = True
+                if visitor_email and not conversation.visitor_email:
+                    conversation.visitor_email = str(visitor_email)
+                    changed = True
+                if visitor_phone and not conversation.visitor_phone:
+                    conversation.visitor_phone = str(visitor_phone)
+                    changed = True
+                if changed:
+                    self.db.commit()
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
 
         # Track the live visitor socket for downstream forwarding
         if visitor_ws:
@@ -423,12 +457,14 @@ class ConversationOrchestrator:
                 },
                 include_global=True,
                 exclude_agent_id=conversation.assigned_agent_id,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
 
             return None
 
         # Unassigned: still notify agents in realtime so inbox updates immediately.
         # Broadcast to website-specific agent sockets and global (website_id=0) sockets.
+        _conv_team_id = getattr(conversation, "team_id", None)
         await self.agent_service.broadcast_to_active_agents(
             website_id=website_id,
             message_data={
@@ -439,6 +475,7 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, msg),
             },
             include_global=True,
+            conversation_team_id=_conv_team_id,
         )
 
         # Web Push for unassigned: notify eligible agents scoped to this website (non-blocking)
@@ -446,7 +483,9 @@ class ConversationOrchestrator:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
 
-            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=website_id)
+            agent_ids = _get_eligible_agent_ids_for_push(
+                self.db, website_id=website_id, conversation_team_id=_conv_team_id
+            )
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
             if subs:
                 loop = asyncio.get_event_loop()
@@ -472,6 +511,7 @@ class ConversationOrchestrator:
                 "delta": 1,
             },
             include_global=True,
+            conversation_team_id=_conv_team_id,
         )
 
         # No agent assigned yet.
@@ -568,6 +608,7 @@ class ConversationOrchestrator:
         
         # Broadcast ONLY to global notification sockets (website_id = 0).
         # This prevents duplicate notifications to agents connected to both sockets.
+        _new_chat_team_id = getattr(conversation, "team_id", None)
         await self.agent_service.broadcast_to_active_agents(
             website_id=None,
             message_data={
@@ -581,6 +622,7 @@ class ConversationOrchestrator:
                 "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
             },
             include_global=True,
+            conversation_team_id=_new_chat_team_id,
         )
 
         # Web Push: notify eligible agents (scoped to this website's org + teams).
@@ -589,7 +631,11 @@ class ConversationOrchestrator:
             from app.repos import push_subscriptions as push_subs_repo
             from app.services.push_service import send_web_push_to_subscriptions
 
-            agent_ids = _get_eligible_agent_ids_for_push(self.db, website_id=int(conversation.website_id))
+            agent_ids = _get_eligible_agent_ids_for_push(
+                self.db,
+                website_id=int(conversation.website_id),
+                conversation_team_id=_new_chat_team_id,
+            )
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:

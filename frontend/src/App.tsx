@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import DocsLayout from './pages/DocsLayout'
+import DocsPage from './pages/DocsPage'
 import { useAppStore } from './store/appStore'
 import { useEffect, useState, useRef } from 'react'
 import { getCurrentUser } from './services/auth'
@@ -385,6 +387,12 @@ function App() {
               path="/reset-password"
               element={token ? <Navigate to={authedHome} replace /> : <ResetPasswordPage />}
             />
+
+            {/* Public docs portal — no auth required */}
+            <Route path="/docs" element={<DocsLayout />}>
+              <Route path="*" element={<DocsPage />} />
+              <Route index element={<DocsPage />} />
+            </Route>
 
             {/* Protected routes - require authentication */}
             {token ? (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, BellOff, Volume2, Play } from 'lucide-react'
+import { Bell, BellOff, Volume2, Play, HelpCircle } from 'lucide-react'
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from '@/services/push'
 import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound } from '@/lib/notificationSound'
 import { saveNotificationPreferences, syncPrefsToLocalStorage } from '@/services/notificationPrefs'
@@ -138,7 +138,12 @@ export default function NotificationSettings() {
     return (
         <div className="flex flex-col h-full">
             <div className="h-16 flex items-center border-b dark:border-gray-700 px-6 flex-shrink-0">
-                <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Notifications</h1>
+                <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Notifications</h1>
+                    <a href="/docs/agent-guide/notifications" target="_blank" rel="noreferrer" title="View notifications guide" className="text-gray-400 hover:text-blue-500 transition-colors">
+                        <HelpCircle className="w-4 h-4" />
+                    </a>
+                </div>
             </div>
 
             <div className="flex-1 overflow-auto py-8">

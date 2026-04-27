@@ -17,6 +17,10 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, case, and_, distinct
 from sqlalchemy.orm import Session
+from fastapi.responses import StreamingResponse
+import io
+from openpyxl import Workbook
+from sqlalchemy.orm import aliased
 
 from app.core.database import get_db
 from app.core.logging import get_logger
@@ -27,6 +31,7 @@ from app.models.conversation_rating import ConversationRating
 from app.models.tag import Tag
 from app.models.user import User, UserRole
 from app.models.website import Website
+from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.services.visibility import compute_visibility_scope
 
@@ -487,7 +492,7 @@ def agents_summary(
             "id": agent.id,
             "name": agent.name or agent.email,
             "email": agent.email,
-            "role": agent.role.value if agent.role else "agent",
+            "role": agent.role.value if getattr(agent, 'role', None) else "agent",
             "conversations_handled": assigned_map.get(agent.id, 0),
             "messages_sent": msgs_map.get(agent.email, 0),
             "avg_first_response_seconds": resp_map.get(agent.email),
@@ -513,6 +518,11 @@ def tags_summary(
     """Tag usage counts for the selected period."""
     start_dt, end_dt = _date_range(start, end)
 
+    # Enforce visibility: only include tags for websites the user can access
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"tags": []}
+
     q = (
         db.query(
             Tag.id,
@@ -527,8 +537,8 @@ def tags_summary(
             ConversationTag.created_at <= end_dt,
         )
     )
-    if website_id:
-        q = q.filter(Tag.website_id == website_id)
+    if allowed_ids is not None:
+        q = q.filter(Tag.website_id.in_(allowed_ids))
 
     q = q.group_by(Tag.id, Tag.name, Tag.color).order_by(func.count(ConversationTag.id).desc())
 
@@ -561,6 +571,18 @@ def analytics_overview(
     start_dt, end_dt = _date_range(start, end)
     period_days = (end_dt.date() - start_dt.date()).days + 1
 
+    # Enforce visibility scope for overview queries
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        # No accessible websites for this user → return empty KPIs
+        return {
+            "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+            "previous_period": {"start": prev_start_dt.date().isoformat(), "end": prev_end_dt.date().isoformat()},
+            "new_conversations": {"value": 0, "previous": 0, "change_pct": None},
+            "resolved_conversations": {"value": 0, "previous": 0, "change_pct": None},
+            "avg_first_response_seconds": {"value": None, "previous": None, "change_pct": None},
+        }
+
     prev_end_dt = start_dt - timedelta(seconds=1)
     prev_start_dt = prev_end_dt - timedelta(days=period_days - 1)
     prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=timezone.utc)
@@ -570,8 +592,8 @@ def analytics_overview(
             Conversation.created_at >= s,
             Conversation.created_at <= e,
         )
-        if website_id:
-            q = q.filter(Conversation.website_id == website_id)
+        if allowed_ids is not None:
+            q = q.filter(Conversation.website_id.in_(allowed_ids))
         return q.scalar() or 0
 
     def _count_resolved(s: datetime, e: datetime) -> int:
@@ -580,8 +602,8 @@ def analytics_overview(
             Conversation.updated_at >= s,
             Conversation.updated_at <= e,
         )
-        if website_id:
-            q = q.filter(Conversation.website_id == website_id)
+        if allowed_ids is not None:
+            q = q.filter(Conversation.website_id.in_(allowed_ids))
         return q.scalar() or 0
 
     def _avg_response(s: datetime, e: datetime) -> float | None:
@@ -607,8 +629,8 @@ def analytics_overview(
                 Conversation.created_at <= e,
             )
         )
-        if website_id:
-            q = q.filter(Conversation.website_id == website_id)
+        if allowed_ids is not None:
+            q = q.filter(Conversation.website_id.in_(allowed_ids))
         val = q.scalar()
         return round(val, 1) if val else None
 
@@ -692,3 +714,212 @@ def ratings_summary(
         "neutral_pct": round(counts[0] / total * 100, 1) if total else 0,
         "bad_pct": round(counts[-1] / total * 100, 1) if total else 0,
     }
+
+
+@router.get("/export_xlsx")
+def export_xlsx(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    website_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+):
+    """Stream an XLSX report for the selected period and website(s)."""
+    start_dt, end_dt = _date_range(start, end)
+
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    # Empty workbook if user has no accessible websites
+    if allowed_ids is not None and not allowed_ids:
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet()
+        headers = ["short_id", "total_time_seconds", "tags", "agent_name", "date_with_time", "page_url", "response_time_seconds"]
+        ws.append(headers)
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        filename = f"analytics_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    # Aliases for user lookups
+    assigned_user = aliased(User)
+    msg_user = aliased(User)
+
+    # first agent message timestamp per conversation
+    first_agent_at = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.min(Message.created_at).label("first_agent_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # first agent message row to get sender
+    first_agent_msg = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.sender.label("agent_sender"),
+            Message.created_at.label("agent_msg_at"),
+        )
+        .join(first_agent_at, and_(
+            Message.conversation_id == first_agent_at.c.conversation_id,
+            Message.created_at == first_agent_at.c.first_agent_at,
+        ))
+        .subquery()
+    )
+
+    # Pageview aggregates: per-session first/last (for total_time) and
+    # first pageview per conversation and per session (for page_url/date fallback).
+    pv_q = db.query(
+        ConversationPageView.session_id.label("session_id"),
+        func.min(ConversationPageView.created_at).label("first_pv"),
+        func.max(ConversationPageView.created_at).label("last_pv"),
+    )
+    if allowed_ids is not None:
+        pv_q = pv_q.filter(ConversationPageView.website_id.in_(allowed_ids))
+    pv_range = pv_q.group_by(ConversationPageView.session_id).subquery()
+
+    # First pageview timestamp/url for conversations that have conversation_id set
+    first_pv_at = (
+        db.query(
+            ConversationPageView.conversation_id.label("conversation_id"),
+            func.min(ConversationPageView.created_at).label("first_pv_at"),
+        )
+        .group_by(ConversationPageView.conversation_id)
+        .subquery()
+    )
+    first_pv = (
+        db.query(
+            ConversationPageView.conversation_id.label("conversation_id"),
+            ConversationPageView.created_at.label("first_pv_at"),
+            ConversationPageView.url.label("url"),
+        )
+        .join(first_pv_at, and_(
+            ConversationPageView.conversation_id == first_pv_at.c.conversation_id,
+            ConversationPageView.created_at == first_pv_at.c.first_pv_at,
+        ))
+        .subquery()
+    )
+
+    # First pageview per session (fallback when conversation_id is not present on pageviews)
+    first_pv_session_at_q = db.query(
+        ConversationPageView.session_id.label("session_id"),
+        func.min(ConversationPageView.created_at).label("first_pv_at"),
+    ).group_by(ConversationPageView.session_id)
+    if allowed_ids is not None:
+        first_pv_session_at_q = first_pv_session_at_q.filter(ConversationPageView.website_id.in_(allowed_ids))
+    first_pv_session_at = first_pv_session_at_q.subquery()
+
+    first_pv_session = (
+        db.query(
+            ConversationPageView.session_id.label("session_id"),
+            ConversationPageView.created_at.label("first_pv_at"),
+            ConversationPageView.url.label("session_url"),
+        )
+        .join(first_pv_session_at, and_(
+            ConversationPageView.session_id == first_pv_session_at.c.session_id,
+            ConversationPageView.created_at == first_pv_session_at.c.first_pv_at,
+        ))
+        .subquery()
+    )
+
+    # tags aggregated per conversation
+    tags_subq = (
+        db.query(
+            ConversationTag.conversation_id.label("conversation_id"),
+            func.string_agg(Tag.name, ", ").label("tags"),
+        )
+        .join(Tag, Tag.id == ConversationTag.tag_id)
+        .group_by(ConversationTag.conversation_id)
+        .subquery()
+    )
+
+    # Main query selecting required columns
+    q = (
+        db.query(
+            Conversation.short_id.label("short_id"),
+            # Prefer pageview range when >0, otherwise fallback to last_seen - created_at
+            func.coalesce(
+                func.nullif((func.extract("epoch", pv_range.c.last_pv) - func.extract("epoch", pv_range.c.first_pv)), 0),
+                (func.extract("epoch", Conversation.last_seen_at) - func.extract("epoch", Conversation.created_at)),
+                0,
+            ).label("total_time_seconds"),
+            func.coalesce(tags_subq.c.tags, "").label("tags"),
+            func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
+            func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at).label("date_with_time"),
+            func.coalesce(first_pv.c.url, first_pv_session.c.session_url).label("page_url"),
+            (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", Conversation.created_at)).label("response_time_seconds"),
+        )
+        .outerjoin(assigned_user, assigned_user.id == Conversation.assigned_agent_id)
+        .outerjoin(first_agent_at, first_agent_at.c.conversation_id == Conversation.id)
+        .outerjoin(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+        .outerjoin(msg_user, msg_user.email == first_agent_msg.c.agent_sender)
+        .outerjoin(pv_range, pv_range.c.session_id == Conversation.session_id)
+        .outerjoin(tags_subq, tags_subq.c.conversation_id == Conversation.id)
+        .outerjoin(first_pv, first_pv.c.conversation_id == Conversation.id)
+        .outerjoin(first_pv_session, first_pv_session.c.session_id == Conversation.session_id)
+        .filter(Conversation.created_at >= start_dt, Conversation.created_at <= end_dt)
+    )
+
+    if allowed_ids is not None:
+        q = q.filter(Conversation.website_id.in_(allowed_ids))
+
+    # Create write-only workbook and stream rows
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet(title="Analytics")
+    # Human-friendly column headers
+    headers = [
+        "Conversation ID",
+        "Total Time",
+        "Tags",
+        "Agent Name",
+        "Date & Time",
+        "Page URL",
+        "Response Time",
+    ]
+    ws.append(headers)
+
+    # Iterate query in batches
+    for row in q.yield_per(200):
+        # Format Date & Time as: YYYY-MM-DD<spaces>HH:MM:SSAM/PM
+        try:
+            dt_val = row.date_with_time
+            if dt_val is None:
+                date_val = ""
+            else:
+                # If DB returned a string, try to parse ISO format first
+                if isinstance(dt_val, str):
+                    try:
+                        dt_val = datetime.fromisoformat(dt_val)
+                    except Exception:
+                        pass
+                # Ensure we have a datetime-like object
+                try:
+                    date_part = dt_val.date().isoformat()
+                    time_part = dt_val.strftime('%I:%M:%S%p')
+                    date_val = f"{date_part}      {time_part}"
+                except Exception:
+                    date_val = str(dt_val)
+        except Exception:
+            date_val = str(row.date_with_time) if row.date_with_time is not None else ""
+
+        ws.append([
+            row.short_id or "",
+            float(row.total_time_seconds) if row.total_time_seconds is not None else 0,
+            row.tags or "",
+            row.agent_name or "",
+            date_val,
+            row.page_url or "",
+            float(row.response_time_seconds) if row.response_time_seconds is not None else None,
+        ])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    filename = f"analytics_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
+    return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})

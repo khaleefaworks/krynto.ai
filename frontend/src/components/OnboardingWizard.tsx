@@ -326,24 +326,33 @@ export default function OnboardingWizard({ open, onClose, onDismiss }: Onboardin
                         <div className="flex shrink-0 items-center gap-2">
                             <button
                                 onClick={onDismiss}
-                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
                             >
                                 Don't show again
                             </button>
                             <button
                                 onClick={onClose}
-                                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                                className="inline-flex h-8 w-8 xl:h-11 xl:w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
                                 title="Close setup guide"
                             >
                                 <X className="h-4 w-4" />
                             </button>
                         </div>
                     </div>
+
+                    {/* Mobile progress bar */}
+                    <div className="xl:hidden mt-2 h-1 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                        <div
+                            className="h-full rounded-full bg-[linear-gradient(90deg,#38bdf8_0%,#6366f1_60%,#a855f7_100%)] transition-all duration-300"
+                            style={{ width: `${Math.max(progressPercent, completionCount > 0 ? 10 : 0)}%` }}
+                        />
+                    </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-hidden px-6 py-6 sm:px-8 sm:py-8">
-                    <div className="grid h-full gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
-                        <div className="min-h-0 overflow-y-auto pr-1">
+                <div className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
+                    <div className="grid gap-4 xl:h-full xl:grid-cols-[300px_minmax(0,1fr)]">
+                        {/* Step list — hidden on mobile, sidebar on xl */}
+                        <div className="hidden xl:flex xl:flex-col min-h-0 overflow-y-auto pr-1">
                             <div className="space-y-3">
                                 {steps.map((item, index) => {
                                     const ItemIcon = item.icon
@@ -386,7 +395,7 @@ export default function OnboardingWizard({ open, onClose, onDismiss }: Onboardin
                         </div>
 
                         <div className="min-w-0 min-h-0">
-                            <div className="flex h-full min-h-[360px] flex-col rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
+                            <div className="flex h-full min-h-0 flex-col rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
                                 <div className="shrink-0 border-b border-slate-200 px-6 py-6 dark:border-slate-800 sm:px-8">
                                     <div className="flex items-start gap-4">
                                         <div className={`inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl bg-slate-100 dark:bg-slate-800 ${step.accentClass}`}>
@@ -421,39 +430,37 @@ export default function OnboardingWizard({ open, onClose, onDismiss }: Onboardin
                     </div>
                 </div>
 
-                <div className="shrink-0 border-t border-slate-200 px-6 py-4 dark:border-slate-800 sm:px-8 sm:py-5">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                <div className="shrink-0 border-t border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-6 sm:py-4 xl:px-8 xl:py-5">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="hidden xl:block text-sm text-slate-500 dark:text-slate-400">
                             Reopen this guide from the rocket in the sidebar whenever you need it.
                         </div>
 
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={back}
-                                    disabled={currentStep === 0}
-                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                                >
-                                    <ChevronLeft className="h-4 w-4" />
-                                    Back
-                                </button>
+                        <div className="flex items-center gap-2 w-full xl:w-auto xl:justify-end flex-wrap">
+                            <button
+                                onClick={back}
+                                disabled={currentStep === 0}
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                                Back
+                            </button>
 
-                                {!isLastStep && (
-                                    <button
-                                        onClick={() => {
-                                            markStepDone(step.id)
-                                            next()
-                                        }}
-                                        className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                                    >
-                                        Mark as completed
-                                    </button>
-                                )}
-                            </div>
+                            {!isLastStep && (
+                                <button
+                                    onClick={() => {
+                                        markStepDone(step.id)
+                                        next()
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                                >
+                                    Mark as completed
+                                </button>
+                            )}
 
                             <button
                                 onClick={step.action}
-                                className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400"
+                                className="flex-1 xl:flex-none inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400"
                             >
                                 {step.actionLabel}
                                 {!isLastStep && <ChevronRight className="h-4 w-4" />}

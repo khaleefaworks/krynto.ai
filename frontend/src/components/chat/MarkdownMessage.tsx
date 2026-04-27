@@ -33,8 +33,22 @@ function linkifyPlainDomains(raw: string): string {
         s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, stashMd)
         s = s.replace(/\[[^\]]*\]\([^)]*\)/g, stashMd)
 
+        // Explicitly convert full protocol URLs (https:// / http://) to markdown
+        // links and stash them immediately. remark-gfm's GFM autolink literal
+        // detection is unreliable with query strings (e.g. ?v=abc), so we handle
+        // these ourselves before the bare-domain pass runs.
+        s = s.replace(
+            /(https?:\/\/[^\s<>[\]"']+)/gi,
+            (full) => {
+                // Strip trailing punctuation that's clearly not part of the URL.
+                const stripped = full.replace(/[.,;:!?)\]']+$/, '')
+                const suffix = full.slice(stripped.length)
+                return stashMd(`[${stripped}](${stripped})`) + suffix
+            }
+        )
+
         // Linkify bare domains like abc.com or sub.abc.co.in (but not emails).
-        // Skip already-protocol URLs; those are handled by markdown/gfm.
+        // Protocol URLs are already stashed above so they won't be re-matched.
         s = s.replace(
             /(^|[^\w@])(\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{2,})\b)(?!\s*\)|\/)/gi,
             (_m, pre, domain) => `${pre}[${domain}](https://${domain})`

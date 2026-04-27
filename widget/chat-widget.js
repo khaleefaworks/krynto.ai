@@ -1051,6 +1051,7 @@
     if (meta && typeof meta === 'object') {
       if (meta.visitor_name) payload.visitor_name = meta.visitor_name;
       if (meta.visitor_email) payload.visitor_email = meta.visitor_email;
+      if (meta.visitor_phone) payload.visitor_phone = meta.visitor_phone;
     }
     ws.send(JSON.stringify(payload));
 
@@ -1579,6 +1580,11 @@
     };
   }
 
+  function unescapeMarkdown(str) {
+    // Reverse markdown backslash escapes (e.g. \* → *, \\ → \, \_ → _)
+    return String(str || '').replace(/\\([\\`*_\[\]()/])/g, '$1');
+  }
+
   function renderInlineMarkdown(text) {
     const frag = document.createDocumentFragment();
     const s = String(text || '');
@@ -1844,7 +1850,9 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    renderMarkdownInto(bubble, content);
+    // Agent/bot messages use markdown escaping from the composer; unescape before rendering.
+    const displayContent = (sender === 'agent' || sender === 'ai') ? unescapeMarkdown(content) : content;
+    renderMarkdownInto(bubble, displayContent);
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
@@ -1927,7 +1935,7 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'chatassist-message-bubble';
-    renderMarkdownInto(bubble, content);
+    renderMarkdownInto(bubble, unescapeMarkdown(content));
 
     const timestamp = document.createElement('div');
     timestamp.className = 'chatassist-message-timestamp';
@@ -2061,11 +2069,14 @@
       return;
     }
 
-    const email = document.getElementById('chatassist-contact-email')?.value.trim();
-    if (email) {
+    const _prefillName = document.getElementById('chatassist-contact-name')?.value.trim();
+    const _prefillPhone = document.getElementById('chatassist-contact-phone')?.value.trim();
+    const _prefillEmail = document.getElementById('chatassist-contact-email')?.value.trim();
+    if (_prefillName && _prefillPhone) {
       const meta = {
-        visitor_name: document.getElementById('chatassist-contact-name')?.value.trim(),
-        visitor_email: email
+        visitor_name: _prefillName,
+        visitor_phone: _prefillPhone,
+        visitor_email: _prefillEmail || undefined
       };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
@@ -2156,15 +2167,28 @@
   }
 
   function submitContactAndSendPending() {
-    const email = document.getElementById('chatassist-contact-email')?.value.trim();
     const name = document.getElementById('chatassist-contact-name')?.value.trim();
+    const phone = document.getElementById('chatassist-contact-phone')?.value.trim();
+    const email = document.getElementById('chatassist-contact-email')?.value.trim();
     if (!name) {
       showToast('Please enter your name.');
       document.getElementById('chatassist-contact-name')?.focus();
       return;
     }
-    if (!email) {
-      showToast('Please enter your email.');
+    if (!phone) {
+      showToast('Please enter your phone number.');
+      document.getElementById('chatassist-contact-phone')?.focus();
+      return;
+    }
+    // Exactly 10 digits required.
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length !== 10) {
+      showToast('Please enter a valid 10-digit phone number.');
+      document.getElementById('chatassist-contact-phone')?.focus();
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showToast('Please enter a valid email address.');
       document.getElementById('chatassist-contact-email')?.focus();
       return;
     }
@@ -2173,10 +2197,11 @@
     pendingOfflineMessage = null;
     pendingOfflineAttachments = [];
     hideContactOverlay(false);
-    if (name) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
-    localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
+    localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
+    localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, phone);
+    if (email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
     if (msg || (atts && atts.length)) {
-      const meta = { visitor_name: name, visitor_email: email };
+      const meta = { visitor_name: name, visitor_phone: phone, visitor_email: email || undefined };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
@@ -2233,8 +2258,9 @@
             <div class="chatassist-contact-overlay-subtitle">Leave your contact info so we can get back to you.</div>
             <div id="chatassist-contact-msg-preview" class="chatassist-contact-msg-preview" style="display:none;"></div>
             <div class="chatassist-contact-form">
-              <input type="text" id="chatassist-contact-name" placeholder="Your name" autocomplete="name" />
-              <input type="email" id="chatassist-contact-email" placeholder="Your email" autocomplete="email" />
+              <input type="text" id="chatassist-contact-name" placeholder="Your name *" autocomplete="name" />
+              <input type="tel" id="chatassist-contact-phone" placeholder="Your phone number *" autocomplete="tel" maxlength="10" />
+              <input type="email" id="chatassist-contact-email" placeholder="Your email (optional)" autocomplete="email" />
             </div>
             <div class="chatassist-contact-overlay-actions">
               <button id="chatassist-contact-overlay-submit" class="chatassist-contact-overlay-submit">Send message</button>
@@ -2446,6 +2472,9 @@
 
     document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
     document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
+    document.getElementById('chatassist-contact-phone').addEventListener('input', function () {
+      this.value = this.value.replace(/\D/g, '').slice(0, 10);
+    });
     document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
 
     // Popup notification buttons
@@ -2540,8 +2569,10 @@
     // Prefill
     try {
       const name = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`);
+      const phone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`);
       const email = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
       if (name) document.getElementById('chatassist-contact-name').value = name;
+      if (phone) document.getElementById('chatassist-contact-phone').value = phone;
       if (email) document.getElementById('chatassist-contact-email').value = email;
     } catch (e) { }
 
