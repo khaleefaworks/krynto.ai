@@ -147,10 +147,10 @@ export default function WebsiteTagsTab({ websiteId }: { websiteId: number }) {
             </div>
 
             {/* Subtitle + Search */}
-            <div className="px-6 pb-4 flex items-center justify-between gap-4 flex-shrink-0">
+            <div className="px-6 pb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 flex-shrink-0">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Manage conversation tags scoped to this website.</p>
                 {tags.length > 0 && (
-                    <div className="relative flex-shrink-0 w-52">
+                    <div className="relative flex-shrink-0 w-full sm:w-52">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                         <Input
                             value={search}
@@ -184,8 +184,8 @@ export default function WebsiteTagsTab({ websiteId }: { websiteId: number }) {
                 ) : filtered.length === 0 && search.trim() ? (
                     <div className="py-16 text-center text-sm text-gray-400">No tags matching &ldquo;{search}&rdquo;</div>
                 ) : (
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <table className="w-full text-sm">
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+                        <table className="w-full text-sm min-w-[420px]">
                             <thead>
                                 <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                                     <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Tag</th>

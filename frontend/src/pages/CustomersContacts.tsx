@@ -157,8 +157,8 @@ export default function CustomersContacts() {
                     <div className="text-gray-600 dark:text-gray-400">No contacts found</div>
                 </div>
             ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mx-6 mb-6">
-                    <table className="w-full">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto mx-6 mb-6">
+                    <table className="w-full min-w-[580px]">
                         <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>

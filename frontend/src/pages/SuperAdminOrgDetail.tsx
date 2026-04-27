@@ -104,7 +104,7 @@ export default function SuperAdminOrgDetail() {
             )}
 
             {/* Stats row */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                 {[
                     { label: 'Members', value: org.member_count, icon: <Users size={16} /> },
                     { label: 'Websites', value: org.website_count, icon: <Globe size={16} /> },

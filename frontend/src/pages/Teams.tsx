@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Users, HelpCircle } from 'lucide-react'
+import { Users, ChevronLeft, HelpCircle } from 'lucide-react'
 
 import { API_BASE } from '@/config/endpoints'
 import UserAvatar from '@/components/UserAvatar'
@@ -150,7 +150,8 @@ export default function Teams() {
         if (loading) return
         if (selectedWebsiteId != null && sorted.some((w) => Number(w.id) === Number(selectedWebsiteId))) return
         const first = sorted[0]
-        setSelectedWebsiteId(first ? Number(first.id) : null)
+        const shouldAutoSelect = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+        setSelectedWebsiteId(shouldAutoSelect ? (first ? Number(first.id) : null) : null)
     }, [loading, sorted, selectedWebsiteId])
 
     const selected = useMemo(() => {
@@ -159,7 +160,7 @@ export default function Teams() {
     }, [sorted, selectedWebsiteId])
 
     return (
-        <div className="bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden">
+        <div className="bg-gray-50 dark:bg-gray-900 overflow-y-auto md:overflow-hidden md:h-screen">
             <div className="flex items-center justify-between mb-4 h-16 border-b dark:border-gray-700 px-4">
                 <div>
                     <div className="flex items-center gap-2">
@@ -198,8 +199,8 @@ export default function Teams() {
             ) : null}
 
             {!loading && !error && sorted.length ? (
-                <div className="mx-4 grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-6rem)]">
-                    <Card className="lg:col-span-4 xl:col-span-3 dark:bg-gray-800 dark:border-gray-700 overflow-hidden">
+                <div className="mx-4 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-4 md:h-[calc(100vh-6rem)]">
+                    <Card className={`lg:col-span-4 xl:col-span-3 dark:bg-gray-800 dark:border-gray-700 overflow-hidden ${selectedWebsiteId !== null ? 'hidden lg:block' : ''}`}>
                         <CardHeader className="pb-3">
                             <CardTitle className="text-base">Websites</CardTitle>
                             <CardDescription className="text-xs">Select a website to view teams</CardDescription>
@@ -240,7 +241,7 @@ export default function Teams() {
                         </CardContent>
                     </Card>
 
-                    <div className="lg:col-span-8 xl:col-span-9 overflow-hidden">
+                    <div className={`lg:col-span-8 xl:col-span-9 md:overflow-hidden ${selectedWebsiteId === null ? 'hidden lg:block' : ''}`}>
                         {selected ? (
                             (() => {
                                 const available = Number(selected.available_agents_count || 0)
@@ -252,14 +253,23 @@ export default function Teams() {
                                 const unassigned = sortAgents(selected.unassigned_agents || [])
 
                                 return (
-                                    <Card className="dark:bg-gray-800 dark:border-gray-700 h-full overflow-hidden">
+                                    <Card className="dark:bg-gray-800 dark:border-gray-700 md:h-full md:overflow-hidden">
                                         <CardHeader className="pb-3">
                                             <CardTitle className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <div className="text-lg font-semibold text-gray-900 dark:text-white truncate">{selected.name}</div>
-                                                    {selected.domain ? (
-                                                        <div className="text-sm text-gray-500 dark:text-gray-400 truncate">{selected.domain}</div>
-                                                    ) : null}
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <button
+                                                        className="lg:hidden flex-shrink-0 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+                                                        onClick={() => setSelectedWebsiteId(null)}
+                                                        aria-label="Back to websites"
+                                                    >
+                                                        <ChevronLeft className="h-5 w-5" />
+                                                    </button>
+                                                    <div className="min-w-0">
+                                                        <div className="text-lg font-semibold text-gray-900 dark:text-white truncate">{selected.name}</div>
+                                                        {selected.domain ? (
+                                                            <div className="text-sm text-gray-500 dark:text-gray-400 truncate">{selected.domain}</div>
+                                                        ) : null}
+                                                    </div>
                                                 </div>
                                                 <div className="text-sm text-gray-600 dark:text-gray-300 flex-shrink-0">
                                                     {available}/{assigned} available

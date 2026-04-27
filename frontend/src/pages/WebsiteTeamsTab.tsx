@@ -320,8 +320,8 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                             </Button>
                         </div>
                     ) : (
-                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                            <table className="w-full text-sm">
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+                            <table className="w-full text-sm min-w-[420px]">
                                 <thead>
                                     <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                                         <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Agent</th>
@@ -406,8 +406,8 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                             </Button>
                         </div>
                     ) : (
-                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                            <table className="w-full text-sm">
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+                            <table className="w-full text-sm min-w-[420px]">
                                 <thead>
                                     <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                                         <th className="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Team</th>

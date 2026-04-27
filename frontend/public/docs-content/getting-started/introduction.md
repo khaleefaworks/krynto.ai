@@ -1,36 +1,56 @@
-# Welcome to AI ChatAssist
+# Get started with AI ChatAssist documentation 
 
-**AI ChatAssist** is a live chat platform that lets you talk to your website visitors in real time. Your team manages conversations from a single dashboard; visitors chat through a small widget that lives on your website.
 
-## What you can do
+AI ChatAssist is a professional-grade live chat platform designed to bridge the gap between you and your website visitors. By providing a seamless, real-time communication channel, you can turn casual visitors into loyal customers.
 
-- **Chat with visitors in real time** — messages appear instantly on both sides, no page refresh needed
-- **Manage multiple websites** — one dashboard, all your websites in one place
-- **Organise your team** — invite agents, group them into teams, assign teams to specific websites
-- **Automate greetings** — send automatic welcome or follow-up messages based on visitor behaviour
-- **Let visitors see their history** — optionally show returning visitors their previous conversations
-- **Never miss a chat** — get browser push notifications even when the dashboard tab is in the background
-- **Understand your performance** — track conversation volume, response times, and satisfaction ratings
+---
 
-## Who uses AI ChatAssist
+## At a Glance: What You Can Do
 
-| Role | What they do |
-|------|-------------|
-| **Owner** | Sets up the organisation, adds websites, invites the team |
-| **Manager** | Oversees agents and conversations across assigned websites |
-| **Agent** | Handles incoming chats on their assigned websites |
-| **Visitor** | Chats through the widget on your website — no account needed |
+AI ChatAssist is packed with features to help your team succeed:
 
-## How a conversation works
+- **Real-Time Engagement** — Chat instantly with visitors. No delays, no page refreshes.
+- **Multi-Site Management** — Monitor and manage conversations across all your websites from a single, unified dashboard.
+- **Team Orchestration** — Organize agents into specialized teams and assign them to specific websites or departments.
+- **Smart Automations** — Set up automatic greetings and triggers based on visitor behavior to provide instant support.
+- **Conversation Continuity** — Allow returning visitors to see their previous chat history for a personalized experience.
+- **Never Miss a Beat** — Stay informed with desktop push notifications, even when the dashboard is in the background.
+- **Performance Insights** — Track response times, satisfaction ratings, and conversation volumes to optimize your service.
 
-1. A visitor opens your website and sees the chat bubble in the corner.
-2. They send a message — it arrives in your agent dashboard instantly.
-3. An agent joins the conversation and replies.
-4. The visitor sees the reply in the widget in real time.
-5. When the issue is resolved, the agent closes the conversation. The visitor can optionally rate the experience.
+---
 
-## Where to go next
+## How It Works
 
-- **Agents** — start with [Conversations](../agent-guide/conversations) to learn the inbox and chat flow
-- **Admins** — start with [Websites](../admin-guide/websites) to set up your first website and embed the widget
-- **Everyone** — check [Notifications](../agent-guide/notifications) to make sure you never miss a chat
+Getting started is simple. Here is the typical flow of a conversation:
+
+1. **Discovery**: A visitor arrives at your site and sees the customizable chat widget.
+2. **Contact**: They send a query, which instantly appears in your team's Inbox.
+3. **Connection**: An agent joins the chat and provides assistance in real-time.
+4. **Resolution**: Once the query is resolved, the agent closes the conversation.
+5. **Feedback**: The visitor can rate their experience, giving you valuable feedback.
+
+---
+
+## Who Uses AI ChatAssist?
+
+AI ChatAssist is built for teams of all sizes. Here is how different roles interact with the platform:
+
+| Role | Responsibility |
+| :--- | :--- |
+| **Owner** | The primary administrator. Sets up the organization, manages billing, and adds websites. |
+| **Manager** | Oversees team performance, manages agents, and handles escalated conversations. |
+| **Agent** | The front line of support. Joins conversations and helps visitors in real-time. |
+| **Visitor** | Your website users. They interact through the widget without needing any account. |
+
+---
+
+## Ready to Get Started?
+
+Depending on your role, we recommend starting with these guides:
+
+*   **For Agents**: Learn how to master the [Inbox and Conversations](../agent-guide/conversations).
+*   **For Admins**: Follow our guide to [Setting up Websites](../admin-guide/websites) and embedding the widget.
+*   **For Everyone**: Make sure your [Notifications](../agent-guide/notifications) are correctly configured.
+
+
+> **Need more help?** Our support team is always just a chat away. Look for the widget on our own help center!

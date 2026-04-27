@@ -1,59 +1,69 @@
 # Conversations
 
-The Conversations page is the main inbox for agents. All active (open) chats across your assigned websites appear here in real time.
+The **Conversations** page is the heart of AI ChatAssist. It's your primary workspace where you'll engage with visitors, resolve queries, and provide top-tier support.
 
-## Layout
+---
 
-```
-Left panel  — conversation list with filters and search
-Right panel — active chat thread
-```
+## The Inbox Layout
 
-## Conversation list
+The dashboard is designed for maximum efficiency, split into two main areas:
 
-Each row shows:
-- Visitor name (or anonymous ID)
-- Website the visitor is on
-- Last message preview
-- Time since last message
-- Unread badge (your unread messages only)
-- Assigned agent avatar
+*   **Left Panel**: Your command center. Filter, search, and navigate between active and resolved chats.
+*   **Right Panel**: Your workspace. View the full conversation history, visitor details, and compose your replies.
 
-### Filters
+---
 
-| Filter | Shows |
-|--------|-------|
-| **All** | Every open conversation on your assigned websites |
-| **Mine** | Conversations assigned to you |
-| **Unassigned** | No agent has joined yet — available for pickup |
-| **Resolved** | Closed conversations (read-only) |
+## Navigating the Conversation List
 
-## Joining a conversation
+Every conversation in the list provides vital context at a glance:
 
-Unassigned conversations show a **Join** button. Click it to claim the chat — you become the assigned agent. Other agents can still spectate but won't receive push notifications for it.
+- **Identity**: Visitor name or a unique anonymous ID.
+- **Context**: Which website they are currently browsing.
+- **Preview**: A snippet of the most recent message.
+- **Recency**: How long ago the last interaction occurred.
+- **Ownership**: The avatar of the agent currently handling the chat.
 
-> **First come, first served:** if two agents click Join at the same time, only one succeeds. The other sees a "taken" message.
+### Powerful Filtering
 
-## Taking over a conversation
+Stay focused by using built-in filters:
 
-If a conversation is already assigned to another agent, you can take over by sending a message. A confirmation dialog appears — confirm to become the new assigned agent.
+| Filter | Purpose |
+| :--- | :--- |
+| **All** | A complete view of all open conversations across your assigned sites. |
+| **Mine** | Focused view of chats specifically assigned to you. |
+| **Unassigned** | New queries waiting for an agent to join. |
+| **Resolved** | A searchable archive of completed conversations. |
 
-## Resolving a conversation
 
-Click **Resolve** (checkmark button) to close the conversation. The visitor's widget enters a "conversation ended" state. They can start a new conversation at any time.
+## Engaging with Visitors
 
-> Resolved conversations move to the **Resolved** filter. The chat composer is disabled on resolved conversations.
+### Joining a Chat
+When a new query arrives, it will appear in the **Unassigned** filter. Click the **Join** button to claim the conversation. You are now the primary point of contact for that visitor.
 
-## Spectating
+> **First Come, First Served**: If multiple agents try to join at once, the system ensures only one agent succeeds to prevent duplicate responses.
+---
 
-You can open any conversation in your website scope without joining. You will see all messages in real time, including visitor and agent typing indicators, but you won't receive push notifications and your unread count won't increment.
+### Real-Time Interaction
 
-## Typing indicators
+AI ChatAssist is built for speed. Experience true real-time communication with:
+- **Typing Indicators**: See exactly when a visitor is composing a message.
+- **Instant Delivery**: Messages appear on both sides without needing to refresh.
+- **Spectating**: Other team members can view a chat to provide background assistance without joining.
 
-- When a visitor is typing, you see **"Visitor is typing…"** in the status bar.
-- When you type, the visitor sees a typing animation in the widget.
-- Other spectating agents see **"Agent X is typing…"** so they don't duplicate replies.
+---
 
-## Keyboard shortcuts
+## Resolving & Closing
 
-See **Settings → Shortcuts** for configurable keyboard shortcuts (e.g., quick-resolve, quick-reply).
+Once a visitor's needs are met, click the **Resolve** button. This closes the session and moves the chat to your archive.
+
+- **Visitor Experience**: The widget will show a "Conversation ended" state.
+- **Feedback**: Visitors can optionally rate the interaction, helping you track satisfaction.
+
+---
+
+## Pro Tips for Speed
+
+*   **Keyboard Shortcuts**: Use `Settings → Shortcuts` to master the dashboard without touching your mouse.
+*   **Quick Replies**: (Coming Soon) Set up canned responses for common questions.
+
+> **Stay Notified**: Ensure your [Notifications](./notifications) are enabled so you never miss a new visitor query!

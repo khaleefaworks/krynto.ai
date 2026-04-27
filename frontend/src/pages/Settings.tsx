@@ -49,10 +49,83 @@ export default function Settings() {
       : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-200"
     }`
 
+  // Build mobile tab items based on current context
+  const mobileTabClass = (active: boolean) =>
+    `flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+      active
+        ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400'
+        : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+    }`
+
   return (
-    <div className="flex h-full">
-      {/* Settings Sidebar */}
-      <aside className="w-56 shrink-0 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col">
+    <div className="flex flex-col h-full">
+      {/* Mobile nav tabs — shown below md */}
+      <nav className="md:hidden flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-x-auto flex-shrink-0">
+        {websiteId ? (
+          <>
+            <Link to="/dashboard/settings/websites" className={mobileTabClass(false)}>
+              <ArrowLeft className="h-4 w-4" />
+              Websites
+            </Link>
+            <Link to={`/dashboard/settings/websites/${websiteId}?tab=installation`} className={mobileTabClass(activeTab === 'installation')}>
+              <Code className="h-4 w-4" />Installation
+            </Link>
+            <Link to={`/dashboard/settings/websites/${websiteId}?tab=settings`} className={mobileTabClass(activeTab === 'settings')}>
+              <SettingsIcon className="h-4 w-4" />General
+            </Link>
+            <Link to={`/dashboard/settings/websites/${websiteId}?tab=widget`} className={mobileTabClass(activeTab === 'widget')}>
+              <Palette className="h-4 w-4" />Widget
+            </Link>
+            <Link to={`/dashboard/settings/websites/${websiteId}?tab=automations`} className={mobileTabClass(activeTab === 'automations')}>
+              <Bot className="h-4 w-4" />Automations
+            </Link>
+            {isAdmin(user) && (
+              <>
+                <Link to={`/dashboard/settings/websites/${websiteId}?tab=teams`} className={mobileTabClass(activeTab === 'teams')}>
+                  <Users className="h-4 w-4" />Teams
+                </Link>
+                <Link to={`/dashboard/settings/websites/${websiteId}?tab=shortcuts`} className={mobileTabClass(activeTab === 'shortcuts')}>
+                  <Zap className="h-4 w-4" />Shortcuts
+                </Link>
+                <Link to={`/dashboard/settings/websites/${websiteId}?tab=tags`} className={mobileTabClass(activeTab === 'tags')}>
+                  <TagIcon className="h-4 w-4" />Tags
+                </Link>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {isAdmin(user) && (
+              <>
+                <Link to="/dashboard/settings/websites" className={mobileTabClass(isActive('/dashboard/settings/websites'))}>
+                  <Globe className="h-4 w-4" />Websites
+                </Link>
+                <Link to="/dashboard/settings/users" className={mobileTabClass(isActive('/dashboard/settings/users'))}>
+                  <Users className="h-4 w-4" />Users
+                </Link>
+                {isOrgOwner(user) && (
+                  <Link to="/dashboard/settings/organization" className={mobileTabClass(isActive('/dashboard/settings/organization'))}>
+                    <Building2 className="h-4 w-4" />Organization
+                  </Link>
+                )}
+              </>
+            )}
+            <Link to="/dashboard/settings/personal" className={mobileTabClass(isActive('/dashboard/settings/personal', { exact: true }))}>
+              <UserIcon className="h-4 w-4" />Profile
+            </Link>
+            <Link to="/dashboard/settings/personal/notifications" className={mobileTabClass(isActive('/dashboard/settings/personal/notifications'))}>
+              <Bell className="h-4 w-4" />Notifications
+            </Link>
+            <Link to="/dashboard/settings/personal/shortcuts" className={mobileTabClass(isActive('/dashboard/settings/personal/shortcuts'))}>
+              <Zap className="h-4 w-4" />Shortcuts
+            </Link>
+          </>
+        )}
+      </nav>
+
+      <div className="flex flex-1 min-h-0">
+      {/* Settings Sidebar — desktop only */}
+      <aside className="hidden md:flex w-56 shrink-0 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex-col">
         {websiteId ? (
           /* ──── Website Detail: contextual vertical tabs ──── */
           <>
@@ -227,6 +300,7 @@ export default function Settings() {
       <main className="flex-1 overflow-hidden relative bg-gray-50 dark:bg-gray-900">
         <Outlet />
       </main>
+      </div>
     </div>
   )
 }

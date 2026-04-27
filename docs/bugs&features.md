@@ -32,7 +32,16 @@ Phase 5 Audit — 3 items still pending:
 
 9) Dashboard side, push notification is not opening the right chat on click. ✅ FIXED — Push notification URL now uses short_id path instead of query param with numeric id
 
-10) Push notification & inapp notification should one come for assigned teams chat. If agents including owner is not assigned to any team, then for all chats it should come but only for assigned websites.
+10) Push notification & inapp notification should one come for assigned teams chat. If agents including owner is not assigned to any team, then for all chats it should come but only for assigned websites. ✅ FIXED — Full two-level scoping implemented (website → team):
+- Website level: agents only receive notifications for websites they are explicitly assigned to. OWNER/MANAGER receive all notifications for their org's websites.
+- Team level (when website has teams):
+  * Unassigned conversation (no team): all agents on that website get push + unread (any can claim it).
+  * Conversation assigned to Team A: only Team A members get push + unread. No-team agents and Team B agents are spectators (live chat list updates, no push, no unread).
+  * Once an agent joins: only the joined agent gets push + unread. All others spectate.
+  * No-team agents: unrestricted visibility (see all conversations in their list) but are spectators for team-assigned chats.
+- OWNER/MANAGER always get push + unread for all conversations regardless of team config.
+- Active chat list (`GET /chats/active`) now includes `team_id IS NULL` conversations for team-assigned agents so unassigned chats appear in their inbox.
+- Changes: `BusEvent` got `conversation_team_id` field (Redis multi-worker path); `AgentService` stores `visible_team_ids` + `is_agent_role` per socket; `broadcast_to_active_agents` enforces team + unread scoping; `_get_eligible_agent_ids_for_push` respects team assignment; docs updated (admin-guide/teams.md, agent-guide/notifications.md, agent-guide/conversations.md).
 
 11) Currently notification count badge is not working properly. When an agent is assigned to a website, then only he will get the chat. Also if a chat is joined by any agent, then for other agents un read cound need not to show. But always the chat list should get updated with live chats. ✅ FIXED — `GET /chats/active` now zeroes out `unread_count` for spectating agents: only the assigned agent (or any agent when the conversation is unassigned/open for pickup) gets the real unread count. Spectators still see the conversation in the list and it updates live, but their badge count is not inflated by chats they don't own.
 
@@ -133,3 +142,64 @@ Features:
 
    **Part C — Dashboard integration**
    - "How it works" / `?` contextual link on each major feature page pointing to the relevant `/docs` page
+
+41) Once an email address is verified, it should become read‑only and cannot be updated.
+Status: Open
+Notes:
+- Backend stores `is_email_verified` on `User` (backend/app/models/user.py) and verification flow exists (backend/app/api/auth.py).
+- Frontend user edit panel still allows changing email in frontend/src/pages/AgentsList.tsx (edit panel sets `formEmail` and sends updates).
+Recommended fix:
+- Add backend guard to reject email changes when `is_email_verified` is true (return 403/400).
+- Disable/hide email editing UI for verified users in frontend/src/pages/AgentsList.tsx and any other user-edit panels.
+Relevant files: frontend/src/pages/AgentsList.tsx, backend/app/api/auth.py, backend/app/api/users.py
+
+42) Widget: preserve first agent’s profile when a second owner joins.
+Status: Open
+Notes:
+- Widget currently updates `activeAgentName` / `activeAgentAvatarUrl` on `agent_joined` and `agent` events (widget/chat-widget.js), which can overwrite the profile shown to the visitor.
+Recommended fix:
+- Ensure widget prefers the assigned/first agent's profile for the conversation thread, and only update to a different agent when takeover semantics require it.
+Relevant files: widget/chat-widget.js
+
+43) Mobile: Optimize Contacts and Visitors pages to avoid horizontal scrolling.
+Status: Open
+Notes:
+- Pages use horizontal tables with `min-w-*` causing overflow (frontend/src/pages/CustomersContacts.tsx, frontend/src/pages/CustomersVisitors.tsx).
+Recommended fix:
+- For small screens, show 3 columns (Name, Phone, Email), reorder columns (phone second, email third), truncate long text and avoid table min-width; consider stacked list cards or responsive column hiding.
+Relevant files: frontend/src/pages/CustomersContacts.tsx, frontend/src/pages/CustomersVisitors.tsx
+
+44) Shortcuts: support formatting (Bold, Italic, Lists) for personal and website shortcuts.
+Status: Open
+Notes:
+- Shortcuts editor is a plain `Textarea` storing `message` as plaintext (frontend/src/pages/PersonalShortcutsSettings.tsx, frontend/src/pages/WebsiteShortcutsTab.tsx). ChatComposer supports richer content.
+Recommended fix:
+- Switch shortcut editor to a Markdown-friendly input or lightweight rich editor (Tiptap or a small toolbar), persist formatted content, and ensure ChatComposer renders it correctly.
+Relevant files: frontend/src/pages/PersonalShortcutsSettings.tsx, frontend/src/pages/WebsiteShortcutsTab.tsx, frontend/src/components/chat/ChatComposer.tsx
+
+45) Allow agents to assign teams to conversations (agents cannot manage teams).
+Status: Open
+Notes:
+- Team picker UI is gated by `isAdmin(user)` so only Owner/Manager can open it (frontend/src/pages/ConversationsView.tsx). Backend accepts team assignment (`PUT /conversations/{id}/team`) without additional checks.
+Recommended fix:
+- Permit Agents to open the team picker and call the assignment API, but hide/manage the "Manage teams" link and any creation actions. Enforce any scope constraints on backend (e.g., only assign teams that belong to conversation's website).
+Relevant files: frontend/src/pages/ConversationsView.tsx, frontend/src/pages/WebsiteTeamsTab.tsx, backend/app/api/conversations.py
+
+46) Mobile UX: add slide animations for list ↔ detail transitions and visitor details panel.
+Status: Open
+Notes:
+- ConversationsView mobile overlays and transitions currently lack slide-in/out animation; visitor details overlay is a fixed element without `animate-in` classes.
+Recommended fix:
+- Add Tailwind/animation classes or CSS transitions for slide-in/out on the mobile visitor details overlay and when switching between chat list and individual chat.
+Relevant files: frontend/src/pages/ConversationsView.tsx, frontend/src/components/VisitorDetailsPanel.tsx
+
+47) Widget offline-form submissions not attached after agent rejoin/offline.
+Status: Open
+Notes:
+- When the widget is offline it shows the offline form and submissions normally create conversation messages.
+- However, if an agent previously joined the conversation and later goes offline, the widget still shows the offline form but submitted form data is not added to the conversation input/messages (visitor data appears not to persist or attach to the conversation thread).
+Recommended fix:
+- Ensure the widget includes the correct `conversation_id` (or creates a new conversation) when submitting the offline form after agent join/rejoin transitions.
+- Add robust handling in `widget/chat-widget.js` to detect conversation ownership changes (agent joined → agent offline) and route offline-form submissions to the proper backend API (create message or create conversation + message).
+- Add backend logging and guard tests for the sequence: visitor offline form submit → agent joins → agent goes offline → visitor submits form.
+Relevant files: widget/chat-widget.js, backend/app/api/conversations.py, frontend/src/pages/ConversationsView.tsx

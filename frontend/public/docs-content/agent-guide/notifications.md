@@ -1,44 +1,69 @@
 # Notifications
 
-AI ChatAssist notifies agents through two channels: **browser push notifications** (works even when the tab is closed) and **in-browser sounds**.
+AI ChatAssist ensures your team stays responsive through a robust notification system including push alerts and audio cues.
 
-## Push notifications
+---
 
-Push notifications appear as system-level browser notifications. They fire when:
-- A new visitor starts a chat on one of your assigned websites
-- A visitor sends a message in a conversation assigned to you
+## Push Notifications
 
-**Scope rules:**
-- You only receive push notifications for websites you are assigned to.
-- If your website uses teams, you only receive notifications for conversations in your team.
-- Spectating agents do not receive push notifications — only the assigned agent does.
+Push notifications are delivered directly by your browser, ensuring you receive alerts even when the dashboard tab is in the background or minimized.
 
-### Enable push notifications
+### Notification Triggers
+Push notifications are dispatched in the following scenarios:
+- **New Conversation**: A visitor initiates a chat on a website you are assigned to.
+- **New Message**: A visitor sends a message in a conversation that is specifically assigned to you.
 
-1. Go to **Settings → Notifications**.
-2. Toggle **Enable push notifications** on.
-3. When the browser permission dialog appears, click **Allow**.
+### Notification Routing Logic
+To prevent alert fatigue, notifications are routed based on your role and team membership:
 
-> If you previously denied the browser permission, you need to reset it in your browser's site settings.
+| Your Status | Notification Eligibility |
+| :--- | :--- |
+| **Owner / Manager** | Receive alerts for all conversations across every website in the organization. |
+| **Team Member** | Receive alerts for unassigned conversations and conversations within your specific team. |
+| **Individual Agent** | Receive alerts for all unassigned conversations on your assigned websites. |
+| **Assigned Agent** | Once you join a chat, you are the exclusive recipient of notifications for that thread. |
 
-### Clicking a push notification
+> **Spectating**: If you view a conversation that you are not responsible for, you will see real-time updates within the dashboard, but you will not receive system push notifications or unread count increments.
 
-Clicking the notification opens the dashboard and navigates directly to that conversation.
+---
 
-## Notification sounds
+## Unread Indicators
 
-Sounds are configured under **Settings → Notifications → Sounds**.
+Unread badges provide a visual cue for pending interactions. These counts follow the same routing rules as push notifications—they only increment for conversations where you are the responsible agent or a relevant team member.
 
-| Sound trigger | Description |
-|--------------|-------------|
-| **New chat** | Plays when a new visitor starts a conversation on your website |
-| **New message** | Plays when a visitor sends a message in a conversation assigned to you |
-| **New visitor on website** | Plays only when you have the Visitors tab open |
+---
 
-You can set a different sound for each trigger (12 options + silent) and preview them before saving.
+## Audio Notifications
 
-**Sound gate:** sounds are rate-limited to once every 1.5 seconds to prevent stacking when many messages arrive at once.
+Audio alerts provide immediate feedback for activity within the dashboard. These can be customized in **Settings > Notifications > Sounds**.
 
-## Per-device settings
+### Standard Audio Triggers
+| Trigger Event | Description |
+| :--- | :--- |
+| **New Chat** | Plays when a new visitor initiates a session on your website. |
+| **New Message** | Plays when a visitor sends a message in a conversation assigned to you. |
+| **New Visitor** | Plays when a new visitor lands on the site (Active only when the Visitors tab is open). |
 
-Notification preferences are stored in the database and synced to `localStorage` on login. Your preferences follow you across devices and browsers automatically.
+### Customization Options
+- **Sound Profiles**: Choose from 12 distinct audio profiles or set specific triggers to silent.
+- **Audio Rate-Limiting**: To prevent overlapping sounds, audio alerts are limited to once every 1.5 seconds.
+
+---
+
+## Setup & Configuration
+
+### Enabling Browser Alerts
+Follow these steps to enable push notifications:
+- **Step 1**: Navigate to **Settings > Notifications**.
+- **Step 2**: Toggle the **Enable push notifications** switch to the ON position.
+- **Step 3**: When the browser prompts for permission, click **Allow**.
+
+> If you previously blocked notification permissions, you must manually reset them in your browser's site settings (usually found by clicking the lock icon in the address bar).
+
+---
+
+## Synchronization & Device Settings
+
+Your notification preferences are securely stored in the cloud and synchronized across all your devices. When you log in on a new browser or machine, your custom sound profiles and alert toggles are automatically applied.
+
+> **Test Your Setup**: Use the "Test Notification" button in the settings panel to ensure your browser and operating system are correctly delivering alerts.
