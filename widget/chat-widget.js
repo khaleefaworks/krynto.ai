@@ -1301,6 +1301,11 @@
       titleEl.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:4px;';
       titleEl.textContent = formName;
       formEl.appendChild(titleEl);
+      const _isDarkTheme = String(CONFIG.theme || '').toLowerCase() === 'dark';
+      const _inputBg = _isDarkTheme ? '#0f172a' : '#ffffff';
+      const _inputBorder = _isDarkTheme ? '#334155' : '#e5e7eb';
+      const _inputColor = _isDarkTheme ? '#e2e8f0' : '#111827';
+
       fields.forEach(function (field) {
         const label = document.createElement('label');
         label.style.cssText = 'font-size:12px;display:flex;flex-direction:column;gap:3px;';
@@ -1317,6 +1322,11 @@
         inputEl.required = !!field.required;
         inputEl.placeholder = field.placeholder || '';
         inputEl.style.cssText = 'padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;';
+        try {
+          inputEl.style.background = _inputBg;
+          inputEl.style.borderColor = _inputBorder;
+          inputEl.style.color = _inputColor;
+        } catch (e) { }
         label.appendChild(inputEl);
         formEl.appendChild(label);
       });
@@ -2295,6 +2305,11 @@
           const formContainer = panel.querySelector('.chatassist-contact-form');
           if (formContainer) {
             formContainer.innerHTML = '';
+            const _isDark = String(CONFIG.theme || '').toLowerCase() === 'dark';
+            const _bg = _isDark ? '#0f172a' : '#ffffff';
+            const _border = _isDark ? '#334155' : '#e5e7eb';
+            const _color = _isDark ? '#e2e8f0' : '#111827';
+
             (configForm.fields || []).forEach(f => {
               const label = document.createElement('label');
               label.style.cssText = 'font-size:13px;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;';
@@ -2327,6 +2342,11 @@
               inputEl.required = !!f.required;
               inputEl.placeholder = f.placeholder || '';
               inputEl.style.cssText = 'padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;';
+              try {
+                inputEl.style.background = _bg;
+                inputEl.style.borderColor = _border;
+                inputEl.style.color = _color;
+              } catch (e) { }
               label.appendChild(inputEl);
               formContainer.appendChild(label);
             });
