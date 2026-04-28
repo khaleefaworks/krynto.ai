@@ -13,6 +13,7 @@ import { automationsApi, type Automation, type AutomationAction } from '@/servic
 import WebsiteShortcutsTab from './WebsiteShortcutsTab'
 import WebsiteTagsTab from './WebsiteTagsTab'
 import WebsiteTeamsTab from './WebsiteTeamsTab'
+import WebsiteFormsTab from './WebsiteFormsTab'
 import WebsiteWidgetTab from './WebsiteWidgetTab'
 
 interface Website {
@@ -109,7 +110,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'danger'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'forms' | 'danger'
 
 type AutomationsSubTab = 'library' | 'messages' | 'chatbots' | 'ai_agents'
 
@@ -122,7 +123,7 @@ type AutomationDraft = {
   name: string
   trigger: string
   enabled: boolean
-  action_type: 'send_bot_message' | 'emit_system_event'
+  action_type: 'send_bot_message' | 'emit_system_event' | 'show_rating_popup' | 'tag_conversation' | 'tag_with_agent_name'
   action_index?: number
   message: string
   event_type?: string
@@ -1024,9 +1025,12 @@ export default function WebsiteDetail() {
       {!isNew && activeTab === 'teams' && isAdmin(user) && websiteId && (
         <WebsiteTeamsTab websiteId={websiteId} />
       )}
+      {!isNew && activeTab === 'forms' && isAdmin(user) && websiteId && (
+        <WebsiteFormsTab websiteId={websiteId} />
+      )}
 
       {/* Scrollable content (hidden when full-height tabs are active) */}
-      {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && (
+      {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && activeTab !== 'forms' && (
         <div className="flex-1 overflow-auto">
           <div className="px-6 py-6 space-y-6">
             {error && (
@@ -1343,9 +1347,10 @@ export default function WebsiteDetail() {
                         return true
                       })
                       const TRIGGER_GROUPS: { label: string; triggers: string[] }[] = [
-                        { label: 'On visitor connect', triggers: ['visitor_connected', 'visitor_socket_connected'] },
-                        { label: 'During conversation', triggers: ['no_agent_assigned_for', 'website_offline_first_message'] },
-                        { label: 'On conversation close', triggers: ['visitor_closed_chat', 'visitor_left_website', 'conversation_resolved', 'conversation_reopened'] },
+                        { label: 'On visitor connect', triggers: ['visitor_connected', 'visitor_socket_connected', 'visitor_new', 'visitor_returning'] },
+                        { label: 'Visitor presence', triggers: ['visitor_dropped', 'visitor_reconnected'] },
+                        { label: 'During conversation', triggers: ['no_agent_assigned_for', 'website_offline_first_message', 'agent_joined'] },
+                        { label: 'On conversation close', triggers: ['conversation_visitor_ended', 'conversation_resolved', 'conversation_auto_resolved'] },
                       ]
                       const groupedTriggers = new Set(TRIGGER_GROUPS.flatMap((g) => g.triggers))
                       const otherAutomations = messageAutomations.filter((a) => !groupedTriggers.has(a.trigger))
@@ -1696,12 +1701,16 @@ export default function WebsiteDetail() {
                                   >
                                     <option value="visitor_connected">Visitor connected</option>
                                     <option value="visitor_socket_connected">Visitor (re)connected</option>
+                                    <option value="visitor_new">First-time visitor (new)</option>
+                                    <option value="visitor_returning">Returning visitor</option>
+                                    <option value="visitor_dropped">Visitor left page</option>
+                                    <option value="visitor_reconnected">Visitor returned to page</option>
                                     <option value="no_agent_assigned_for">No agent assigned for</option>
                                     <option value="website_offline_first_message">Website offline: first message</option>
-                                    <option value="visitor_closed_chat">Visitor closed chat</option>
-                                    <option value="visitor_left_website">Visitor left website</option>
+                                    <option value="conversation_visitor_ended">Visitor ended chat</option>
                                     <option value="conversation_resolved">Conversation resolved</option>
-                                    <option value="conversation_reopened">Conversation reopened</option>
+                                    <option value="conversation_auto_resolved">Auto-resolved (inactivity)</option>
+                                    <option value="agent_joined">Agent joined</option>
                                   </select>
                                 </div>
                               </div>
@@ -1860,6 +1869,9 @@ export default function WebsiteDetail() {
                                 >
                                   <option value="send_bot_message">Bot message</option>
                                   <option value="emit_system_event">System event</option>
+                                  <option value="show_rating_popup">Show rating popup</option>
+                                  <option value="tag_conversation">Tag conversation</option>
+                                  <option value="tag_with_agent_name">Tag with agent name</option>
                                 </select>
                               </div>
 

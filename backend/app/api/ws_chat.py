@@ -43,7 +43,7 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
         return dt
 
 
-VISITOR_LEFT_DELAY_SECONDS = 2
+VISITOR_LEFT_DELAY_SECONDS = 45
 _visitor_left_scheduled: set[int] = set()
 
 
@@ -335,10 +335,7 @@ async def chat_ws(
             pass
 
         # Load history only for an OPEN conversation tied to this session.
-        # IMPORTANT: Do NOT create a new conversation just because the widget connected.
-        # If all prior conversations are resolved, the generic widget route must
-        # start empty; resolved history is opened explicitly via the
-        # /ws/chat/{website_id}/{session_id}/{conversation_id} route.
+        # Do NOT create a new conversation just because the widget connected.
         conversation = None
         try:
             conversation = conversations_repo.get_open_conversation_by_session(
@@ -348,32 +345,6 @@ async def chat_ws(
             )
         except Exception:
             conversation = None
-
-        # If the visitor intentionally ended this conversation, properly resolve it
-        # before starting a fresh one.  Two OPEN conversations per session cannot
-        # coexist, so the visitor-ended conversation must be closed first.
-        # We call close_conversation() (not a raw DB write) so the agent dashboard
-        # receives a clean conversation_closed broadcast and the conv moves to the
-        # Resolved tab explicitly instead of silently disappearing.
-        if conversation:
-            try:
-                from app.models.message import Message as _Msg
-                _visitor_left = (
-                    db.query(_Msg)
-                    .filter(
-                        _Msg.conversation_id == conversation.id,
-                        _Msg.event_type == "visitor_left",
-                    )
-                    .first()
-                )
-                if _visitor_left:
-                    await orchestrator.close_conversation(
-                        conversation_id=int(conversation.id),
-                        closed_by="visitor_ended",
-                    )
-                    conversation = None
-            except Exception:
-                pass
 
         if conversation:
             # Track whether this conversation already had an active visitor socket.
@@ -388,10 +359,22 @@ async def chat_ws(
 
             # Smartsupp-like: visitor reconnected/connected (internal timeline event).
             try:
-                # If a delayed "left" is scheduled, treat this as a transient reconnect and
-                # avoid persisting a redundant "connected" event (page refresh / quick reconnect).
-                if (not _was_active) and (int(conversation.id) not in _visitor_left_scheduled):
-                    await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
+                if not _was_active:
+                    # Check if a visitor_dropped event was already recorded for this conversation.
+                    # If so, this is a true reconnect (visitor came back after truly leaving).
+                    from app.models.message import Message as _Msg
+                    _had_drop = (
+                        db.query(_Msg)
+                        .filter(
+                            _Msg.conversation_id == conversation.id,
+                            _Msg.event_type == "visitor_dropped",
+                        )
+                        .first()
+                    )
+                    if _had_drop:
+                        await orchestrator.visitor_reconnected(conversation_id=int(conversation.id))
+                    elif int(conversation.id) not in _visitor_left_scheduled:
+                        await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
             except Exception:
                 pass
 
@@ -595,6 +578,27 @@ async def chat_ws(
                 ws_message(kind="chat", direction="in", message_type=str(message_type or "unknown"))
             except Exception:
                 pass
+
+            # Heartbeat ping — update last_seen_at so the dropped-visitor heuristic
+            # can tell a page reload from a true leave (45-second window).
+            if message_type == "ping":
+                try:
+                    if registered_conversation_id is not None:
+                        from app.models.conversation import Conversation as _Conv
+                        _c = db.query(_Conv).filter_by(id=registered_conversation_id).first()
+                        if _c:
+                            _c.last_seen_at = datetime.utcnow()
+                            db.commit()
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
+                continue
 
             # Page view / browsing history event.
             # This can arrive even before the first visitor message, so it must NOT create

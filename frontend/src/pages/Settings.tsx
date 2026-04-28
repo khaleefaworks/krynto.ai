@@ -15,6 +15,7 @@ import {
   Trash2,
   Building2,
   Bell,
+  FileText,
 } from "lucide-react"
 
 
@@ -89,6 +90,9 @@ export default function Settings() {
                 </Link>
                 <Link to={`/dashboard/settings/websites/${websiteId}?tab=tags`} className={mobileTabClass(activeTab === 'tags')}>
                   <TagIcon className="h-4 w-4" />Tags
+                </Link>
+                <Link to={`/dashboard/settings/websites/${websiteId}?tab=forms`} className={mobileTabClass(activeTab === 'forms')}>
+                  <FileText className="h-4 w-4" />Forms
                 </Link>
               </>
             )}
@@ -192,6 +196,13 @@ export default function Settings() {
                   >
                     <TagIcon className="h-4 w-4 shrink-0" />
                     Tags
+                  </Link>
+                  <Link
+                    to={`/dashboard/settings/websites/${websiteId}?tab=forms`}
+                    className={tabLinkClass(activeTab === "forms")}
+                  >
+                    <FileText className="h-4 w-4 shrink-0" />
+                    Forms
                   </Link>
                 </>
               )}

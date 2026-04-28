@@ -11,11 +11,76 @@ from app.models.automation import Automation
 logger = get_logger(__name__)
 
 
+def _parse_repeat_config(conditions: Any, trigger: str) -> tuple[str, int | None]:
+    """Extract repeat mode and cooldown_seconds from an automation's conditions dict."""
+    try:
+        c = json.loads(conditions) if isinstance(conditions, str) else (conditions or {})
+    except Exception:
+        c = {}
+    if not isinstance(c, dict):
+        c = {}
+
+    repeat = str(c.get("repeat") or "").strip().lower()
+    if repeat not in {"once", "cooldown", "always"}:
+        repeat = "cooldown" if trigger == "visitor_connected" else "once"
+
+    cooldown: int | None = None
+    if repeat == "cooldown":
+        raw = c.get("repeat_cooldown_seconds") or c.get("cooldown_seconds")
+        if raw is None:
+            hours = c.get("cooldown_hours")
+            if hours is not None:
+                try:
+                    raw = int(hours) * 3600
+                except Exception:
+                    pass
+        if raw is not None:
+            try:
+                cooldown = max(1, int(raw))
+            except Exception:
+                cooldown = None
+
+    return repeat, cooldown
+
+
 class AutomationService:
-    """Minimal automation runner for MVP triggers (bot message actions only)."""
+    """Automation runner: executes ordered multi-action pipelines per trigger."""
 
     def __init__(self, db: Session):
         self.db = db
+
+    # ─── Core unified accessor ────────────────────────────────────────────────
+
+    def get_automations_with_actions(self, *, website_id: int, trigger: str) -> list[dict]:
+        """Return all enabled automations for a trigger as an ordered list.
+
+        Each entry: {automation_id, actions: [action_dicts], repeat, cooldown_seconds}
+        Actions are normalized to a list and filtered to non-empty dicts.
+        """
+        result: list[dict] = []
+        for automation in self.list_enabled_for_trigger(website_id=website_id, trigger=trigger):
+            raw = automation.actions or {}
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            if isinstance(raw, dict):
+                actions = [raw] if raw else []
+            elif isinstance(raw, list):
+                actions = [a for a in raw if isinstance(a, dict)]
+            else:
+                actions = []
+            if not actions:
+                continue
+            repeat, cooldown = _parse_repeat_config(automation.conditions, trigger)
+            result.append({
+                "automation_id": automation.id,
+                "actions": actions,
+                "repeat": repeat,
+                "cooldown_seconds": cooldown,
+            })
+        return result
 
     def list_enabled_for_trigger(self, *, website_id: int, trigger: str) -> List[Automation]:
         return (
@@ -162,140 +227,123 @@ class AutomationService:
     def ensure_default_automations_for_website(self, *, website_id: int) -> None:
         """Create default automations for a website if missing.
 
-        Safe to call multiple times; only inserts missing triggers.
+        Safe to call multiple times; only inserts missing (trigger, name) pairs.
         """
         defaults = [
+            # ─── Connection / visitor type ───────────────────────────────────
             {
                 "name": "Welcome message",
                 "trigger": "visitor_connected",
                 "enabled": True,
                 "conditions": {"cooldown_hours": 24},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Hi! How can we help you today?",
-                        "event_type": "automation_welcome",
-                    }
-                ],
+                "actions": [{"type": "send_bot_message", "message": "Hi! How can we help you today?", "event_type": "automation_welcome"}],
             },
+            {
+                "name": "New visitor welcome",
+                "trigger": "visitor_new",
+                "enabled": False,
+                "conditions": {"repeat": "once"},
+                "actions": [{"type": "send_bot_message", "message": "Hi! Welcome — is there anything we can help you with?", "event_type": "bot_new_visitor"}],
+            },
+            {
+                "name": "Returning visitor welcome",
+                "trigger": "visitor_returning",
+                "enabled": False,
+                "conditions": {"repeat": "once"},
+                "actions": [{"type": "send_bot_message", "message": "Welcome back! How can we help?", "event_type": "bot_returning_visitor"}],
+            },
+            # ─── Presence timeline ───────────────────────────────────────────
             {
                 "name": "Visitor connected event",
                 "trigger": "visitor_socket_connected",
                 "enabled": False,
                 "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor has just connected.",
-                        "event_type": "visitor_socket_connected",
-                    }
-                ],
+                "actions": [{"type": "emit_system_event", "content": "Visitor has just connected.", "event_type": "visitor_socket_connected"}],
             },
+            {
+                "name": "Visitor dropped event",
+                "trigger": "visitor_dropped",
+                "enabled": True,
+                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
+                "actions": [{"type": "emit_system_event", "content": "Visitor left the page.", "event_type": "visitor_dropped"}],
+            },
+            {
+                "name": "Visitor reconnected",
+                "trigger": "visitor_reconnected",
+                "enabled": False,
+                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
+                "actions": [{"type": "emit_system_event", "content": "Visitor returned to the page.", "event_type": "visitor_reconnected"}],
+            },
+            # ─── During conversation ─────────────────────────────────────────
             {
                 "name": "Waiting message",
                 "trigger": "no_agent_assigned_for",
                 "enabled": True,
                 "conditions": {"delay_seconds": 60},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! An agent will be with you shortly.",
-                        "event_type": "bot_waiting",
-                    }
-                ],
+                "actions": [{"type": "send_bot_message", "message": "Thanks! An agent will be with you shortly.", "event_type": "bot_waiting"}],
             },
             {
                 "name": "Offline prompt",
                 "trigger": "website_offline_first_message",
                 "enabled": True,
                 "conditions": {},
+                "actions": [{"type": "send_bot_message", "message": "We're offline right now. Leave us your email and we'll get back to you soon.", "event_type": "bot_offline"}],
+            },
+            {
+                "name": "Agent joined",
+                "trigger": "agent_joined",
+                "enabled": True,
+                "conditions": {"repeat": "always"},
+                "actions": [{"type": "tag_with_agent_name"}],
+            },
+            # ─── Visitor ended ───────────────────────────────────────────────
+            {
+                "name": "Visitor ended chat",
+                "trigger": "conversation_visitor_ended",
+                "enabled": True,
+                "conditions": {"repeat": "once"},
                 "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                        "event_type": "bot_offline",
-                    }
+                    {"type": "emit_system_event", "content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended"},
+                    {"type": "show_rating_popup", "event_type": "rating_popup_shown"},
                 ],
             },
+            {
+                "name": "Visitor ended bot message",
+                "trigger": "conversation_visitor_ended",
+                "enabled": False,
+                "conditions": {"repeat": "once"},
+                "actions": [{"type": "send_bot_message", "message": "Thanks for chatting! If you need more help, just send us a message.", "event_type": "bot_visitor_ended"}],
+            },
+            # ─── Resolved ────────────────────────────────────────────────────
             {
                 "name": "Closing message",
                 "trigger": "conversation_resolved",
                 "enabled": False,
                 "conditions": {},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! This conversation is now closed.",
-                        "event_type": "bot_closing",
-                    }
-                ],
+                "actions": [{"type": "send_bot_message", "message": "Thanks! This conversation is now closed.", "event_type": "bot_closing"}],
             },
             {
-                "name": "Resolved event",
+                "name": "Resolved rating",
                 "trigger": "conversation_resolved",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "This conversation has been resolved.",
-                        "event_type": "conversation_resolved",
-                    }
-                ],
+                "enabled": True,
+                "conditions": {"repeat": "once"},
+                "actions": [{"type": "show_rating_popup", "event_type": "rating_popup_shown"}],
             },
             {
-                "name": "Visitor closed event",
-                "trigger": "visitor_closed_chat",
+                "name": "Auto-resolved event",
+                "trigger": "conversation_auto_resolved",
                 "enabled": True,
                 "conditions": {},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor closed chat.",
-                        "event_type": "visitor_closed_chat",
-                    }
-                ],
+                "actions": [{"type": "emit_system_event", "content": "Conversation automatically resolved after visitor ended (24 h).", "event_type": "conversation_auto_resolved"}],
             },
-            {
-                "name": "Visitor closed message",
-                "trigger": "visitor_closed_chat",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! If you need anything else, just send another message.",
-                        "event_type": "bot_visitor_closed",
-                    }
-                ],
-            },
-            {
-                "name": "Visitor left website event",
-                "trigger": "visitor_left_website",
-                "enabled": True,
-                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor left website.",
-                        "event_type": "visitor_left_website",
-                    }
-                ],
-            },
+            # ─── Chatbot ─────────────────────────────────────────────────────
             {
                 "name": "Team routing chatbot",
                 "trigger": "conversation_created",
                 "enabled": False,
                 "category": "chatbot_flow",
                 "conditions": {},
-                "actions": [
-                    {
-                        "type": "bot_prompt_buttons",
-                        "message": "Welcome! What are you looking for?",
-                        "allow_input": False,
-                        "buttons": [],
-                    }
-                ],
+                "actions": [{"type": "bot_prompt_buttons", "message": "Welcome! What are you looking for?", "allow_input": False, "buttons": []}],
             },
         ]
 
@@ -339,200 +387,40 @@ class AutomationService:
             self.db.commit()
 
     def get_bot_message_actions(self, *, website_id: int, trigger: str) -> List[dict]:
-        """Return bot message actions for a trigger.
-
-        Supported actions schema:
-        - actions: [{"type": "send_bot_message", "message": "...", "event_type": "bot_waiting"}]
-        - actions: {"type": "send_bot_message", "message": "..."}
-        """
-        actions: List[dict] = []
-        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-
-        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
-            # repeat: once | cooldown | always
-            try:
-                if isinstance(conditions, str):
-                    conditions_obj = json.loads(conditions)
-                else:
-                    conditions_obj = conditions
-            except Exception:
-                conditions_obj = {}
-            if not isinstance(conditions_obj, dict):
-                conditions_obj = {}
-
-            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
-            if repeat not in {"once", "cooldown", "always"}:
-                # Backward-compatible defaults.
-                repeat = "cooldown" if trigger == "visitor_connected" else "once"
-
-            cooldown_seconds: int | None = None
-            if repeat == "cooldown":
-                raw = (
-                    conditions_obj.get("repeat_cooldown_seconds")
-                    if conditions_obj.get("repeat_cooldown_seconds") is not None
-                    else conditions_obj.get("cooldown_seconds")
-                )
-                if raw is None:
-                    raw = conditions_obj.get("cooldown_hours")
-                    if raw is not None:
-                        try:
-                            raw = int(raw) * 3600
-                        except Exception:
-                            raw = None
-                if raw is not None:
-                    try:
-                        cooldown_seconds = max(1, int(raw))
-                    except Exception:
-                        cooldown_seconds = None
-
-            return repeat, cooldown_seconds
-
-        for automation in automations:
-            raw_actions = automation.actions or {}
-            if isinstance(raw_actions, str):
-                try:
-                    raw_actions = json.loads(raw_actions)
-                except Exception:
-                    raw_actions = {}
-            normalized: Iterable[dict]
-            if isinstance(raw_actions, list):
-                normalized = [a for a in raw_actions if isinstance(a, dict)]
-            elif isinstance(raw_actions, dict):
-                normalized = [raw_actions]
-            else:
-                normalized = []
-
-            for action in normalized:
+        """Return send_bot_message actions for a trigger (with repeat config merged in)."""
+        result: List[dict] = []
+        for entry in self.get_automations_with_actions(website_id=website_id, trigger=trigger):
+            for action in entry["actions"]:
                 if str(action.get("type") or "").lower() != "send_bot_message":
                     continue
-
-                # Backward-compatibility: older UI versions stored some system events
-                # as `send_bot_message` with event_type == trigger (e.g. conversation_resolved).
-                # Those should be treated as system events, not bot messages.
-                if trigger == "conversation_resolved":
-                    event_type = action.get("event_type")
-                    if isinstance(event_type, str) and event_type.strip() == trigger:
-                        continue
-
                 message = action.get("message")
                 if not isinstance(message, str) or not message.strip():
                     continue
-
-                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
-                actions.append(
-                    {
-                        "message": message.strip(),
-                        "event_type": action.get("event_type") or None,
-                        "repeat": repeat,
-                        "repeat_cooldown_seconds": cooldown_seconds,
-                        "automation_id": getattr(automation, "id", None),
-                    }
-                )
-
-        return actions
+                result.append({
+                    "message": message.strip(),
+                    "event_type": action.get("event_type") or None,
+                    "repeat": entry["repeat"],
+                    "repeat_cooldown_seconds": entry["cooldown_seconds"],
+                    "automation_id": entry["automation_id"],
+                })
+        return result
 
     def get_system_event_actions(self, *, website_id: int, trigger: str) -> List[dict]:
-        """Return system event actions for a trigger.
-
-        Supported actions schema:
-        - actions: [{"type": "emit_system_event", "content": "...", "event_type": "..."}]
-        - actions: {"type": "emit_system_event", "content": "...", "event_type": "..."}
-
-        Notes:
-        - This does not persist anything by itself; callers decide whether/how to apply these.
-        - `content` may also be provided as `message` for convenience.
-        """
-        actions: List[dict] = []
-        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-
-        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
-            try:
-                if isinstance(conditions, str):
-                    conditions_obj = json.loads(conditions)
-                else:
-                    conditions_obj = conditions
-            except Exception:
-                conditions_obj = {}
-            if not isinstance(conditions_obj, dict):
-                conditions_obj = {}
-
-            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
-            if repeat not in {"once", "cooldown", "always"}:
-                repeat = "cooldown" if trigger == "visitor_connected" else "once"
-
-            cooldown_seconds: int | None = None
-            if repeat == "cooldown":
-                raw = (
-                    conditions_obj.get("repeat_cooldown_seconds")
-                    if conditions_obj.get("repeat_cooldown_seconds") is not None
-                    else conditions_obj.get("cooldown_seconds")
-                )
-                if raw is None:
-                    raw = conditions_obj.get("cooldown_hours")
-                    if raw is not None:
-                        try:
-                            raw = int(raw) * 3600
-                        except Exception:
-                            raw = None
-                if raw is not None:
-                    try:
-                        cooldown_seconds = max(1, int(raw))
-                    except Exception:
-                        cooldown_seconds = None
-
-            return repeat, cooldown_seconds
-
-        for automation in automations:
-            raw_actions = automation.actions or {}
-            if isinstance(raw_actions, str):
-                try:
-                    raw_actions = json.loads(raw_actions)
-                except Exception:
-                    raw_actions = {}
-
-            normalized: Iterable[dict]
-            if isinstance(raw_actions, list):
-                normalized = [a for a in raw_actions if isinstance(a, dict)]
-            elif isinstance(raw_actions, dict):
-                normalized = [raw_actions]
-            else:
-                normalized = []
-
-            for action in normalized:
-                action_type = str(action.get("type") or "").lower()
-
-                # Primary supported action type.
-                if action_type == "emit_system_event":
-                    pass
-                # Backward-compatibility: treat `send_bot_message` where event_type == trigger
-                # as a system event (this matches how older templates were saved).
-                elif action_type == "send_bot_message" and trigger == "conversation_resolved":
-                    event_type = action.get("event_type")
-                    if not (isinstance(event_type, str) and event_type.strip() == trigger):
-                        continue
-                else:
+        """Return emit_system_event actions for a trigger (with repeat config merged in)."""
+        result: List[dict] = []
+        for entry in self.get_automations_with_actions(website_id=website_id, trigger=trigger):
+            for action in entry["actions"]:
+                if str(action.get("type") or "").lower() != "emit_system_event":
                     continue
-
-                content = action.get("content")
-                if content is None:
-                    content = action.get("message")
+                content = action.get("content") or action.get("message")
                 if not isinstance(content, str) or not content.strip():
                     continue
-
-                event_type = action.get("event_type")
-                if event_type is not None and not isinstance(event_type, str):
-                    event_type = str(event_type)
-
-                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
-
-                actions.append(
-                    {
-                        "content": content.strip(),
-                        "event_type": event_type.strip() if isinstance(event_type, str) and event_type.strip() else None,
-                        "repeat": repeat,
-                        "repeat_cooldown_seconds": cooldown_seconds,
-                        "automation_id": getattr(automation, "id", None),
-                    }
-                )
-
-        return actions
+                result.append({
+                    "content": content.strip(),
+                    "visitor_content": action.get("visitor_content"),
+                    "event_type": action.get("event_type") or None,
+                    "repeat": entry["repeat"],
+                    "repeat_cooldown_seconds": entry["cooldown_seconds"],
+                    "automation_id": entry["automation_id"],
+                })
+        return result

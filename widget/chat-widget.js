@@ -89,6 +89,7 @@
   // chatbot_pending / bot_prompt message arrives first. On bot_prompt the
   // visitor must click a button (or allow_input=true) to reveal it.
   let _inputRevealTimer = null;
+  let _pingInterval = null;
   let pendingOfflineMessage = null;
   let pendingOfflineAttachments = [];
 
@@ -1028,6 +1029,14 @@
           clearTimeout(reconnectTimeout);
           reconnectTimeout = null;
         }
+        // Heartbeat: send ping every 15s so the server knows the visitor is still on the page.
+        // Keeps the 45-second visitor_dropped debounce from firing on slow pages.
+        if (_pingInterval) clearInterval(_pingInterval);
+        _pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+          }
+        }, 15000);
         // Start the input reveal timer. If no chatbot_pending / bot_prompt
         // arrives within 2500ms the input area is revealed (no chatbot active).
         clearTimeout(_inputRevealTimer);
@@ -1041,6 +1050,7 @@
       ws.onclose = () => {
         isConnecting = false;
         ws = null;
+        if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
         showToast('Connection lost. Reconnecting...');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
@@ -1223,20 +1233,12 @@
 
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
-        else showSystemMessage(data.message);
-        // When conversation is resolved, show rating overlay (skip for inactivity closes)
+        else if (eventType !== 'conversation_resolved') showSystemMessage(data.message);
+        // conversation_resolved UI transition now handled by show_rating_popup WS event from automations
         if (eventType === 'conversation_resolved') {
-          const closedBy = (dto && dto.closed_by) || (data && data.closed_by) || null;
-          const convId = (dto && dto.conversation_id) || (data && data.conversation_id) || ratingConversationId;
           if (ratingTriggeredByVisitorEnd) {
-            // Visitor's confirm-button click already showed the rating overlay and
-            // is handling the whole transition. Suppress the duplicate server echo.
-            // Silently update ratingConversationId in case it wasn't set yet.
-            if (convId) ratingConversationId = convId;
-          } else if (closedBy !== 'inactivity') {
-            showRatingOverlay(convId);
+            // Visitor's confirm-button click already showed the rating overlay — no-op.
           } else {
-            // Inactivity: visitor was offline anyway; just transition view
             afterConversationClose();
           }
         }
@@ -1248,6 +1250,22 @@
         showNewMsgIndicator();
       }
       smartScroll();
+      return;
+    }
+
+    // Automation-driven rating popup (decoupled from conversation_resolved system event).
+    if (data.type === 'show_rating_popup') {
+      if (!ratingTriggeredByVisitorEnd) {
+        const convId = data.conversation_id || ratingConversationId;
+        if (convId) ratingConversationId = convId;
+        showRatingOverlay(ratingConversationId);
+      }
+      return;
+    }
+
+    // Dynamic form display stub (show_form automation action).
+    if (data.type === 'show_form') {
+      // TODO: render the form fields from data.form
       return;
     }
 
