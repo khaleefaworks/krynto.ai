@@ -43,6 +43,7 @@ def send_web_push_to_subscriptions(
     }
 
     count = 0
+    stale_sub_ids: list[tuple[int, str]] = []  # (agent_id, endpoint)
 
     for sub in subscriptions:
         try:
@@ -60,10 +61,35 @@ def send_web_push_to_subscriptions(
             )
             count += 1
         except Exception as e:
+            err_str = str(e)
+            # HTTP 410 Gone — push endpoint is no longer valid (browser unsubscribed,
+            # different device, or stale dev session). Remove it so it doesn't accumulate.
+            is_gone = "410" in err_str or (
+                hasattr(e, "response")
+                and getattr(getattr(e, "response", None), "status_code", None) == 410
+            )
+            if is_gone:
+                stale_sub_ids.append((sub.agent_id, sub.endpoint))
             logger.warning(
                 "web_push_send_failed",
                 agent_id=sub.agent_id,
-                error=str(e),
+                status_gone=is_gone,
+                error=err_str[:200],
             )
+
+    # Prune stale subscriptions in a dedicated session (safe to call from thread executor).
+    if stale_sub_ids:
+        try:
+            from app.core.database import SessionLocal
+            from app.repos import push_subscriptions as push_subs_repo
+
+            db = SessionLocal()
+            try:
+                for agent_id, endpoint in stale_sub_ids:
+                    push_subs_repo.delete_subscription(db, agent_id=agent_id, endpoint=endpoint)
+            finally:
+                db.close()
+        except Exception as cleanup_err:
+            logger.warning("push_stale_cleanup_failed", error=str(cleanup_err))
 
     return count

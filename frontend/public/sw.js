@@ -32,6 +32,10 @@ self.addEventListener('push', (event) => {
     const title = String(data.title || 'New chat')
     const body = String(data.body || '')
     const url = String(data.url || '/')
+    // Derive a tag so the browser collapses rapid duplicate notifications
+    // (e.g. if multiple stale subscriptions still exist for the same agent).
+    // Different conversation URLs produce different tags so distinct chats still each show.
+    const tag = `aica:${title.slice(0, 30)}:${url.slice(0, 60)}`
 
     event.waitUntil(
         (async () => {
@@ -43,6 +47,7 @@ self.addEventListener('push', (event) => {
                     body,
                     icon: '/android-chrome-192x192.png',
                     badge: '/favicon-32x32.png',
+                    tag,
                     data: { url },
                 })
 

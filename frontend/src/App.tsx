@@ -67,6 +67,12 @@ function _shouldBeep(key: string, minIntervalMs: number): boolean {
   return _shouldToast(`beep:${key}`, minIntervalMs)
 }
 
+// Race-fix: visitor_message often arrives a few ms before new_chat for the same
+// first message. We delay the message sound 200 ms so a near-simultaneous
+// new_chat event can cancel it and play the correct "New chat" sound instead.
+// The existing 1500 ms gate handles the reverse order (new_chat first).
+const _pendingMsgSoundTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
 function App() {
   const {
     token,
@@ -258,6 +264,17 @@ function App() {
             : Number((data as any)?.website_id) || undefined
 
         if (data.type === 'new_chat') {
+          // Cancel any pending visitor_message sound for this conversation —
+          // new_chat takes priority and plays the "New chat" sound instead.
+          // The 1500 ms gate handles the reverse order (new_chat arrives first).
+          if (conversationId) {
+            const pending = _pendingMsgSoundTimers.get(conversationId)
+            if (pending !== undefined) {
+              clearTimeout(pending)
+              _pendingMsgSoundTimers.delete(conversationId)
+            }
+          }
+
           if (_shouldPlaySound()) {
             try { playNewVisitorNotificationSound() } catch { }
           }
@@ -279,11 +296,27 @@ function App() {
             void 0  // in-app toasts removed; desktop push + sounds handle notifications
           }
         } else if (data.type === 'visitor_message') {
-          // Only play on visitor_message — not on conversation_unread.
-          // The backend sends both events for the same message; listening to
-          // conversation_unread here caused a double-sound on every message.
-          if (_shouldPlaySound()) {
-            try { playMessageNotificationSound() } catch { }
+          // Delay 200 ms: if a new_chat event arrives for the same conversation
+          // within that window it will cancel this timer and play the correct
+          // "New chat" sound. For all subsequent messages the timer simply fires
+          // and plays the message sound normally.
+          // If a timer is already pending for this conversation (rapid messages),
+          // do NOT skip — cancel the old one and start a fresh 200 ms window.
+          if (conversationId) {
+            const existing = _pendingMsgSoundTimers.get(conversationId)
+            if (existing !== undefined) clearTimeout(existing)
+            const timer = setTimeout(() => {
+              _pendingMsgSoundTimers.delete(conversationId)
+              if (_shouldPlaySound()) {
+                try { playMessageNotificationSound() } catch { }
+              }
+            }, 200)
+            _pendingMsgSoundTimers.set(conversationId, timer)
+          } else {
+            // No conversation id — play immediately (fallback, should be rare).
+            if (_shouldPlaySound()) {
+              try { playMessageNotificationSound() } catch { }
+            }
           }
         }
       } catch {

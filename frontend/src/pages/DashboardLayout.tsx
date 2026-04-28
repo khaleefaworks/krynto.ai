@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
-import OnboardingWizard, { isDismissed, dismissOnboarding, hasCompletedOnboarding } from '@/components/OnboardingWizard'
+import OnboardingWizard, { dismissOnboarding } from '@/components/OnboardingWizard'
 
 import { API_BASE } from '@/config/endpoints'
 
@@ -37,18 +37,6 @@ export default function DashboardLayout() {
     userId: user?.id ?? null,
     role: user?.role ?? null,
   }
-
-  const shouldAutoOpenWizard = location.pathname === '/dashboard' || location.pathname.startsWith('/dashboard/chats')
-
-  // Auto-show the wizard for owner/manager/admin users until setup is completed or explicitly suppressed.
-  useEffect(() => {
-    if (!user) return
-    if (!isAdmin(user)) return
-    if (!shouldAutoOpenWizard) return
-    if (isDismissed(onboardingScope)) return
-    if (hasCompletedOnboarding(onboardingScope)) return
-    setWizardOpen(true)
-  }, [user, shouldAutoOpenWizard, onboardingScope.orgId, onboardingScope.orgSlug, onboardingScope.userId, onboardingScope.role])
 
   useEffect(() => {
     localStorage.setItem('darkMode', JSON.stringify(darkMode))
