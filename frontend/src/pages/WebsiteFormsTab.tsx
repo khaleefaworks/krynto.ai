@@ -44,12 +44,14 @@ const EMPTY_FIELD: FormField = {
 
 /** "My Form Name" → "my-form-name" */
 function toSlug(s: string) {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const str = (s || '').toString()
+    return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 /** "Your Email Address" → "your_email_address" */
 function toFieldName(s: string) {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    const str = (s || '').toString()
+    return str.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -113,8 +115,15 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
         setFormSubmitLabel(item.submit_label)
         setFormEnabled(item.enabled)
         setFormFields(
-            item.fields.length > 0
-                ? item.fields.map(f => ({ ...f, options: f.options || [] }))
+            item.fields && item.fields.length > 0
+                ? item.fields.map((f: any) => ({
+                    name: String(f?.name || f?.field_name || ''),
+                    label: String(f?.label || ''),
+                    field_type: (f?.field_type || f?.type || 'text') as FormField['field_type'],
+                    required: !!f?.required,
+                    options: Array.isArray(f?.options) ? f.options : [],
+                    placeholder: f?.placeholder || '',
+                }))
                 : [{ ...EMPTY_FIELD }]
         )
         setError(null)
@@ -149,9 +158,9 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
     const handleFieldLabelChange = (idx: number, label: string) => {
         setFormFields(prev => prev.map((f, i) => {
             if (i !== idx) return f
-            const prevAutoName = toFieldName(f.label)
-            const nameIsAuto = f.name === '' || f.name === prevAutoName
-            return { ...f, label, name: nameIsAuto ? toFieldName(label) : f.name }
+            const prevAutoName = toFieldName(f.label || '')
+            const nameIsAuto = (f.name || '') === '' || (f.name || '') === prevAutoName
+            return { ...f, label, name: nameIsAuto ? toFieldName(label) : (f.name || '') }
         }))
     }
 
@@ -174,12 +183,14 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
             setError('Slug may only contain lowercase letters, numbers, hyphens and underscores.')
             return
         }
-        const validFields = formFields.filter(f => f.label.trim())
+        const validFields = formFields.filter(f => (f.label || '').toString().trim())
         if (validFields.length === 0) { setError('Add at least one field.'); return }
         for (const f of validFields) {
-            if (!f.name.trim()) { setError(`Field "${f.label}" is missing a field name.`); return }
-            if (!/^[a-z0-9_]+$/.test(f.name)) {
-                setError(`Field name "${f.name}" may only contain lowercase letters, numbers and underscores.`)
+            const fname = (f.name || '').toString().trim()
+            const flabel = (f.label || '').toString().trim()
+            if (!fname) { setError(`Field "${flabel || '(unnamed)'}" is missing a field name.`); return }
+            if (!/^[a-z0-9_]+$/.test(fname)) {
+                setError(`Field name "${fname}" may only contain lowercase letters, numbers and underscores.`)
                 return
             }
         }
@@ -189,14 +200,18 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
             slug: formSlug.trim(),
             submit_label: formSubmitLabel.trim() || 'Send',
             enabled: formEnabled,
-            fields: validFields.map(f => ({
-                name: f.name.trim(),
-                label: f.label.trim(),
-                field_type: f.field_type,
-                required: f.required,
-                options: f.field_type === 'select' ? f.options.filter(o => o.trim()) : [],
-                placeholder: f.placeholder?.trim() || undefined,
-            })),
+            fields: validFields.map(f => {
+                const fname = (f.name || '').toString().trim()
+                const flabel = (f.label || '').toString().trim()
+                return {
+                    name: fname,
+                    label: flabel,
+                    field_type: f.field_type || 'text',
+                    required: !!f.required,
+                    options: f.field_type === 'select' ? (Array.isArray(f.options) ? f.options : []).filter(o => (o || '').toString().trim()) : [],
+                    placeholder: (f.placeholder || '').toString().trim() || undefined,
+                }
+            }),
         }
 
         setSaving(true)
