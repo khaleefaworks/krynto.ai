@@ -960,6 +960,26 @@ class ConversationOrchestrator:
             else:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
+        # Schedule the waiting bot message if this is the visitor's first action
+        # and no agent is assigned yet. Regular messages schedule it in
+        # handle_visitor_message; button clicks are a separate code path so we
+        # must handle it here too.
+        if not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
+            _waiting_bot_message_scheduled.add(conversation.id)
+            automation_service = AutomationService(self.db)
+            delay_seconds = automation_service.get_delay_seconds(
+                website_id=int(conversation.website_id),
+                trigger="no_agent_assigned_for",
+                default_seconds=60,
+            )
+            asyncio.create_task(
+                _send_delayed_waiting_message_if_unassigned(
+                    conversation_id=conversation.id,
+                    website_id=int(conversation.website_id),
+                    delay_seconds=delay_seconds,
+                )
+            )
+
         return result
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
@@ -1216,7 +1236,7 @@ class ConversationOrchestrator:
             "availability_changed": availability_changed,
         }
 
-    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent") -> dict:
+    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent", agent_name: str | None = None) -> dict:
         """Close a conversation.
 
         A canonical `conversation_resolved` event is always recorded so visitor
@@ -1230,15 +1250,18 @@ class ConversationOrchestrator:
             return {"error": "Conversation not found"}
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
+        resolved_name = agent_name or "Support"
 
         await self._run_automation_trigger(
             conversation_id=conversation_id,
             website_id=website_id,
             trigger="conversation_resolved",
             log_key="conversation_resolve_automation_failed",
+            send_to_visitor=True,
             ensure_system_event=True,
             fallback_system_event_type="conversation_resolved",
             fallback_system_content="This conversation has been resolved.",
+            context={"agent_name": resolved_name},
         )
 
         # Notify dashboards to remove/refresh the closed conversation.
@@ -1578,6 +1601,55 @@ class ConversationOrchestrator:
                                 website_id=int(website_id),
                                 tag_name=tag_name,
                             )
+
+                    elif action_type == "show_form":
+                        form_slug = str(action.get("form_slug") or "offline-contact").strip()
+                        if website_id and send_to_visitor:
+                            try:
+                                from app.repos import forms as forms_repo
+                                form = forms_repo.get_form_by_slug(self.db, int(website_id), form_slug)
+                                if form and form.enabled:
+                                    # Normalize field keys so the widget can reliably render them.
+                                    normalized_fields = []
+                                    for f in (form.fields or []):
+                                        try:
+                                            if isinstance(f, dict):
+                                                name = str(f.get("name") or f.get("field_name") or "")
+                                                label = str(f.get("label") or name or "")
+                                                ftype = str(f.get("type") or f.get("field_type") or "text")
+                                                required = bool(f.get("required") or False)
+                                                placeholder = str(f.get("placeholder") or f.get("hint") or "")
+                                                options = f.get("options") or []
+                                            else:
+                                                name = ""
+                                                label = ""
+                                                ftype = "text"
+                                                required = False
+                                                placeholder = ""
+                                                options = []
+                                            normalized_fields.append({
+                                                "name": name,
+                                                "label": label,
+                                                "type": ftype,
+                                                "required": required,
+                                                "placeholder": placeholder,
+                                                "options": options,
+                                            })
+                                        except Exception:
+                                            continue
+                                    await ChatService.send_to_visitor(
+                                        conversation_id,
+                                        {
+                                            "type": "show_form",
+                                            "form_id": form.id,
+                                            "form_name": form.name,
+                                            "fields": normalized_fields,
+                                            "submit_label": getattr(form, "submit_label", None) or "Send",
+                                            "conversation_id": conversation_id,
+                                        },
+                                    )
+                            except Exception as e:
+                                logger.warning("show_form_dispatch_failed", error=str(e))
 
                     elif action_type == "tag_with_agent_name":
                         if website_id:

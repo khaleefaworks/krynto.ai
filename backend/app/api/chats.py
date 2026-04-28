@@ -385,7 +385,10 @@ async def close_conversation(
 
     orchestrator = ConversationOrchestrator(db)
 
-    result = await orchestrator.close_conversation(conversation_id=conv.id)
+    result = await orchestrator.close_conversation(
+        conversation_id=conv.id,
+        agent_name=getattr(current_user, 'name', None) or 'Support',
+    )
 
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
@@ -514,3 +517,31 @@ def get_chat_read_state(
         "last_read_at": last_read_at.isoformat() if last_read_at else None,
         "first_unread_message_id": first_unread_message_id,
     }
+
+
+@router.get("/{chat_id}/form-submissions")
+def get_conversation_form_submissions(
+    chat_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Return all form submissions linked to this conversation."""
+    conv = _resolve_conversation(db, chat_id)
+    _ensure_conversation_visible(db, current_user=current_user, conv=conv)
+
+    from app.repos import forms as forms_repo
+    from app.models.website_form import WebsiteForm
+
+    subs = forms_repo.get_submissions_by_conversation(db, conv.id)
+    result = []
+    for sub in subs:
+        form = db.query(WebsiteForm).filter(WebsiteForm.id == sub.form_id).first()
+        result.append({
+            "id": sub.id,
+            "form_id": sub.form_id,
+            "form_name": form.name if form else None,
+            "form_fields": form.fields if form else [],
+            "data": sub.data,
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+        })
+    return result

@@ -838,6 +838,49 @@ async def chat_ws(
                             pass
                 continue
 
+            # Widget opened by visitor click — trigger welcome if not yet sent.
+            if message_type == "widget_opened":
+                try:
+                    from app.repos import messages as messages_repo
+                    _wo_conversation = conversations_repo.get_open_conversation_by_session(
+                        db, website_id=website_id, session_id=session_id
+                    )
+                    if _wo_conversation:
+                        last_welcome = messages_repo.get_last_welcome_message(db, _wo_conversation.id)
+                        if not last_welcome:
+                            last_welcome = messages_repo.get_last_event_message(
+                                db, _wo_conversation.id, "bot_prompt_buttons"
+                            )
+                        if not last_welcome:
+                            # Welcome not yet sent — send immediately (0s delay) via existing mechanism.
+                            # Re-run automation lookup for welcome message content.
+                            from app.services.automation_service import AutomationService as _AS
+                            _as = _AS(db)
+                            _welcome_automations = _as.list_enabled_for_trigger(
+                                website_id=website_id, trigger="visitor_connected"
+                            )
+                            if _welcome_automations:
+                                _wa = _welcome_automations[0]
+                                _wa_actions = _wa.actions or []
+                                if isinstance(_wa_actions, str):
+                                    import json as _json3
+                                    _wa_actions = _json3.loads(_wa_actions)
+                                for _act in _wa_actions:
+                                    if isinstance(_act, dict) and _act.get("type") == "send_bot_message":
+                                        asyncio.create_task(
+                                            _send_delayed_welcome(
+                                                websocket=websocket,
+                                                website_id=website_id,
+                                                session_id=session_id,
+                                                welcome_message=str(_act.get("message", "")).strip(),
+                                                delay_seconds=0.5,
+                                            )
+                                        )
+                                        break
+                except Exception as _e:
+                    logger.warning("widget_opened_handler_failed", error=str(_e))
+                continue
+
             if message_type == "typing":
                 is_typing = bool(payload.get("is_typing"))
 

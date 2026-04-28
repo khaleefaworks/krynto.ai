@@ -123,7 +123,7 @@ type AutomationDraft = {
   name: string
   trigger: string
   enabled: boolean
-  action_type: 'send_bot_message' | 'emit_system_event' | 'show_rating_popup' | 'tag_conversation' | 'tag_with_agent_name'
+  action_type: 'send_bot_message' | 'emit_system_event' | 'show_form' | 'show_rating_popup' | 'tag_conversation' | 'tag_with_agent_name'
   action_index?: number
   message: string
   event_type?: string
@@ -132,6 +132,7 @@ type AutomationDraft = {
   welcome_delay_seconds?: number
   repeat?: 'once' | 'cooldown' | 'always'
   repeat_cooldown_seconds?: number
+  form_slug?: string  // for show_form actions
 }
 
 export default function WebsiteDetail() {
@@ -161,6 +162,10 @@ export default function WebsiteDetail() {
   const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
+
+  // Website forms (for show_form action picker)
+  const [websiteForms, setWebsiteForms] = useState<{ id: number; name: string; slug: string }[]>([])
+  const [offlinePromptFormSlug, setOfflinePromptFormSlug] = useState<string>('')
 
   // Team routing chatbot state
   const [chatbotTeams, setChatbotTeams] = useState<{ id: number; name: string }[]>([])
@@ -230,6 +235,17 @@ export default function WebsiteDetail() {
     apiRequest<{ id: number; name: string }[]>(`/websites/${websiteId}/teams`)
       .then((data) => setChatbotTeams(Array.isArray(data) ? data : []))
       .catch(() => setChatbotTeams([]))
+    // Load forms for show_form action picker
+    apiRequest<{ id: number; name: string; slug: string }[]>(`/websites/${websiteId}/forms`)
+      .then((data) => {
+        const forms = Array.isArray(data) ? data : []
+        setWebsiteForms(forms)
+        // Default selection: first form's slug (or 'offline-contact' fallback)
+        if (!offlinePromptFormSlug) {
+          setOfflinePromptFormSlug(forms[0]?.slug || 'offline-contact')
+        }
+      })
+      .catch(() => setWebsiteForms([]))
   }, [activeTab, websiteId])
 
   useEffect(() => {
@@ -469,7 +485,13 @@ export default function WebsiteDetail() {
     const action = extractPrimaryAction(automation)
     const actions = normalizeAutomationActions(automation)
     const idx = action ? actions.findIndex((a) => a === action) : -1
-    return draftFromAutomationAction(automation, action, idx >= 0 ? idx : undefined)
+    const draft = draftFromAutomationAction(automation, action, idx >= 0 ? idx : undefined)
+    // Extract form_slug from any show_form action in the automation
+    const showFormAction = actions.find((a) => (a as any).type === 'show_form') as any
+    if (showFormAction) {
+      draft.form_slug = showFormAction.form_slug || 'offline-contact'
+    }
+    return draft
   }
 
   const openBuilderPickType = () => {
@@ -541,12 +563,17 @@ export default function WebsiteDetail() {
           content: builderDraft.message.trim(),
           event_type: (builderDraft.event_type || '').trim() || builderDraft.trigger,
         }
-        : {
-          type: 'send_bot_message',
-          message: builderDraft.message.trim(),
-          // Keep stable server-side idempotency for welcome.
-          event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
-        }
+        : builderDraft.action_type === 'show_form'
+          ? {
+            type: 'show_form',
+            form_slug: builderDraft.form_slug || offlinePromptFormSlug || 'offline-contact',
+          } as any
+          : {
+            type: 'send_bot_message',
+            message: builderDraft.message.trim(),
+            // Keep stable server-side idempotency for welcome.
+            event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
+          }
 
     let nextActions: any = [nextAction]
     if (builderDraft.id) {
@@ -555,7 +582,14 @@ export default function WebsiteDetail() {
         const existingActions = normalizeAutomationActions(existing)
         const actionIndex = typeof builderDraft.action_index === 'number' ? builderDraft.action_index : -1
         if (actionIndex >= 0 && actionIndex < existingActions.length) {
-          nextActions = existingActions.map((a, idx) => (idx === actionIndex ? nextAction : a))
+          nextActions = existingActions.map((a, idx) => {
+            if (idx === actionIndex) return nextAction
+            // Update form_slug on show_form actions if user changed it
+            if ((a as any).type === 'show_form' && builderDraft.form_slug) {
+              return { ...(a as any), form_slug: builderDraft.form_slug }
+            }
+            return a
+          })
         }
       }
     }
@@ -1175,137 +1209,132 @@ export default function WebsiteDetail() {
                   ) : automationsSubTab === 'library' ? (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {(() => {
-                          const t = {
-                            name: 'Welcome message',
-                            trigger: 'visitor_connected',
-                            enabled: true,
-                            action_type: 'send_bot_message',
-                            cooldown_hours: 24,
-                            message: 'Hi! How can we help you today?',
-                            event_type: 'automation_welcome',
-                            description: 'Sends when a visitor opens the widget, with a cooldown.',
-                          } as const
-                          const existing = getAutomationByTemplate(t)
-                          return (
-                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {t.trigger}</div>
-                                </div>
-                                <div className="flex-shrink-0">
-                                {existing ? (
-                                  <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
-                                    Edit
-                                  </Button>
-                                ) : (
-                                  <Button type="button" size="sm" onClick={() => createTemplateIfMissing(t)}>
-                                    Use template
-                                  </Button>
-                                )}
-                                </div>
-                              </div>
-                              <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-500">
-                                Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
-                              </div>
-                            </div>
-                          )
-                        })()}
 
                         {(
                           [
                             {
+                              name: 'Welcome message',
+                              trigger: 'visitor_connected',
+                              enabled: true,
+                              action_type: 'send_bot_message' as const,
+                              cooldown_hours: 24,
+                              message: 'Hi! How can we help you today?',
+                              event_type: 'automation_welcome',
+                              badge: 'Bot' as const,
+                              description: 'Sends when a visitor opens the widget, with a cooldown.',
+                            },
+                            {
                               name: 'Waiting message',
                               trigger: 'no_agent_assigned_for',
                               enabled: true,
-                              action_type: 'send_bot_message',
+                              action_type: 'send_bot_message' as const,
                               delay_seconds: 60,
                               message: 'Thanks! An agent will be with you shortly.',
                               event_type: 'bot_waiting',
+                              badge: 'Bot' as const,
                               description: 'Sends after the visitor waits without an assigned agent.',
-                            },
-                            {
-                              name: 'Offline prompt',
-                              trigger: 'website_offline_first_message',
-                              enabled: true,
-                              action_type: 'send_bot_message',
-                              message:
-                                "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                              event_type: 'bot_offline',
-                              description: 'Sends when the website is offline and the visitor sends the first message.',
                             },
                             {
                               name: 'Visitor closed message',
                               trigger: 'visitor_closed_chat',
                               enabled: false,
-                              action_type: 'send_bot_message',
+                              action_type: 'send_bot_message' as const,
                               message: 'Thanks! If you need anything else, just send another message.',
                               event_type: 'bot_visitor_closed',
+                              badge: 'Bot' as const,
                               description: 'Optional message when a visitor ends the chat UI (does not resolve the conversation).',
                             },
                             {
                               name: 'Visitor closed event',
                               trigger: 'visitor_closed_chat',
                               enabled: true,
-                              action_type: 'emit_system_event',
+                              action_type: 'emit_system_event' as const,
                               message: 'Visitor closed chat.',
                               event_type: 'visitor_closed_chat',
+                              badge: 'Event' as const,
                               description: 'System event shown in the timeline when a visitor ends the chat UI (conversation remains open).',
                             },
                             {
                               name: 'Visitor connected event',
                               trigger: 'visitor_socket_connected',
                               enabled: false,
-                              action_type: 'emit_system_event',
+                              action_type: 'emit_system_event' as const,
                               message: 'Visitor has just connected.',
                               event_type: 'visitor_socket_connected',
+                              badge: 'Event' as const,
                               description: 'Internal timeline event when the visitor opens/reconnects (not shown to the visitor).',
-                              repeat: 'cooldown',
+                              repeat: 'cooldown' as const,
                               repeat_cooldown_seconds: 10,
                             },
                             {
                               name: 'Visitor left website event',
                               trigger: 'visitor_left_website',
                               enabled: true,
-                              action_type: 'emit_system_event',
+                              action_type: 'emit_system_event' as const,
                               message: 'Visitor left website.',
                               event_type: 'visitor_left_website',
+                              badge: 'Event' as const,
                               description: 'Internal timeline event when the visitor closes the tab or navigates away (best-effort).',
-                              repeat: 'cooldown',
+                              repeat: 'cooldown' as const,
                               repeat_cooldown_seconds: 10,
                             },
                             {
                               name: 'Closing message',
                               trigger: 'conversation_resolved',
                               enabled: false,
-                              action_type: 'send_bot_message',
+                              action_type: 'send_bot_message' as const,
                               message: 'Thanks! This conversation is now closed.',
                               event_type: 'bot_closing',
+                              badge: 'Bot' as const,
                               description: 'Optional message sent after a conversation is resolved.',
                             },
                             {
                               name: 'Resolved event',
                               trigger: 'conversation_resolved',
                               enabled: false,
-                              action_type: 'emit_system_event',
+                              action_type: 'emit_system_event' as const,
                               message: 'This conversation has been resolved.',
                               event_type: 'conversation_resolved',
+                              badge: 'Event' as const,
                               description: 'Optional system event shown in the timeline when a conversation is resolved.',
                             },
                             {
                               name: 'Reopened event',
                               trigger: 'conversation_reopened',
                               enabled: false,
-                              action_type: 'emit_system_event',
+                              action_type: 'emit_system_event' as const,
                               message: 'This conversation has been reopened.',
                               event_type: 'conversation_reopened',
+                              badge: 'Event' as const,
                               description: 'Optional system event shown in the timeline when a resolved conversation is reopened.',
+                            },
+                            {
+                              name: 'Agent joined',
+                              trigger: 'agent_joined',
+                              enabled: true,
+                              action_type: 'emit_system_event' as const,
+                              message: 'An agent has joined the chat.',
+                              event_type: 'agent_joined',
+                              badge: 'Event' as const,
+                              description: 'System event shown in the chat when an agent joins the conversation.',
+                            },
+                            {
+                              name: 'Visitor ended chat',
+                              trigger: 'conversation_visitor_ended',
+                              enabled: true,
+                              action_type: 'emit_system_event' as const,
+                              message: 'Visitor ended the chat.',
+                              event_type: 'visitor_ended',
+                              badge: 'Event' as const,
+                              description: 'System event shown when the visitor ends the conversation from the widget.',
                             },
                           ] as const
                         ).map((t) => {
                           const existing = getAutomationByTemplate(t)
+                          const badgeLabel = (t as any).badge as string | undefined
+                          const badgeClass = badgeLabel === 'Event'
+                            ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                            : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
                           return (
                             <div
                               key={`${t.trigger}:${t.action_type}:${t.event_type || ''}`}
@@ -1313,8 +1342,13 @@ export default function WebsiteDetail() {
                             >
                               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {t.trigger}</div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                                    {badgeLabel && (
+                                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>{badgeLabel}</span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: {t.trigger}</div>
                                 </div>
                                 <div className="flex-shrink-0">
                                 {existing ? (
@@ -1335,6 +1369,133 @@ export default function WebsiteDetail() {
                             </div>
                           )
                         })}
+
+                        {/* Multi-action templates */}
+                        {(
+                          [
+                            {
+                              name: 'Offline prompt',
+                              trigger: 'website_offline_first_message',
+                              enabled: true,
+                              description: 'Shows a contact form then a bot message when the website is offline and a visitor messages.',
+                              isOfflinePrompt: true,
+                              actions: [] as any[], // built dynamically using offlinePromptFormSlug
+                            },
+                            {
+                              name: 'Visitor ended + rating popup',
+                              trigger: 'conversation_visitor_ended',
+                              enabled: true,
+                              description: 'Shows a timeline event and then a rating popup when the visitor ends the chat.',
+                              isOfflinePrompt: false,
+                              actions: [
+                                { type: 'emit_system_event', content: 'Visitor ended the chat.', event_type: 'visitor_ended' },
+                                { type: 'show_rating_popup', event_type: 'rating_popup_shown' },
+                              ],
+                            },
+                            {
+                              name: 'Resolved rating',
+                              trigger: 'conversation_resolved',
+                              enabled: true,
+                              description: 'Shows a "{agent} resolved the chat." event then a rating popup when an agent resolves.',
+                              isOfflinePrompt: false,
+                              actions: [
+                                { type: 'emit_system_event', content: '{agent_name} resolved the chat.', event_type: 'conversation_resolved' },
+                                { type: 'show_rating_popup', event_type: 'rating_popup_shown' },
+                              ],
+                            },
+                          ] as const
+                        ).map((t) => {
+                          const existing = websiteId ? automations.find((a) => a.trigger === t.trigger && a.name === t.name) ?? null : null
+                          const handleUse = async () => {
+                            if (!websiteId) return
+                            try {
+                              setAutomationsError(null)
+                              if (existing) { openBuilderForAutomation(existing); return }
+                              const resolvedActions = t.isOfflinePrompt
+                                ? [
+                                    { type: 'show_form', form_slug: offlinePromptFormSlug || 'offline-contact' },
+                                    { type: 'send_bot_message', message: "We're offline at the moment. Leave your details above and we'll get back to you!", event_type: 'bot_offline' },
+                                  ]
+                                : t.actions
+                              const created = await automationsApi.create({
+                                website_id: websiteId,
+                                name: t.name,
+                                trigger: t.trigger,
+                                enabled: t.enabled,
+                                conditions: {},
+                                actions: resolvedActions as any,
+                              })
+                              await loadAutomations()
+                              if (created) openBuilderForAutomation(created)
+                            } catch (err: any) {
+                              setAutomationsError(err?.message || 'Failed to create template')
+                            }
+                          }
+                          return (
+                            <div
+                              key={`multi:${t.trigger}:${t.name}`}
+                              className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
+                            >
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.name}</div>
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400">Multi-step</span>
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 break-all">Trigger: {t.trigger}</div>
+                                </div>
+                                <div className="flex-shrink-0">
+                                  {existing ? (
+                                    <Button type="button" size="sm" variant="outline" onClick={() => openBuilderForAutomation(existing)}>
+                                      Edit
+                                    </Button>
+                                  ) : (
+                                    <Button type="button" size="sm" onClick={handleUse}>
+                                      Use template
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">{t.description}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-500">
+                                Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
+                              </div>
+                            </div>
+                          )
+                        })}
+
+                        {/* Team Routing Chatbot card */}
+                        {(() => {
+                          const existing = getTeamRoutingAutomation()
+                          return (
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Team Routing Chatbot</div>
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">Chatbot</span>
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">Trigger: conversation_created</div>
+                                </div>
+                                <div className="flex-shrink-0">
+                                  {existing ? (
+                                    <Button type="button" size="sm" variant="outline" onClick={() => openChatbotBuilder(existing)}>
+                                      Edit
+                                    </Button>
+                                  ) : (
+                                    <Button type="button" size="sm" onClick={() => openChatbotBuilder(null)}>
+                                      Use template
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">Show interactive buttons when a visitor starts a chat. Route conversations to the right team based on their selection.</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-500">
+                                Status: {existing ? (existing.enabled ? 'Enabled' : 'Disabled') : 'Not added'}
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </div>
                     </div>
                   ) : automationsSubTab === 'messages' ? (
@@ -1374,30 +1535,40 @@ export default function WebsiteDetail() {
                               ? otherAutomations
                               : messageAutomations.filter((a) => group.triggers.includes(a.trigger))
                             if (groupItems.length === 0) return null
-                            const rows = groupItems.flatMap((automation) => {
-                              const actions = normalizeAutomationActions(automation)
-                              if (actions.length === 0) {
-                                return [{ automation, action: null as AutomationAction | null, idx: -1, showControls: true }]
-                              }
-                              return actions.map((action, idx) => ({ automation, action, idx, showControls: idx === 0 }))
-                            })
                             return (
                               <div key={group.label} className="space-y-3">
                                 <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{group.label}</div>
                                 <div className="space-y-2">
-                                  {rows.map(({ automation, action, idx, showControls }) => {
+                                  {groupItems.map((automation) => {
+                                    const actions = normalizeAutomationActions(automation)
                                     const delay = Number(automation.conditions?.delay_seconds ?? 60)
                                     const cooldown = Number(automation.conditions?.cooldown_hours ?? 24)
-                                    const isEvent = action?.type === 'emit_system_event'
-                                    const text = extractActionText(action)
-                                    const eventType = action?.event_type ? String(action.event_type) : ''
-                                    const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
-                                    const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
-                                    const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
-                                    const hasCollision = collisions.length > 1
+                                    // Badge reflects primary action type
+                                    const primaryAction = actions[0] ?? null
+                                    const isEvent = primaryAction?.type === 'emit_system_event'
+                                    // Collision check across all actions
+                                    const hasCollision = actions.some((action, idx) => {
+                                      const effectiveEventType = getEffectiveEventType(String(automation.trigger || ''), action)
+                                      const collisionKey = effectiveEventType ? `${String(automation.trigger || '')}::${effectiveEventType}` : null
+                                      const collisions = collisionKey ? enabledEventTypeCollisions.get(collisionKey) || [] : []
+                                      return collisions.length > 1
+                                    })
+                                    // Build a summary line for all actions
+                                    const actionSummaries = actions.map((action) => {
+                                      if (!action) return null
+                                      const t = (action as any).type as string
+                                      if (t === 'emit_system_event') return `📢 ${extractActionText(action) || 'System event'}`
+                                      if (t === 'send_bot_message') return `💬 ${extractActionText(action) || 'Bot message'}`
+                                      if (t === 'show_rating_popup') return `⭐ Show rating popup`
+                                      if (t === 'show_form') return `📋 Show form`
+                                      if (t === 'tag_conversation') return `🏷 Tag: ${(action as any).tag || ''}`
+                                      if (t === 'tag_with_agent_name') return `🏷 Tag with agent name`
+                                      if (t === 'bot_prompt_buttons') return `🤖 Bot prompt with buttons`
+                                      return t
+                                    }).filter(Boolean)
                                     return (
                                       <div
-                                        key={`${automation.id}:${idx}:${action?.type || 'none'}:${eventType}`}
+                                        key={automation.id}
                                         className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-2"
                                       >
                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1419,44 +1590,42 @@ export default function WebsiteDetail() {
                                             {automation.trigger === 'visitor_connected' && (
                                               <div className="text-xs text-gray-500 dark:text-gray-400">Cooldown: {Number.isFinite(cooldown) ? cooldown : 24}h</div>
                                             )}
-                                            {text && <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">{text}</div>}
+                                            {actionSummaries.length > 0 && (
+                                              <div className="mt-1 space-y-0.5">
+                                                {actionSummaries.map((s, i) => (
+                                                  <div key={i} className="text-xs text-gray-600 dark:text-gray-400">{s}</div>
+                                                ))}
+                                              </div>
+                                            )}
                                           </div>
                                           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-                                            {showControls ? (
-                                              <Switch
-                                                checked={automation.enabled}
-                                                onCheckedChange={(checked) => {
-                                                  const next = { ...automation, enabled: checked }
-                                                  updateAutomationLocal(automation.id, { enabled: checked })
-                                                  saveAutomation(next)
-                                                }}
-                                              />
-                                            ) : (
-                                              <div className="w-10" />
-                                            )}
+                                            <Switch
+                                              checked={automation.enabled}
+                                              onCheckedChange={(checked) => {
+                                                const next = { ...automation, enabled: checked }
+                                                updateAutomationLocal(automation.id, { enabled: checked })
+                                                saveAutomation(next)
+                                              }}
+                                            />
                                             <Button
                                               type="button"
                                               size="sm"
                                               variant="outline"
-                                              onClick={() => openBuilderForAutomationAction(automation, action, idx)}
+                                              onClick={() => openBuilderForAutomation(automation)}
                                             >
                                               Edit
                                             </Button>
-                                            {showControls ? (
-                                              <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="destructive"
-                                                onClick={() => deleteAutomation(automation)}
-                                                disabled={deletingAutomationId === automation.id}
-                                                className="gap-2"
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                                {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
-                                              </Button>
-                                            ) : (
-                                              <div className="w-[92px]" />
-                                            )}
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              variant="destructive"
+                                              onClick={() => deleteAutomation(automation)}
+                                              disabled={deletingAutomationId === automation.id}
+                                              className="gap-2"
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                              {deletingAutomationId === automation.id ? 'Deleting…' : 'Delete'}
+                                            </Button>
                                           </div>
                                         </div>
                                       </div>
@@ -1472,12 +1641,10 @@ export default function WebsiteDetail() {
                   ) : automationsSubTab === 'chatbots' ? (
                     <div className="space-y-4">
                       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Team Routing Chatbot</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              Show interactive buttons when a visitor starts a chat. Route conversations to the right team based on their selection.
-                            </div>
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Team Routing Chatbot</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Show interactive buttons when a visitor starts a chat. Route conversations to the right team based on their selection.
                           </div>
                         </div>
                         {(() => {
@@ -1508,14 +1675,27 @@ export default function WebsiteDetail() {
                                       {existing.enabled ? 'Active' : 'Disabled'}
                                     </span>
                                   </div>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => openChatbotBuilder(existing)}
-                                  >
-                                    Edit
-                                  </Button>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openChatbotBuilder(existing)}
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => deleteAutomation(existing)}
+                                      disabled={deletingAutomationId === existing.id}
+                                      className="gap-2"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                      {deletingAutomationId === existing.id ? 'Deleting…' : 'Delete'}
+                                    </Button>
+                                  </div>
                                 </div>
                                 <div className="rounded-md bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 p-3 space-y-2">
                                   <div className="text-xs text-gray-600 dark:text-gray-400">{promptAction?.message || '—'}</div>
@@ -1850,25 +2030,63 @@ export default function WebsiteDetail() {
                                 />
                               </div>
 
+                              {builderDraft.form_slug !== undefined && (
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Form to show visitor</label>
+                                  {websiteForms.length > 0 ? (
+                                    <select
+                                      value={builderDraft.form_slug}
+                                      onChange={(e) => setBuilderDraft({ ...builderDraft, form_slug: e.target.value })}
+                                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    >
+                                      {websiteForms.map((f) => (
+                                        <option key={f.id} value={f.slug}>{f.name}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <div className="text-xs text-gray-400 dark:text-gray-500">No forms found. Create one in the Forms tab.</div>
+                                  )}
+                                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">This form will be shown to the visitor before the bot message.</div>
+                                </div>
+                              )}
+
                               <div>
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Action type</label>
                                 <select
                                   value={builderDraft.action_type}
                                   onChange={(e) => {
-                                    const nextType = e.target.value === 'emit_system_event' ? 'emit_system_event' : 'send_bot_message'
+                                    const val = e.target.value
+                                    const nextType =
+                                      val === 'emit_system_event'
+                                        ? 'emit_system_event'
+                                        : val === 'show_form'
+                                          ? 'show_form'
+                                          : val === 'show_rating_popup'
+                                            ? 'show_rating_popup'
+                                            : val === 'tag_conversation'
+                                              ? 'tag_conversation'
+                                              : val === 'tag_with_agent_name'
+                                                ? 'tag_with_agent_name'
+                                                : 'send_bot_message'
+
                                     setBuilderDraft({
                                       ...builderDraft,
-                                      action_type: nextType,
+                                      action_type: nextType as any,
                                       event_type:
                                         nextType === 'emit_system_event'
                                           ? builderDraft.event_type || builderDraft.trigger
                                           : builderDraft.event_type,
+                                      form_slug:
+                                        nextType === 'show_form'
+                                          ? (builderDraft.form_slug || offlinePromptFormSlug || websiteForms[0]?.slug || 'offline-contact')
+                                          : builderDraft.form_slug,
                                     })
                                   }}
                                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                                 >
                                   <option value="send_bot_message">Bot message</option>
                                   <option value="emit_system_event">System event</option>
+                                  <option value="show_form">Show form</option>
                                   <option value="show_rating_popup">Show rating popup</option>
                                   <option value="tag_conversation">Tag conversation</option>
                                   <option value="tag_with_agent_name">Tag with agent name</option>

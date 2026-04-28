@@ -77,10 +77,11 @@ def _form_to_dict(form):
     }
 
 
-def _submission_to_dict(sub):
+def _submission_to_dict(sub, form_name: str | None = None):
     return {
         "id": sub.id,
         "form_id": sub.form_id,
+        "form_name": form_name,
         "conversation_id": sub.conversation_id,
         "session_id": sub.session_id,
         "data": sub.data,
@@ -205,7 +206,7 @@ def submit_form(
         conversation_id=body.conversation_id,
         session_id=body.session_id,
     )
-    return _submission_to_dict(sub)
+    return _submission_to_dict(sub, form_name=form.name)
 
 
 @router.get("/{form_id}/submissions")
@@ -222,4 +223,4 @@ def list_submissions(
     if not form or form.website_id != website_id:
         raise HTTPException(status_code=404, detail="Form not found")
     subs = forms_repo.get_submissions(db, form_id, limit=limit, offset=offset)
-    return [_submission_to_dict(s) for s in subs]
+    return [_submission_to_dict(s, form_name=form.name) for s in subs]

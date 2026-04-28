@@ -20,12 +20,13 @@ export interface BotPromptButton {
 }
 
 export interface AutomationAction {
-  type: 'send_bot_message' | 'emit_system_event' | 'bot_prompt_buttons'
+  type: 'send_bot_message' | 'emit_system_event' | 'bot_prompt_buttons' | 'show_form'
   message?: string
   content?: string
   event_type?: string
   allow_input?: boolean
   buttons?: BotPromptButton[]
+  form_slug?: string
 }
 
 export interface Automation {

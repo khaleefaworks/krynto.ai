@@ -311,6 +311,7 @@ export default function ConversationsView() {
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
+    const [formSubmissions, setFormSubmissions] = useState<any[]>([])
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
     const [visitorConversations, setVisitorConversations] = useState<VisitorConversation[]>([])
@@ -1264,6 +1265,17 @@ export default function ConversationsView() {
             setNotes(fetchedNotes)
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
             setConversationRating(fetchedRating)
+
+            // Fetch form submissions for this conversation (best-effort).
+            apiRequest<any[]>(`/chats/${chatId}/form-submissions`)
+                .then((data) => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setFormSubmissions(Array.isArray(data) ? data : [])
+                    }
+                })
+                .catch(() => {
+                    if (loadDetailsTokenRef.current === token) setFormSubmissions([])
+                })
 
             // Fetch other conversations from this visitor (best-effort, non-blocking).
             apiRequest<VisitorConversation[]>(`/chats/${chatId}/visitor-history`)
@@ -2421,6 +2433,7 @@ export default function ConversationsView() {
                                     }))}
                                     browsingHistory={browsingHistory}
                                     rating={conversationRating}
+                                    formSubmissions={formSubmissions}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {
@@ -2457,8 +2470,6 @@ export default function ConversationsView() {
                                     onAddNote={handleAddNote}
                                     onDeleteNote={handleDeleteNote}
                                 />
-
-                                {/* Closed by label (only for resolved conversations) */}
                                 {conversation.closed_by && conversation.status === 'resolved' && (
                                     <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
                                         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
@@ -2540,6 +2551,7 @@ export default function ConversationsView() {
                             }))}
                             browsingHistory={browsingHistory}
                             rating={conversationRating}
+                            formSubmissions={formSubmissions}
                             onUpdateMetadata={async (data) => {
                                 if (!conversation?.id) return
                                 try {

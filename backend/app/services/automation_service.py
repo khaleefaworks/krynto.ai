@@ -279,7 +279,7 @@ class AutomationService:
                 "name": "Waiting message",
                 "trigger": "no_agent_assigned_for",
                 "enabled": True,
-                "conditions": {"delay_seconds": 60},
+                "conditions": {"delay_seconds": 30},
                 "actions": [{"type": "send_bot_message", "message": "Thanks! An agent will be with you shortly.", "event_type": "bot_waiting"}],
             },
             {
@@ -287,7 +287,10 @@ class AutomationService:
                 "trigger": "website_offline_first_message",
                 "enabled": True,
                 "conditions": {},
-                "actions": [{"type": "send_bot_message", "message": "We're offline right now. Leave us your email and we'll get back to you soon.", "event_type": "bot_offline"}],
+                "actions": [
+                    {"type": "show_form", "form_slug": "offline-contact"},
+                    {"type": "send_bot_message", "message": "We're offline right now. Leave us a message and we'll get back to you soon.", "event_type": "bot_offline"},
+                ],
             },
             {
                 "name": "Agent joined",
@@ -327,7 +330,10 @@ class AutomationService:
                 "trigger": "conversation_resolved",
                 "enabled": True,
                 "conditions": {"repeat": "once"},
-                "actions": [{"type": "show_rating_popup", "event_type": "rating_popup_shown"}],
+                "actions": [
+                    {"type": "emit_system_event", "content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message"},
+                    {"type": "show_rating_popup", "event_type": "rating_popup_shown"},
+                ],
             },
             {
                 "name": "Auto-resolved event",

@@ -67,6 +67,15 @@ interface VisitorDetailsPanelProps {
   }>
 
   rating?: { rating: number; feedback?: string } | null
+
+  formSubmissions?: Array<{
+    id: number
+    form_id: number
+    form_name: string | null
+    form_fields: Array<{ name: string; label: string; type: string }>
+    data: Record<string, string>
+    created_at: string | null
+  }>
 }
 
 export default function VisitorDetailsPanel({
@@ -77,6 +86,7 @@ export default function VisitorDetailsPanel({
   onDeleteNote,
   browsingHistory = [],
   rating,
+  formSubmissions = [],
 }: VisitorDetailsPanelProps) {
   const [editingName, setEditingName] = useState(false)
   const [editingEmail, setEditingEmail] = useState(false)
@@ -404,6 +414,36 @@ export default function VisitorDetailsPanel({
           </div>
         )}
       </div>
+
+      {/* Form Submissions */}
+      {formSubmissions.length > 0 && (
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Form submissions</h4>
+          </div>
+          <div className="space-y-4">
+            {formSubmissions.map((sub) => {
+              const when = sub.created_at ? formatDistanceToNow(new Date(sub.created_at), { addSuffix: true }) : ''
+              const labelMap: Record<string, string> = {}
+              ;(sub.form_fields || []).forEach((f) => { labelMap[f.name] = f.label })
+              return (
+                <div key={sub.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{sub.form_name || 'Form'}</span>
+                    {when && <span className="text-xs text-gray-400 dark:text-gray-500">{when}</span>}
+                  </div>
+                  {Object.entries(sub.data || {}).map(([key, val]) => (
+                    <div key={key} className="text-xs">
+                      <span className="text-gray-500 dark:text-gray-400">{labelMap[key] || key}: </span>
+                      <span className="text-gray-900 dark:text-white">{String(val)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
     </div>
   )

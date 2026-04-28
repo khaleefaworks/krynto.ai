@@ -103,3 +103,56 @@ def get_submissions(db: Session, form_id: int, limit: int = 100, offset: int = 0
         .limit(limit)
         .all()
     )
+
+
+def get_submissions_by_conversation(db: Session, conversation_id: int) -> list[WebsiteFormSubmission]:
+    """Return all form submissions linked to a conversation, oldest first."""
+    return (
+        db.query(WebsiteFormSubmission)
+        .filter(WebsiteFormSubmission.conversation_id == conversation_id)
+        .order_by(WebsiteFormSubmission.id.asc())
+        .all()
+    )
+
+
+def get_submissions_by_session(
+    db: Session,
+    session_id: str,
+    website_id: int | None = None,
+    limit: int = 50,
+) -> list[WebsiteFormSubmission]:
+    """Return all form submissions for a session (optionally scoped to a website)."""
+    q = db.query(WebsiteFormSubmission).filter(
+        WebsiteFormSubmission.session_id == session_id
+    )
+    if website_id is not None:
+        # Filter via join with WebsiteForm to scope to website
+        q = q.join(WebsiteForm, WebsiteForm.id == WebsiteFormSubmission.form_id).filter(
+            WebsiteForm.website_id == website_id
+        )
+    return q.order_by(WebsiteFormSubmission.id.desc()).limit(limit).all()
+
+
+def ensure_default_form_for_website(db: Session, website_id: int) -> None:
+    """Create the default 'Leave us a message' offline contact form if it doesn't exist."""
+    existing = get_form_by_slug(db, website_id, "offline-contact")
+    if existing:
+        return
+    form = WebsiteForm(
+        website_id=website_id,
+        name="Leave us a message",
+        slug="offline-contact",
+        fields=[
+            {"label": "Your Name", "field_name": "name", "type": "text", "required": True, "placeholder": "Enter your name"},
+            {"label": "Phone Number", "field_name": "phone", "type": "tel", "required": True, "placeholder": "Enter your phone number"},
+            {"label": "Email Address", "field_name": "email", "type": "email", "required": False, "placeholder": "Enter your email (optional)"},
+            {"label": "Message", "field_name": "message", "type": "textarea", "required": True, "placeholder": "What can we help you with?"},
+        ],
+        submit_label="Send Message",
+        enabled=True,
+    )
+    db.add(form)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()

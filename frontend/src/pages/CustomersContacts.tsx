@@ -322,6 +322,36 @@ export default function CustomersContacts() {
                                             <div>Last update: {formatDate(details.last_update)}</div>
                                         </div>
                                     </details>
+
+                                    {details.form_submissions?.length > 0 && (
+                                        <details className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800" open>
+                                            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
+                                                Form submissions ({details.form_submissions.length})
+                                            </summary>
+                                            <div className="px-4 pb-4 space-y-3">
+                                                {details.form_submissions.map((sub: any) => {
+                                                    const labelMap: Record<string, string> = {}
+                                                    ;(sub.form_fields || []).forEach((f: any) => { labelMap[f.name] = f.label })
+                                                    return (
+                                                        <div key={sub.id} className="rounded border border-gray-100 dark:border-gray-700 p-3 space-y-1">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{sub.form_name || 'Form'}</span>
+                                                                {sub.created_at && (
+                                                                    <span className="text-xs text-gray-400 dark:text-gray-500">{formatDate(sub.created_at)}</span>
+                                                                )}
+                                                            </div>
+                                                            {Object.entries(sub.data || {}).map(([key, val]: [string, any]) => (
+                                                                <div key={key} className="text-xs">
+                                                                    <span className="text-gray-500 dark:text-gray-400">{labelMap[key] || key}: </span>
+                                                                    <span className="text-gray-900 dark:text-white">{String(val)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </details>
+                                    )}
                                 </>
                             ) : null}
                         </div>

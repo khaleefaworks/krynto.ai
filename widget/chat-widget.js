@@ -114,6 +114,10 @@
   // Set when the visitor intentionally clicks "End chat" so the rating overlay
   // knows to minimise (not run afterConversationClose) on dismiss.
   let ratingTriggeredByVisitorEnd = false;
+  // Deferred flag: set when conversation_resolved arrives; cleared once show_rating_popup fires.
+  // Safety timeout calls afterConversationClose() if show_rating_popup never arrives.
+  let _awaitingRatingAfterResolve = false;
+  let _resolveRatingTimeout = null;
 
   // --- Multi-conversation view state ---
   // viewMode: 'start' | 'list' | 'thread'
@@ -430,6 +434,8 @@
       el.classList.remove('chatassist-rating-overlay-visible');
       el.style.display = 'none';
     }
+    clearTimeout(_resolveRatingTimeout);
+    _awaitingRatingAfterResolve = false;
     if (ratingTriggeredByVisitorEnd) {
       // Visitor intentionally ended — transition view same as an agent-resolved close.
       ratingTriggeredByVisitorEnd = false;
@@ -1149,6 +1155,7 @@
         } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
           else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
+          else if (eventType === 'visitor_ended') showSystemMessage('You ended the chat.');
           else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
         } else {
@@ -1239,7 +1246,15 @@
           if (ratingTriggeredByVisitorEnd) {
             // Visitor's confirm-button click already showed the rating overlay — no-op.
           } else {
-            afterConversationClose();
+            // Defer close: wait for show_rating_popup. Safety timeout 5s.
+            _awaitingRatingAfterResolve = true;
+            clearTimeout(_resolveRatingTimeout);
+            _resolveRatingTimeout = setTimeout(function () {
+              if (_awaitingRatingAfterResolve) {
+                _awaitingRatingAfterResolve = false;
+                afterConversationClose();
+              }
+            }, 5000);
           }
         }
       } else {
@@ -1258,14 +1273,96 @@
       if (!ratingTriggeredByVisitorEnd) {
         const convId = data.conversation_id || ratingConversationId;
         if (convId) ratingConversationId = convId;
+        // Clear deferred-close flag (rating popup handles navigation).
+        clearTimeout(_resolveRatingTimeout);
+        _awaitingRatingAfterResolve = false;
         showRatingOverlay(ratingConversationId);
       }
       return;
     }
 
-    // Dynamic form display stub (show_form automation action).
+    // Dynamic form display (show_form automation action).
     if (data.type === 'show_form') {
-      // TODO: render the form fields from data.form
+      const formId = data.form_id;
+      const formName = data.form_name || 'Contact Us';
+      const fields = Array.isArray(data.fields) ? data.fields : [];
+      const submitLabel = data.submit_label || 'Send';
+      const convId = data.conversation_id || CONFIG.conversationId;
+      if (!formId || !fields.length) return;
+      // Render the inline form into the messages area.
+      const container = document.getElementById('chatassist-messages');
+      if (!container) return;
+      const formWrap = document.createElement('div');
+      formWrap.className = 'chatassist-bot-msg';
+      formWrap.style.cssText = 'margin:8px 0;';
+      const formEl = document.createElement('form');
+      formEl.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:10px 0;';
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:4px;';
+      titleEl.textContent = formName;
+      formEl.appendChild(titleEl);
+      fields.forEach(function (field) {
+        const label = document.createElement('label');
+        label.style.cssText = 'font-size:12px;display:flex;flex-direction:column;gap:3px;';
+        label.textContent = field.label + (field.required ? ' *' : '');
+        let inputEl;
+        if (field.type === 'textarea') {
+          inputEl = document.createElement('textarea');
+          inputEl.rows = 3;
+        } else {
+          inputEl = document.createElement('input');
+          inputEl.type = field.type || 'text';
+        }
+        inputEl.name = field.name;
+        inputEl.required = !!field.required;
+        inputEl.placeholder = field.placeholder || '';
+        inputEl.style.cssText = 'padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;';
+        label.appendChild(inputEl);
+        formEl.appendChild(label);
+      });
+      const submitBtn = document.createElement('button');
+      submitBtn.type = 'submit';
+      submitBtn.textContent = submitLabel;
+      submitBtn.style.cssText = 'margin-top:4px;padding:8px 14px;background:var(--chatassist-color,#4f46e5);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;align-self:flex-start;';
+      formEl.appendChild(submitBtn);
+      const statusEl = document.createElement('div');
+      statusEl.style.cssText = 'font-size:12px;color:#16a34a;display:none;';
+      formEl.appendChild(statusEl);
+      formEl.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const formData = {};
+        fields.forEach(function (field) {
+          const el = formEl.elements[field.name];
+          if (el) formData[field.name] = el.value;
+        });
+        submitBtn.disabled = true;
+        submitBtn.textContent = '...';
+        try {
+          const apiBase = (CONFIG.apiUrl || '').replace(/\/$/, '');
+          await fetch(
+            apiBase + '/websites/' + CONFIG.websiteId + '/forms/' + formId + '/submissions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                data: formData,
+                session_id: CONFIG.sessionId,
+                conversation_id: convId || null,
+              }),
+            }
+          );
+          Array.from(formEl.querySelectorAll('input,textarea,button')).forEach(function (el) { el.disabled = true; });
+          statusEl.textContent = 'Message sent! We will get back to you soon.';
+          statusEl.style.display = 'block';
+          submitBtn.style.display = 'none';
+        } catch (err) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = submitLabel;
+        }
+      });
+      formWrap.appendChild(formEl);
+      container.appendChild(formWrap);
+      smartScroll();
       return;
     }
 
@@ -2185,9 +2282,63 @@
           preview.style.display = 'none';
         }
       }
+      // If the widget-config provided an offline_form, render it here instead
+      // of the default hardcoded contact fields.
+      try {
+        const configForm = (window && window._aichatassist && window._aichatassist.offlineForm) || CONFIG.offline_form || null;
+        const panel = el.querySelector('.chatassist-contact-overlay-panel');
+        if (configForm && panel) {
+          const titleEl = panel.querySelector('.chatassist-contact-overlay-title');
+          const subtitleEl = panel.querySelector('.chatassist-contact-overlay-subtitle');
+          if (titleEl) titleEl.textContent = configForm.name || 'Please introduce yourself';
+          if (subtitleEl) subtitleEl.textContent = panel.querySelector('#chatassist-contact-msg-preview')?.style.display === 'block' ? subtitleEl.textContent : (subtitleEl.textContent || 'Leave your contact info so we can get back to you.');
+          const formContainer = panel.querySelector('.chatassist-contact-form');
+          if (formContainer) {
+            formContainer.innerHTML = '';
+            (configForm.fields || []).forEach(f => {
+              const label = document.createElement('label');
+              label.style.cssText = 'font-size:13px;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;';
+              label.textContent = (f.label || f.name) + (f.required ? ' *' : '');
+              let inputEl;
+              if (f.type === 'textarea') {
+                inputEl = document.createElement('textarea');
+                inputEl.rows = 3;
+              } else if (f.type === 'select') {
+                inputEl = document.createElement('select');
+                (f.options || []).forEach(opt => {
+                  const o = document.createElement('option');
+                  o.value = opt;
+                  o.textContent = opt;
+                  inputEl.appendChild(o);
+                });
+              } else {
+                inputEl = document.createElement('input');
+                inputEl.type = f.type || 'text';
+              }
+              inputEl.id = 'chatassist-offline-field-' + (f.name || 'field');
+              // If this is a phone/tel field, restrict input to digits and max length 10
+              const lname = (f.name || '').toLowerCase();
+              if (f.type === 'tel' || f.type === 'phone' || lname.includes('phone')) {
+                inputEl.addEventListener('input', function () {
+                  this.value = (this.value || '').replace(/\D/g, '').slice(0, 10);
+                });
+              }
+              inputEl.name = f.name || '';
+              inputEl.required = !!f.required;
+              inputEl.placeholder = f.placeholder || '';
+              inputEl.style.cssText = 'padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;';
+              label.appendChild(inputEl);
+              formContainer.appendChild(label);
+            });
+          }
+        }
+      } catch (e) { }
+
       el.style.display = 'flex';
       el.classList.add('chatassist-contact-overlay-visible');
-      document.getElementById('chatassist-contact-name')?.focus();
+      // Focus first input (offline form or default name field)
+      const firstField = el.querySelector('#chatassist-offline-field-' + ((CONFIG.offline_form && CONFIG.offline_form.fields && CONFIG.offline_form.fields[0] && CONFIG.offline_form.fields[0].name) || '') ) || document.getElementById('chatassist-contact-name');
+      try { firstField && firstField.focus(); } catch (e) { }
     }
   }
 
@@ -2231,41 +2382,87 @@
   }
 
   function submitContactAndSendPending() {
-    const name = document.getElementById('chatassist-contact-name')?.value.trim();
-    const phone = document.getElementById('chatassist-contact-phone')?.value.trim();
-    const email = document.getElementById('chatassist-contact-email')?.value.trim();
-    if (!name) {
-      showToast('Please enter your name.');
-      document.getElementById('chatassist-contact-name')?.focus();
-      return;
+    // If an offline_form is configured, submit that first.
+    const configForm = CONFIG.offline_form || (window && window._aichatassist && window._aichatassist.offlineForm) || null;
+    let collected = {};
+    let visitorName = null;
+    let visitorPhone = null;
+    let visitorEmail = null;
+    if (configForm && configForm.id) {
+      const fields = configForm.fields || [];
+      for (const f of fields) {
+        const el = document.getElementById('chatassist-offline-field-' + (f.name || 'field'));
+        const val = el ? (el.value || '').toString().trim() : '';
+        if (f.required && !val) {
+          showToast((f.label || f.name || 'This field') + ' is required.');
+          el && el.focus();
+          return;
+        }
+        if (val) {
+          collected[f.name] = val;
+          const lname = (f.name || '').toLowerCase();
+          if (!visitorName && (lname === 'name' || lname === 'full_name' || lname === 'your_name')) visitorName = val;
+          if (!visitorPhone && (lname === 'phone' || lname === 'phone_number' || f.type === 'tel')) visitorPhone = val;
+          if (!visitorEmail && (lname === 'email' || f.type === 'email')) visitorEmail = val;
+        }
+      }
+      // Submit the form to the public submissions endpoint.
+      (async () => {
+        try {
+          await fetch((CONFIG.apiUrl || '') + '/websites/' + CONFIG.websiteId + '/forms/' + configForm.id + '/submissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: collected, session_id: CONFIG.sessionId || undefined, conversation_id: CONFIG.conversationId || undefined }),
+          });
+        } catch (e) {
+          // Non-fatal: continue to send the pending message even if form submission fails.
+          console.warn('offline form submission failed', e);
+        }
+      })();
+    } else {
+      // Fallback to legacy simple contact overlay fields.
+      const name = document.getElementById('chatassist-contact-name')?.value.trim();
+      const phone = document.getElementById('chatassist-contact-phone')?.value.trim();
+      const email = document.getElementById('chatassist-contact-email')?.value.trim();
+      if (!name) {
+        showToast('Please enter your name.');
+        document.getElementById('chatassist-contact-name')?.focus();
+        return;
+      }
+      if (!phone) {
+        showToast('Please enter your phone number.');
+        document.getElementById('chatassist-contact-phone')?.focus();
+        return;
+      }
+      // Exactly 10 digits required.
+      const phoneDigits = phone.replace(/\D/g, '');
+      if (phoneDigits.length !== 10) {
+        showToast('Please enter a valid 10-digit phone number.');
+        document.getElementById('chatassist-contact-phone')?.focus();
+        return;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showToast('Please enter a valid email address.');
+        document.getElementById('chatassist-contact-email')?.focus();
+        return;
+      }
+      visitorName = name;
+      visitorPhone = phone;
+      visitorEmail = email;
     }
-    if (!phone) {
-      showToast('Please enter your phone number.');
-      document.getElementById('chatassist-contact-phone')?.focus();
-      return;
-    }
-    // Exactly 10 digits required.
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (phoneDigits.length !== 10) {
-      showToast('Please enter a valid 10-digit phone number.');
-      document.getElementById('chatassist-contact-phone')?.focus();
-      return;
-    }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      showToast('Please enter a valid email address.');
-      document.getElementById('chatassist-contact-email')?.focus();
-      return;
-    }
+
     const msg = pendingOfflineMessage;
     const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
     pendingOfflineAttachments = [];
     hideContactOverlay(false);
-    localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
-    localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, phone);
-    if (email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
+    try {
+      if (visitorName) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitorName);
+      if (visitorPhone) localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, visitorPhone);
+      if (visitorEmail) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitorEmail);
+    } catch (e) { }
     if (msg || (atts && atts.length)) {
-      const meta = { visitor_name: name, visitor_phone: phone, visitor_email: email || undefined };
+      const meta = { visitor_name: visitorName, visitor_phone: visitorPhone, visitor_email: visitorEmail || undefined };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
@@ -2462,6 +2659,12 @@
       if (endChatDisabled) setEndChatDisabled(true);
       // Persist open state
       try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '1'); } catch (e) { }
+      // Notify backend that widget was opened (triggers welcome if not yet sent)
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'widget_opened' }));
+        }
+      } catch (e) { }
     }
 
     function closeWidget(restoreOverlay) {
@@ -2839,6 +3042,21 @@
   async function init() {
     CONFIG.sessionId = getSessionId();
     try {
+      // Attempt to fetch widget-config to obtain website-specific offline_form.
+      async function loadRemoteWidgetConfig() {
+        try {
+          if (!CONFIG.apiUrl || !CONFIG.websiteId) return;
+          const res = await fetch((CONFIG.apiUrl || '') + '/websites/' + CONFIG.websiteId + '/widget-config');
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data && data.offline_form) {
+            CONFIG.offline_form = data.offline_form;
+            // Also make it available under the global loader object for older integrations.
+            try { if (window && window._aichatassist) window._aichatassist.offlineForm = data.offline_form; } catch (e) { }
+          }
+        } catch (e) { }
+      }
+      await loadRemoteWidgetConfig();
       createWidget();
 
       // Restore end-chat disabled state (per session) before wiring events.
