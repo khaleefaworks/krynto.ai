@@ -117,16 +117,6 @@ def create_website(
     db.commit()
     db.refresh(website)
 
-    # Seed default offline contact form for this website.
-    try:
-        from app.repos import forms as forms_repo
-        forms_repo.ensure_default_form_for_website(db, website_id=website.id)
-    except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
-
     return website
 
 
@@ -276,41 +266,6 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
     
     # Get widget config or use defaults
     config = website.widget_config or {}
-    
-    # Resolve offline form by slug configured on the website, falling back to the
-    # seeded 'offline-contact' form. Normalize field keys for widget consumption.
-    offline_form_obj = None
-    try:
-        offline_slug = (config.get("offline_form_slug") if isinstance(config, dict) else None) or "offline-contact"
-        from app.repos import forms as forms_repo
-        form = forms_repo.get_form_by_slug(db, website_id, offline_slug)
-        if form and getattr(form, "enabled", False):
-            fields = []
-            for f in (form.fields or []):
-                # Support different field shapes (name vs field_name, type vs field_type)
-                name = f.get("name") or f.get("field_name") or f.get("field") or f.get("fieldName") or ''
-                label = f.get("label") or name or ''
-                ftype = f.get("type") or f.get("field_type") or 'text'
-                required = bool(f.get("required") or False)
-                placeholder = f.get("placeholder") or f.get("hint") or ''
-                options = f.get("options") or []
-                fields.append({
-                    "name": name,
-                    "label": label,
-                    "type": ftype,
-                    "required": required,
-                    "placeholder": placeholder,
-                    "options": options,
-                })
-            offline_form_obj = {
-                "id": form.id,
-                "slug": form.slug,
-                "name": form.name,
-                "fields": fields,
-                "submit_label": getattr(form, "submit_label", None) or "Send",
-            }
-    except Exception:
-        offline_form_obj = None
 
     return {
         "theme": config.get("theme", "dark"),
@@ -325,7 +280,7 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
         "show_attachments": config.get("show_attachments", False),
         "branding_text": config.get("branding_text"),
         "header_icon_url": config.get("header_icon_url"),
-        "offline_form": offline_form_obj,
+        "offline_form": None,
     }
 
 

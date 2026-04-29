@@ -1602,55 +1602,6 @@ class ConversationOrchestrator:
                                 tag_name=tag_name,
                             )
 
-                    elif action_type == "show_form":
-                        form_slug = str(action.get("form_slug") or "offline-contact").strip()
-                        if website_id and send_to_visitor:
-                            try:
-                                from app.repos import forms as forms_repo
-                                form = forms_repo.get_form_by_slug(self.db, int(website_id), form_slug)
-                                if form and form.enabled:
-                                    # Normalize field keys so the widget can reliably render them.
-                                    normalized_fields = []
-                                    for f in (form.fields or []):
-                                        try:
-                                            if isinstance(f, dict):
-                                                name = str(f.get("name") or f.get("field_name") or "")
-                                                label = str(f.get("label") or name or "")
-                                                ftype = str(f.get("type") or f.get("field_type") or "text")
-                                                required = bool(f.get("required") or False)
-                                                placeholder = str(f.get("placeholder") or f.get("hint") or "")
-                                                options = f.get("options") or []
-                                            else:
-                                                name = ""
-                                                label = ""
-                                                ftype = "text"
-                                                required = False
-                                                placeholder = ""
-                                                options = []
-                                            normalized_fields.append({
-                                                "name": name,
-                                                "label": label,
-                                                "type": ftype,
-                                                "required": required,
-                                                "placeholder": placeholder,
-                                                "options": options,
-                                            })
-                                        except Exception:
-                                            continue
-                                    await ChatService.send_to_visitor(
-                                        conversation_id,
-                                        {
-                                            "type": "show_form",
-                                            "form_id": form.id,
-                                            "form_name": form.name,
-                                            "fields": normalized_fields,
-                                            "submit_label": getattr(form, "submit_label", None) or "Send",
-                                            "conversation_id": conversation_id,
-                                        },
-                                    )
-                            except Exception as e:
-                                logger.warning("show_form_dispatch_failed", error=str(e))
-
                     elif action_type == "tag_with_agent_name":
                         if website_id:
                             self._apply_agent_name_tag(

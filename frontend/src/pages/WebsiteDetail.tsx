@@ -123,7 +123,7 @@ type AutomationDraft = {
   name: string
   trigger: string
   enabled: boolean
-  action_type: 'send_bot_message' | 'emit_system_event' | 'show_form' | 'show_rating_popup' | 'tag_conversation' | 'tag_with_agent_name'
+  action_type: 'send_bot_message' | 'emit_system_event' | 'show_rating_popup' | 'tag_conversation' | 'tag_with_agent_name'
   action_index?: number
   message: string
   event_type?: string
@@ -132,7 +132,6 @@ type AutomationDraft = {
   welcome_delay_seconds?: number
   repeat?: 'once' | 'cooldown' | 'always'
   repeat_cooldown_seconds?: number
-  form_slug?: string  // for show_form actions
 }
 
 export default function WebsiteDetail() {
@@ -162,10 +161,6 @@ export default function WebsiteDetail() {
   const [builderCreateType, setBuilderCreateType] = useState<BuilderCreateType>('auto_message')
   const [builderDraft, setBuilderDraft] = useState<AutomationDraft | null>(null)
   const [builderSaving, setBuilderSaving] = useState(false)
-
-  // Website forms (for show_form action picker)
-  const [websiteForms, setWebsiteForms] = useState<{ id: number; name: string; slug: string }[]>([])
-  const [offlinePromptFormSlug, setOfflinePromptFormSlug] = useState<string>('')
 
   // Team routing chatbot state
   const [chatbotTeams, setChatbotTeams] = useState<{ id: number; name: string }[]>([])
@@ -235,17 +230,6 @@ export default function WebsiteDetail() {
     apiRequest<{ id: number; name: string }[]>(`/websites/${websiteId}/teams`)
       .then((data) => setChatbotTeams(Array.isArray(data) ? data : []))
       .catch(() => setChatbotTeams([]))
-    // Load forms for show_form action picker
-    apiRequest<{ id: number; name: string; slug: string }[]>(`/websites/${websiteId}/forms`)
-      .then((data) => {
-        const forms = Array.isArray(data) ? data : []
-        setWebsiteForms(forms)
-        // Default selection: first form's slug (or 'offline-contact' fallback)
-        if (!offlinePromptFormSlug) {
-          setOfflinePromptFormSlug(forms[0]?.slug || 'offline-contact')
-        }
-      })
-      .catch(() => setWebsiteForms([]))
   }, [activeTab, websiteId])
 
   useEffect(() => {
@@ -485,13 +469,7 @@ export default function WebsiteDetail() {
     const action = extractPrimaryAction(automation)
     const actions = normalizeAutomationActions(automation)
     const idx = action ? actions.findIndex((a) => a === action) : -1
-    const draft = draftFromAutomationAction(automation, action, idx >= 0 ? idx : undefined)
-    // Extract form_slug from any show_form action in the automation
-    const showFormAction = actions.find((a) => (a as any).type === 'show_form') as any
-    if (showFormAction) {
-      draft.form_slug = showFormAction.form_slug || 'offline-contact'
-    }
-    return draft
+    return draftFromAutomationAction(automation, action, idx >= 0 ? idx : undefined)
   }
 
   const openBuilderPickType = () => {
@@ -563,17 +541,12 @@ export default function WebsiteDetail() {
           content: builderDraft.message.trim(),
           event_type: (builderDraft.event_type || '').trim() || builderDraft.trigger,
         }
-        : builderDraft.action_type === 'show_form'
-          ? {
-            type: 'show_form',
-            form_slug: builderDraft.form_slug || offlinePromptFormSlug || 'offline-contact',
-          } as any
-          : {
-            type: 'send_bot_message',
-            message: builderDraft.message.trim(),
-            // Keep stable server-side idempotency for welcome.
-            event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
-          }
+        : {
+          type: 'send_bot_message',
+          message: builderDraft.message.trim(),
+          // Keep stable server-side idempotency for welcome.
+          event_type: isWelcome ? 'automation_welcome' : builderDraft.event_type || undefined,
+        }
 
     let nextActions: any = [nextAction]
     if (builderDraft.id) {
@@ -582,14 +555,7 @@ export default function WebsiteDetail() {
         const existingActions = normalizeAutomationActions(existing)
         const actionIndex = typeof builderDraft.action_index === 'number' ? builderDraft.action_index : -1
         if (actionIndex >= 0 && actionIndex < existingActions.length) {
-          nextActions = existingActions.map((a, idx) => {
-            if (idx === actionIndex) return nextAction
-            // Update form_slug on show_form actions if user changed it
-            if ((a as any).type === 'show_form' && builderDraft.form_slug) {
-              return { ...(a as any), form_slug: builderDraft.form_slug }
-            }
-            return a
-          })
+          nextActions = existingActions.map((a, idx) => idx === actionIndex ? nextAction : a)
         }
       }
     }
@@ -1377,16 +1343,16 @@ export default function WebsiteDetail() {
                               name: 'Offline prompt',
                               trigger: 'website_offline_first_message',
                               enabled: true,
-                              description: 'Shows a contact form then a bot message when the website is offline and a visitor messages.',
-                              isOfflinePrompt: true,
-                              actions: [] as any[], // built dynamically using offlinePromptFormSlug
+                              description: 'Sends a bot message when the website is offline and a visitor messages.',
+                              actions: [
+                                { type: 'send_bot_message', message: "We're offline right now. Leave us a message and we'll get back to you soon.", event_type: 'bot_offline' },
+                              ],
                             },
                             {
                               name: 'Visitor ended + rating popup',
                               trigger: 'conversation_visitor_ended',
                               enabled: true,
                               description: 'Shows a timeline event and then a rating popup when the visitor ends the chat.',
-                              isOfflinePrompt: false,
                               actions: [
                                 { type: 'emit_system_event', content: 'Visitor ended the chat.', event_type: 'visitor_ended' },
                                 { type: 'show_rating_popup', event_type: 'rating_popup_shown' },
@@ -1397,7 +1363,6 @@ export default function WebsiteDetail() {
                               trigger: 'conversation_resolved',
                               enabled: true,
                               description: 'Shows a "{agent} resolved the chat." event then a rating popup when an agent resolves.',
-                              isOfflinePrompt: false,
                               actions: [
                                 { type: 'emit_system_event', content: '{agent_name} resolved the chat.', event_type: 'conversation_resolved' },
                                 { type: 'show_rating_popup', event_type: 'rating_popup_shown' },
@@ -1411,19 +1376,13 @@ export default function WebsiteDetail() {
                             try {
                               setAutomationsError(null)
                               if (existing) { openBuilderForAutomation(existing); return }
-                              const resolvedActions = t.isOfflinePrompt
-                                ? [
-                                    { type: 'show_form', form_slug: offlinePromptFormSlug || 'offline-contact' },
-                                    { type: 'send_bot_message', message: "We're offline at the moment. Leave your details above and we'll get back to you!", event_type: 'bot_offline' },
-                                  ]
-                                : t.actions
                               const created = await automationsApi.create({
                                 website_id: websiteId,
                                 name: t.name,
                                 trigger: t.trigger,
                                 enabled: t.enabled,
                                 conditions: {},
-                                actions: resolvedActions as any,
+                                actions: t.actions as any,
                               })
                               await loadAutomations()
                               if (created) openBuilderForAutomation(created)
@@ -1560,7 +1519,6 @@ export default function WebsiteDetail() {
                                       if (t === 'emit_system_event') return `📢 ${extractActionText(action) || 'System event'}`
                                       if (t === 'send_bot_message') return `💬 ${extractActionText(action) || 'Bot message'}`
                                       if (t === 'show_rating_popup') return `⭐ Show rating popup`
-                                      if (t === 'show_form') return `📋 Show form`
                                       if (t === 'tag_conversation') return `🏷 Tag: ${(action as any).tag || ''}`
                                       if (t === 'tag_with_agent_name') return `🏷 Tag with agent name`
                                       if (t === 'bot_prompt_buttons') return `🤖 Bot prompt with buttons`
@@ -2030,26 +1988,6 @@ export default function WebsiteDetail() {
                                 />
                               </div>
 
-                              {builderDraft.form_slug !== undefined && (
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Form to show visitor</label>
-                                  {websiteForms.length > 0 ? (
-                                    <select
-                                      value={builderDraft.form_slug}
-                                      onChange={(e) => setBuilderDraft({ ...builderDraft, form_slug: e.target.value })}
-                                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                    >
-                                      {websiteForms.map((f) => (
-                                        <option key={f.id} value={f.slug}>{f.name}</option>
-                                      ))}
-                                    </select>
-                                  ) : (
-                                    <div className="text-xs text-gray-400 dark:text-gray-500">No forms found. Create one in the Forms tab.</div>
-                                  )}
-                                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">This form will be shown to the visitor before the bot message.</div>
-                                </div>
-                              )}
-
                               <div>
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Action type</label>
                                 <select
@@ -2059,15 +1997,13 @@ export default function WebsiteDetail() {
                                     const nextType =
                                       val === 'emit_system_event'
                                         ? 'emit_system_event'
-                                        : val === 'show_form'
-                                          ? 'show_form'
-                                          : val === 'show_rating_popup'
-                                            ? 'show_rating_popup'
-                                            : val === 'tag_conversation'
-                                              ? 'tag_conversation'
-                                              : val === 'tag_with_agent_name'
-                                                ? 'tag_with_agent_name'
-                                                : 'send_bot_message'
+                                        : val === 'show_rating_popup'
+                                          ? 'show_rating_popup'
+                                          : val === 'tag_conversation'
+                                            ? 'tag_conversation'
+                                            : val === 'tag_with_agent_name'
+                                              ? 'tag_with_agent_name'
+                                              : 'send_bot_message'
 
                                     setBuilderDraft({
                                       ...builderDraft,
@@ -2076,17 +2012,12 @@ export default function WebsiteDetail() {
                                         nextType === 'emit_system_event'
                                           ? builderDraft.event_type || builderDraft.trigger
                                           : builderDraft.event_type,
-                                      form_slug:
-                                        nextType === 'show_form'
-                                          ? (builderDraft.form_slug || offlinePromptFormSlug || websiteForms[0]?.slug || 'offline-contact')
-                                          : builderDraft.form_slug,
                                     })
                                   }}
                                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                                 >
                                   <option value="send_bot_message">Bot message</option>
                                   <option value="emit_system_event">System event</option>
-                                  <option value="show_form">Show form</option>
                                   <option value="show_rating_popup">Show rating popup</option>
                                   <option value="tag_conversation">Tag conversation</option>
                                   <option value="tag_with_agent_name">Tag with agent name</option>

@@ -288,7 +288,6 @@ class AutomationService:
                 "enabled": True,
                 "conditions": {},
                 "actions": [
-                    {"type": "show_form", "form_slug": "offline-contact"},
                     {"type": "send_bot_message", "message": "We're offline right now. Leave us a message and we'll get back to you soon.", "event_type": "bot_offline"},
                 ],
             },

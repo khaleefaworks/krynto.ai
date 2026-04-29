@@ -933,6 +933,35 @@ async def chat_ws(
 
                 continue
 
+            if message_type == "visitor_contact":
+                v_name = payload.get("visitor_name")
+                v_email = payload.get("visitor_email")
+                v_phone = payload.get("visitor_phone")
+                if v_name or v_email or v_phone:
+                    try:
+                        conv = conversations_repo.get_open_conversation_by_session(
+                            db, website_id=website_id, session_id=session_id
+                        )
+                        if conv:
+                            changed = False
+                            if v_name and not conv.visitor_name:
+                                conv.visitor_name = str(v_name)
+                                changed = True
+                            if v_email and not conv.visitor_email:
+                                conv.visitor_email = str(v_email)
+                                changed = True
+                            if v_phone and not conv.visitor_phone:
+                                conv.visitor_phone = str(v_phone)
+                                changed = True
+                            if changed:
+                                db.commit()
+                    except Exception:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                continue
+
             user_message = payload.get("message")
             if not user_message:
                 continue
