@@ -13,7 +13,6 @@ from app.services.visibility import compute_visibility_scope, ensure_website_vis
 
 
 def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
-    """Raise 403 if the user doesn't have visibility to this website."""
     scope = compute_visibility_scope(db, user=user)
     try:
         ensure_website_visible(scope, website_id=int(website_id))
@@ -29,8 +28,8 @@ class AutomationCreate(BaseModel):
     trigger: str = Field(..., min_length=1, max_length=100)
     enabled: bool = True
     category: str = Field('auto_message', max_length=50)
-    conditions: dict | None = None
-    actions: Any | None = None
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
 
 
 class AutomationUpdate(BaseModel):
@@ -38,8 +37,8 @@ class AutomationUpdate(BaseModel):
     trigger: Optional[str] = Field(None, min_length=1, max_length=100)
     enabled: Optional[bool] = None
     category: Optional[str] = Field(None, max_length=50)
-    conditions: Optional[dict] = None
-    actions: Any | None = None
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
 
 
 class AutomationResponse(BaseModel):
@@ -49,8 +48,9 @@ class AutomationResponse(BaseModel):
     trigger: str
     enabled: bool
     category: str = 'auto_message'
-    conditions: dict | None
-    actions: Any | None
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
+    template_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -64,12 +64,10 @@ def list_automations(
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_authenticated_user),
 ):
-    """List automations for a website."""
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     _enforce_website_access(db, website_id=website_id, user=_current_user)
-
     return automations_repo.list_automations(db, website_id=website_id)
 
 
@@ -79,7 +77,6 @@ def create_automation(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """Create an automation (Admin only)."""
     website = db.query(Website).filter_by(id=payload.website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
@@ -92,8 +89,8 @@ def create_automation(
         trigger=payload.trigger,
         enabled=payload.enabled,
         category=payload.category,
-        conditions=payload.conditions,
-        actions=payload.actions,
+        nodes=payload.nodes,
+        edges=payload.edges,
     )
 
 
@@ -129,8 +126,8 @@ def update_automation(
         trigger=payload.trigger,
         enabled=payload.enabled,
         category=payload.category,
-        conditions=payload.conditions,
-        actions=payload.actions,
+        nodes=payload.nodes,
+        edges=payload.edges,
     )
 
 

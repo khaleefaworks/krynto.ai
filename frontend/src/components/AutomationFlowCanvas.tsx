@@ -1,0 +1,629 @@
+import { useState, useCallback, useRef } from 'react'
+import {
+  ReactFlow, Background, Controls,
+  useNodesState, useEdgesState, addEdge,
+  Handle, Position, MarkerType,
+  type Node, type Edge, type Connection, type NodeProps,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { X, Plus, Trash2, GripVertical } from 'lucide-react'
+import {
+  automationsApi,
+  type Automation,
+  type AutomationNode,
+  type AutomationEdge,
+  type AutomationTrigger,
+} from '@/services/automations'
+
+// ─── Node type metadata ────────────────────────────────────────────────────
+
+const NODE_META: Record<string, { label: string; icon: string; color: string }> = {
+  trigger:            { label: 'Trigger',        icon: '⚡', color: 'bg-purple-100 dark:bg-purple-950 border-purple-400' },
+  send_bot_message:   { label: 'Bot message',    icon: '💬', color: 'bg-blue-50 dark:bg-blue-950 border-blue-400' },
+  emit_system_event:  { label: 'System event',   icon: '📢', color: 'bg-gray-100 dark:bg-gray-800 border-gray-400' },
+  wait:               { label: 'Wait',            icon: '⏱',  color: 'bg-yellow-50 dark:bg-yellow-950 border-yellow-400' },
+  condition:          { label: 'Condition',       icon: '🔀', color: 'bg-orange-50 dark:bg-orange-950 border-orange-400' },
+  show_rating_popup:  { label: 'Rating popup',   icon: '⭐', color: 'bg-green-50 dark:bg-green-950 border-green-400' },
+  tag_conversation:   { label: 'Tag',             icon: '🏷',  color: 'bg-pink-50 dark:bg-pink-950 border-pink-400' },
+  tag_with_agent_name:{ label: 'Tag agent name', icon: '👤', color: 'bg-pink-50 dark:bg-pink-950 border-pink-400' },
+  bot_prompt_buttons: { label: 'Button prompt',  icon: '🤖', color: 'bg-indigo-50 dark:bg-indigo-950 border-indigo-400' },
+  end:                { label: 'End',             icon: '🔚', color: 'bg-red-50 dark:bg-red-950 border-red-400' },
+}
+
+const PALETTE_NODES = [
+  'send_bot_message', 'emit_system_event', 'wait', 'condition',
+  'show_rating_popup', 'tag_conversation', 'tag_with_agent_name',
+  'bot_prompt_buttons', 'end',
+]
+
+const TRIGGERS: { value: AutomationTrigger; label: string }[] = [
+  { value: 'visitor_connected',          label: 'Visitor connected' },
+  { value: 'visitor_new',                label: 'New visitor' },
+  { value: 'visitor_returning',          label: 'Returning visitor' },
+  { value: 'visitor_socket_connected',   label: 'Visitor socket connected' },
+  { value: 'visitor_dropped',            label: 'Visitor dropped' },
+  { value: 'visitor_reconnected',        label: 'Visitor reconnected' },
+  { value: 'no_agent_assigned_for',      label: 'No agent assigned for…' },
+  { value: 'website_offline_first_message', label: 'Website offline (first message)' },
+  { value: 'agent_joined',              label: 'Agent joined' },
+  { value: 'conversation_created',       label: 'Conversation created' },
+  { value: 'conversation_visitor_ended', label: 'Visitor ended chat' },
+  { value: 'conversation_resolved',      label: 'Conversation resolved' },
+  { value: 'conversation_auto_resolved', label: 'Auto-resolved' },
+  { value: 'conversation_reopened',      label: 'Conversation reopened' },
+]
+
+// ─── Summary helpers ──────────────────────────────────────────────────────
+
+function nodeSummary(type: string, config: Record<string, any>): string {
+  if (type === 'send_bot_message') return config.message ? `"${config.message.slice(0, 40)}…"` : ''
+  if (type === 'emit_system_event') return config.content ? `"${config.content.slice(0, 40)}…"` : ''
+  if (type === 'wait') return config.seconds ? `${config.seconds}s` : ''
+  if (type === 'condition') return config.field || ''
+  if (type === 'tag_conversation') return config.tag || ''
+  if (type === 'bot_prompt_buttons') return config.message ? `"${config.message.slice(0, 30)}…"` : ''
+  if (type === 'trigger') {
+    const parts = []
+    if (config.repeat === 'cooldown') parts.push(`cooldown ${config.cooldown_hours ?? 24}h`)
+    if (config.repeat === 'once') parts.push('once')
+    if (config.repeat === 'always') parts.push('always')
+    if (config.delay_seconds) parts.push(`delay ${config.delay_seconds}s`)
+    return parts.join(', ')
+  }
+  return ''
+}
+
+// ─── Custom node component ────────────────────────────────────────────────
+
+function FlowNode({ id, data, selected }: NodeProps) {
+  const meta = NODE_META[data.type as string] || { label: data.type, icon: '?', color: 'bg-white border-gray-300' }
+  const isTrigger = data.type === 'trigger'
+  const isCondition = data.type === 'condition'
+  const isEnd = data.type === 'end'
+  const summary = nodeSummary(data.type as string, (data.config as Record<string, any>) || {})
+
+  return (
+    <div
+      className={`rounded-xl border-2 ${meta.color} ${selected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} p-3 min-w-[180px] max-w-[220px] shadow-sm cursor-pointer select-none`}
+    >
+      {!isTrigger && <Handle type="target" position={Position.Top} className="!w-3 !h-3 !bg-gray-400" />}
+      <div className="flex items-center gap-2">
+        <span className="text-base">{meta.icon}</span>
+        <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{meta.label}</span>
+      </div>
+      {summary && (
+        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 truncate">{summary}</div>
+      )}
+      {isCondition ? (
+        <>
+          <Handle type="source" position={Position.Bottom} id="true"  style={{ left: '30%' }}  className="!w-3 !h-3 !bg-green-500" />
+          <Handle type="source" position={Position.Bottom} id="false" style={{ left: '70%' }}  className="!w-3 !h-3 !bg-red-500" />
+          <div className="flex justify-between mt-1 text-[10px] text-gray-400 px-1">
+            <span>true</span><span>false</span>
+          </div>
+        </>
+      ) : !isEnd ? (
+        <Handle type="source" position={Position.Bottom} className="!w-3 !h-3 !bg-gray-400" />
+      ) : null}
+    </div>
+  )
+}
+
+const NODE_TYPES = { automationNode: FlowNode }
+
+// ─── Serialization helpers ────────────────────────────────────────────────
+
+function toRFNodes(nodes: AutomationNode[]): Node[] {
+  return nodes.map((n) => ({
+    id: n.id,
+    type: 'automationNode',
+    position: n.position,
+    data: { type: n.type, config: n.config, label: n.type },
+  }))
+}
+
+function toRFEdges(edges: AutomationEdge[]): Edge[] {
+  return edges.map((e) => ({
+    id: e.id,
+    source: e.from,
+    target: e.to,
+    sourceHandle: e.branch ?? undefined,
+    label: e.branch ?? undefined,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    style: { stroke: '#6b7280' },
+  }))
+}
+
+function fromRFNodes(rfNodes: Node[]): AutomationNode[] {
+  return rfNodes.map((n) => ({
+    id: n.id,
+    type: (n.data.type as string) as AutomationNode['type'],
+    config: (n.data.config as Record<string, any>) || {},
+    position: n.position,
+  }))
+}
+
+function fromRFEdges(rfEdges: Edge[]): AutomationEdge[] {
+  return rfEdges.map((e) => ({
+    id: e.id,
+    from: e.source,
+    to: e.target,
+    branch: (e.sourceHandle as 'true' | 'false') ?? null,
+  }))
+}
+
+function newNodeId() {
+  return `n${Date.now().toString(36)}`
+}
+
+function defaultConfig(type: string): Record<string, any> {
+  if (type === 'trigger') return { repeat: 'once' }
+  if (type === 'send_bot_message') return { message: '', event_type: '' }
+  if (type === 'emit_system_event') return { content: '', event_type: '', visitor_content: '' }
+  if (type === 'wait') return { seconds: 5 }
+  if (type === 'condition') return { field: 'agent_online' }
+  if (type === 'show_rating_popup') return { event_type: 'rating_popup_shown' }
+  if (type === 'tag_conversation') return { tag: '' }
+  if (type === 'tag_with_agent_name') return {}
+  if (type === 'bot_prompt_buttons') return { message: '', allow_input: false, buttons: [] }
+  return {}
+}
+
+// ─── Node config panel ────────────────────────────────────────────────────
+
+function NodeConfigPanel({
+  node,
+  onChange,
+  onDelete,
+}: {
+  node: Node
+  onChange: (config: Record<string, any>) => void
+  onDelete: () => void
+}) {
+  const type = node.data.type as string
+  const cfg = (node.data.config as Record<string, any>) || {}
+  const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch })
+
+  return (
+    <div className="flex flex-col gap-3 p-4 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-gray-900 dark:text-gray-100">
+          {NODE_META[type]?.icon} {NODE_META[type]?.label}
+        </span>
+        {type !== 'trigger' && (
+          <button onClick={onDelete} className="text-red-500 hover:text-red-700">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {type === 'trigger' && (
+        <>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Repeat</label>
+            <select
+              value={cfg.repeat || 'once'}
+              onChange={(e) => set({ repeat: e.target.value })}
+              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+            >
+              <option value="once">Once per conversation</option>
+              <option value="cooldown">Cooldown</option>
+              <option value="always">Always</option>
+            </select>
+          </div>
+          {cfg.repeat === 'cooldown' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cooldown (hours)</label>
+              <Input
+                type="number" min={1}
+                value={cfg.cooldown_hours ?? 24}
+                onChange={(e) => set({ cooldown_hours: Number(e.target.value) })}
+                className="h-8 text-xs"
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Delay (seconds, optional)</label>
+            <Input
+              type="number" min={0}
+              value={cfg.delay_seconds ?? ''}
+              placeholder="0"
+              onChange={(e) => set({ delay_seconds: e.target.value ? Number(e.target.value) : undefined })}
+              className="h-8 text-xs"
+            />
+          </div>
+        </>
+      )}
+
+      {type === 'send_bot_message' && (
+        <>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Message</label>
+            <Textarea
+              value={cfg.message || ''}
+              onChange={(e) => set({ message: e.target.value })}
+              placeholder="Bot message text…"
+              rows={3}
+              className="text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Event type (optional)</label>
+            <Input
+              value={cfg.event_type || ''}
+              onChange={(e) => set({ event_type: e.target.value })}
+              placeholder="e.g. bot_waiting"
+              className="h-8 text-xs"
+            />
+          </div>
+        </>
+      )}
+
+      {type === 'emit_system_event' && (
+        <>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Agent-side content</label>
+            <Textarea
+              value={cfg.content || ''}
+              onChange={(e) => set({ content: e.target.value })}
+              placeholder="e.g. {agent_name} resolved the chat."
+              rows={2}
+              className="text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Visitor-side content (optional)</label>
+            <Input
+              value={cfg.visitor_content || ''}
+              onChange={(e) => set({ visitor_content: e.target.value })}
+              placeholder="e.g. Chat resolved."
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Event type</label>
+            <Input
+              value={cfg.event_type || ''}
+              onChange={(e) => set({ event_type: e.target.value })}
+              placeholder="e.g. conversation_resolved"
+              className="h-8 text-xs"
+            />
+          </div>
+        </>
+      )}
+
+      {type === 'wait' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Wait (seconds)</label>
+          <Input
+            type="number" min={1}
+            value={cfg.seconds || 5}
+            onChange={(e) => set({ seconds: Number(e.target.value) })}
+            className="h-8 text-xs"
+          />
+        </div>
+      )}
+
+      {type === 'condition' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Condition field</label>
+          <select
+            value={cfg.field || 'agent_online'}
+            onChange={(e) => set({ field: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+          >
+            <option value="agent_online">Agent online?</option>
+            <option value="is_first_visit">First visit?</option>
+            <option value="has_tag">Has tag?</option>
+          </select>
+          {cfg.field === 'has_tag' && (
+            <Input
+              value={cfg.value || ''}
+              onChange={(e) => set({ value: e.target.value })}
+              placeholder="Tag name"
+              className="h-8 text-xs mt-2"
+            />
+          )}
+        </div>
+      )}
+
+      {type === 'show_rating_popup' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Event type</label>
+          <Input
+            value={cfg.event_type || 'rating_popup_shown'}
+            onChange={(e) => set({ event_type: e.target.value })}
+            className="h-8 text-xs"
+          />
+        </div>
+      )}
+
+      {type === 'tag_conversation' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Tag name</label>
+          <Input
+            value={cfg.tag || ''}
+            onChange={(e) => set({ tag: e.target.value })}
+            placeholder="e.g. follow-up"
+            className="h-8 text-xs"
+          />
+        </div>
+      )}
+
+      {type === 'bot_prompt_buttons' && (
+        <>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Message</label>
+            <Textarea
+              value={cfg.message || ''}
+              onChange={(e) => set({ message: e.target.value })}
+              placeholder="Button prompt message…"
+              rows={2}
+              className="text-xs"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-600 dark:text-gray-400">Allow free-text input</span>
+            <Switch
+              checked={!!cfg.allow_input}
+              onCheckedChange={(v) => set({ allow_input: v })}
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Buttons</label>
+              <button
+                onClick={() => set({ buttons: [...(cfg.buttons || []), { label: '', reply: '', team_id: null }] })}
+                className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+            {(cfg.buttons || []).map((btn: any, i: number) => (
+              <div key={i} className="flex items-center gap-1 mb-1">
+                <Input
+                  value={btn.label}
+                  onChange={(e) => {
+                    const next = [...cfg.buttons]
+                    next[i] = { ...btn, label: e.target.value }
+                    set({ buttons: next })
+                  }}
+                  placeholder="Button label"
+                  className="h-7 text-xs flex-1"
+                />
+                <button
+                  onClick={() => set({ buttons: cfg.buttons.filter((_: any, j: number) => j !== i) })}
+                  className="text-red-400 hover:text-red-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {(type === 'tag_with_agent_name' || type === 'end') && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">No configuration needed.</p>
+      )}
+    </div>
+  )
+}
+
+// ─── Main canvas component ────────────────────────────────────────────────
+
+interface Props {
+  websiteId: number
+  automation: Automation | null
+  onClose: () => void
+  onSaved: () => void
+}
+
+function makeTriggerNode(trigger: string): Node {
+  return {
+    id: 'trigger',
+    type: 'automationNode',
+    position: { x: 200, y: 40 },
+    data: { type: 'trigger', config: { repeat: 'once' }, label: 'trigger' },
+    deletable: false,
+  }
+}
+
+export default function AutomationFlowCanvas({ websiteId, automation, onClose, onSaved }: Props) {
+  const [name, setName] = useState(automation?.name || 'New automation')
+  const [trigger, setTrigger] = useState<string>(automation?.trigger || 'visitor_connected')
+  const [enabled, setEnabled] = useState(automation?.enabled ?? true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+
+  const initialNodes: Node[] = automation?.nodes?.length
+    ? toRFNodes(automation.nodes)
+    : [makeTriggerNode(trigger)]
+
+  const initialEdges: Edge[] = automation?.edges?.length
+    ? toRFEdges(automation.edges)
+    : []
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((eds) =>
+        addEdge({
+          ...connection,
+          id: `e${Date.now()}`,
+          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+          style: { stroke: '#6b7280' },
+          label: connection.sourceHandle ?? undefined,
+        }, eds)
+      )
+    },
+    [setEdges]
+  )
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null
+
+  const addNode = (type: string) => {
+    const lastNode = nodes[nodes.length - 1]
+    const y = lastNode ? lastNode.position.y + 150 : 200
+    const id = newNodeId()
+    const newNode: Node = {
+      id,
+      type: 'automationNode',
+      position: { x: 200, y },
+      data: { type, config: defaultConfig(type), label: type },
+    }
+    setNodes((nds) => [...nds, newNode])
+    setSelectedNodeId(id)
+  }
+
+  const updateSelectedNodeConfig = (config: Record<string, any>) => {
+    if (!selectedNodeId) return
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === selectedNodeId ? { ...n, data: { ...n.data, config } } : n
+      )
+    )
+  }
+
+  const deleteSelectedNode = () => {
+    if (!selectedNodeId || selectedNodeId === 'trigger') return
+    setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId))
+    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId))
+    setSelectedNodeId(null)
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Name is required'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      const outNodes = fromRFNodes(nodes)
+      // keep trigger column in sync with trigger node
+      const triggerNode = outNodes.find((n) => n.type === 'trigger')
+      if (triggerNode) triggerNode.config = triggerNode.config || {}
+
+      const payload = {
+        name: name.trim(),
+        trigger,
+        enabled,
+        nodes: outNodes,
+        edges: fromRFEdges(edges),
+      }
+      if (automation?.id) {
+        await automationsApi.update(automation.id, payload)
+      } else {
+        await automationsApi.create({ website_id: websiteId, ...payload })
+      }
+      onSaved()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col bg-gray-50 dark:bg-gray-950">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0">
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          <X className="w-5 h-5" />
+        </button>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="max-w-xs h-8 text-sm font-medium"
+          placeholder="Automation name"
+        />
+        <select
+          value={trigger}
+          onChange={(e) => setTrigger(e.target.value)}
+          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+        >
+          {TRIGGERS.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        <div className="flex items-center gap-2 ml-2">
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+          <span className="text-xs text-gray-500">{enabled ? 'Enabled' : 'Disabled'}</span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {error && <span className="text-xs text-red-500">{error}</span>}
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save flow'}
+          </Button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Node palette */}
+        <div className="w-48 shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
+          <div className="p-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Add node
+          </div>
+          {PALETTE_NODES.map((type) => {
+            const meta = NODE_META[type]
+            return (
+              <button
+                key={type}
+                onClick={() => addNode(type)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 text-left"
+              >
+                <span>{meta.icon}</span>
+                <span>{meta.label}</span>
+                <Plus className="w-3 h-3 ml-auto text-gray-400" />
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Canvas */}
+        <div className="flex-1 relative">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={NODE_TYPES}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+            onPaneClick={() => setSelectedNodeId(null)}
+            fitView
+            fitViewOptions={{ padding: 0.3 }}
+            deleteKeyCode={null}
+          >
+            <Background gap={16} size={1} className="!bg-gray-50 dark:!bg-gray-950" />
+            <Controls className="!bottom-4 !left-4" />
+          </ReactFlow>
+        </div>
+
+        {/* Config panel */}
+        <div className="w-72 shrink-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 overflow-y-auto">
+          {selectedNode ? (
+            <NodeConfigPanel
+              node={selectedNode}
+              onChange={updateSelectedNodeConfig}
+              onDelete={deleteSelectedNode}
+            />
+          ) : (
+            <div className="p-4 text-xs text-gray-400 dark:text-gray-500">
+              Click a node to configure it, or add nodes from the palette on the left.
+              <br /><br />
+              Connect nodes by dragging from the bottom handle of one node to the top handle of another.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

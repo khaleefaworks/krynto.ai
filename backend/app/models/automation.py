@@ -14,7 +14,9 @@ class Automation(Base, TimestampMixin):
     trigger = Column(String(100), nullable=False, index=True)
     enabled = Column(Boolean, nullable=False, default=True)
     category = Column(String(50), nullable=False, default='auto_message', server_default='auto_message', index=True)
-    conditions = Column(JSON, nullable=True, default={})
-    actions = Column(JSON, nullable=True, default={})
+    nodes = Column(JSON, nullable=True, default=list)
+    edges = Column(JSON, nullable=True, default=list)
+    template_id = Column(Integer, ForeignKey("automation_templates.id", ondelete="SET NULL"), nullable=True, index=True)
 
     website = relationship("Website", back_populates="automations")
+    template = relationship("AutomationTemplate")

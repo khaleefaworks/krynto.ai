@@ -27,6 +27,7 @@ from app.api.metrics import router as metrics_router
 from app.api.tags import router as tags_router
 from app.api.attachments import router as attachments_router
 from app.api.automations import router as automations_router
+from app.api.automation_templates import router as automation_templates_router
 from app.api.customers import router as customers_router
 from app.api.website_teams import router as website_teams_router
 from app.api.website_shortcuts import router as website_shortcuts_router
@@ -161,6 +162,7 @@ app.include_router(metrics_router)
 app.include_router(tags_router)
 app.include_router(attachments_router)
 app.include_router(automations_router)
+app.include_router(automation_templates_router)
 app.include_router(customers_router)
 app.include_router(website_teams_router)
 app.include_router(website_shortcuts_router)

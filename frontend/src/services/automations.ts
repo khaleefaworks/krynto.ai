@@ -2,16 +2,38 @@ import { apiRequest } from '@/services/api'
 
 export type AutomationTrigger =
   | 'visitor_connected'
+  | 'visitor_new'
+  | 'visitor_returning'
   | 'visitor_socket_connected'
+  | 'visitor_dropped'
+  | 'visitor_reconnected'
   | 'no_agent_assigned_for'
   | 'website_offline_first_message'
-  | 'visitor_closed_chat'
-  | 'visitor_left_website'
-  | 'conversation_resolved'
-  | 'conversation_reopened'
+  | 'agent_joined'
   | 'conversation_created'
+  | 'conversation_visitor_ended'
+  | 'conversation_resolved'
+  | 'conversation_auto_resolved'
+  | 'conversation_reopened'
+
+export type AutomationNodeType =
+  | 'trigger'
+  | 'send_bot_message'
+  | 'emit_system_event'
+  | 'wait'
+  | 'condition'
+  | 'bot_prompt_buttons'
+  | 'show_rating_popup'
+  | 'tag_conversation'
+  | 'tag_with_agent_name'
+  | 'end'
 
 export type AutomationCategory = 'auto_message' | 'chatbot_flow' | 'ai_agent'
+
+export interface NodePosition {
+  x: number
+  y: number
+}
 
 export interface BotPromptButton {
   label: string
@@ -19,13 +41,18 @@ export interface BotPromptButton {
   reply?: string
 }
 
-export interface AutomationAction {
-  type: 'send_bot_message' | 'emit_system_event' | 'bot_prompt_buttons'
-  message?: string
-  content?: string
-  event_type?: string
-  allow_input?: boolean
-  buttons?: BotPromptButton[]
+export interface AutomationNode {
+  id: string
+  type: AutomationNodeType
+  config: Record<string, any>
+  position: NodePosition
+}
+
+export interface AutomationEdge {
+  id: string
+  from: string
+  to: string
+  branch?: 'true' | 'false' | null
 }
 
 export interface Automation {
@@ -35,10 +62,22 @@ export interface Automation {
   trigger: AutomationTrigger | string
   enabled: boolean
   category: AutomationCategory | string
-  conditions: Record<string, any>
-  actions: AutomationAction[] | Record<string, any> | null
+  nodes: AutomationNode[] | null
+  edges: AutomationEdge[] | null
+  template_id?: number | null
   created_at: string
   updated_at?: string | null
+}
+
+export interface AutomationTemplate {
+  id: number
+  name: string
+  description: string | null
+  trigger: AutomationTrigger | string
+  category: AutomationCategory | string
+  nodes: AutomationNode[] | null
+  edges: AutomationEdge[] | null
+  created_at: string
 }
 
 export interface AutomationCreatePayload {
@@ -47,8 +86,8 @@ export interface AutomationCreatePayload {
   trigger: AutomationTrigger | string
   enabled?: boolean
   category?: AutomationCategory | string
-  conditions?: Record<string, any>
-  actions?: any
+  nodes?: AutomationNode[]
+  edges?: AutomationEdge[]
 }
 
 export interface AutomationUpdatePayload {
@@ -56,8 +95,8 @@ export interface AutomationUpdatePayload {
   trigger?: AutomationTrigger | string
   enabled?: boolean
   category?: AutomationCategory | string
-  conditions?: Record<string, any>
-  actions?: any
+  nodes?: AutomationNode[]
+  edges?: AutomationEdge[]
 }
 
 export const automationsApi = {
@@ -76,5 +115,15 @@ export const automationsApi = {
   remove: (id: number) =>
     apiRequest<void>(`/automations/${id}`, {
       method: 'DELETE',
+    }),
+}
+
+export const automationTemplatesApi = {
+  list: () =>
+    apiRequest<AutomationTemplate[]>(`/automation-templates`),
+  use: (templateId: number, websiteId: number, name?: string) =>
+    apiRequest<Automation>(`/automation-templates/${templateId}/use`, {
+      method: 'POST',
+      body: JSON.stringify({ website_id: websiteId, name }),
     }),
 }

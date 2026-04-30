@@ -122,86 +122,59 @@ async def _send_delayed_visitor_left_event(*, conversation_id: int, delay_second
 
 async def _send_delayed_welcome(
     *,
-    websocket: WebSocket,
     website_id: int,
     session_id: str,
-    welcome_message: str,
-    delay_seconds: float = 4.0,
-    chatbot_buttons: list | None = None,
-    chatbot_automation_id: int | None = None,
-    chatbot_allow_input: bool = False,
+    delay_seconds: float = 3.0,
 ) -> None:
-    """Send the welcome automation message after a short delay.
+    """Fire the visitor_connected automation flow after a short delay.
 
-    Delaying the welcome creates a more natural "someone is messaging you"
-    feel and gives the widget time to arm notification sounds via user gesture.
-
-    When ``chatbot_buttons`` is provided the welcome is sent as a ``bot_prompt``
-    frame with interactive buttons (team routing chatbot) instead of a plain bot
-    message.
+    Creates a conversation for the session if one doesn't exist yet (proactive
+    welcome — visitor hasn't sent a message yet). The graph executor handles
+    cooldown, message content, and delivery.
     """
     try:
         await asyncio.sleep(delay_seconds)
 
         db2 = SessionLocal()
         try:
+            from app.services.conversation_orchestrator import ConversationOrchestrator
             from app.services.conversation_service import ConversationService
 
-            service = ConversationService(db2)
-
-            conversation = service.get_or_create_conversation(
+            conv_service = ConversationService(db2)
+            conversation = conv_service.get_or_create_conversation(
                 website_id=website_id,
                 session_id=session_id,
             )
-            if not conversation:
-                return
 
-            # Register visitor socket if not already registered.
-            ChatService.register_visitor(conversation.id, websocket)
+            # Link the visitor's already-connected WebSocket to this conversation
+            # so send_to_visitor can deliver the welcome message immediately.
+            from app.services.chat_service import ChatService as _CS
+            was_already_known = conversation.id in _CS.active_visitors
+            _CS.link_session_to_conversation(
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation.id,
+            )
 
-            # Ensure last_seen_at is set for newly created conversations.
-            if not conversation.last_seen_at:
-                conversation.last_seen_at = datetime.utcnow()
-                conversation.visit_count = int(conversation.visit_count or 0) or 1
-                db2.commit()
+            # Notify the widget of the new conversation_id so it stores it
+            # for future outgoing messages (only when we just created it).
+            if not was_already_known:
+                try:
+                    await _CS.send_to_visitor(
+                        conversation.id,
+                        {"type": "conversation_created", "conversation_id": conversation.id},
+                    )
+                except Exception:
+                    pass
 
-            if chatbot_buttons:
-                # Team routing chatbot: send as interactive bot_prompt with buttons.
-                import json as _json2
-                enriched_content = _json2.dumps({
-                    "message": welcome_message,
-                    "automation_id": chatbot_automation_id,
-                    "buttons": chatbot_buttons,
-                })
-                saved = service.add_bot_message(
-                    conversation.id,
-                    enriched_content,
-                    event_type="bot_prompt_buttons",
-                )
-                await websocket.send_json(
-                    {
-                        "type": "bot_prompt",
-                        "message": welcome_message,
-                        "conversation_id": conversation.id,
-                        "automation_id": chatbot_automation_id,
-                        "buttons": chatbot_buttons,
-                        "allow_input": chatbot_allow_input,
-                        "message_obj": serialize_message(db2, saved),
-                    }
-                )
-            else:
-                saved = service.add_bot_message(
-                    conversation.id,
-                    welcome_message,
-                    event_type="automation_welcome",
-                )
-                await websocket.send_json(
-                    {
-                        "type": "bot",
-                        "message": welcome_message,
-                        "message_obj": serialize_message(db2, saved),
-                    }
-                )
+            orchestrator = ConversationOrchestrator(db2)
+            await orchestrator._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=website_id,
+                trigger="visitor_connected",
+                log_key="delayed_welcome_failed",
+                send_to_visitor=True,
+            )
         finally:
             db2.close()
     except Exception as e:
@@ -413,16 +386,13 @@ async def chat_ws(
         except Exception:
             pass
 
-        # Welcome automation: send on first visit or if returning after cooldown.
-        # DB-backed automation only (no legacy widget_config.automations fallback).
+        # Welcome automation: fire visitor_connected flow after a short delay.
+        # Cooldown and message are defined inside the automation graph nodes.
         try:
-            from app.services.conversation_service import ConversationService
+            now = datetime.utcnow()
             from app.services.automation_service import AutomationService
 
             automation_service = AutomationService(db)
-            action = automation_service.get_first_bot_message_action(website_id=website_id, trigger="visitor_connected")
-            welcome_message = action.get("message").strip() if (action and isinstance(action.get("message"), str)) else None
-
             cooldown_seconds = automation_service.get_cooldown_seconds(
                 website_id=website_id,
                 trigger="visitor_connected",
@@ -430,46 +400,6 @@ async def chat_ws(
             )
             cooldown = timedelta(seconds=max(1, int(cooldown_seconds)))
 
-            now = datetime.utcnow()
-
-            prev_seen_at = None
-
-            should_send = bool(isinstance(welcome_message, str) and welcome_message.strip())
-
-            # Check for team routing chatbot (overrides welcome if active).
-            chatbot_buttons = None
-            chatbot_automation_id = None
-            chatbot_allow_input = False
-            try:
-                chatbot_actions = automation_service.get_actions_by_type(
-                    website_id=website_id,
-                    trigger="conversation_created",
-                    action_type="bot_prompt_buttons",
-                )
-                if chatbot_actions:
-                    _ca = chatbot_actions[0]
-                    _cb_msg = (_ca.get("message") or "").strip()
-                    _cb_raw = _ca.get("buttons") or []
-                    _cb_auto_id = _ca.get("automation_id")
-                    if _cb_msg and isinstance(_cb_raw, list) and _cb_raw:
-                        _validated = []
-                        for _btn in _cb_raw:
-                            if isinstance(_btn, dict) and (_btn.get("label") or "").strip():
-                                _validated.append({
-                                    "label": _btn["label"].strip(),
-                                    "team_id": _btn.get("team_id"),
-                                    "reply": _btn.get("reply", ""),
-                                })
-                        if _validated:
-                            welcome_message = _cb_msg
-                            chatbot_buttons = _validated
-                            chatbot_automation_id = _cb_auto_id
-                            chatbot_allow_input = bool(_ca.get("allow_input", False))
-                            should_send = True
-            except Exception:
-                pass
-
-            # Update last_seen_at for existing conversations on every connect.
             if conversation:
                 prev_seen_at = _to_naive_utc(conversation.last_seen_at)
                 conversation.last_seen_at = now
@@ -477,67 +407,15 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) + 1
                 db.commit()
 
-            if should_send and conversation:
-                last_welcome = messages_repo.get_last_welcome_message(db, conversation.id)
-                # Also check bot_prompt_buttons (chatbot replaces welcome).
-                if not last_welcome:
-                    last_welcome = messages_repo.get_last_event_message(
-                        db, conversation.id, "bot_prompt_buttons"
-                    )
-
-                if last_welcome and last_welcome.created_at:
-                    last_welcome_at = _to_naive_utc(last_welcome.created_at)
-                    should_send = bool(last_welcome_at and (now - last_welcome_at) > cooldown)
-                else:
-                    # If we've never tracked last_seen_at before, use other activity timestamps.
-                    last_activity = (
-                        prev_seen_at
-                        or conversation.last_visitor_message_at
-                        or conversation.last_agent_message_at
-                        or conversation.updated_at
-                        or conversation.created_at
-                    )
-                    if last_activity:
-                        last_activity_at = _to_naive_utc(last_activity)
-                        should_send = bool(last_activity_at and (now - last_activity_at) > cooldown)
-
-            if should_send:
-                # Read configurable delay from automation conditions (default 3s).
-                welcome_delay = 3.0
-                try:
-                    welcome_automation = automation_service.list_enabled_for_trigger(
-                        website_id=website_id, trigger="visitor_connected"
-                    )
-                    if welcome_automation:
-                        conds = welcome_automation[0].conditions or {}
-                        if isinstance(conds, str):
-                            import json as _json
-                            conds = _json.loads(conds)
-                        raw_delay = conds.get("welcome_delay_seconds")
-                        if raw_delay is not None:
-                            welcome_delay = max(0.0, float(raw_delay))
-                except Exception:
-                    pass
-
-                asyncio.create_task(
-                    _send_delayed_welcome(
-                        websocket=websocket,
-                        website_id=website_id,
-                        session_id=session_id,
-                        welcome_message=str(welcome_message).strip(),
-                        delay_seconds=welcome_delay,
-                        chatbot_buttons=chatbot_buttons,
-                        chatbot_automation_id=chatbot_automation_id,
-                        chatbot_allow_input=chatbot_allow_input,
-                    )
+            # Always schedule the welcome — _send_delayed_welcome will create
+            # the conversation if the visitor hasn't sent a message yet.
+            asyncio.create_task(
+                _send_delayed_welcome(
+                    website_id=website_id,
+                    session_id=session_id,
+                    delay_seconds=3.0,
                 )
-                # Immediately tell the widget that a chatbot prompt is coming so it
-                # can keep the text input hidden until the visitor makes a selection.
-                if chatbot_buttons:
-                    try:
-                        await websocket.send_json({"type": "chatbot_pending"})
-                    except Exception:
-                        pass
+            )
         except Exception as e:
             try:
                 db.rollback()
@@ -852,31 +730,13 @@ async def chat_ws(
                                 db, _wo_conversation.id, "bot_prompt_buttons"
                             )
                         if not last_welcome:
-                            # Welcome not yet sent — send immediately (0s delay) via existing mechanism.
-                            # Re-run automation lookup for welcome message content.
-                            from app.services.automation_service import AutomationService as _AS
-                            _as = _AS(db)
-                            _welcome_automations = _as.list_enabled_for_trigger(
-                                website_id=website_id, trigger="visitor_connected"
+                            asyncio.create_task(
+                                _send_delayed_welcome(
+                                    website_id=website_id,
+                                    session_id=session_id,
+                                    delay_seconds=0.5,
+                                )
                             )
-                            if _welcome_automations:
-                                _wa = _welcome_automations[0]
-                                _wa_actions = _wa.actions or []
-                                if isinstance(_wa_actions, str):
-                                    import json as _json3
-                                    _wa_actions = _json3.loads(_wa_actions)
-                                for _act in _wa_actions:
-                                    if isinstance(_act, dict) and _act.get("type") == "send_bot_message":
-                                        asyncio.create_task(
-                                            _send_delayed_welcome(
-                                                websocket=websocket,
-                                                website_id=website_id,
-                                                session_id=session_id,
-                                                welcome_message=str(_act.get("message", "")).strip(),
-                                                delay_seconds=0.5,
-                                            )
-                                        )
-                                        break
                 except Exception as _e:
                     logger.warning("widget_opened_handler_failed", error=str(_e))
                 continue
