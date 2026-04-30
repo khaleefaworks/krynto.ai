@@ -8,28 +8,64 @@ export const SOUND_PREF_KEYS = {
   newChat: 'notif_sound_new_chat',
   message: 'notif_sound_message',
   newVisitorWebsite: 'notif_sound_new_visitor_website',
+  sinkId: 'notif_sound_sink_id',
 } as const
+
+/**
+ * Triggers a dummy getUserMedia call to unlock hardware device labels.
+ * Browsers protect hardware info (like speaker names) until the user grants 
+ * a media permission.
+ */
+export async function ensureHardwareLabelsUnlocked(): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices) return
+  
+  try {
+    // Only trigger if we don't already have labels
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const hasLabels = devices.some(d => !!d.label)
+    if (hasLabels) return
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach(t => t.stop())
+  } catch (err) {
+    console.warn('Failed to unlock hardware labels:', err)
+  }
+}
 
 // Default sound file names (relative to /sounds/)
 const SOUND_DEFAULTS = {
-  newChat: 'new-notification.mp3',
-  message: 'notification.mp3',
-  newVisitorWebsite: '',  // silent by default
+  newChat: 'alarm.mp3',
+  message: 'blackberry2.mp3',
+  newVisitorWebsite: 'simplesms.mp3',
 }
 
 // Kept for backward-compat (used by components that reference these constants directly)
-export const NEW_VISITOR_SOUND_URL = '/sounds/new-notification.mp3'
-export const MESSAGE_SOUND_URL = '/sounds/notification.mp3'
+export const NEW_VISITOR_SOUND_URL = '/sounds/alarm.mp3'
+export const MESSAGE_SOUND_URL = '/sounds/blackberry2.mp3'
 
 /** Returns the configured sound URL for a given key, or '' if silent. */
 function _getSoundUrl(key: keyof typeof SOUND_PREF_KEYS): string {
   try {
     const stored = localStorage.getItem(SOUND_PREF_KEYS[key])
     // null means never set → use default; empty string means user chose silent
-    const fileName = stored !== null ? stored : SOUND_DEFAULTS[key]
+    const fileName = stored !== null ? stored : (SOUND_DEFAULTS as any)[key]
     return fileName ? `/sounds/${fileName}` : ''
   } catch {
-    return SOUND_DEFAULTS[key] ? `/sounds/${SOUND_DEFAULTS[key]}` : ''
+    return (SOUND_DEFAULTS as any)[key] ? `/sounds/${(SOUND_DEFAULTS as any)[key]}` : ''
+  }
+}
+
+/** 
+ * Helper to get the effective sinkId for the browser API.
+ * The spec uses "" for default, but we store "default" for clarity in settings.
+ */
+function _getEffectiveSinkId(): string {
+  try {
+    const saved = localStorage.getItem(SOUND_PREF_KEYS.sinkId)
+    if (!saved || saved === 'default') return ''
+    return saved
+  } catch {
+    return ''
   }
 }
 
@@ -43,9 +79,42 @@ function _getOrCreateBaseAudio(url: string): HTMLAudioElement | null {
     const a = new Audio(url)
     a.preload = 'auto'
     _audioBaseCache.set(url, a)
+    
+    // Apply sinkId if configured
+    const sinkId = _getEffectiveSinkId()
+    if (typeof (a as any).setSinkId === 'function') {
+      (a as any).setSinkId(sinkId).catch(() => {})
+    }
+    
     return a
   } catch {
     return null
+  }
+}
+
+/**
+ * Updates the output device for all cached and future notification sounds.
+ * @param sinkId The device ID from navigator.mediaDevices.enumerateDevices()
+ */
+export async function setNotificationAudioSink(sinkId: string): Promise<void> {
+  try {
+    localStorage.setItem(SOUND_PREF_KEYS.sinkId, sinkId)
+    const effectiveSinkId = sinkId === 'default' ? '' : sinkId
+    
+    // Update cached audio elements
+    for (const audio of _audioBaseCache.values()) {
+      if (typeof (audio as any).setSinkId === 'function') {
+        try { await (audio as any).setSinkId(effectiveSinkId) } catch { }
+      }
+    }
+    
+    // Update AudioContext
+    const ctx = getAudioContext()
+    if (ctx && typeof (ctx as any).setSinkId === 'function') {
+      try { await (ctx as any).setSinkId(effectiveSinkId) } catch { }
+    }
+  } catch {
+    // ignore
   }
 }
 
@@ -75,6 +144,13 @@ function _playFile(url: string): void {
     a.currentTime = 0
     // Keep volume at 1.0 for now (OS / browser volume control is still respected).
     a.volume = 1.0
+    
+    // Apply sinkId if configured
+    const sinkId = _getEffectiveSinkId()
+    if (typeof (a as any).setSinkId === 'function') {
+      (a as any).setSinkId(sinkId).catch(() => {})
+    }
+    
     void a.play()
   } catch {
     // ignore
@@ -92,7 +168,14 @@ function getAudioContext(): AudioContext | null {
     | undefined
 
   if (!Ctor) return null
-  if (!audioContext) audioContext = new Ctor()
+  if (!audioContext) {
+    audioContext = new Ctor()
+    // Apply sinkId to new context if configured
+    const sinkId = _getEffectiveSinkId()
+    if (typeof (audioContext as any).setSinkId === 'function') {
+      (audioContext as any).setSinkId(sinkId).catch(() => {})
+    }
+  }
   return audioContext
 }
 

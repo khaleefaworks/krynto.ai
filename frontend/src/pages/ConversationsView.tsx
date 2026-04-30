@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import ChatComposer from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import Logo from '@/components/Logo'
+import DocsLink from '@/components/DocsLink'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { isAdmin, isAgent } from '@/lib/roles'
@@ -1809,10 +1810,8 @@ export default function ConversationsView() {
                         <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             {getFilterIcon()}
                             {getFilterHeaderText()}
+                            <DocsLink slug="agent-guide/conversations" />
                         </h2>
-                        <a href="/docs/agent-guide/conversations" target="_blank" rel="noreferrer" title="View conversations guide" className="text-gray-400 hover:text-blue-500 transition-colors">
-                            <HelpCircle className="w-4 h-4" />
-                        </a>
                     </div>
 
                     {/* Search */}

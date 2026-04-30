@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Bell, X, Info } from 'lucide-react'
 import { Button } from './ui/button'
 import { requestPermissionAndSubscribe, getNotificationPermission } from '@/services/push'
-import { installNotificationSoundArm } from '@/lib/notificationSound'
+import { installNotificationSoundArm, ensureHardwareLabelsUnlocked } from '@/lib/notificationSound'
 
 export default function NotificationPermissionPrompt() {
   const [show, setShow] = useState(false)
@@ -28,15 +28,17 @@ export default function NotificationPermissionPrompt() {
   }, [])
 
   const handleContinue = async () => {
+    // Hide immediately to keep UI responsive
+    setShow(false)
+
     // Also try to arm sound since this is a user gesture
     installNotificationSoundArm()
+    // Trigger hardware labels unlocking (for audio routing)
+    ensureHardwareLabelsUnlocked()
     
     try {
       const result = await requestPermissionAndSubscribe()
       setPermission(result)
-      if (result !== 'default') {
-        setShow(false)
-      }
     } catch (error) {
       console.error('Error requesting notification permission:', error)
     }

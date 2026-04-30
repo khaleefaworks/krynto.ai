@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import type { CustomerContact, CustomerContactDetails } from '@/services/customers'
 import { fetchContactDetails, fetchContacts } from '@/services/customers'
 import UserAvatar from '@/components/UserAvatar'
+import DocsLink from '@/components/DocsLink'
 
 function formatDate(value: string | null): string {
     if (!value) return '-'
@@ -132,8 +133,9 @@ export default function CustomersContacts() {
     return (
         <div>
             <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-                <div>
+                <div className="flex items-center gap-2">
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Contacts</h1>
+                    <DocsLink slug="agent-guide/visitors" />
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
                     Number of contacts <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>

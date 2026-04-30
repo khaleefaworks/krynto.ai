@@ -10,6 +10,7 @@ import { playNewVisitorOnWebsiteSound } from '@/lib/notificationSound'
 import { websitesApi } from '@/services/websites'
 import { agentAssignmentsApi } from '@/services/agentAssignments'
 import UserAvatar from '@/components/UserAvatar'
+import DocsLink from '@/components/DocsLink'
 import { API_BASE } from '@/config/endpoints'
 
 function formatOnlineSeconds(seconds: number | null): string {
@@ -301,8 +302,9 @@ export default function CustomersVisitors() {
     return (
         <div>
             <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-                <div>
+                <div className="flex items-center gap-2">
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Visitors</h1>
+                    <DocsLink slug="agent-guide/visitors" />
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
                     Number of visitors <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>

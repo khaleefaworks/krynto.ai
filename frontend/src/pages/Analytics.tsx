@@ -6,6 +6,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts'
+import DocsLink from '@/components/DocsLink'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -292,7 +293,10 @@ export default function Analytics() {
         <div className="px-4 py-3 sm:py-0 w-full">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+                <DocsLink slug="admin-guide/analytics" />
+              </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Monitor conversations, agent performance, and tag usage
               </p>

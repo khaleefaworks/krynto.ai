@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { apiRequest } from '@/services/api'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
 import { Plus, X, Trash2, Users, UserPlus, Shield, Search } from 'lucide-react'
+import DocsLink from '@/components/DocsLink'
 
 // ─── Types ────────────────────────────────────────────────
 interface WebsiteTeam {
@@ -213,6 +214,14 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                     body: JSON.stringify({ name, description: formDescription.trim() || null }),
                 })
             } else if (teamPanel.kind === 'edit') {
+                // Save team details if changed
+                if (formName.trim() !== teamPanel.team.name || formDescription.trim() !== (teamPanel.team.description || '')) {
+                    await apiRequest(`/websites/${websiteId}/teams/${teamPanel.team.id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ name: formName.trim(), description: formDescription.trim() || null }),
+                    })
+                }
+
                 // Save members
                 await apiRequest(`/websites/${websiteId}/teams/${teamPanel.team.id}/members`, {
                     method: 'PUT',
@@ -292,6 +301,7 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                         <h2 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                             <Shield className="h-4 w-4 text-gray-400" />
                             Website Agents
+                            <DocsLink slug="admin-guide/agents" />
                         </h2>
                         <Button size="sm" onClick={openAgentPanel}>
                             <UserPlus className="h-4 w-4 mr-1.5" />
@@ -378,6 +388,7 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                         <h2 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                             <Users className="h-4 w-4 text-gray-400" />
                             Teams
+                            <DocsLink slug="admin-guide/teams" />
                         </h2>
                         <Button size="sm" onClick={openTeamCreate}>
                             <Plus className="h-4 w-4 mr-1.5" />
@@ -566,7 +577,6 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                     placeholder="e.g. Support, Sales"
                                     className="dark:bg-gray-800 dark:border-gray-700"
                                     autoFocus
-                                    disabled={teamPanel.kind === 'edit'}
                                 />
                             </div>
 
@@ -579,7 +589,6 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                     placeholder="What is this team responsible for?"
                                     rows={2}
                                     className="dark:bg-gray-800 dark:border-gray-700 resize-none"
-                                    disabled={teamPanel.kind === 'edit'}
                                 />
                             </div>
 
