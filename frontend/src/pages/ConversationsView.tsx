@@ -226,6 +226,14 @@ interface VisitorConversation {
 
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
 
+function sortChatsByActivity(chats: any[]): any[] {
+    return [...chats].sort((a, b) => {
+        const ta = a.last_message_at || a.created_at || ''
+        const tb = b.last_message_at || b.created_at || ''
+        return tb < ta ? -1 : tb > ta ? 1 : 0
+    })
+}
+
 export default function ConversationsView() {
     const { chatId: chatIdParam, conversationId } = useParams<{ chatId?: string; conversationId?: string }>()
     const navigate = useNavigate()
@@ -650,7 +658,7 @@ export default function ConversationsView() {
                     })
                     if (cancelled || !summary?.id) return
                     // Inject into activeChats so it appears in the left list
-                    setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                    setActiveChats(sortChatsByActivity([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats]))
                     openChat(summary.id)
                 } catch {
                     // Conversation not found or no access — ignore
@@ -786,7 +794,7 @@ export default function ConversationsView() {
                     if (idx >= 0) {
                         const next = [...latest]
                         next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                        setActiveChats(next)
+                        setActiveChats(sortChatsByActivity(next))
                     }
                 }
             } else if (data.type === 'conversation_unread' && dataConversationId) {
@@ -832,7 +840,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -882,7 +890,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -973,7 +981,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -1035,7 +1043,7 @@ export default function ConversationsView() {
         }
         try {
             const chats = await fetchChatsApi()
-            setActiveChats(chats)
+            setActiveChats(sortChatsByActivity(chats as any[]))
             hasLoadedChatsRef.current = true
 
             // Hydrate per-conversation unread counts from server truth.
@@ -1212,7 +1220,7 @@ export default function ConversationsView() {
                         // Temporarily inject into activeChats so it appears in the left list
                         // (e.g. bot-only conversations opened from the Visitors page).
                         if (!activeChats.some(c => c.id === chatId)) {
-                            setActiveChats([summary as any, ...activeChats])
+                            setActiveChats(sortChatsByActivity([summary as any, ...activeChats]))
                         }
                     }
 
@@ -1424,7 +1432,7 @@ export default function ConversationsView() {
                 if (idx >= 0) {
                     const next = [...latest]
                     next[idx] = { ...next[idx], last_message: messageContent, last_message_at: optimisticCreatedAt }
-                    setActiveChats(next)
+                    setActiveChats(sortChatsByActivity(next))
                 }
             } catch {
                 // ignore

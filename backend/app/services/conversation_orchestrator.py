@@ -216,6 +216,8 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             error=str(e),
             exc_info=True,
         )
+    finally:
+        _waiting_bot_message_scheduled.discard(conversation_id)
 
 
 class ConversationOrchestrator:
@@ -235,11 +237,11 @@ class ConversationOrchestrator:
         return False
 
     def _should_record_presence_event(self, *, conversation: Conversation) -> bool:
-        """Presence timeline events should only be recorded for meaningful scenarios.
+        """Presence timeline events should only be recorded once the visitor has
+        actually initiated a chat (sent at least one message or clicked a button).
 
-        Current rule (simple + practical): only record presence events when the
-        last *human* message is from the agent (i.e. the visitor likely left after
-        receiving an agent reply).
+        This prevents noisy dropped/reconnected events for visitors who only
+        browsed without engaging.
         """
 
         try:
@@ -248,30 +250,27 @@ class ConversationOrchestrator:
         except Exception:
             return False
 
-        # Require that the agent has actually participated.
+        # Record if the visitor has sent at least one message.
         try:
-            if not getattr(conversation, "last_agent_message_at", None):
-                return False
-        except Exception:
-            return False
-
-        try:
-            from app.repos import messages as messages_repo
-            from app.models.message import MessageSenderType
-
-            last = messages_repo.get_last_human_message(self.db, int(conversation.id))
-            if not last:
-                return False
-
-            sender_type = getattr(last, "sender_type", None)
-            # sender_type is usually a MessageSenderType enum value.
-            if sender_type == MessageSenderType.AGENT:
+            has_visitor_message = getattr(conversation, "last_visitor_message_at", None) is not None
+            if has_visitor_message:
                 return True
-            # Defensive: if DB/model ever returns a raw string.
-            try:
-                return str(getattr(sender_type, "value", sender_type) or "").strip().lower() == "agent"
-            except Exception:
-                return False
+        except Exception:
+            pass
+
+        # Fallback: count visitor messages directly.
+        try:
+            from app.models.message import MessageSenderType as _ST
+            count = (
+                self.db.query(Message)
+                .filter(
+                    Message.conversation_id == conversation.id,
+                    Message.sender_type == _ST.VISITOR,
+                )
+                .limit(1)
+                .count()
+            )
+            return count > 0
         except Exception:
             return False
 
@@ -827,6 +826,15 @@ class ConversationOrchestrator:
             else:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
+        # IVR complete: tell the widget it can now reveal the free-form input.
+        try:
+            await ChatService.send_to_visitor(
+                conversation.id,
+                {"type": "automation_complete", "conversation_id": conversation.id},
+            )
+        except Exception:
+            pass
+
         # Schedule the waiting bot message if this is the visitor's first action
         # and no agent is assigned yet. Regular messages schedule it in
         # handle_visitor_message; button clicks are a separate code path so we
@@ -1042,6 +1050,9 @@ class ConversationOrchestrator:
         if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
 
+        if getattr(conversation, "visitor_ended", False):
+            return {"error": "Visitor has ended this conversation"}
+
         if conversation.assigned_agent_id != agent_id:
             return {"error": "Conversation is assigned to another agent"}
 
@@ -1159,14 +1170,30 @@ class ConversationOrchestrator:
         """Visitor clicked 'End chat' — fires conversation_visitor_ended automation.
 
         Conversation stays OPEN so agents can follow up. No lead is lost.
-        The automation handles the system message and rating popup by default.
+        visitor_ended=True prevents the backend from resuming this conversation
+        if the visitor reconnects and requests a fresh start.
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
             return {"error": "Conversation not found"}
 
+        # Mark that the visitor intentionally ended this conversation so a
+        # subsequent "Start new chat" creates a new conversation rather than
+        # resuming this one.
+        try:
+            conversation.visitor_ended = True
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
+        # Automations handle all messaging (emit_system_event, show_rating_popup, etc.)
+        # for this trigger. Nothing is hardcoded here so agents can configure the
+        # flow — including wait nodes and agent-only messages — via the automation editor.
         await self._run_automation_flows(
             conversation_id=conversation_id,
             website_id=website_id,
@@ -1175,12 +1202,12 @@ class ConversationOrchestrator:
             send_to_visitor=True,
         )
 
-        # Notify agent dashboards that the visitor ended the chat.
+        # Signal the agent dashboard in real-time (UI update only, no message stored).
         if website_id:
             await self.agent_service.broadcast_to_active_agents(
                 website_id=website_id,
                 message_data={
-                    "type": "visitor_ended_chat",
+                    "type": "visitor_closed_chat",
                     "conversation_id": conversation_id,
                     "website_id": website_id,
                 },
@@ -1475,20 +1502,23 @@ class ConversationOrchestrator:
                     saved_evt = self.conversation_service.add_system_message(
                         conversation_id, content, event_type=event_type
                     )
-                    if send_to_visitor:
-                        msg_obj = serialize_message(self.db, saved_evt)
+                    msg_obj = serialize_message(self.db, saved_evt)
+                    # Per-node send_to_visitor flag (default True) lets automation
+                    # authors configure agent-only messages by setting it to false.
+                    node_sends_to_visitor = send_to_visitor and cfg.get("send_to_visitor", True)
+                    if node_sends_to_visitor:
                         visitor_text = visitor_content if visitor_content else content
                         await ChatService.send_to_visitor(
                             conversation_id,
                             {"type": "system", "event_type": event_type, "message": visitor_text,
                              "message_obj": msg_obj, "conversation_id": conversation_id, "website_id": website_id},
                         )
-                        await self.agent_service.broadcast_to_active_agents(
-                            website_id=website_id,
-                            message_data={"type": "system_message", "conversation_id": conversation_id,
-                                          "website_id": website_id, "message_obj": msg_obj},
-                            include_global=True,
-                        )
+                    await self.agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data={"type": "system_message", "conversation_id": conversation_id,
+                                      "website_id": website_id, "message_obj": msg_obj},
+                        include_global=True,
+                    )
 
             elif node_type == "wait":
                 secs = int(cfg.get("seconds") or 0)

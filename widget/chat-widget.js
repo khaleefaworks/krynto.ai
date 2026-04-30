@@ -437,9 +437,12 @@
     clearTimeout(_resolveRatingTimeout);
     _awaitingRatingAfterResolve = false;
     if (ratingTriggeredByVisitorEnd) {
-      // Visitor intentionally ended — transition view same as an agent-resolved close.
+      // Visitor intentionally ended — transition to closed state then minimize so
+      // the visitor isn't forced to start a new chat immediately. They can re-open
+      // the widget later and will see the closed banner with "Start new chat".
       ratingTriggeredByVisitorEnd = false;
       afterConversationClose();
+      try { closeWidget(false); } catch (e) { }
     } else if (viewMode === 'thread' && !isReadOnlyThread) {
       // Agent resolved — transition view as usual.
       afterConversationClose();
@@ -1045,6 +1048,10 @@
         }, 15000);
         // Start the input reveal timer. If no chatbot_pending / bot_prompt
         // arrives within 2500ms the input area is revealed (no chatbot active).
+        // Run even when offline: if an offline automation is configured it sends
+        // chatbot_pending quickly (~200ms) which cancels this timer and manages
+        // the flow itself. Without automation the timer fires and reveals the
+        // input so the visitor can type, which triggers the contact overlay on send.
         clearTimeout(_inputRevealTimer);
         _inputRevealTimer = setTimeout(showInputContainer, 2500);
       };
@@ -1303,11 +1310,31 @@
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
-      // If this is the offline automation bot message, force the contact overlay
-      // to show as an empty form so visitors must re-enter required fields.
+      // If this is the offline automation bot message, collect visitor contact info.
+      // If localStorage already has name + phone, send them silently to the backend
+      // (so the conversation stores them) and skip the overlay. Otherwise show the
+      // overlay so the visitor can provide their details.
       try {
         if (data.message_obj && data.message_obj.event_type === 'bot_offline') {
-          showContactOverlay(true);
+          const storedName = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`) || '';
+          const storedPhone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`) || '';
+          const storedEmail = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`) || '';
+          if (storedName && storedPhone) {
+            // Auto-send stored contact info to back-end; show the input so visitor
+            // can type their message normally.
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'visitor_contact',
+                visitor_name: storedName,
+                visitor_phone: storedPhone,
+                visitor_email: storedEmail || undefined,
+              }));
+            }
+            showInputContainer();
+          } else {
+            // No stored info — show the form so the visitor can fill it in.
+            showContactOverlay();
+          }
         }
       } catch (e) { }
       notifyNewMessage(null, null, data.message);
@@ -1362,6 +1389,12 @@
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
+    } else if (data.type === 'automation_complete') {
+      // IVR flow is done — reveal the free-form input and clear any fallback timer.
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      showInputContainer();
+      try { document.getElementById('chatassist-input')?.focus(); } catch (e) { }
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -2042,10 +2075,11 @@
           // Highlight selected
           btnEl.classList.add('chatassist-prompt-btn-selected');
 
-          // Reveal the input area now that user has made a selection
-          showInputContainer();
-          const inputEl = document.getElementById('chatassist-input');
-          if (inputEl) inputEl.focus();
+          // Input reveal is deferred: the server sends automation_complete
+          // after processing (so the reply appears before the input opens).
+          // A 5-second fallback fires if the event never arrives.
+          clearTimeout(_inputRevealTimer);
+          _inputRevealTimer = setTimeout(showInputContainer, 5000);
 
           // Optimistically append the visitor's selection as a visitor message
           appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
@@ -2088,6 +2122,11 @@
       automation_id: automationId,
       button_index: buttonIndex,
     }));
+    // Button click counts as a visitor action — re-enable the end button
+    // in case it was hidden after a previous "End chat".
+    if (endChatDisabled) {
+      setEndChatDisabled(false);
+    }
   }
 
   function showSystemMessage(content) {

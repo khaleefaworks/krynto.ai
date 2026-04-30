@@ -63,10 +63,6 @@ function _shouldToast(key: string, minIntervalMs: number): boolean {
   return true
 }
 
-function _shouldBeep(key: string, minIntervalMs: number): boolean {
-  return _shouldToast(`beep:${key}`, minIntervalMs)
-}
-
 // Race-fix: visitor_message often arrives a few ms before new_chat for the same
 // first message. We delay the message sound 200 ms so a near-simultaneous
 // new_chat event can cancel it and play the correct "New chat" sound instead.
@@ -106,16 +102,20 @@ function App() {
         const data: any = event?.data || {}
         if (data?.type !== 'push') return
 
-        // If WS is connected it will handle the sound — never double-play from SW push.
-        const isRealtimeConnected = Boolean((useAppStore as any).getState?.()?.isConnected)
-        if (isRealtimeConnected) return
+        // Only play sound when the tab is hidden. Visible tabs handle sound via the
+        // WS event handler. In hidden tabs, WS event audio is blocked by autoplay
+        // policy, so the SW postMessage is the reliable trigger for sound.
+        if (!document.hidden) return
 
-        if (_shouldPlaySound()) {
-          try { playMessageNotificationSound() } catch { }
-        }
-
-        const title = String(data?.title || 'Notification')
-        void title
+        const title = String(data?.title || '')
+        try {
+          // Match the sound to the push type: new-chat vs regular message.
+          if (title.toLowerCase().startsWith('new chat')) {
+            playNewVisitorNotificationSound()
+          } else {
+            playMessageNotificationSound()
+          }
+        } catch { }
       } catch {
         // ignore
       }
@@ -219,7 +219,8 @@ function App() {
           if (typeof window === 'undefined') return
           if (!('Notification' in window)) return
           if (Notification.permission !== 'granted') return
-          // Prevent duplicates: if push is supported, rely on SW push for OS notifications.
+          // Backend always sends a web push (handled by the SW push event) — avoid
+          // a duplicate OS notification from the page when push is supported.
           if (isPushSupported()) return
 
           // Only show OS notifications when the tab isn't visible.
@@ -233,16 +234,8 @@ function App() {
           const url = opts.url ? String(opts.url) : ''
           if (url) {
             n.onclick = () => {
-              try {
-                window.focus()
-              } catch {
-                // ignore
-              }
-              try {
-                window.location.assign(url)
-              } catch {
-                // ignore
-              }
+              try { window.focus() } catch { }
+              try { window.location.assign(url) } catch { }
             }
           }
         } catch {
@@ -258,10 +251,6 @@ function App() {
             ? (data as any).conversation_id
             : Number((data as any)?.conversation_id) || undefined
 
-        const websiteId =
-          typeof (data as any)?.website_id === 'number'
-            ? (data as any).website_id
-            : Number((data as any)?.website_id) || undefined
 
         if (data.type === 'new_chat') {
           // Cancel any pending visitor_message sound for this conversation —
@@ -318,6 +307,7 @@ function App() {
               try { playMessageNotificationSound() } catch { }
             }
           }
+
         }
       } catch {
         // Never break realtime handling because of toast UI.

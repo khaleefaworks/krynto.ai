@@ -486,10 +486,10 @@ export default function CustomersVisitors() {
                                             <span className="mx-2">·</span>
                                             Chats <span className="font-medium text-gray-900 dark:text-white">{details.chats}</span>
                                         </div>
-                                        {details.conversations?.length ? (
+                                        {details.conversations?.some((c: any) => c.has_visitor_message) ? (
                                             <button
                                                 onClick={() => {
-                                                    const latest = details.conversations?.[0]
+                                                    const latest = details.conversations?.find((c: any) => c.has_visitor_message)
                                                     const cid = Number(latest?.conversation_id)
                                                     if (Number.isFinite(cid) && cid > 0) {
                                                         openConversation(latest?.short_id || null, cid)

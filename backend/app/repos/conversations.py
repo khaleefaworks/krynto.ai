@@ -19,10 +19,11 @@ def get_conversation_by_short_id(db: Session, short_id: str) -> Conversation | N
 def get_open_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
     return (
         db.query(Conversation)
-        .filter_by(
-            session_id=session_id,
-            website_id=website_id,
-            status=ConversationStatus.OPEN,
+        .filter(
+            Conversation.session_id == session_id,
+            Conversation.website_id == website_id,
+            Conversation.status == ConversationStatus.OPEN,
+            Conversation.visitor_ended == False,  # noqa: E712
         )
         .order_by(Conversation.id.desc())
         .first()

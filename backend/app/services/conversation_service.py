@@ -48,12 +48,17 @@ class ConversationService:
         Returns:
             Conversation object with status=OPEN
         """
-        # Only resume an OPEN conversation — never route back into a resolved one.
-        # This is the core fix for the session/conversation refactor: a returning
-        # visitor whose previous conversation is RESOLVED gets a fresh start.
+        # Only resume an OPEN conversation that the visitor has NOT intentionally
+        # ended. A visitor_ended=True conversation stays open for agents to follow
+        # up, but the visitor gets a fresh conversation on their next connect.
         conversation = (
             self.db.query(Conversation)
-            .filter_by(session_id=session_id, website_id=website_id, status=ConversationStatus.OPEN)
+            .filter(
+                Conversation.session_id == session_id,
+                Conversation.website_id == website_id,
+                Conversation.status == ConversationStatus.OPEN,
+                Conversation.visitor_ended == False,  # noqa: E712
+            )
             .order_by(Conversation.id.desc())
             .first()
         )
