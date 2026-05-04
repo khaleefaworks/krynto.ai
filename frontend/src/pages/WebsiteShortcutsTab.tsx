@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { apiRequest } from '@/services/api'
 import { Plus, X, Trash2, Zap, Search } from 'lucide-react'
+import RichTextEditor from '@/components/RichTextEditor'
 
 interface WebsiteShortcut {
     id: number
@@ -278,12 +278,12 @@ export default function WebsiteShortcutsTab({ websiteId }: { websiteId: number }
 
                             <div>
                                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">Reply message</label>
-                                <Textarea
-                                    value={formMessage}
-                                    onChange={e => setFormMessage(e.target.value)}
+                                <RichTextEditor
+                                    key={panel.kind === 'edit' ? `edit-${panel.item.id}` : 'create'}
+                                    defaultValue={formMessage}
+                                    onChange={setFormMessage}
                                     placeholder="Hello! How can I help you today?"
-                                    rows={5}
-                                    className="dark:bg-gray-800 dark:border-gray-700 resize-none"
+                                    minRows={5}
                                 />
                             </div>
 

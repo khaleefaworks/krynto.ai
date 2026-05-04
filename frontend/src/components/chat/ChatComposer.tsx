@@ -106,6 +106,69 @@ function escapeMarkdownText(value: string): string {
     return value.replace(/[\\`*_\[\]]/g, (m) => `\\${m}`)
 }
 
+// Parse inline markdown (bold/italic) into an array of Tiptap inline nodes.
+function parseInlineMarkdownNodes(text: string): any[] {
+    const nodes: any[] = []
+    let i = 0
+    while (i < text.length) {
+        if (text[i] === '*') {
+            if (text[i + 1] === '*') {
+                const close = text.indexOf('**', i + 2)
+                if (close !== -1) {
+                    const inner = text.slice(i + 2, close)
+                    if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }] })
+                    i = close + 2
+                    continue
+                }
+            }
+            const close = text.indexOf('*', i + 1)
+            if (close !== -1) {
+                const inner = text.slice(i + 1, close)
+                if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'italic' }] })
+                i = close + 1
+                continue
+            }
+        }
+        // Plain text up to the next * (or end)
+        const next = text.indexOf('*', i)
+        const plain = next === -1 ? text.slice(i) : text.slice(i, next)
+        if (plain) nodes.push({ type: 'text', text: plain })
+        i = next === -1 ? text.length : next
+    }
+    return nodes
+}
+
+// Convert a markdown string (from a shortcut) into Tiptap JSONContent so that
+// bold/italic marks survive the round-trip through serializeDocToMarkdown.
+function parseShortcutMarkdown(md: string): any {
+    const blocks: any[] = []
+    const paragraphs = String(md || '').split(/\n\n+/)
+    for (const para of paragraphs) {
+        const lines = para.split('\n')
+        // Ordered list
+        if (lines.length > 0 && /^\d+\.\s+/.test(lines[0])) {
+            const items = lines
+                .filter((l) => /^\d+\.\s+/.test(l))
+                .map((l) => ({
+                    type: 'listItem',
+                    content: [{ type: 'paragraph', content: parseInlineMarkdownNodes(l.replace(/^\d+\.\s+/, '')) }],
+                }))
+            if (items.length) blocks.push({ type: 'orderedList', content: items })
+            continue
+        }
+        // Regular paragraph (with hard breaks for single newlines)
+        const content: any[] = []
+        for (let idx = 0; idx < lines.length; idx++) {
+            if (idx > 0) content.push({ type: 'hardBreak' })
+            content.push(...parseInlineMarkdownNodes(lines[idx]))
+        }
+        if (content.length) blocks.push({ type: 'paragraph', content })
+    }
+    return blocks.length
+        ? { type: 'doc', content: blocks }
+        : { type: 'doc', content: [{ type: 'paragraph' }] }
+}
+
 function escapeMarkdownLinkText(value: string): string {
     // Link labels also need to escape parentheses.
     return String(value || '').replace(/[\\`*_\[\]()/]/g, (m) => `\\${m}`)
@@ -424,7 +487,7 @@ export default function ChatComposer({
             if (!editor) return
             const from = shortcutCtx.start
             const to = shortcutCtx.end
-            editor.chain().focus().deleteRange({ from, to }).insertContent(message).run()
+            editor.chain().focus().deleteRange({ from, to }).insertContent(parseShortcutMarkdown(message)).run()
         },
         [editor, shortcutCtx.end, shortcutCtx.start]
     )

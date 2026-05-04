@@ -53,6 +53,22 @@ import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import UserAvatar from '@/components/UserAvatar'
 import { formatDistanceToNow } from 'date-fns'
 
+// Reverse backslash-escape sequences added by the markdown serializer
+// (e.g. \* → *, \\ → \). Matches what the widget's unescapeMarkdown does.
+function unescapeMarkdown(s: string | null | undefined): string {
+    return String(s || '').replace(/\\([\\`*_[\]()/])/g, '$1')
+}
+
+// Strip markdown syntax for plain-text previews (chat list last message).
+function stripMarkdownPreview(s: string | null | undefined): string {
+    return String(s || '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/\\([\\`*_[\]()/])/g, '$1')
+        .replace(/\n+/g, ' ')
+        .trim()
+}
+
 function formatWhatsAppDate(dateLike: any): string {
     const t = dateLike ? new Date(dateLike).getTime() : NaN
     if (!Number.isFinite(t)) return ''
@@ -2170,7 +2186,7 @@ export default function ConversationsView() {
                                             <div className="flex items-center gap-1.5 mt-0.5">
                                                 {(chat as any).last_message && (
                                                     <p className="text-[12px] text-gray-500 dark:text-gray-400 truncate mt-0.5 leading-tight">
-                                                        {(chat as any).last_message}
+                                                        {stripMarkdownPreview((chat as any).last_message)}
                                                     </p>
                                                 )}
                                                 {chat.id !== selectedChat && Boolean(unreadByConversationId[chat.id]) && (
@@ -2589,7 +2605,7 @@ export default function ConversationsView() {
                                                     <div className="flex justify-end">
                                                         <div className="flex items-end gap-2 max-w-[70%] min-w-0">
                                                             <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700 min-w-0">
-                                                                <MarkdownMessage content={msg.content} className="text-sm" />
+                                                                <MarkdownMessage content={unescapeMarkdown(msg.content)} className="text-sm" />
                                                                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                 </div>
@@ -2612,7 +2628,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-sm" />
+                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : unescapeMarkdown(msg.content)} className="text-sm" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (
