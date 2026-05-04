@@ -15,6 +15,7 @@ from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
+from app.repos.conversations import CONVERSATION_RESUME_CUTOFF_HOURS
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.avatar_colors import pick_avatar_color
@@ -49,8 +50,10 @@ class ConversationService:
             Conversation object with status=OPEN
         """
         # Only resume an OPEN conversation that the visitor has NOT intentionally
-        # ended. A visitor_ended=True conversation stays open for agents to follow
-        # up, but the visitor gets a fresh conversation on their next connect.
+        # ended AND that has been active within the cooldown window. Stale or
+        # visitor-ended conversations stay OPEN for agent follow-up, but the
+        # visitor gets a fresh conversation on their next connect.
+        cutoff = datetime.utcnow() - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
         conversation = (
             self.db.query(Conversation)
             .filter(
@@ -58,6 +61,7 @@ class ConversationService:
                 Conversation.website_id == website_id,
                 Conversation.status == ConversationStatus.OPEN,
                 Conversation.visitor_ended == False,  # noqa: E712
+                Conversation.updated_at > cutoff,
             )
             .order_by(Conversation.id.desc())
             .first()
