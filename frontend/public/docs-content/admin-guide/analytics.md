@@ -1,41 +1,105 @@
 # Analytics Guide
 
-The Analytics dashboard provides insights into how your websites and agents are performing. You can filter data by a specific date range and, if applicable, a specific website. 
+The Analytics dashboard gives you a clear view of conversation volume, agent performance, customer satisfaction, and tag usage. Filter the data by date range and — if you manage multiple websites — by a specific property.
 
 ---
+
 ## 1. Conversations
 
-Conversation metrics help you understand the volume of incoming chats and how quickly your team handles them.
+| Metric | Description |
+| :--- | :--- |
+| **New Conversations** | Total conversations created in the selected period. |
+| **Resolved Conversations** | Total conversations marked Resolved during the period. |
+| **Replied Conversations** | Conversations that received at least one human-agent reply. |
+| **Avg. First Response Time** | Average time from conversation creation to the first agent reply. Displayed as `Xs`, `Xm Ys`, or `Xh Ym`. The daily chart uses the **median** to dampen the effect of outliers. |
 
-*   **New Conversations:** The total number of conversations created within the selected date range.
-*   **Resolved Conversations:** The total number of conversations marked as "Resolved" during the selected period.
-*   **Replied Conversations:** The number of conversations that received at least one reply from an agent.
-*   **Avg. First Response Time:** The average time it takes for an agent to send the first reply after a conversation is created. In the daily charts, the **median** is used instead of the average to prevent extreme outliers from skewing the data.
 ---
+
 ## 2. Agent Performance
 
-The Agent section breaks down activity on a per-agent basis to help you evaluate individual performance.
+The per-agent table breaks down activity for each team member:
 
-*   **Conversations Handled:** The number of conversations assigned to the agent during the selected period.
-*   **Messages Sent:** The total number of chat messages sent by the agent.
-*   **Avg. First Response Time:** The average time it takes for this specific agent to send their first reply to a newly assigned conversation.
+| Column | Description |
+| :--- | :--- |
+| **Conversations Handled** | Conversations assigned to this agent during the period. |
+| **Messages Sent** | Total messages sent by the agent. |
+| **Avg. First Response Time** | Time from assignment to first reply, averaged across their conversations. |
+
 ---
+
 ## 3. Tag Usage
 
-Tags help categorize conversations (e.g., "Sales", "Support", "Urgent"). The **Tag Statistics** table shows how often each tag was applied to conversations during the selected date range. This is useful for identifying the most common topics or issues your visitors are asking about.
+The **Tag Statistics** table shows how often each tag was applied to conversations in the selected window. Use this to spot the most common topics your visitors raise.
 
 ---
+
 ## 4. Ratings (Customer Satisfaction)
 
-If you have enabled customer satisfaction ratings, this section provides a breakdown of how visitors rated their chat experience.
+If CSAT ratings are enabled, this section shows the breakdown of visitor feedback collected after conversations are resolved:
 
-*   **Good (👍):** Positive ratings (+1).
-*   **Neutral (😐):** Neutral ratings (0).
-*   **Bad (👎):** Negative ratings (-1).
+| Rating | Meaning |
+| :--- | :--- |
+| **Good (😊)** | Positive experience (+1) |
+| **Neutral (😐)** | Neutral experience (0) |
+| **Bad (😞)** | Negative experience (−1) |
 
-The dashboard displays both the total count and the percentage distribution of these ratings, helping you gauge overall visitor satisfaction.
+Both total counts and percentage distributions are displayed.
 
 ---
+
 ## 5. Exporting Data
 
-You can export the raw analytics data to an Excel (`.xlsx`) file by clicking the **Export** button. This export includes detailed information for each conversation, such as the initial page URL, total session time, tags applied, the assigned agent, and the response time in seconds.
+### Download Report
+
+Click **Download Report** to export a summary of all conversations as an Excel `.xlsx` file. Each row is one conversation with the following columns:
+
+| Column | Description |
+| :--- | :--- |
+| Conversation ID | Internal numeric ID |
+| Status | `open` / `resolved` / `closed` |
+| Website | Website name |
+| Team | Assigned team name (if any) |
+| Visitor Name | Name provided by visitor or agent |
+| Visitor Email | Email on file |
+| Visitor Phone | Phone number on file |
+| Session ID | Browser session UUID |
+| Visitor IP | IP address at time of chat |
+| Device | Operating system / device info |
+| Browser | Browser name and version |
+| Agent | Assigned agent's name |
+| Rating | `Good`, `Neutral`, `Bad`, or blank |
+| Closed By | Agent who resolved the conversation |
+| Page URL | URL where the chat was initiated |
+| First Response Time (s) | Seconds to first agent reply |
+| Total Duration (s) | Total conversation duration in seconds |
+| Tags | Comma-separated tags |
+| Created At | Timestamp the conversation was created |
+
+### Download Transcripts
+
+Click **Download Transcripts** to export the full message-by-message log as a single flat Excel tab. Every message is one row; conversation metadata columns are repeated on each row so you can filter and sort freely in Excel.
+
+| Column | Description |
+| :--- | :--- |
+| Conversation ID | |
+| Status | `open` / `resolved` / `closed` |
+| Website | |
+| Team | |
+| Visitor Name | |
+| Visitor Email | |
+| Visitor Phone | |
+| Session ID | |
+| Visitor IP | |
+| Device | |
+| Browser | |
+| Agent | |
+| Rating | Good / Neutral / Bad |
+| Tags | Comma-separated |
+| Closed By | |
+| Conv Started At | Conversation creation timestamp |
+| Timestamp | When this specific message was sent |
+| Sender | `visitor`, `agent`, `bot`, or `system` |
+| Message Type | `text`, `image`, `file`, etc. |
+| Message | Full message content |
+
+> **Tip:** In Excel, freeze the header row and use column filters to slice by website, agent, rating, or any other dimension.

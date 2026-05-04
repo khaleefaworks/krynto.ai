@@ -249,19 +249,20 @@ Restart the backend after updating.
 
 #### 7.2 Email via Resend
 
-The app uses [Resend](https://resend.com) for transactional email (OTP, password reset, welcome).
+The app uses [Resend](https://resend.com) for transactional email (invites, OTP, password reset).
 
 1. Sign up at https://resend.com and create an API key.
 2. Add to `backend/.env`:
 
 ```env
 RESEND_API_KEY=your-resend-api-key
-FROM_EMAIL="AI ChatAssist <onboarding@resend.dev>"
+FROM_EMAIL="AI ChatAssist <noreply@yourdomain.com>"
 FRONTEND_URL=http://localhost:5173
-RESEND_OVERRIDE_TO_EMAIL=your-email@example.com
 ```
 
-> **Development note:** When using Resend's shared test domain (`onboarding@resend.dev`), set `RESEND_OVERRIDE_TO_EMAIL` to your verified Resend email. Remove it once you verify a custom domain.
+> **Custom domain (recommended):** Verify your domain in the Resend dashboard and use `noreply@yourdomain.com` as `FROM_EMAIL`. Email will be delivered to any recipient with no restrictions.
+
+> **Shared test domain:** If you haven't verified a domain yet, use `FROM_EMAIL="AI ChatAssist <onboarding@resend.dev>"` and add `RESEND_OVERRIDE_TO_EMAIL=your-verified@email.com` to redirect all outgoing mail to your inbox.
 
 #### 7.3 Redis
 
@@ -332,7 +333,7 @@ python3 reset_application.py --seed     # reset + seed test data
 |---|---|
 | `start_server.sh` reports missing virtualenv | Create it: `python3 -m venv backend/.venv` |
 | DB connectivity fails | Check `DATABASE_URL` in `.env`; verify Postgres is running |
-| Email sending fails in dev | Set `RESEND_OVERRIDE_TO_EMAIL` when using Resend's shared test domain |
+| Email sending fails in dev | Set `RESEND_OVERRIDE_TO_EMAIL` when using Resend's shared test domain (`onboarding@resend.dev`); not needed with a verified custom domain |
 | Frontend build errors | Delete `node_modules/` and run `npm ci` |
 | Push notifications not working | Ensure VAPID keys are set in `.env` and backend is restarted |
 

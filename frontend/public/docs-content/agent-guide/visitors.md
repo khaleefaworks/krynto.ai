@@ -1,53 +1,60 @@
 # Visitors & Contacts
 
-AI ChatAssist provides powerful tools to monitor website activity in real-time and manage your lead information.
+AI ChatAssist gives you real-time visibility into who is browsing your websites and a structured way to manage visitor contact information.
 
 ---
 
 ## Live Visitor Monitoring
 
-The **Visitors** dashboard provides a real-time view of every active session across your websites. This allows your team to understand traffic patterns and proactively identify opportunities for engagement.
+The **Visitors** dashboard shows every active browser session across your websites in real time, helping your team spot engagement opportunities and understand traffic patterns.
 
-### Understanding Visitor Sessions
-A visitor session is initialized the moment a user loads a page containing your chat widget. Each session is assigned a unique identifier that persists in the visitor's browser, allowing for continuous tracking across multiple pages and return visits.
+### What Each Session Shows
 
-### Visitor Data Reference
 | Data Point | Description |
 | :--- | :--- |
-| **Visitor Identity** | Displays an anonymous ID or a name (if provided). Includes a status indicator if an active chat is in progress. |
-| **Source Website** | The specific website within your organization that the visitor is currently browsing. |
-| **Origin / Referrer** | Shows the URL that referred the visitor to your site (e.g., Search, Social Media) or "Direct" for manual entry. |
-| **Geographic Location** | Estimated country and city based on the visitor's IP address. |
-| **Device & Browser** | Technical context including the operating system and browser version. |
-| **Activity Status** | Real-time indicator of the visitor's last interaction with your site. |
+| **Visitor Identity** | An anonymous session ID or a name if the visitor has been identified. |
+| **Source Website** | Which website in your organisation the visitor is currently browsing. |
+| **Origin / Referrer** | The URL that referred the visitor, or "Direct" for manual entry. |
+| **Device & Browser** | Operating system and browser version. |
+| **IP Address** | The visitor's public IP address at the time of the session. |
+| **Activity Status** | Real-time indicator of when the visitor last interacted with the page. |
 
+> **Note:** Geographic location lookup (city/country from IP) is not currently available. Only the raw IP address is shown.
 
-## Visitor Insights and History
+---
 
-Selecting a visitor from the list opens a comprehensive **Detail Panel** on the right side of the dashboard. This panel provides deep insights into the visitor's behavior:
+## Visitor Detail Panel
 
-- **Browsing Journey**: A chronological log of every page visited during the session, complete with timestamps.
-- **Conversation History**: A centralized list of all previous chat sessions associated with this visitor.
-- **Enriched Data**: Any contact information (Email, Phone) collected through automation or manual entry.
+Clicking a visitor opens a detail panel showing:
+
+- **IP address** and **device / browser info** — displayed as compact icon rows, no section heading.
+- **Browsing journey** — a chronological list of every page visited in this session, with timestamps.
+- **Conversation history** — all previous chat sessions linked to this visitor's browser session.
+- **Contact info** — name, email, and phone if collected.
 
 ---
 
 ## Integrating with Conversations
 
-The Visitors page serves as a gateway to the inbox:
-- **Direct Access**: If a visitor has an active conversation with at least one human message, you can jump directly to the chat by selecting **Open Conversation**.
-- **Automation Guard**: Conversations that currently only contain automated or bot messages are marked as "non-actionable" until the visitor sends their first direct response.
+The Visitors page connects directly to your inbox:
+
+- **Open Conversation** — if the visitor has an active conversation with at least one human message, this button jumps straight to the chat thread.
+- **Automation Guard** — conversations that contain only bot or system messages are not surfaced as "actionable" until the visitor sends a direct reply.
 
 ---
 
 ## Contact Management
 
-The **Contacts** view is a curated list of visitors who have been "identified." This occurs when a user provides their information through an offline form, a lead-capture automation, or when an agent manually updates their profile.
+The **Contacts** view lists visitors who have been **identified** — meaning at least one of their contact fields (name, email, or phone) has been filled in, either by:
 
-> **Data Relationship**: In AI ChatAssist, a Contact is not a separate entity from a Visitor. Rather, it is a Visitor record that has been enriched with identifiable data. This ensures that the entire history of an anonymous user is preserved once they become a known lead.
+- A lead-capture form or automation.
+- An agent editing their profile inline from the conversation panel.
+- The visitor submitting an offline form.
+
+> A Contact is not a separate record from a Visitor — it is the same session record with enriched data. This means the full anonymous browsing history is preserved once a visitor becomes a known lead.
 
 ---
 
-## Proactive Management Tips
+## Proactive Engagement Tips
 
-> **Monitor Browsing History**: Before joining a chat, review the visitor's browsing journey in the Detail Panel. Understanding which pages they viewed (e.g., Pricing or Documentation) allows you to provide more relevant and personalized support.
+> **Review the browsing journey before joining.** Knowing which pages a visitor viewed (Pricing, Docs, Checkout) lets you tailor your opening message and provide more relevant support immediately.

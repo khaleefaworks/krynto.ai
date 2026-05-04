@@ -115,7 +115,8 @@ Create `backend/.env` (copy from `.env.example`):
 | `REDIS_URL` | | `redis://localhost:6379` — enables multi-worker Pub/Sub |
 | `UPLOADS_DIR` | | Absolute path for file uploads (default: `<repo-root>/uploads`) |
 | `RESEND_API_KEY` | | Transactional email via Resend |
-| `FROM_EMAIL` | | Sender address — `AI ChatAssist <noreply@example.com>` |
+| `FROM_EMAIL` | | Sender address — `AI ChatAssist <noreply@yourdomain.com>` |
+| `RESEND_OVERRIDE_TO_EMAIL` | | Redirect all outgoing mail to this address (only needed when using Resend's shared test domain, not required with a verified custom domain) |
 | `VAPID_PUBLIC_KEY` | | Web Push public key |
 | `VAPID_PRIVATE_KEY` | | Web Push private key |
 | `VAPID_SUBJECT` | | Web Push subject — `mailto:you@example.com` |
