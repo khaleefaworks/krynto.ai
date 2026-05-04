@@ -95,6 +95,14 @@ async def lifespan(app: FastAPI):
     await realtime_bus.start(_handle_event)
     from app.services.auto_close_scheduler import start_scheduler, stop_scheduler
     start_scheduler()
+
+    # Seed automation library templates if the table is empty (idempotent).
+    try:
+        from seed_data import seed_automation_library
+        seed_automation_library()
+    except Exception:
+        pass
+
     try:
         yield
     finally:

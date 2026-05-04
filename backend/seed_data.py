@@ -5,7 +5,227 @@ from app.models.website import Website
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.website_message_shortcut import WebsiteMessageShortcut
 from app.models.system_settings import SystemSettings
+from app.models.automation_template import AutomationTemplate
 from app.core.security import get_password_hash
+
+
+AUTOMATION_LIBRARY_TEMPLATES = [
+    # ── Connection / visitor type ────────────────────────────────────────────
+    {
+        "name": "Welcome message",
+        "description": "Greet every visitor once per day with a friendly opening message.",
+        "trigger": "visitor_connected",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_hours": 24}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi! How can we help you today?", "event_type": "automation_welcome"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "New visitor welcome",
+        "description": "Send a one-time greeting to first-time visitors.",
+        "trigger": "visitor_new",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi! Welcome — is there anything we can help you with?", "event_type": "bot_new_visitor"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Returning visitor welcome",
+        "description": "Personalised welcome-back message for visitors with prior conversations.",
+        "trigger": "visitor_returning",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Welcome back! How can we help?", "event_type": "bot_returning_visitor"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Presence timeline ────────────────────────────────────────────────────
+    {
+        "name": "Visitor connected event",
+        "description": "Log a system event each time the visitor socket connects.",
+        "trigger": "visitor_socket_connected",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor has just connected.", "event_type": "visitor_socket_connected"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Visitor dropped event",
+        "description": "Log a system event when the visitor leaves the page.",
+        "trigger": "visitor_dropped",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Visitor reconnected",
+        "description": "Log a system event when the visitor returns to the page after a disconnect.",
+        "trigger": "visitor_reconnected",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── During conversation ──────────────────────────────────────────────────
+    {
+        "name": "Waiting message",
+        "description": "Reassure the visitor after 30 seconds with no agent response.",
+        "trigger": "no_agent_assigned_for",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"delay_seconds": 30}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks! An agent will be with you shortly.", "event_type": "bot_waiting"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Offline prompt",
+        "description": "Inform the visitor the team is offline and invite them to leave a message.",
+        "trigger": "website_offline_first_message",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "We're offline right now. Leave us a message and we'll get back to you soon.", "event_type": "bot_offline"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Agent joined",
+        "description": "Tag the conversation with the agent's name when they join.",
+        "trigger": "agent_joined",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "tag_with_agent_name", "config": {}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Visitor ended ────────────────────────────────────────────────────────
+    {
+        "name": "Visitor ended chat",
+        "description": "Show a system event and prompt a CSAT rating when the visitor ends the chat.",
+        "trigger": "conversation_visitor_ended",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended"}, "position": {"x": 0, "y": 150}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n1"},
+            {"id": "e2", "from": "n1", "to": "n2"},
+        ],
+    },
+    {
+        "name": "Visitor ended bot message",
+        "description": "Send a farewell bot message when the visitor ends the chat.",
+        "trigger": "conversation_visitor_ended",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks for chatting! If you need more help, just send us a message.", "event_type": "bot_visitor_ended"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Resolved ─────────────────────────────────────────────────────────────
+    {
+        "name": "Closing message",
+        "description": "Send a closing bot message when an agent resolves the conversation.",
+        "trigger": "conversation_resolved",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks! This conversation is now closed.", "event_type": "bot_closing"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Resolved rating",
+        "description": "Notify the visitor the conversation is resolved and show a CSAT rating prompt.",
+        "trigger": "conversation_resolved",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message"}, "position": {"x": 0, "y": 150}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n1"},
+            {"id": "e2", "from": "n1", "to": "n2"},
+        ],
+    },
+    {
+        "name": "Auto-resolved event",
+        "description": "Log a system event when the conversation is automatically resolved after inactivity.",
+        "trigger": "conversation_auto_resolved",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Conversation automatically resolved after visitor ended (24 h).", "event_type": "conversation_auto_resolved"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Chatbot ───────────────────────────────────────────────────────────────
+    {
+        "name": "Team routing chatbot",
+        "description": "Present visitors with department buttons on connect so they self-route to the right team.",
+        "trigger": "conversation_created",
+        "category": "chatbot_flow",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": []}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+]
+
+
+def seed_automation_library(db=None) -> None:
+    """Insert library templates that are missing. Safe to call multiple times."""
+    own_session = db is None
+    if own_session:
+        db = SessionLocal()
+    try:
+        existing_names = {
+            name for (name,) in db.query(AutomationTemplate.name).all()
+        }
+        added = 0
+        for tpl in AUTOMATION_LIBRARY_TEMPLATES:
+            if tpl["name"] in existing_names:
+                continue
+            db.add(AutomationTemplate(
+                name=tpl["name"],
+                description=tpl.get("description"),
+                trigger=tpl["trigger"],
+                category=tpl.get("category", "auto_message"),
+                nodes=tpl.get("nodes", []),
+                edges=tpl.get("edges", []),
+            ))
+            added += 1
+        if added:
+            db.commit()
+            print(f"✅ Seeded {added} automation library template(s)")
+        else:
+            print("ℹ️  Automation library templates already present")
+    except Exception as e:
+        print(f"❌ Error seeding automation library: {e}")
+        db.rollback()
+    finally:
+        if own_session:
+            db.close()
+
 
 def seed_database():
     db = SessionLocal()
@@ -120,10 +340,14 @@ def seed_database():
             else:
                 print("ℹ️  System already initialized")
         
+        # Seed automation library templates
+        print("\n📚 Seeding automation library templates...")
+        seed_automation_library(db)
+
         print("\n📋 Login Credentials:")
         print("   Admin: ragul.k@noveloffice.in / $0ft%963$")
         print("   Agent: agent@test.com / agent123")
-        
+
     except Exception as e:
         print(f"❌ Error seeding database: {e}")
         db.rollback()
