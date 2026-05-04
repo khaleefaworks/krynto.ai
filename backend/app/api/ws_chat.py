@@ -175,6 +175,15 @@ async def _send_delayed_welcome(
                 log_key="delayed_welcome_failed",
                 send_to_visitor=True,
             )
+
+            # Fire conversation_created automations (e.g. Team Routing Chatbot)
+            # proactively on connect. The idempotency guard inside this method
+            # prevents re-firing if the visitor sends a message before the delay.
+            await orchestrator._fire_conversation_created_automations(
+                conversation=conversation,
+                website_id=website_id,
+                visitor_ws=None,
+            )
         finally:
             db2.close()
     except Exception as e:
