@@ -49,6 +49,46 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import UserAvatar from '@/components/UserAvatar'
 import { formatDistanceToNow } from 'date-fns'
+
+function formatWhatsAppDate(dateLike: any): string {
+    const t = dateLike ? new Date(dateLike).getTime() : NaN
+    if (!Number.isFinite(t)) return ''
+
+    const now = new Date()
+    const then = new Date(t)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const yesterdayStart = todayStart - 86400000
+    const weekStart = todayStart - 6 * 86400000
+
+    const time = then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })
+
+    if (t >= todayStart) return time
+    if (t >= yesterdayStart) return 'Yesterday'
+    if (t >= weekStart) return then.toLocaleDateString(undefined, { weekday: 'long' })
+    if (then.getFullYear() === now.getFullYear())
+        return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    return `${then.getDate()}/${then.getMonth() + 1}/${then.getFullYear()}`
+}
+
+function formatLastSeen(dateLike: any): string {
+    const t = dateLike ? new Date(dateLike).getTime() : NaN
+    if (!Number.isFinite(t)) return ''
+
+    const now = new Date()
+    const then = new Date(t)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const yesterdayStart = todayStart - 86400000
+    const weekStart = todayStart - 6 * 86400000
+
+    const time = then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })
+
+    if (t >= todayStart) return `today at ${time}`
+    if (t >= yesterdayStart) return `yesterday at ${time}`
+    if (t >= weekStart) return `${then.toLocaleDateString(undefined, { weekday: 'long' })} at ${time}`
+    if (then.getFullYear() === now.getFullYear())
+        return `${then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} at ${time}`
+    return `${then.getDate()}/${then.getMonth() + 1}/${then.getFullYear()} at ${time}`
+}
 import { API_BASE } from '@/config/endpoints'
 
 function getMessageTimestamp(m: any): number {
@@ -80,18 +120,7 @@ function compareMessagesChronologically(a: any, b: any): number {
 }
 
 function formatShortAge(dateLike: any): string {
-    const t = dateLike ? new Date(dateLike).getTime() : NaN
-    if (!Number.isFinite(t)) return ''
-
-    const deltaMs = Math.max(0, Date.now() - t)
-    const minutes = Math.floor(deltaMs / 60000)
-    if (minutes < 60) return `${minutes}m`
-
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h`
-
-    const days = Math.floor(hours / 24)
-    return `${days}d`
+    return formatWhatsAppDate(dateLike)
 }
 
 function shortSessionId(sessionId: string | null | undefined): string {
@@ -634,10 +663,13 @@ export default function ConversationsView() {
         if (preferredId) {
             if (preferredId !== selectedChat) {
                 openChat(preferredId)
+                // Auto-switch the filter tab so the conversation is visible in the list.
+                const inResolved = resolvedChats.some((c: any) => c.id === preferredId)
+                setActiveFilter(inResolved ? 'resolved' : 'all')
             }
             return
         }
-    }, [getPreferredConversationId, selectedChat, openChat])
+    }, [getPreferredConversationId, selectedChat, openChat, resolvedChats])
 
     // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
     // fetch the conversation from the API and inject it so it can be selected.
@@ -657,8 +689,17 @@ export default function ConversationsView() {
                         headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
                     })
                     if (cancelled || !summary?.id) return
-                    // Inject into activeChats so it appears in the left list
-                    setActiveChats(sortChatsByActivity([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats]))
+                    const isResolved = summary.status === 'resolved'
+                    if (isResolved) {
+                        setResolvedChats((prev: any[]) => {
+                            const exists = prev.some((c) => c.id === summary.id)
+                            return exists ? prev : [summary, ...prev]
+                        })
+                        setActiveFilter('resolved')
+                    } else {
+                        setActiveChats(sortChatsByActivity([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats]))
+                        setActiveFilter('all')
+                    }
                     openChat(summary.id)
                 } catch {
                     // Conversation not found or no access — ignore
@@ -1957,11 +1998,14 @@ export default function ConversationsView() {
                                             Visitor ended
                                         </span>
                                     )}
-                                    {conversation?.last_seen_at && (
-                                        <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
-                                            Last seen {formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}
-                                        </p>
-                                    )}
+                                    {(() => {
+                                        const lastActiveTs = (conversation as any)?.last_visitor_message_at || conversation?.last_seen_at
+                                        return lastActiveTs ? (
+                                            <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
+                                                Last seen {formatLastSeen(lastActiveTs)}
+                                            </p>
+                                        ) : null
+                                    })()}
                                 </div>
                             </div>
 

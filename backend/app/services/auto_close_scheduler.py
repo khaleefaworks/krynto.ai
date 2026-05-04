@@ -18,8 +18,13 @@ _scheduler: AsyncIOScheduler | None = None
 
 def _run_auto_close() -> None:
     """
-    Find all OPEN conversations with no activity for >= 24 hours and resolve them.
+    Find OPEN conversations with real visitor engagement (at least one visitor
+    message) where that engagement has been idle for >= 24 hours, and resolve them.
     Sets closed_by = 'inactivity'. No rating prompt is triggered (visitor is offline).
+
+    Conversations where the visitor only browsed without sending a message are
+    intentionally excluded — they have no value to close and would pollute the
+    resolved list.
     """
     from app.models.conversation import Conversation, ConversationStatus
 
@@ -27,31 +32,32 @@ def _run_auto_close() -> None:
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        # Build a query for OPEN conversations where the latest activity is older than cutoff.
-        # last_activity = max(last_visitor_message_at, last_agent_message_at, created_at)
+        # Only consider conversations where the visitor actually sent a message.
         conversations = (
             db.query(Conversation)
-            .filter(Conversation.status == ConversationStatus.OPEN)
+            .filter(
+                Conversation.status == ConversationStatus.OPEN,
+                Conversation.last_visitor_message_at.isnot(None),
+            )
             .all()
         )
 
+        def _to_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+
         closed_count = 0
         for conv in conversations:
-            # Determine the most recent activity timestamp.
+            # Use the most recent of visitor/agent message timestamps (created_at
+            # intentionally excluded — it fires before any engagement).
             timestamps = [t for t in [
                 conv.last_visitor_message_at,
                 conv.last_agent_message_at,
-                conv.created_at,
             ] if t is not None]
 
             if not timestamps:
                 continue
-
-            # Normalise to UTC-aware for comparison.
-            def _to_utc(dt: datetime) -> datetime:
-                if dt.tzinfo is None:
-                    return dt.replace(tzinfo=timezone.utc)
-                return dt
 
             last_activity = max(_to_utc(t) for t in timestamps)
 
