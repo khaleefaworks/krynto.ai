@@ -723,11 +723,23 @@ def export_xlsx(
     website_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    agent_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
+    rating: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
 ):
-    """Stream an XLSX report for the selected period and website(s)."""
+    """Stream an XLSX report for the selected period and website(s) with optional filters."""
     start_dt, end_dt = _date_range(start, end)
 
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    # Parse tag_ids CSV
+    parsed_tag_ids: list[int] = []
+    if tag_ids:
+        try:
+            parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
 
     # Empty workbook if user has no accessible websites
     if allowed_ids is not None and not allowed_ids:
@@ -867,6 +879,26 @@ def export_xlsx(
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
 
+    # Optional extra filters
+    if agent_id is not None:
+        q = q.filter(Conversation.assigned_agent_id == agent_id)
+    if team_id is not None:
+        q = q.filter(Conversation.team_id == team_id)
+    if rating is not None:
+        rated_conv_ids = (
+            db.query(ConversationRating.conversation_id)
+            .filter(ConversationRating.rating == rating)
+            .scalar_subquery()
+        )
+        q = q.filter(Conversation.id.in_(rated_conv_ids))
+    if parsed_tag_ids:
+        for tid in parsed_tag_ids:
+            q = q.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tid)
+                )
+            )
+
     # Create write-only workbook and stream rows
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title="Analytics")
@@ -923,3 +955,136 @@ def export_xlsx(
     filename = f"analytics_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
     return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/export_transcripts")
+def export_transcripts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    website_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    agent_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
+    rating: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+):
+    """Export full conversation transcripts as XLSX with one sheet per conversation."""
+    start_dt, end_dt = _date_range(start, end)
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    parsed_tag_ids: list[int] = []
+    if tag_ids:
+        try:
+            parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
+
+    if allowed_ids is not None and not allowed_ids:
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("Transcripts")
+        ws.append(["No accessible conversations"])
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": 'attachment; filename="transcripts.xlsx"'})
+
+    # Build conversation query
+    conv_q = (
+        db.query(Conversation)
+        .filter(Conversation.created_at >= start_dt, Conversation.created_at <= end_dt)
+        .filter(Conversation.last_visitor_message_at.isnot(None))
+    )
+    if allowed_ids is not None:
+        conv_q = conv_q.filter(Conversation.website_id.in_(allowed_ids))
+    if agent_id is not None:
+        conv_q = conv_q.filter(Conversation.assigned_agent_id == agent_id)
+    if team_id is not None:
+        conv_q = conv_q.filter(Conversation.team_id == team_id)
+    if rating is not None:
+        rated_ids = (
+            db.query(ConversationRating.conversation_id)
+            .filter(ConversationRating.rating == rating)
+            .scalar_subquery()
+        )
+        conv_q = conv_q.filter(Conversation.id.in_(rated_ids))
+    if parsed_tag_ids:
+        for tid in parsed_tag_ids:
+            conv_q = conv_q.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tid)
+                )
+            )
+
+    conversations = conv_q.order_by(Conversation.created_at.desc()).limit(500).all()
+
+    # Load website names in batch
+    website_ids_needed = {c.website_id for c in conversations}
+    websites_map: dict[int, str] = {}
+    if website_ids_needed:
+        for w in db.query(Website).filter(Website.id.in_(website_ids_needed)).all():
+            websites_map[w.id] = w.name
+
+    # Load agent names in batch
+    agent_ids_needed = {c.assigned_agent_id for c in conversations if c.assigned_agent_id}
+    agents_map: dict[int, str] = {}
+    if agent_ids_needed:
+        for u in db.query(User).filter(User.id.in_(agent_ids_needed)).all():
+            agents_map[u.id] = u.name or u.email
+
+    # Build XLSX — one summary sheet + one sheet per conversation (up to 500)
+    wb = Workbook(write_only=True)
+
+    # Summary sheet
+    summary_ws = wb.create_sheet("Summary")
+    summary_ws.append([
+        "Conversation ID", "Status", "Website", "Visitor Name", "Visitor Email",
+        "Agent", "Started At", "Messages",
+    ])
+    for conv in conversations:
+        summary_ws.append([
+            conv.short_id or str(conv.id),
+            conv.status.value if hasattr(conv.status, "value") else str(conv.status),
+            websites_map.get(conv.website_id, f"Website {conv.website_id}"),
+            conv.visitor_name or "",
+            conv.visitor_email or "",
+            agents_map.get(conv.assigned_agent_id, "") if conv.assigned_agent_id else "",
+            conv.created_at.strftime("%Y-%m-%d %H:%M") if conv.created_at else "",
+            0,  # will be filled in transcript sheet
+        ])
+
+    # One sheet per conversation (limit to first 200 for workbook size)
+    for conv in conversations[:200]:
+        msgs = (
+            db.query(Message)
+            .filter(Message.conversation_id == conv.id)
+            .order_by(Message.created_at.asc())
+            .all()
+        )
+        sheet_title = (conv.short_id or str(conv.id))[:31]  # Excel sheet name limit
+        ws = wb.create_sheet(sheet_title)
+        # Header rows
+        ws.append([f"Conversation: {conv.short_id or conv.id}"])
+        ws.append([f"Visitor: {conv.visitor_name or conv.visitor_email or conv.session_id}"])
+        ws.append([f"Status: {conv.status.value if hasattr(conv.status, 'value') else conv.status}"])
+        ws.append([f"Started: {conv.created_at.strftime('%Y-%m-%d %H:%M') if conv.created_at else ''}"])
+        ws.append([])
+        ws.append(["Timestamp", "Sender", "Type", "Message"])
+        for msg in msgs:
+            sender = msg.sender or (msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type))
+            ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S") if msg.created_at else ""
+            event = msg.event_type or ""
+            content = msg.content or ""
+            ws.append([ts, sender, event, content])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    filename = f"transcripts_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

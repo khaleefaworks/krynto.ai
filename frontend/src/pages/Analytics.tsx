@@ -234,17 +234,33 @@ export default function Analytics() {
   const [ratings, setRatings] = useState<RatingSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [modalExportType, setModalExportType] = useState<'report' | 'transcripts'>('report')
   const [modalWebsite, setModalWebsite] = useState<number | ''>(selectedWebsite)
   const [modalStartDate, setModalStartDate] = useState<string>('')
   const [modalEndDate, setModalEndDate] = useState<string>('')
+  const [modalAgentId, setModalAgentId] = useState<number | ''>('')
+  const [modalTeamId, setModalTeamId] = useState<number | ''>('')
+  const [modalTagIds, setModalTagIds] = useState<number[]>([])
+  const [modalRating, setModalRating] = useState<string>('')
   const [downloading, setDownloading] = useState(false)
+
+  // Filter metadata for download modal
+  const [allAgents, setAllAgents] = useState<AgentStat[]>([])
+  const [allTags, setAllTags] = useState<TagStat[]>([])
+  const [allTeams, setAllTeams] = useState<{ id: number; name: string }[]>([])
 
   const startDate = dateNDaysAgo(dateRange - 1)
   const endDate = todayStr()
 
-  // Load websites list
+  // Load websites list + filter metadata for download modal
   useEffect(() => {
     apiRequest<Website[]>('/websites').then(setWebsites).catch(() => { })
+    apiRequest<{ agents: AgentStat[] }>('/analytics/agents/summary?start=2000-01-01&end=2099-12-31')
+      .then(d => setAllAgents(Array.isArray(d?.agents) ? d.agents : [])).catch(() => { })
+    apiRequest<{ tags: TagStat[] }>('/analytics/tags/summary?start=2000-01-01&end=2099-12-31')
+      .then(d => setAllTags(Array.isArray(d?.tags) ? d.tags : [])).catch(() => { })
+    apiRequest<any[]>('/teams/overview')
+      .then(d => setAllTeams(Array.isArray(d) ? d.flatMap((w: any) => w.teams || []).map((t: any) => ({ id: t.id, name: t.name })) : [])).catch(() => { })
   }, [])
 
   // Build query string
@@ -324,15 +340,36 @@ export default function Analytics() {
                 ))}
               </select>
               <button
-                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-auto"
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 w-full sm:w-auto"
                 onClick={() => {
+                  setModalExportType('report')
                   setModalWebsite(selectedWebsite)
                   setModalStartDate(startDate)
                   setModalEndDate(endDate)
+                  setModalAgentId('')
+                  setModalTeamId('')
+                  setModalTagIds([])
+                  setModalRating('')
                   setShowDownloadModal(true)
                 }}
               >
-                Download Report                   
+                Download Report
+              </button>
+              <button
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 w-full sm:w-auto"
+                onClick={() => {
+                  setModalExportType('transcripts')
+                  setModalWebsite(selectedWebsite)
+                  setModalStartDate(startDate)
+                  setModalEndDate(endDate)
+                  setModalAgentId('')
+                  setModalTeamId('')
+                  setModalTagIds([])
+                  setModalRating('')
+                  setShowDownloadModal(true)
+                }}
+              >
+                Download Transcripts
               </button>
             </div>
           </div>
@@ -614,14 +651,38 @@ export default function Analytics() {
       {showDownloadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="fixed inset-0 bg-black/40" onClick={() => setShowDownloadModal(false)} />
-          <div className="relative z-[60] w-full max-w-md mx-4">
+          <div className="relative z-[60] w-full max-w-lg mx-4">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Analytics</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose website and date range to export.</p>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {modalExportType === 'report' ? 'Download Report' : 'Download Transcripts'}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {modalExportType === 'report'
+                  ? 'Export conversation analytics as XLSX with optional filters.'
+                  : 'Export full conversation transcripts as XLSX.'}
+              </p>
 
-              <div className="mt-4 space-y-3">
+              {/* Export type toggle */}
+              <div className="mt-4 flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                {(['report', 'transcripts'] as const).map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setModalExportType(type)}
+                    className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                      modalExportType === type
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {type === 'report' ? 'Report (XLSX)' : 'Transcripts (XLSX)'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                {/* Website */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Website</label>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Website</label>
                   <select
                     value={modalWebsite}
                     onChange={e => setModalWebsite(e.target.value ? Number(e.target.value) : '')}
@@ -634,19 +695,97 @@ export default function Analytics() {
                   </select>
                 </div>
 
+                {/* Agent */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">From</label>
-                  <input type="date" value={modalStartDate} onChange={e => setModalStartDate(e.target.value)} className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Agent</label>
+                  <select
+                    value={modalAgentId}
+                    onChange={e => setModalAgentId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All Agents</option>
+                    {allAgents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name || a.email}</option>
+                    ))}
+                  </select>
                 </div>
 
+                {/* Team */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">To</label>
-                  <input type="date" value={modalEndDate} onChange={e => setModalEndDate(e.target.value)} className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Team</label>
+                  <select
+                    value={modalTeamId}
+                    onChange={e => setModalTeamId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All Teams</option>
+                    {allTeams.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Rating */}
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Rating</label>
+                  <select
+                    value={modalRating}
+                    onChange={e => setModalRating(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All Ratings</option>
+                    <option value="1">Positive</option>
+                    <option value="0">Neutral</option>
+                    <option value="-1">Negative</option>
+                  </select>
+                </div>
+
+                {/* From */}
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">From</label>
+                  <input type="date" value={modalStartDate} onChange={e => setModalStartDate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                </div>
+
+                {/* To */}
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">To</label>
+                  <input type="date" value={modalEndDate} onChange={e => setModalEndDate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
                 </div>
               </div>
 
+              {/* Tags multi-select */}
+              {allTags.length > 0 && (
+                <div className="mt-3">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">Tags (filter by — select none for all)</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allTags.map(tag => {
+                      const active = modalTagIds.includes(tag.id)
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() => setModalTagIds(prev => active ? prev.filter(id => id !== tag.id) : [...prev, tag.id])}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                            active
+                              ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          {tag.color && <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color }} />}
+                          {tag.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="mt-5 flex justify-end gap-3">
-                <button onClick={() => setShowDownloadModal(false)} className="px-4 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-200">Cancel</button>
+                <button onClick={() => setShowDownloadModal(false)}
+                  className="px-4 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-200">
+                  Cancel
+                </button>
                 <Button
                   onClick={async () => {
                     try {
@@ -655,13 +794,19 @@ export default function Analytics() {
                       params.set('start', modalStartDate)
                       params.set('end', modalEndDate)
                       if (modalWebsite) params.set('website_id', String(modalWebsite))
+                      if (modalAgentId) params.set('agent_id', String(modalAgentId))
+                      if (modalTeamId) params.set('team_id', String(modalTeamId))
+                      if (modalRating !== '') params.set('rating', modalRating)
+                      if (modalTagIds.length > 0) params.set('tag_ids', modalTagIds.join(','))
+
+                      const endpoint = modalExportType === 'transcripts'
+                        ? '/analytics/export_transcripts'
+                        : '/analytics/export_xlsx'
 
                       const token = localStorage.getItem('auth_token')
-                      const res = await fetch(`${API_BASE}/analytics/export_xlsx?${params.toString()}`, {
+                      const res = await fetch(`${API_BASE}${endpoint}?${params.toString()}`, {
                         method: 'GET',
-                        headers: {
-                          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                        },
+                        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
                       })
 
                       if (!res.ok) {
@@ -674,7 +819,8 @@ export default function Analytics() {
                       const url = URL.createObjectURL(blob)
                       const a = document.createElement('a')
                       a.href = url
-                      a.download = `analytics_${modalStartDate}_${modalEndDate}.xlsx`
+                      const suffix = modalExportType === 'transcripts' ? 'transcripts' : 'analytics'
+                      a.download = `${suffix}_${modalStartDate}_${modalEndDate}.xlsx`
                       document.body.appendChild(a)
                       a.click()
                       a.remove()

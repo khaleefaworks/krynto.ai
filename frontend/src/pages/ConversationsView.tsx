@@ -43,7 +43,10 @@ import {
     Bot,
     Plus,
     X,
-    HelpCircle
+    HelpCircle,
+    SlidersHorizontal,
+    Globe,
+    UserRound,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -318,6 +321,14 @@ export default function ConversationsView() {
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
 
+    // Advanced conversation filters
+    const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+    const [filterWebsiteId, setFilterWebsiteId] = useState<number | null>(null)
+    const [filterAgentId, setFilterAgentId] = useState<number | null>(null)
+    const [filterTeamId, setFilterTeamId] = useState<number | null>(null)
+    const [filterTagIds, setFilterTagIds] = useState<number[]>([])
+    const [agentsList, setAgentsList] = useState<{ id: number; name: string; email: string }[]>([])
+
     // Chat state
     const [selectedChat, setSelectedChat] = useState<number | null>(null)
     const [input, setInput] = useState('')
@@ -431,6 +442,33 @@ export default function ConversationsView() {
         }
     }, [])
 
+    // Load agents list for advanced filters
+    useEffect(() => {
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const data = await apiRequest<any[]>('/users')
+                    if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email })) : [])
+                } catch {
+                    if (!cancelled) setAgentsList([])
+                }
+                try {
+                    const data = await apiRequest<any[]>('/teams/overview')
+                    if (!cancelled) setAvailableTeams(
+                        Array.isArray(data)
+                            ? data.flatMap((w: any) => w.teams || [])
+                            : []
+                    )
+                } catch {
+                    // Teams will be loaded per-conversation as a fallback
+                }
+                try {
+                    // Load any tags from any accessible website as filter options
+                    // Tags are also derived from loaded chats below (allTagsFromChats)
+                } catch { /* no-op */ }
+            })()
+        return () => { cancelled = true }
+    }, [])
 
     // Listen to global notification changes and refresh list (only on ConversationsView)
     const { unreadChatsCount } = useAppStore()
@@ -630,8 +668,10 @@ export default function ConversationsView() {
 
     // When navigating back to the chats list (/dashboard/chats), clear any previously
     // selected chat so the empty-state screen renders (instead of persisting the thread view).
+    // Always reset the filter to 'all' so the sidebar Chats link brings you to open conversations.
     useEffect(() => {
         if (!isChatsListRoute) return
+        setActiveFilter('all')
         if (selectedChat === null) return
         setSelectedChat(null)
         setConversation(null)
@@ -1588,17 +1628,29 @@ export default function ConversationsView() {
         : activeChats
 
     const filteredChats = chatsForList.filter(chat => {
-        // Apply search filter
+        // Search: name, email, short_id, session_id, last_message
         if (searchQuery) {
             const q = searchQuery.toLowerCase().trim()
-            const matchesSession = chat.session_id.toLowerCase().includes(q)
-            const matchesName = String((chat as any).visitor_name || '').toLowerCase().includes(q)
-            if (!matchesSession && !matchesName) {
-                return false
-            }
+            const fields = [
+                String((chat as any).visitor_name || ''),
+                String((chat as any).visitor_email || ''),
+                String((chat as any).short_id || ''),
+                String(chat.session_id || ''),
+                String((chat as any).last_message || ''),
+            ]
+            if (!fields.some(f => f.toLowerCase().includes(q))) return false
         }
 
-        // Apply category filter
+        // Advanced filters
+        if (filterWebsiteId && (chat as any).website_id !== filterWebsiteId) return false
+        if (filterAgentId && (chat as any).assigned_agent_id !== filterAgentId) return false
+        if (filterTeamId && (chat as any).team_id !== filterTeamId) return false
+        if (filterTagIds.length > 0) {
+            const chatTagIds = ((chat as any).tags || []).map((t: any) => Number(t?.id))
+            if (!filterTagIds.every(id => chatTagIds.includes(id))) return false
+        }
+
+        // Category filter
         switch (activeFilter) {
             case 'all':
                 return chat.status === 'open'
@@ -1612,6 +1664,34 @@ export default function ConversationsView() {
                 return chat.status === 'open'
         }
     })
+
+    const hasAdvancedFilters = !!(filterWebsiteId || filterAgentId || filterTeamId || filterTagIds.length > 0)
+
+    // Distinct website options from loaded chats (for filter dropdown)
+    const websiteOptions = useMemo(() => {
+        const seen = new Map<number, string>()
+        for (const c of [...activeChats, ...resolvedChats]) {
+            const id = (c as any).website_id
+            const name = (c as any).website_name || `Website ${id}`
+            if (id && !seen.has(id)) seen.set(id, name)
+        }
+        return Array.from(seen.entries()).map(([id, name]) => ({ id, name }))
+    }, [activeChats, resolvedChats])
+
+    // Unique tags derived from loaded chats (supplements availableTags)
+    const allTagsFromChats = useMemo(() => {
+        const seen = new Map<number, { id: number; name: string; color: string }>()
+        for (const c of [...activeChats, ...resolvedChats]) {
+            for (const tag of ((c as any).tags || [])) {
+                if (tag?.id && !seen.has(Number(tag.id))) seen.set(Number(tag.id), tag)
+            }
+        }
+        // Merge with availableTags (loaded per-conversation)
+        for (const tag of availableTags) {
+            if (tag?.id && !seen.has(Number(tag.id))) seen.set(Number(tag.id), tag)
+        }
+        return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name))
+    }, [activeChats, resolvedChats, availableTags])
 
     useEffect(() => {
         let cancelled = false
@@ -1863,16 +1943,139 @@ export default function ConversationsView() {
                         </h2>
                     </div>
 
-                    {/* Search */}
-                    <div className="relative p-4 border-b border-gray-200 dark:border-gray-700">
-                        <Search className="absolute left-7 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <Input
-                            placeholder="Search..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10 dark:bg-gray-700 dark:border-gray-600"
-                        />
+                    {/* Search + Filter button */}
+                    <div className="flex items-center gap-2 p-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Input
+                                placeholder="Search name, email, ID…"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 dark:bg-gray-700 dark:border-gray-600"
+                            />
+                        </div>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        onClick={() => setFilterPanelOpen(v => !v)}
+                                        className={`relative flex-shrink-0 p-2 rounded-lg border transition-colors ${
+                                            filterPanelOpen || hasAdvancedFilters
+                                                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400'
+                                                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        <SlidersHorizontal className="h-4 w-4" />
+                                        {hasAdvancedFilters && (
+                                            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-blue-600 border-2 border-white dark:border-gray-800" />
+                                        )}
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Advanced Filters</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     </div>
+
+                    {/* Advanced filter panel */}
+                    {filterPanelOpen && (
+                        <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 space-y-3">
+                            {/* Website */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <Globe className="h-3 w-3" /> Website
+                                </label>
+                                <select
+                                    value={filterWebsiteId ?? ''}
+                                    onChange={e => setFilterWebsiteId(e.target.value ? Number(e.target.value) : null)}
+                                    className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                >
+                                    <option value="">All websites</option>
+                                    {websiteOptions.map(w => (
+                                        <option key={w.id} value={w.id}>{w.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {/* Agent */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <UserRound className="h-3 w-3" /> Agent
+                                </label>
+                                <select
+                                    value={filterAgentId ?? ''}
+                                    onChange={e => setFilterAgentId(e.target.value ? Number(e.target.value) : null)}
+                                    className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                >
+                                    <option value="">All agents</option>
+                                    {agentsList.map(a => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {/* Team */}
+                            {availableTeams.length > 0 && (
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                        <Users className="h-3 w-3" /> Team
+                                    </label>
+                                    <select
+                                        value={filterTeamId ?? ''}
+                                        onChange={e => setFilterTeamId(e.target.value ? Number(e.target.value) : null)}
+                                        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    >
+                                        <option value="">All teams</option>
+                                        {availableTeams.map((t: any) => (
+                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            {/* Tags */}
+                            {allTagsFromChats.length > 0 && (
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                        <TagIcon className="h-3 w-3" /> Tags
+                                    </label>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {allTagsFromChats.map((tag: any) => {
+                                            const active = filterTagIds.includes(Number(tag.id))
+                                            return (
+                                                <button
+                                                    key={tag.id}
+                                                    onClick={() => setFilterTagIds(prev =>
+                                                        active ? prev.filter(id => id !== Number(tag.id)) : [...prev, Number(tag.id)]
+                                                    )}
+                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+                                                        active
+                                                            ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                                            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    {tag.color && (
+                                                        <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color }} />
+                                                    )}
+                                                    {tag.name}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            {/* Clear all */}
+                            {hasAdvancedFilters && (
+                                <button
+                                    onClick={() => {
+                                        setFilterWebsiteId(null)
+                                        setFilterAgentId(null)
+                                        setFilterTeamId(null)
+                                        setFilterTagIds([])
+                                    }}
+                                    className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400"
+                                >
+                                    Clear all filters
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     {/* Filter tabs — visible below lg (when Col1 sidebar is hidden) */}
                     <div className="lg:hidden flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
