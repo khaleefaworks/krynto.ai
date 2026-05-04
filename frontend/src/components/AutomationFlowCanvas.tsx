@@ -487,8 +487,9 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
     let cancelled = false
     apiRequest<any[]>('/teams/overview').then((data) => {
       if (!cancelled && Array.isArray(data)) {
+        // WebsiteTeamsOverview uses `.id` for the website id, not `.website_id`
         const teams = data
-          .filter((w: any) => !websiteId || w.website_id === websiteId)
+          .filter((w: any) => !websiteId || Number(w.id) === Number(websiteId))
           .flatMap((w: any) => w.teams || [])
           .map((t: any) => ({ id: Number(t.id), name: String(t.name) }))
         setWebsiteTeams(teams)
