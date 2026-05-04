@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   ReactFlow, Background, Controls,
   useNodesState, useEdgesState, addEdge,
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { X, Plus, Trash2, GripVertical } from 'lucide-react'
+import { apiRequest } from '@/services/api'
 import {
   automationsApi,
   type Automation,
@@ -179,10 +180,12 @@ function NodeConfigPanel({
   node,
   onChange,
   onDelete,
+  websiteTeams = [],
 }: {
   node: Node
   onChange: (config: Record<string, any>) => void
   onDelete: () => void
+  websiteTeams?: { id: number; name: string }[]
 }) {
   const type = node.data.type as string
   const cfg = (node.data.config as Record<string, any>) || {}
@@ -394,23 +397,51 @@ function NodeConfigPanel({
               </button>
             </div>
             {(cfg.buttons || []).map((btn: any, i: number) => (
-              <div key={i} className="flex items-center gap-1 mb-1">
+              <div key={i} className="border border-gray-200 dark:border-gray-700 rounded p-2 mb-2 space-y-1.5 bg-gray-50 dark:bg-gray-900">
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={btn.label}
+                    onChange={(e) => {
+                      const next = [...cfg.buttons]
+                      next[i] = { ...btn, label: e.target.value }
+                      set({ buttons: next })
+                    }}
+                    placeholder="Button label"
+                    className="h-7 text-xs flex-1"
+                  />
+                  <button
+                    onClick={() => set({ buttons: cfg.buttons.filter((_: any, j: number) => j !== i) })}
+                    className="text-red-400 hover:text-red-600 flex-shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
                 <Input
-                  value={btn.label}
+                  value={btn.reply || ''}
                   onChange={(e) => {
                     const next = [...cfg.buttons]
-                    next[i] = { ...btn, label: e.target.value }
+                    next[i] = { ...btn, reply: e.target.value }
                     set({ buttons: next })
                   }}
-                  placeholder="Button label"
-                  className="h-7 text-xs flex-1"
+                  placeholder="Bot reply after click (optional)"
+                  className="h-7 text-xs"
                 />
-                <button
-                  onClick={() => set({ buttons: cfg.buttons.filter((_: any, j: number) => j !== i) })}
-                  className="text-red-400 hover:text-red-600"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+                {websiteTeams.length > 0 && (
+                  <select
+                    value={btn.team_id ?? ''}
+                    onChange={(e) => {
+                      const next = [...cfg.buttons]
+                      next[i] = { ...btn, team_id: e.target.value === '' ? null : Number(e.target.value) }
+                      set({ buttons: next })
+                    }}
+                    className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+                  >
+                    <option value="">— No team assigned —</option>
+                    {websiteTeams.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             ))}
           </div>
@@ -450,6 +481,21 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [websiteTeams, setWebsiteTeams] = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    apiRequest<any[]>('/teams/overview').then((data) => {
+      if (!cancelled && Array.isArray(data)) {
+        const teams = data
+          .filter((w: any) => !websiteId || w.website_id === websiteId)
+          .flatMap((w: any) => w.teams || [])
+          .map((t: any) => ({ id: Number(t.id), name: String(t.name) }))
+        setWebsiteTeams(teams)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [websiteId])
 
   const initialNodes: Node[] = automation?.nodes?.length
     ? toRFNodes(automation.nodes)
@@ -624,6 +670,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
               node={selectedNode}
               onChange={updateSelectedNodeConfig}
               onDelete={deleteSelectedNode}
+              websiteTeams={websiteTeams}
             />
           ) : (
             <div className="p-4 text-xs text-gray-400 dark:text-gray-500">

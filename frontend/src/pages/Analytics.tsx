@@ -196,7 +196,7 @@ function ResponseTimeChart({ data }: { data: ChartPoint[] }) {
       <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
         <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#9ca3af" />
-        <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" unit="s" />
+        <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={(v) => formatDuration(v as number)} width={55} />
         <Tooltip
           contentStyle={{
             backgroundColor: '#1f2937',

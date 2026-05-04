@@ -234,6 +234,7 @@ interface ConversationDetails {
     visitor_phone?: string
     device_info?: string
     browser_info?: string
+    visitor_ip?: string | null
     visit_count?: number
     last_seen_at?: string
     visitor_avatar_color?: string | null
@@ -1769,7 +1770,7 @@ export default function ConversationsView() {
                 </div>
             )}
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
+            <div className={`hidden lg:flex dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-46'
                 }`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -1806,14 +1807,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <MessageCircle className="h-5 w-5 flex-shrink-0" />
+                                                <MessageCircle className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <MessageCircle className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">All</span>
+                                                    <MessageCircle className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open').length}
@@ -1836,14 +1837,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Users className="h-5 w-5 flex-shrink-0" />
+                                                <Users className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Users className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Mine</span>
+                                                    <Users className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Mine</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}
@@ -1866,14 +1867,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Inbox className="h-5 w-5 flex-shrink-0" />
+                                                <Inbox className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Inbox className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Unassigned</span>
+                                                    <Inbox className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Unassigned</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}
@@ -1908,14 +1909,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Check className="h-5 w-5 flex-shrink-0" />
+                                                <Check className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{resolvedChats.length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Check className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Resolved</span>
+                                                    <Check className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Resolved</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {resolvedChats.length}
@@ -1936,7 +1937,7 @@ export default function ConversationsView() {
                 {/* Header */}
                 <div>
                     <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between'>
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             {getFilterIcon()}
                             {getFilterHeaderText()}
                             <DocsLink slug="agent-guide/conversations" />
@@ -1959,11 +1960,10 @@ export default function ConversationsView() {
                                 <TooltipTrigger asChild>
                                     <button
                                         onClick={() => setFilterPanelOpen(v => !v)}
-                                        className={`relative flex-shrink-0 p-2 rounded-lg border transition-colors ${
-                                            filterPanelOpen || hasAdvancedFilters
-                                                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400'
-                                                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                        }`}
+                                        className={`relative flex-shrink-0 p-2 rounded-lg border transition-colors ${filterPanelOpen || hasAdvancedFilters
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400'
+                                            : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            }`}
                                     >
                                         <SlidersHorizontal className="h-4 w-4" />
                                         {hasAdvancedFilters && (
@@ -2044,11 +2044,10 @@ export default function ConversationsView() {
                                                     onClick={() => setFilterTagIds(prev =>
                                                         active ? prev.filter(id => id !== Number(tag.id)) : [...prev, Number(tag.id)]
                                                     )}
-                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
-                                                        active
-                                                            ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                                            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                    }`}
+                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${active
+                                                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                        }`}
                                                 >
                                                     {tag.color && (
                                                         <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color }} />
@@ -2088,16 +2087,14 @@ export default function ConversationsView() {
                             <button
                                 key={tab.key}
                                 onClick={() => setActiveFilter(tab.key)}
-                                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                    activeFilter === tab.key
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                }`}
+                                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFilter === tab.key
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                    }`}
                             >
                                 {tab.label}
-                                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${
-                                    activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                                }`}>{tab.count}</span>
+                                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                                    }`}>{tab.count}</span>
                             </button>
                         ))}
                     </div>
@@ -2124,44 +2121,86 @@ export default function ConversationsView() {
                                 <button
                                     key={chat.id}
                                     onClick={() => handleChatSelect(chat.id)}
-                                    className={`w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : ''
-                                        }`}
+                                    className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
                                 >
-                                    <div className="flex items-start gap-3">
-                                        <UserAvatar
-                                            seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
-                                            bgColor={(chat as any).visitor_avatar_color}
-                                            className="w-10 h-10 flex-shrink-0"
-                                            iconClassName="w-10 h-10"
-                                            title={conversationDisplayName(chat as any)}
-                                        />
+                                    <div className="flex items-start gap-2.5">
+                                        {/* Visitor avatar with assigned-agent badge */}
+                                        <div className="relative flex-shrink-0">
+                                            <UserAvatar
+                                                seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
+                                                bgColor={(chat as any).visitor_avatar_color}
+                                                className="w-9 h-9"
+                                                iconClassName="w-9 h-9"
+                                                title={conversationDisplayName(chat as any)}
+                                            />
+                                            {(chat as any).assigned_agent_id && (() => {
+                                                const agent = agentsList.find((a) => a.id === (chat as any).assigned_agent_id)
+                                                return (
+                                                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
+                                                        title={agent?.name || `Agent #${(chat as any).assigned_agent_id}`}
+                                                    >
+                                                        <UserAvatar
+                                                            seed={agent?.email || String((chat as any).assigned_agent_id)}
+                                                            className="w-4 h-4"
+                                                            iconClassName="w-4 h-4"
+                                                            title={agent?.name}
+                                                        />
+                                                    </div>
+                                                )
+                                            })()}
+                                        </div>
+
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <span className="font-semibold text-gray-900 dark:text-white truncate">
-                                                    {conversationDisplayName(chat as any)}
-                                                </span>
-                                                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-                                                    {((chat as any).last_message_at || (chat as any).created_at)
-                                                        ? formatShortAge((chat as any).last_message_at || (chat as any).created_at)
-                                                        : ''}
+                                            {/* Row 1: name + website+ time */}
+                                            <div className="flex items-baseline justify-between gap-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-[14px] font-semibold text-gray-900 dark:text-white truncate leading-tight">
+                                                        {conversationDisplayName(chat as any)}
+                                                    </span>
+                                                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] max-w-28 truncate rounded">
+                                                        {(chat as any).website_name || `Site #${(chat as any).website_id}`}
+                                                    </Badge>
+                                                </div>
+                                                <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0 leading-tight">
+                                                    {formatShortAge((chat as any).last_message_at || (chat as any).created_at)}
                                                 </span>
                                             </div>
 
-                                            <div className="mt-1 flex items-center justify-between gap-2">
-                                                <Badge variant="secondary" className="h-5 px-2 text-[10px] max-w-44 truncate">
-                                                    {(chat as any).website_name
-                                                        ? (chat as any).website_name
-                                                        : `Website #${(chat as any).website_id}`}
-                                                </Badge>
+                                            {/* Row 2: last message + unread badge */}
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                {(chat as any).last_message && (
+                                                    <p className="text-[12px] text-gray-500 dark:text-gray-400 truncate mt-0.5 leading-tight">
+                                                        {(chat as any).last_message}
+                                                    </p>
+                                                )}
                                                 {chat.id !== selectedChat && Boolean(unreadByConversationId[chat.id]) && (
-                                                    <Badge
-                                                        variant="destructive"
-                                                        className="h-5 min-w-5 justify-center rounded-full px-1.5 text-xs flex-shrink-0"
-                                                    >
+                                                    <Badge variant="destructive" className="h-4 min-w-4 justify-center rounded-full px-1 text-[10px] flex-shrink-0 ml-auto">
                                                         {unreadByConversationId[chat.id] > 99 ? '99+' : unreadByConversationId[chat.id]}
                                                     </Badge>
                                                 )}
                                             </div>
+
+                                            {/* Row 3: tags */}
+                                            {((chat as any).tags || []).length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {((chat as any).tags as any[]).slice(0, 3).map((tag: any) => (
+                                                        <span
+                                                            key={tag.id}
+                                                            className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-full border leading-none"
+                                                            style={{
+                                                                backgroundColor: getTagPillBackground(tag.color),
+                                                                borderColor: tag.color || '#d1d5db',
+                                                                color: tag.color || 'inherit',
+                                                            }}
+                                                        >
+                                                            {tag.name}
+                                                        </span>
+                                                    ))}
+                                                    {((chat as any).tags as any[]).length > 3 && (
+                                                        <span className="text-[9px] text-gray-400">+{((chat as any).tags as any[]).length - 3}</span>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </button>
@@ -2188,8 +2227,8 @@ export default function ConversationsView() {
                                 <UserAvatar
                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
                                     bgColor={conversation?.visitor_avatar_color}
-                                    className="w-10 h-10 flex-shrink-0"
-                                    iconClassName="w-10 h-10"
+                                    className="w-9 h-9 flex-shrink-0"
+                                    iconClassName="w-9 h-9"
                                     title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
@@ -2550,7 +2589,7 @@ export default function ConversationsView() {
                                                     <div className="flex justify-end">
                                                         <div className="flex items-end gap-2 max-w-[70%] min-w-0">
                                                             <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700 min-w-0">
-                                                                <MarkdownMessage content={msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={msg.content} className="text-sm" />
                                                                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                 </div>
@@ -2573,7 +2612,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-sm" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (

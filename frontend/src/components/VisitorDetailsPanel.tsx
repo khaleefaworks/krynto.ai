@@ -7,6 +7,7 @@ import {
   Mail,
   Phone,
   Monitor,
+  Globe,
   Plus,
   X
 } from "lucide-react"
@@ -42,6 +43,7 @@ interface VisitorDetailsPanelProps {
     visitor_phone?: string
     device_info?: string
     browser_info?: string
+    visitor_ip?: string | null
     visit_count?: number
     last_seen_at?: string
     visitor_avatar_color?: string | null
@@ -162,21 +164,25 @@ export default function VisitorDetailsPanel({
         </div>
       </div>
 
-      {/* Device */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Device</h4>
-        <div className="flex items-center gap-2">
-          <Monitor className="h-4 w-4 text-gray-400" />
-          <span className="text-sm text-gray-600 dark:text-gray-400">
-            {(() => {
-              const device = String(conversation.device_info || '').trim()
-              const browser = String(conversation.browser_info || '').trim()
-              if (device && browser) return `${device}, ${browser}`
-              return device || browser || 'Unknown'
-            })()}
-          </span>
+      {/* IP / device rows — no heading, Smartsupp-style */}
+      {(conversation.visitor_ip || conversation.device_info || conversation.browser_info) && (
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 space-y-1.5">
+          {conversation.visitor_ip && (
+            <div className="flex items-center gap-2">
+              <Globe className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+              <span className="text-xs text-gray-600 dark:text-gray-400 font-mono">{conversation.visitor_ip}</span>
+            </div>
+          )}
+          {(conversation.device_info || conversation.browser_info) && (
+            <div className="flex items-center gap-2">
+              <Monitor className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+              <span className="text-xs text-gray-600 dark:text-gray-400">
+                {[conversation.device_info, conversation.browser_info].filter(Boolean).join(', ')}
+              </span>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Visitor Rating */}
       {rating && (
