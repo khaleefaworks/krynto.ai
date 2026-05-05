@@ -205,7 +205,7 @@ class AutomationService:
             {
                 "name": "Visitor ended chat",
                 "trigger": "conversation_visitor_ended",
-                "enabled": True,
+                "enabled": False,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
                     {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
@@ -222,7 +222,7 @@ class AutomationService:
             {
                 "name": "Resolved rating",
                 "trigger": "conversation_resolved",
-                "enabled": True,
+                "enabled": False,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
                     {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
