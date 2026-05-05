@@ -388,6 +388,26 @@ async def agent_ws(
             pass
         if agent_service and websocket_id:
             agent_service.unregister_agent(websocket_id)
+
+        # After unregistering, check if the website just went offline.
+        # If so, push a 'website_offline' event to all active visitor sockets
+        # so the offline form can appear mid-conversation without needing a
+        # page reload or a new message from the visitor.
+        if website_id:
+            try:
+                from app.services.website_resolver import is_website_online as _is_online
+                from app.services.chat_service import ChatService as _CS
+                if not _is_online(website_id):
+                    import asyncio as _asyncio
+                    _asyncio.create_task(
+                        _CS.broadcast_to_visitors(
+                            website_id=int(website_id),
+                            message={"type": "website_offline"},
+                        )
+                    )
+            except Exception:
+                pass
+
         db.close()
         if agent_id:
             logger.info("agent_cleanup_complete", agent_id=agent_id)

@@ -196,6 +196,43 @@ class ChatService:
         logger.warning("visitor_not_connected", conversation_id=conversation_id)
 
     @classmethod
+    async def broadcast_to_visitors(cls, *, website_id: int, message: dict) -> None:
+        """Send a message to all locally-connected visitors for a given website.
+
+        This is a best-effort broadcast used for website-level events such as going
+        offline so that active visitor sockets are notified in real-time without
+        requiring a new message from the visitor.
+
+        Uses the DB to resolve which conversation_ids belong to the website, then
+        sends directly to any locally-registered sockets.
+        """
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        try:
+            from app.models.conversation import Conversation
+            from app.models.conversation import ConversationStatus
+            conv_ids = [
+                row[0]
+                for row in db.query(Conversation.id)
+                .filter(
+                    Conversation.website_id == website_id,
+                    Conversation.status == ConversationStatus.OPEN,
+                )
+                .all()
+            ]
+        except Exception:
+            conv_ids = []
+        finally:
+            db.close()
+
+        for conv_id in conv_ids:
+            if conv_id in cls.active_visitors:
+                try:
+                    await cls.send_to_visitor(conv_id, message)
+                except Exception:
+                    pass
+
+    @classmethod
     async def deliver_bus_event(cls, event: dict) -> None:
         """Deliver a Redis bus event to a locally connected visitor socket."""
 

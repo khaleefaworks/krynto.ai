@@ -168,13 +168,28 @@ async def _send_delayed_welcome(
                     pass
 
             orchestrator = ConversationOrchestrator(db2)
-            await orchestrator._run_automation_flows(
-                conversation_id=conversation.id,
-                website_id=website_id,
-                trigger="visitor_connected",
-                log_key="delayed_welcome_failed",
-                send_to_visitor=True,
-            )
+
+            # Choose the welcome trigger based on website online status.
+            # If all agents are offline, fire the offline automation proactively
+            # (before the visitor sends any message) so the contact form shows
+            # immediately instead of after the first message.
+            from app.services.website_resolver import is_website_online as _is_online
+            if _is_online(website_id):
+                await orchestrator._run_automation_flows(
+                    conversation_id=conversation.id,
+                    website_id=website_id,
+                    trigger="visitor_connected",
+                    log_key="delayed_welcome_failed",
+                    send_to_visitor=True,
+                )
+            else:
+                await orchestrator._run_automation_flows(
+                    conversation_id=conversation.id,
+                    website_id=website_id,
+                    trigger="website_offline_first_message",
+                    log_key="delayed_offline_welcome_failed",
+                    send_to_visitor=True,
+                )
 
             # Fire conversation_created automations (e.g. Team Routing Chatbot)
             # proactively on connect. The idempotency guard inside this method
