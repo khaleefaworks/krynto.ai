@@ -1205,6 +1205,11 @@
         // Reveal input unless a bot_prompt is still pending a visitor selection.
         if (!hasPendingBotPrompt) {
           showInputContainer();
+        } else {
+          // Cancel the connect-time reveal timer so it doesn't override the
+          // hidden input state after a page reload with a pending button prompt.
+          clearTimeout(_inputRevealTimer);
+          _inputRevealTimer = null;
         }
       }
       // If 0 history messages (brand-new session): keep the _inputRevealTimer

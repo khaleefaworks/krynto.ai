@@ -43,7 +43,7 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
         return dt
 
 
-VISITOR_LEFT_DELAY_SECONDS = 45
+VISITOR_LEFT_DELAY_SECONDS = 15
 _visitor_left_scheduled: set[int] = set()
 
 
