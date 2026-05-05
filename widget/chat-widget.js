@@ -1022,6 +1022,7 @@
   }
 
   function afterConversationClose() {
+    const closedConvId = CONFIG.conversationId;
     CONFIG.conversationId = 0;
     if (widgetShowHistory) {
       fetchConversationList().then(function (listData) {
@@ -1032,9 +1033,9 @@
         }
       }).catch(function () { enterStartView(); });
     } else {
-      // Start a fresh conversation so the welcome automation fires.
-      _clearClosedState();
-      enterStartView();
+      // History disabled: show a closed state instead of auto-reconnecting.
+      // Auto-reconnecting would re-trigger the welcome automation immediately.
+      enterClosedView(closedConvId);
     }
   }
 
@@ -1411,28 +1412,6 @@
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
-    } else if (data.type === 'website_offline') {
-      // Server pushed a real-time offline notification (e.g. last agent disconnected
-      // mid-conversation). Show the offline contact form if the visitor hasn't
-      // already submitted their details this session.
-      try {
-        const storedName = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`) || '';
-        const storedPhone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`) || '';
-        const storedEmail = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`) || '';
-        if (storedName && storedPhone) {
-          // Auto-send stored info so conversation is updated.
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'visitor_contact',
-              visitor_name: storedName,
-              visitor_phone: storedPhone,
-              visitor_email: storedEmail || undefined,
-            }));
-          }
-        } else {
-          showContactOverlay();
-        }
-      } catch (e) { }
     } else if (data.type === 'automation_complete') {
       // IVR flow is done — reveal the free-form input and clear any fallback timer.
       clearTimeout(_inputRevealTimer);
@@ -3126,14 +3105,15 @@
 
       if (listData && listData.active) {
         if (listData.active.visitor_ended) {
-          // Visitor had ended this conversation.
+          // Visitor had ended this conversation — don't auto-resume it.
           if (!widgetShowHistory) {
-            // History disabled: start a fresh conversation so the welcome
-            // automation fires and the visitor gets a clean slate.
-            _clearClosedState();
-            enterStartView();
+            // History disabled: load the thread as read-only so the visitor can
+            // see their previous messages and the "Start new chat" banner.
+            // The conv_id WS route sends history without firing visitor_socket_connected
+            // or the welcome automation, avoiding noisy agent-side events.
+            await enterThreadView(listData.active.id, true);
           } else {
-            // History enabled: show list so visitor can start a new one.
+            // History enabled: show list so visitor can start a new one
             enterListView(listData);
           }
         } else {
@@ -3141,10 +3121,13 @@
           await enterThreadView(listData.active.id, false);
         }
       } else if (!widgetShowHistory && _loadClosedState()) {
-        // History disabled and a previously-resolved conversation was cached.
-        // Start fresh so the welcome automation fires for this new visit.
-        _clearClosedState();
-        enterStartView();
+        // History is disabled and the visitor previously ended a chat.
+        // Reload the closed conversation as read-only so they see their
+        // history and the "Start new chat" button — no welcome loop.
+        // enterThreadView → connectWebSocket → backend sends {type:'history',
+        // status:'resolved'} which re-injects the banner automatically.
+        const closedId = _loadClosedState();
+        await enterThreadView(closedId, true);
       } else {
         // No active conversation — start fresh so the bot welcome fires
         // and the new-message popup can show for returning visitors.
