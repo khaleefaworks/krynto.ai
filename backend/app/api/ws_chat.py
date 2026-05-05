@@ -367,10 +367,20 @@ async def chat_ws(
                 for msg in messages:
                     history_messages.append(serialize_message(db, msg))
 
+                conv_status = conversation.status.value if hasattr(conversation.status, "value") else str(conversation.status)
+                resolved_at = None
+                if conv_status == "resolved" and conversation.updated_at:
+                    try:
+                        resolved_at = _to_naive_utc(conversation.updated_at).isoformat() + "Z"
+                    except Exception:
+                        pass
+
                 await websocket.send_json(
                     {
                         "type": "history",
                         "conversation_id": conversation.id,
+                        "status": conv_status,
+                        "resolved_at": resolved_at,
                         "messages": history_messages,
                     }
                 )

@@ -121,6 +121,8 @@
   // Set when the visitor intentionally clicks "End chat" so the rating overlay
   // knows to minimise (not run afterConversationClose) on dismiss.
   let ratingTriggeredByVisitorEnd = false;
+  // Set when agent resolves so the rating overlay minimises the widget after dismiss.
+  let ratingTriggeredByAgentResolve = false;
   // Deferred flag: set when conversation_resolved arrives; cleared once show_rating_popup fires.
   // Safety timeout calls afterConversationClose() if show_rating_popup never arrives.
   let _awaitingRatingAfterResolve = false;
@@ -146,6 +148,39 @@
   function _closedStateKey() {
     if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
     return `aichatassist_closed_conv_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  // --- Resolved-at expiry (24h) ---
+  function _resolvedAtKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_resolved_at_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function _saveResolvedAt(isoString) {
+    try {
+      const k = _resolvedAtKey();
+      if (k && isoString) localStorage.setItem(k, isoString);
+    } catch (e) { }
+  }
+
+  function _clearResolvedAt() {
+    try {
+      const k = _resolvedAtKey();
+      if (k) localStorage.removeItem(k);
+    } catch (e) { }
+  }
+
+  // Returns true if the session's resolved conversation is older than 24 hours.
+  function _isResolvedConvExpired() {
+    try {
+      const k = _resolvedAtKey();
+      if (!k) return false;
+      const v = localStorage.getItem(k);
+      if (!v) return false;
+      const resolvedMs = new Date(v).getTime();
+      if (isNaN(resolvedMs)) return false;
+      return (Date.now() - resolvedMs) > 24 * 60 * 60 * 1000;
+    } catch (e) { return false; }
   }
 
   function _saveClosedState(convId) {
@@ -438,9 +473,14 @@
       if (key && localStorage.getItem(key) === '1') { hasRatedSession = true; return; }
     } catch (e) { }
 
-    ratingConversationId = conversationId || null;
     const el = $id('chatassist-rating-overlay');
     if (!el) return;
+    // If already visible, just update the conversationId without resetting the UI.
+    if (el.classList.contains('chatassist-rating-overlay-visible')) {
+      if (conversationId) ratingConversationId = conversationId;
+      return;
+    }
+    ratingConversationId = conversationId || ratingConversationId || null;
     // Reset state
     const thanks = $id('chatassist-rating-thanks');
     if (thanks) thanks.style.display = 'none';
@@ -459,15 +499,14 @@
     }
     clearTimeout(_resolveRatingTimeout);
     _awaitingRatingAfterResolve = false;
-    if (ratingTriggeredByVisitorEnd) {
-      // Visitor intentionally ended — transition to closed state then minimize so
-      // the visitor isn't forced to start a new chat immediately. They can re-open
-      // the widget later and will see the closed banner with "Start new chat".
+    if (ratingTriggeredByVisitorEnd || ratingTriggeredByAgentResolve) {
+      // Visitor ended or agent resolved — transition to closed/list view then
+      // minimize the widget so the visitor isn't forced into a new chat.
       ratingTriggeredByVisitorEnd = false;
+      ratingTriggeredByAgentResolve = false;
       afterConversationClose();
-      try { closeWidget(false); } catch (e) { }
+      try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
     } else if (viewMode === 'thread' && !isReadOnlyThread) {
-      // Agent resolved — transition view as usual.
       afterConversationClose();
     }
   }
@@ -1133,6 +1172,31 @@
         historyQueue = data;
         return;
       }
+
+      // ── 24-hour expiry for resolved conversations ──────────────────────────
+      // If the session's last resolved conv is older than 24h, discard history
+      // and start a fresh session so the welcome automation fires again.
+      if (data.status === 'resolved') {
+        const resolvedAt = data.resolved_at || null;
+        if (resolvedAt) {
+          _saveResolvedAt(resolvedAt);
+        }
+        if (_isResolvedConvExpired()) {
+          // Clear stored conversation so widget reconnects cleanly.
+          _clearResolvedAt();
+          _clearClosedState();
+          CONFIG.conversationId = 0;
+          _closeWsCleanly();
+          enterStartView();
+          return;
+        }
+        // Not expired: fall through and show read-only thread.
+        isReadOnlyThread = true;
+      } else {
+        // Active conversation — clear any stale resolved_at for this session.
+        _clearResolvedAt();
+      }
+      // ─────────────────────────────────────────────────────────────────────
       const container = $id('chatassist-messages');
       if (!container) return;
       container.innerHTML = '';
@@ -1276,20 +1340,21 @@
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
         else if (eventType !== 'conversation_resolved') showSystemMessage(data.message);
-        // conversation_resolved UI transition now handled by show_rating_popup WS event from automations
+        // conversation_resolved UI transition handled by show_rating_popup from automation (2s wait + delivery).
+        // Safety timeout (7s = 2s wait + 2s delivery buffer + 3s extra) in case show_rating_popup never arrives.
         if (eventType === 'conversation_resolved') {
-          if (ratingTriggeredByVisitorEnd) {
-            // Visitor's confirm-button click already showed the rating overlay — no-op.
-          } else {
-            // Defer close: wait for show_rating_popup. Safety timeout 5s.
+          if (!ratingTriggeredByVisitorEnd) {
             _awaitingRatingAfterResolve = true;
+            ratingTriggeredByAgentResolve = true;
             clearTimeout(_resolveRatingTimeout);
             _resolveRatingTimeout = setTimeout(function () {
               if (_awaitingRatingAfterResolve) {
                 _awaitingRatingAfterResolve = false;
+                ratingTriggeredByAgentResolve = false;
                 afterConversationClose();
+                try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
               }
-            }, 5000);
+            }, 7000);
           }
         }
       } else {
@@ -1303,16 +1368,15 @@
       return;
     }
 
-    // Automation-driven rating popup (decoupled from conversation_resolved system event).
+    // Automation-driven rating popup (decoupled from conversation_resolved/visitor_ended system event).
     if (data.type === 'show_rating_popup') {
-      if (!ratingTriggeredByVisitorEnd) {
-        const convId = data.conversation_id || ratingConversationId;
-        if (convId) ratingConversationId = convId;
-        // Clear deferred-close flag (rating popup handles navigation).
-        clearTimeout(_resolveRatingTimeout);
-        _awaitingRatingAfterResolve = false;
-        showRatingOverlay(ratingConversationId);
-      }
+      const convId = data.conversation_id || ratingConversationId;
+      if (convId) ratingConversationId = convId;
+      // Clear deferred-close flag (rating popup handles navigation).
+      clearTimeout(_resolveRatingTimeout);
+      _awaitingRatingAfterResolve = false;
+      // ratingTriggeredByAgentResolve is already set; showRatingOverlay is idempotent.
+      showRatingOverlay(ratingConversationId);
       return;
     }
 
@@ -2682,16 +2746,28 @@
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      // Show rating overlay so we capture feedback before the visitor leaves.
-      // Conversation stays OPEN on the server — agents follow up and resolve manually.
+      // Mark that visitor intentionally ended so the rating overlay minimises on dismiss.
       ratingTriggeredByVisitorEnd = true;
-      showRatingOverlay(CONFIG.conversationId || null);
-      // If the rating overlay was skipped because the visitor already rated
-      // (hasRatedSession=true), transition immediately — don't leave them stuck.
+
+      // If visitor already rated this conversation, skip the overlay entirely.
       if (hasRatedSession) {
         ratingTriggeredByVisitorEnd = false;
         afterConversationClose();
+        try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+        return;
       }
+
+      // Let the backend automation deliver the system message + show_rating_popup
+      // (via "Visitor ended chat" automation: emit_system_event → wait 2s → show_rating_popup).
+      // Fallback: if backend never delivers show_rating_popup within 6s, show it ourselves.
+      _awaitingRatingAfterResolve = true;
+      clearTimeout(_resolveRatingTimeout);
+      _resolveRatingTimeout = setTimeout(function () {
+        if (_awaitingRatingAfterResolve) {
+          _awaitingRatingAfterResolve = false;
+          showRatingOverlay(CONFIG.conversationId || null);
+        }
+      }, 6000);
     });
 
     // Rating overlay buttons

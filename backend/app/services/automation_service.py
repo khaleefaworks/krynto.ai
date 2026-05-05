@@ -205,30 +205,34 @@ class AutomationService:
             {
                 "name": "Visitor ended chat",
                 "trigger": "conversation_visitor_ended",
-                "enabled": False,
+                "enabled": True,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
                     {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
-                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+                    {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
                 ],
                 "edges": [
                     {"id": "e1", "from": "trigger", "to": "n1"},
-                    {"id": "e2", "from": "n1", "to": "n2"},
+                    {"id": "e_wait", "from": "n1", "to": "n_wait"},
+                    {"id": "e2", "from": "n_wait", "to": "n2"},
                 ],
             },
             # ─── Conversation resolved ────────────────────────────────────────
             {
                 "name": "Resolved rating",
                 "trigger": "conversation_resolved",
-                "enabled": False,
+                "enabled": True,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
                     {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
-                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+                    {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
                 ],
                 "edges": [
                     {"id": "e1", "from": "trigger", "to": "n1"},
-                    {"id": "e2", "from": "n1", "to": "n2"},
+                    {"id": "e_wait", "from": "n1", "to": "n_wait"},
+                    {"id": "e2", "from": "n_wait", "to": "n2"},
                 ],
             },
         ]
