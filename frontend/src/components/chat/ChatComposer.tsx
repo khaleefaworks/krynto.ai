@@ -112,6 +112,17 @@ function parseInlineMarkdownNodes(text: string): any[] {
     let i = 0
     while (i < text.length) {
         if (text[i] === '*') {
+            // Bold + Italic: ***text*** — must check before ** to avoid partial consume
+            if (text[i + 1] === '*' && text[i + 2] === '*') {
+                const close = text.indexOf('***', i + 3)
+                if (close !== -1) {
+                    const inner = text.slice(i + 3, close)
+                    if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }, { type: 'italic' }] })
+                    i = close + 3
+                    continue
+                }
+            }
+            // Bold: **text**
             if (text[i + 1] === '*') {
                 const close = text.indexOf('**', i + 2)
                 if (close !== -1) {
@@ -121,6 +132,7 @@ function parseInlineMarkdownNodes(text: string): any[] {
                     continue
                 }
             }
+            // Italic: *text*
             const close = text.indexOf('*', i + 1)
             if (close !== -1) {
                 const inner = text.slice(i + 1, close)
@@ -128,6 +140,10 @@ function parseInlineMarkdownNodes(text: string): any[] {
                 i = close + 1
                 continue
             }
+            // Unmatched * — emit as literal and advance to prevent infinite loop
+            nodes.push({ type: 'text', text: '*' })
+            i += 1
+            continue
         }
         // Plain text up to the next * (or end)
         const next = text.indexOf('*', i)
@@ -175,11 +191,18 @@ function escapeMarkdownLinkText(value: string): string {
 }
 
 function wrapInline(text: string, marks: { bold?: boolean; italic?: boolean; linkHref?: string | null }): string {
-    let out = text
-    if (marks.italic) out = `*${out}*`
-    if (marks.bold) out = `**${out}**`
-    if (marks.linkHref) out = `[${out}](${marks.linkHref})`
-    return out
+    // Move surrounding whitespace OUTSIDE the delimiters so we never produce
+    // `***Hello! ***` (space adjacent to closing delimiter is invalid GFM).
+    const leadMatch = /^\s+/.exec(text)
+    const trailMatch = /\s+$/.exec(text)
+    const leading = leadMatch ? leadMatch[0] : ''
+    const trailing = trailMatch ? trailMatch[0] : ''
+    let inner = text.slice(leading.length, trailing.length ? text.length - trailing.length : undefined)
+    if (!inner) return text  // whitespace-only: skip wrapping
+    if (marks.italic) inner = `*${inner}*`
+    if (marks.bold) inner = `**${inner}**`
+    if (marks.linkHref) inner = `[${inner}](${marks.linkHref})`
+    return leading + inner + trailing
 }
 
 function serializeInline(node: any): string {

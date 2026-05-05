@@ -15,10 +15,17 @@ function escapeMarkdownText(value: string): string {
 }
 
 function wrapInline(text: string, bold: boolean, italic: boolean): string {
-  let out = text
-  if (italic) out = `*${out}*`
-  if (bold) out = `**${out}**`
-  return out
+  // Move surrounding whitespace OUTSIDE the delimiters so we never produce
+  // `***Hello! ***` (space adjacent to closing delimiter is invalid GFM).
+  const leadMatch = /^\s+/.exec(text)
+  const trailMatch = /\s+$/.exec(text)
+  const leading = leadMatch ? leadMatch[0] : ''
+  const trailing = trailMatch ? trailMatch[0] : ''
+  let inner = text.slice(leading.length, trailing.length ? text.length - trailing.length : undefined)
+  if (!inner) return text
+  if (italic) inner = `*${inner}*`
+  if (bold) inner = `**${inner}**`
+  return leading + inner + trailing
 }
 
 function serializeInline(node: any): string {
@@ -73,17 +80,92 @@ function serializeToMarkdown(doc: JSONContent | null | undefined): string {
   return parts.join('\n\n').trim()
 }
 
-// ── Plain-text → Tiptap doc ───────────────────────────────────────────────────
+// ── Plain-text / Markdown → Tiptap doc ───────────────────────────────────────
 
-function textToDoc(text: string): JSONContent {
-  const lines = String(text || '').split('\n')
-  return {
-    type: 'doc',
-    content: lines.map((line) => ({
-      type: 'paragraph',
-      content: line ? [{ type: 'text', text: line }] : [],
-    })),
+function parseInlineMarkdown(text: string): any[] {
+  const nodes: any[] = []
+  let i = 0
+  while (i < text.length) {
+    // Backslash escape: \* → literal *
+    if (text[i] === '\\' && i + 1 < text.length) {
+      nodes.push({ type: 'text', text: text[i + 1] })
+      i += 2
+      continue
+    }
+    if (text[i] === '*') {
+      // Bold + Italic: ***text*** — must check before **
+      if (text[i + 1] === '*' && text[i + 2] === '*') {
+        const close = text.indexOf('***', i + 3)
+        if (close !== -1) {
+          const inner = text.slice(i + 3, close)
+          if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }, { type: 'italic' }] })
+          i = close + 3
+          continue
+        }
+      }
+      // Bold: **text**
+      if (text[i + 1] === '*') {
+        const close = text.indexOf('**', i + 2)
+        if (close !== -1) {
+          const inner = text.slice(i + 2, close)
+          if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }] })
+          i = close + 2
+          continue
+        }
+      }
+      // Italic: *text*
+      const close = text.indexOf('*', i + 1)
+      if (close !== -1) {
+        const inner = text.slice(i + 1, close)
+        if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'italic' }] })
+        i = close + 1
+        continue
+      }
+      // Unmatched * — emit as literal
+      nodes.push({ type: 'text', text: '*' })
+      i += 1
+      continue
+    }
+    // Plain text up to next * or \
+    const nextStar = text.indexOf('*', i)
+    const nextSlash = text.indexOf('\\', i)
+    const next = Math.min(
+      nextStar === -1 ? text.length : nextStar,
+      nextSlash === -1 ? text.length : nextSlash,
+    )
+    const plain = text.slice(i, next)
+    if (plain) nodes.push({ type: 'text', text: plain })
+    i = next
   }
+  return nodes
+}
+
+function markdownToDoc(md: string): JSONContent {
+  if (!md) return { type: 'doc', content: [{ type: 'paragraph' }] }
+  const blocks: any[] = []
+  const paragraphs = md.split(/\n\n+/)
+  for (const para of paragraphs) {
+    const lines = para.split('\n')
+    // Ordered list
+    if (lines.length > 0 && /^\d+\.\s+/.test(lines[0])) {
+      const items = lines
+        .filter((l) => /^\d+\.\s+/.test(l))
+        .map((l) => ({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: parseInlineMarkdown(l.replace(/^\d+\.\s+/, '')) }],
+        }))
+      if (items.length) blocks.push({ type: 'orderedList', content: items })
+      continue
+    }
+    // Regular paragraph (hard breaks for single newlines)
+    const content: any[] = []
+    for (let idx = 0; idx < lines.length; idx++) {
+      if (idx > 0) content.push({ type: 'hardBreak' })
+      content.push(...parseInlineMarkdown(lines[idx]))
+    }
+    if (content.length) blocks.push({ type: 'paragraph', content })
+  }
+  return blocks.length ? { type: 'doc', content: blocks } : { type: 'doc', content: [{ type: 'paragraph' }] }
 }
 
 function isDark(): boolean {
@@ -118,7 +200,7 @@ export default function RichTextEditor({
       }),
       Placeholder.configure({ placeholder }),
     ],
-    content: defaultValue ? textToDoc(defaultValue) : undefined,
+    content: defaultValue ? markdownToDoc(defaultValue) : undefined,
     editable: !disabled,
     editorProps: {
       attributes: {

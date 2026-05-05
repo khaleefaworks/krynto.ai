@@ -301,15 +301,31 @@
 
     if (nameEl) nameEl.textContent = senderName || CONFIG.popupName;
     if (bodyEl) {
-      var raw = String(messageText || '');
-      var plain = raw.replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
+      var raw = unescapeMarkdown(String(messageText || ''));
+      // Build a plain-text version for length check and image/file fallback detection.
+      var plain = raw
+        .replace(/!?\[[^\]]*\]\([^)]+\)/g, '')   // strip markdown links/images
+        .replace(/\*\*\*([^*\n]*)\*\*\*/g, '$1') // bold+italic
+        .replace(/\*\*([^*\n]*)\*\*/g, '$1')      // bold
+        .replace(/\*([^*\n]*)\*/g, '$1')           // italic
+        .replace(/\\([\\`*_[\]()/])/g, '$1')       // remaining escapes
+        .trim();
       if (!plain) {
+        // Content was purely images or links — show a friendly fallback.
         if (/!\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcf7 Sent an image';
         else if (/\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcce Sent a file';
         else plain = 'New message';
+        bodyEl.textContent = plain;
+      } else {
+        // Truncate the markdown source proportionally to plain length so that
+        // rendered output roughly fits within 150 visible characters.
+        var mdSrc = plain.length > 150 ? raw.slice(0, raw.length * 150 / plain.length | 0) : raw;
+        bodyEl.textContent = '';
+        bodyEl.appendChild(renderInlineMarkdown(mdSrc));
+        if (plain.length > 150) {
+          bodyEl.appendChild(document.createTextNode('\u2026'));
+        }
       }
-      var truncated = plain.slice(0, 150);
-      bodyEl.textContent = truncated + (plain.length > 150 ? '\u2026' : '');
     }
     if (avatarWrap) {
       const url = getFullAssetUrl(avatarUrl) || getFullAssetUrl(CONFIG.headerIconUrl);
@@ -1700,7 +1716,13 @@
 
   function unescapeMarkdown(str) {
     // Reverse markdown backslash escapes (e.g. \* → *, \\ → \, \_ → _)
-    return String(str || '').replace(/\\([\\`*_\[\]()/])/g, '$1');
+    // Also normalise trailing whitespace inside closing delimiters (old message
+    // format): "***Hello! ***" → "***Hello!***" so the renderer sees valid markup.
+    return String(str || '')
+      .replace(/\\([\\`*_\[\]()/])/g, '$1')
+      .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
+      .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
+      .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*');
   }
 
   function renderInlineMarkdown(text) {
@@ -1710,6 +1732,7 @@
     const patterns = [
       { type: 'image', re: /!\[([^\]]*)\]\(([^)]+)\)/g },
       { type: 'link', re: /\[([^\]]+)\]\(([^)]+)\)/g },
+      { type: 'bold_italic', re: /\*\*\*([^*\n]+)\*\*\*/g },
       { type: 'bold', re: /\*\*([^*]+)\*\*/g },
       { type: 'italic', re: /\*([^*\n]+)\*/g },
       // Bare domains like abc.com, docs.example.co.uk/path
@@ -1780,6 +1803,16 @@
         } else {
           frag.appendChild(document.createTextNode(full));
         }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bold_italic') {
+        const strong = document.createElement('strong');
+        const em = document.createElement('em');
+        em.textContent = String(m[1] || '');
+        strong.appendChild(em);
+        frag.appendChild(strong);
         i = best.index + full.length;
         continue;
       }

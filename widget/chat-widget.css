@@ -378,6 +378,14 @@
   word-break: break-word;
 }
 
+.chatassist-popup-body strong {
+  font-weight: 700;
+}
+
+.chatassist-popup-body em {
+  font-style: italic;
+}
+
 .chatassist-popup-reply {
   display: flex;
   align-items: center;

@@ -1,16 +1,16 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   ReactFlow, Background, Controls,
   useNodesState, useEdgesState, addEdge,
   Handle, Position, MarkerType,
-  type Node, type Edge, type Connection, type NodeProps,
+  type Node, type Edge, type Connection, type NodeProps, type ColorMode,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Trash2, GripVertical } from 'lucide-react'
+import { X, Plus, Trash2 } from 'lucide-react'
 import { apiRequest } from '@/services/api'
 import {
   automationsApi,
@@ -464,7 +464,7 @@ interface Props {
   onSaved: () => void
 }
 
-function makeTriggerNode(trigger: string): Node {
+function makeTriggerNode(_trigger: string): Node {
   return {
     id: 'trigger',
     type: 'automationNode',
@@ -477,11 +477,23 @@ function makeTriggerNode(trigger: string): Node {
 export default function AutomationFlowCanvas({ websiteId, automation, onClose, onSaved }: Props) {
   const [name, setName] = useState(automation?.name || 'New automation')
   const [trigger, setTrigger] = useState<string>(automation?.trigger || 'visitor_connected')
+  const [category, setCategory] = useState<string>(automation?.category || 'auto_message')
   const [enabled, setEnabled] = useState(automation?.enabled ?? true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [websiteTeams, setWebsiteTeams] = useState<{ id: number; name: string }[]>([])
+  const [colorMode, setColorMode] = useState<ColorMode>(() =>
+    document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  )
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setColorMode(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -569,6 +581,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
       const payload = {
         name: name.trim(),
         trigger,
+        category,
         enabled,
         nodes: outNodes,
         edges: fromRFEdges(edges),
@@ -589,7 +602,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
   return (
     <div className="absolute inset-0 z-50 flex flex-col bg-gray-50 dark:bg-gray-950">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0 h-16">
         <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
           <X className="w-5 h-5" />
         </button>
@@ -602,18 +615,26 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
         <select
           value={trigger}
           onChange={(e) => setTrigger(e.target.value)}
-          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
         >
           {TRIGGERS.map((t) => (
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+        >
+          <option value="auto_message">Message flow</option>
+          <option value="chatbot_flow">Chatbot flow</option>
+        </select>
         <div className="flex items-center gap-2 ml-2">
           <Switch checked={enabled} onCheckedChange={setEnabled} />
-          <span className="text-xs text-gray-500">{enabled ? 'Enabled' : 'Disabled'}</span>
+          <span className="text-sm text-gray-500">{enabled ? 'Enabled' : 'Disabled'}</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {error && <span className="text-xs text-red-500">{error}</span>}
+          {error && <span className="text-sm text-red-500">{error}</span>}
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save flow'}
@@ -625,7 +646,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
       <div className="flex flex-1 overflow-hidden">
         {/* Node palette */}
         <div className="w-48 shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
-          <div className="p-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+          <div className="p-3 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
             Add node
           </div>
           {PALETTE_NODES.map((type) => {
@@ -634,7 +655,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
               <button
                 key={type}
                 onClick={() => addNode(type)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 text-left"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 text-left"
               >
                 <span>{meta.icon}</span>
                 <span>{meta.label}</span>
@@ -655,12 +676,13 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
             nodeTypes={NODE_TYPES}
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => setSelectedNodeId(null)}
+            colorMode={colorMode}
             fitView
             fitViewOptions={{ padding: 0.3 }}
             deleteKeyCode={null}
           >
             <Background gap={16} size={1} className="!bg-gray-50 dark:!bg-gray-950" />
-            <Controls className="!bottom-4 !left-4" />
+            <Controls position='bottom-left' />
           </ReactFlow>
         </div>
 
@@ -674,7 +696,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
               websiteTeams={websiteTeams}
             />
           ) : (
-            <div className="p-4 text-xs text-gray-400 dark:text-gray-500">
+            <div className="p-4 text-sm text-gray-400 dark:text-gray-500">
               Click a node to configure it, or add nodes from the palette on the left.
               <br /><br />
               Connect nodes by dragging from the bottom handle of one node to the top handle of another.

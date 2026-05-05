@@ -431,7 +431,7 @@ export default function WebsiteDetail() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden relative">
       {/* Header */}
       <div className="h-16 flex items-center gap-3 border-b dark:border-gray-700 px-6 flex-shrink-0">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center overflow-hidden">
@@ -471,7 +471,7 @@ export default function WebsiteDetail() {
 
       {/* Scrollable content (hidden when full-height tabs are active) */}
       {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && activeTab !== 'forms' && (
-        <div className="flex-1 overflow-auto relative">
+        <div className="flex-1 overflow-auto">
           <div className="px-6 py-6 space-y-6">
             {error && (
               <div className="p-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
@@ -1172,15 +1172,16 @@ export default function WebsiteDetail() {
             </form>
           </div>
 
-          {canvasOpen && websiteId && (
-            <AutomationFlowCanvas
-              websiteId={websiteId}
-              automation={canvasAutomation}
-              onClose={() => setCanvasOpen(false)}
-              onSaved={async () => { setCanvasOpen(false); await loadAutomations() }}
-            />
-          )}
         </div>
+      )}
+
+      {canvasOpen && websiteId && (
+        <AutomationFlowCanvas
+          websiteId={websiteId}
+          automation={canvasAutomation}
+          onClose={() => setCanvasOpen(false)}
+          onSaved={async () => { setCanvasOpen(false); await loadAutomations() }}
+        />
       )}
     </div>
   )

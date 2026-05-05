@@ -55,16 +55,25 @@ import { formatDistanceToNow } from 'date-fns'
 
 // Reverse backslash-escape sequences added by the markdown serializer
 // (e.g. \* → *, \\ → \). Matches what the widget's unescapeMarkdown does.
+// Also normalises trailing whitespace *inside* closing delimiters (old message
+// format bug): e.g. "***Hello! ***" → "***Hello!***".  CommonMark requires
+// closing * delimiters to be right-flanking (not preceded by whitespace),
+// otherwise ReactMarkdown falls back to rendering them as raw asterisks.
 function unescapeMarkdown(s: string | null | undefined): string {
-    return String(s || '').replace(/\\([\\`*_[\]()/])/g, '$1')
+    return String(s || '')
+        .replace(/\\([\\`*_[\]()/])/g, '$1')
+        .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
+        .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
+        .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*')
 }
 
 // Strip markdown syntax for plain-text previews (chat list last message).
 function stripMarkdownPreview(s: string | null | undefined): string {
     return String(s || '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/\\([\\`*_[\]()/])/g, '$1')
+        .replace(/\\([\\`*_[\]()/])/g, '$1')    // unescape \* \_ etc. FIRST so patterns below see clean text
+        .replace(/\*\*\*(.*?)\*\*\*/g, '$1')    // bold+italic ***text***
+        .replace(/\*\*(.*?)\*\*/g, '$1')        // bold **text**
+        .replace(/\*(.*?)\*/g, '$1')            // italic *text*
         .replace(/\n+/g, ' ')
         .trim()
 }

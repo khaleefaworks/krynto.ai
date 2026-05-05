@@ -1527,7 +1527,7 @@ class ConversationOrchestrator:
 
             elif node_type == "condition":
                 field = str(cfg.get("field") or "").strip()
-                result = await self._evaluate_condition(field, conversation_id, website_id, ctx)
+                result = await self._evaluate_condition(field, conversation_id, website_id, ctx, cfg)
                 branch_str = "true" if result else "false"
                 next_ids = [e["to"] for e in adjacency.get(node_id, []) if e.get("branch") == branch_str]
                 queue.extend(next_ids)
@@ -1592,6 +1592,7 @@ class ConversationOrchestrator:
         conversation_id: int,
         website_id: int,
         ctx: dict,
+        cfg: dict | None = None,
     ) -> bool:
         """Evaluate a condition node field. Returns True/False to select branch."""
         if field == "agent_online":
@@ -1613,6 +1614,27 @@ class ConversationOrchestrator:
             except Exception:
                 pass
             return True
+        if field == "has_tag":
+            tag_name = str((cfg or {}).get("value") or "").strip()
+            if not tag_name:
+                return False
+            try:
+                from app.models.tag import Tag
+                from app.models.conversation_tag import ConversationTag
+                tag = (
+                    self.db.query(Tag)
+                    .filter_by(name=tag_name, website_id=website_id)
+                    .first()
+                )
+                if not tag:
+                    return False
+                return (
+                    self.db.query(ConversationTag)
+                    .filter_by(conversation_id=conversation_id, tag_id=tag.id)
+                    .first()
+                ) is not None
+            except Exception:
+                return False
         # Unknown field: default true
         return True
 
