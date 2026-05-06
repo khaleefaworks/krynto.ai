@@ -1075,16 +1075,19 @@ async def chat_ws_with_conversation(
             await websocket.close(code=1008, reason=_ws_close_reason("Conversation not found"))
             return
 
-        # Register visitor presence only for OPEN conversations.
+        # Always register session-level presence so resolved-conv visitors appear in the Visitors page.
         is_open = conv.status not in (ConversationStatus.RESOLVED,)
         _was_active_cid = False
+        try:
+            ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+        except Exception:
+            pass
         if is_open and str(conv.session_id) == str(session_id):
             try:
                 _was_active_cid = int(conv.id) in ChatService.active_visitors
             except Exception:
                 pass
             ChatService.register_visitor(conv.id, websocket)
-            ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
 
         # Reconnect detection: if visitor was not already active, check for a prior
         # visitor_dropped event and fire visitor_reconnected automation if found.

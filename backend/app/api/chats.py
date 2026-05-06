@@ -3,6 +3,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.agent_service import AgentService
+from app.services.chat_service import ChatService
 from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.conversation_service import ConversationService
 from app.api.deps import require_authenticated_user
@@ -260,6 +261,7 @@ def get_chat_summary(
         "visitor_avatar_color": getattr(conv, "visitor_avatar_color", None),
         "visit_count": int(getattr(conv, "visit_count", 0) or 0) if hasattr(conv, "visit_count") else None,
         "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
+        "is_online": int(conv.id) in ChatService.active_visitors,
         "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
         "assigned_agent_id": getattr(conv, "assigned_agent_id", None),

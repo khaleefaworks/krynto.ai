@@ -1015,6 +1015,7 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
+                setConversation(prev => prev ? { ...prev, is_online: false } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
                 const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
@@ -1029,6 +1030,7 @@ export default function ConversationsView() {
                 }
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
+                setConversation(prev => prev ? { ...prev, is_online: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
@@ -2273,7 +2275,16 @@ export default function ConversationsView() {
                                         </span>
                                     )}
                                     {(() => {
+                                        const isOnline = Boolean((conversation as any)?.is_online)
                                         const lastActiveTs = (conversation as any)?.last_visitor_message_at || conversation?.last_seen_at
+                                        if (isOnline) {
+                                            return (
+                                                <p className="hidden sm:flex text-xs text-green-500 items-center gap-1">
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                                                    Online
+                                                </p>
+                                            )
+                                        }
                                         return lastActiveTs ? (
                                             <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
                                                 Last seen {formatLastSeen(lastActiveTs)}
