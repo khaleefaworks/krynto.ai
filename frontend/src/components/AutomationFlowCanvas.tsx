@@ -220,11 +220,11 @@ function NodeConfigPanel({
           </div>
           {cfg.repeat === 'cooldown' && (
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cooldown (hours)</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cooldown (seconds)</label>
               <Input
                 type="number" min={1}
-                value={cfg.cooldown_hours ?? 24}
-                onChange={(e) => set({ cooldown_hours: Number(e.target.value) })}
+                value={cfg.cooldown_seconds ?? (cfg.cooldown_hours != null ? cfg.cooldown_hours * 3600 : 10)}
+                onChange={(e) => set({ cooldown_seconds: Number(e.target.value), cooldown_hours: undefined })}
                 className="h-8 text-xs"
               />
             </div>

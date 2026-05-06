@@ -10,52 +10,7 @@ from app.core.security import get_password_hash
 
 
 AUTOMATION_LIBRARY_TEMPLATES = [
-    # ── Connection / visitor type ────────────────────────────────────────────
-    {
-        "name": "Welcome message",
-        "description": "Greet every visitor once per day with a friendly opening message.",
-        "trigger": "visitor_connected",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_hours": 24}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi! How can we help you today?", "event_type": "automation_welcome"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
-    {
-        "name": "New visitor welcome",
-        "description": "Send a one-time greeting to first-time visitors.",
-        "trigger": "visitor_new",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi! Welcome — is there anything we can help you with?", "event_type": "bot_new_visitor"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
-    {
-        "name": "Returning visitor welcome",
-        "description": "Personalised welcome-back message for visitors with prior conversations.",
-        "trigger": "visitor_returning",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "Welcome back! How can we help?", "event_type": "bot_returning_visitor"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
     # ── Presence timeline ────────────────────────────────────────────────────
-    {
-        "name": "Visitor connected event",
-        "description": "Log a system event each time the visitor socket connects.",
-        "trigger": "visitor_socket_connected",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor has just connected.", "event_type": "visitor_socket_connected"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
     {
         "name": "Visitor dropped event",
         "description": "Log a system event when the visitor leaves the page.",
@@ -63,7 +18,7 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "category": "auto_message",
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped"}, "position": {"x": 0, "y": 150}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },
@@ -73,8 +28,8 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "trigger": "visitor_reconnected",
         "category": "auto_message",
         "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected"}, "position": {"x": 0, "y": 150}},
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },
@@ -128,29 +83,7 @@ AUTOMATION_LIBRARY_TEMPLATES = [
             {"id": "e2", "from": "n1", "to": "n2"},
         ],
     },
-    {
-        "name": "Visitor ended bot message",
-        "description": "Send a farewell bot message when the visitor ends the chat.",
-        "trigger": "conversation_visitor_ended",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks for chatting! If you need more help, just send us a message.", "event_type": "bot_visitor_ended"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
     # ── Resolved ─────────────────────────────────────────────────────────────
-    {
-        "name": "Closing message",
-        "description": "Send a closing bot message when an agent resolves the conversation.",
-        "trigger": "conversation_resolved",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks! This conversation is now closed.", "event_type": "bot_closing"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
-    },
     {
         "name": "Resolved rating",
         "description": "Notify the visitor the conversation is resolved and show a CSAT rating prompt.",
@@ -165,17 +98,6 @@ AUTOMATION_LIBRARY_TEMPLATES = [
             {"id": "e1", "from": "trigger", "to": "n1"},
             {"id": "e2", "from": "n1", "to": "n2"},
         ],
-    },
-    {
-        "name": "Auto-resolved event",
-        "description": "Log a system event when the conversation is automatically resolved after inactivity.",
-        "trigger": "conversation_auto_resolved",
-        "category": "auto_message",
-        "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "Conversation automatically resolved after visitor ended (24 h).", "event_type": "conversation_auto_resolved"}, "position": {"x": 0, "y": 150}},
-        ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },
     # ── Chatbot ───────────────────────────────────────────────────────────────
     {

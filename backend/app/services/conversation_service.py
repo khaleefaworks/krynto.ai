@@ -164,6 +164,7 @@ class ConversationService:
         *,
         event_type: str | None = None,
         sender: str = "system",
+        is_agent_only: bool = False,
     ) -> Message:
         """
         Add a system-generated message to a conversation.
@@ -181,6 +182,7 @@ class ConversationService:
             sender=sender,
             event_type=event_type,
             content=content,
+            is_agent_only=is_agent_only,
         )
         
         self.db.add(message)

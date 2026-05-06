@@ -1500,7 +1500,8 @@ class ConversationOrchestrator:
                     ):
                         continue
                     saved_evt = self.conversation_service.add_system_message(
-                        conversation_id, content, event_type=event_type
+                        conversation_id, content, event_type=event_type,
+                        is_agent_only=not (send_to_visitor and cfg.get("send_to_visitor", True)),
                     )
                     msg_obj = serialize_message(self.db, saved_evt)
                     # Per-node send_to_visitor flag (default True) lets automation

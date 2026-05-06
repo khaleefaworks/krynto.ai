@@ -340,31 +340,39 @@ async def chat_ws(
             registered_conversation_id = conversation.id
 
             # Smartsupp-like: visitor reconnected/connected (internal timeline event).
+            # Use a fresh session to avoid stale transaction state from the current db session.
             try:
                 if not _was_active:
-                    # Check if a visitor_dropped event was already recorded for this conversation.
-                    # If so, this is a true reconnect (visitor came back after truly leaving).
                     from app.models.message import Message as _Msg
-                    _had_drop = (
-                        db.query(_Msg)
-                        .filter(
-                            _Msg.conversation_id == conversation.id,
-                            _Msg.event_type == "visitor_dropped",
+                    from app.core.database import SessionLocal as _SL
+                    _detect_db = _SL()
+                    try:
+                        _last_presence = (
+                            _detect_db.query(_Msg)
+                            .filter(
+                                _Msg.conversation_id == conversation.id,
+                                _Msg.event_type.in_(["visitor_dropped", "visitor_reconnected", "visitor_socket_connected"]),
+                            )
+                            .order_by(_Msg.id.desc())
+                            .first()
                         )
-                        .first()
-                    )
-                    if _had_drop:
+                    finally:
+                        _detect_db.close()
+                    if _last_presence and _last_presence.event_type == "visitor_dropped":
                         await orchestrator.visitor_reconnected(conversation_id=int(conversation.id))
                     elif int(conversation.id) not in _visitor_left_scheduled:
                         await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("reconnect_detection_failed", conversation_id=conversation.id, error=str(_exc), exc_info=True)
 
             try:
                 messages = messages_repo.list_messages_for_conversation(db, conversation.id)
 
                 history_messages = []
                 for msg in messages:
+                    # Exclude agent-only system messages from visitor history.
+                    if getattr(msg, 'is_agent_only', False):
+                        continue
                     history_messages.append(serialize_message(db, msg))
 
                 conv_status = conversation.status.value if hasattr(conversation.status, "value") else str(conversation.status)
@@ -1062,19 +1070,64 @@ async def chat_ws_with_conversation(
 
         # Register visitor presence only for OPEN conversations.
         is_open = conv.status not in (ConversationStatus.RESOLVED,)
+        _was_active_cid = False
         if is_open and str(conv.session_id) == str(session_id):
+            try:
+                _was_active_cid = int(conv.id) in ChatService.active_visitors
+            except Exception:
+                pass
             ChatService.register_visitor(conv.id, websocket)
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
 
-        # Send conversation history.
+        # Reconnect detection: if visitor was not already active, check for a prior
+        # visitor_dropped event and fire visitor_reconnected automation if found.
+        if is_open and not _was_active_cid:
+            try:
+                from app.models.message import Message as _MsgCid
+                from app.core.database import SessionLocal as _SLCid
+                _det_db = _SLCid()
+                try:
+                    _last_presence_cid = (
+                        _det_db.query(_MsgCid)
+                        .filter(
+                            _MsgCid.conversation_id == conv.id,
+                            _MsgCid.event_type.in_(["visitor_dropped", "visitor_reconnected", "visitor_socket_connected"]),
+                        )
+                        .order_by(_MsgCid.id.desc())
+                        .first()
+                    )
+                finally:
+                    _det_db.close()
+                if _last_presence_cid and _last_presence_cid.event_type == "visitor_dropped":
+                    _recon_orchestrator = ConversationOrchestrator(db)
+                    await _recon_orchestrator.visitor_reconnected(conversation_id=int(conv.id))
+                elif int(conv.id) not in _visitor_left_scheduled:
+                    _recon_orchestrator = ConversationOrchestrator(db)
+                    await _recon_orchestrator.visitor_socket_connected(conversation_id=int(conv.id))
+            except Exception as _exc:
+                logger.warning("reconnect_detection_failed_cid", conversation_id=conv.id, error=str(_exc), exc_info=True)
+
+        # Send conversation history (excluding agent-only messages).
         try:
             messages = messages_repo.list_messages_for_conversation(db, conv.id)
+            conv_status_str = conv.status.value if hasattr(conv.status, "value") else str(conv.status)
+            resolved_at_str = None
+            if conv_status_str == "resolved" and conv.updated_at:
+                try:
+                    resolved_at_str = _to_naive_utc(conv.updated_at).isoformat() + "Z"
+                except Exception:
+                    pass
+            history_msgs = [
+                serialize_message(db, m) for m in messages
+                if not getattr(m, 'is_agent_only', False)
+            ]
             await websocket.send_json(
                 {
                     "type": "history",
                     "conversation_id": conv.id,
-                    "status": conv.status.value if hasattr(conv.status, "value") else str(conv.status),
-                    "messages": [serialize_message(db, m) for m in messages],
+                    "status": conv_status_str,
+                    "resolved_at": resolved_at_str,
+                    "messages": history_msgs,
                 }
             )
         except Exception as e:
