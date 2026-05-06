@@ -132,42 +132,47 @@ export default function CustomersContacts() {
 
     return (
         <div>
-            <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
+            <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-4 sm:px-6">
                 <div className="flex items-center gap-2">
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Contacts</h1>
                     <DocsLink slug="agent-guide/visitors" />
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Number of contacts <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span> contacts
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 px-6 py-4">
-                <div className="relative w-full max-w-sm">
+            <div className="flex items-center gap-3 px-4 sm:px-6 py-3">
+                <div className="relative flex-1 max-w-sm">
                     <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search..."
-                        className="w-full pl-9 pr-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                        placeholder="Search name, email, phone..."
+                        className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                     />
+                    {query && (
+                        <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
             </div>
 
             {filtered.length === 0 ? (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-6 mb-6">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-4 sm:mx-6 mb-6">
                     <div className="text-gray-600 dark:text-gray-400">No contacts found</div>
                 </div>
             ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto mx-6 mb-6">
-                    <table className="w-full min-w-[580px]">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mx-4 sm:mx-6 mb-6">
+                    <table className="w-full">
                         <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Email</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tags</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last update</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Email</th>
+                                <th className="hidden sm:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
+                                <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tags</th>
+                                <th className="hidden lg:table-cell px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last update</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -177,7 +182,7 @@ export default function CustomersContacts() {
                                     onClick={() => setSelected({ websiteId: r.website_id, contactKey: r.contact_key })}
                                     className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
                                 >
-                                    <td className="px-6 py-4 whitespace-nowrap">
+                                    <td className="px-4 py-3">
                                         <div className="flex items-center gap-3 min-w-0">
                                             <UserAvatar
                                                 seed={String(r.contact_key || r.email || r.phone || r.name || 'contact')}
@@ -188,18 +193,20 @@ export default function CustomersContacts() {
                                             />
                                             <div className="min-w-0">
                                                 <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.name || '-'}</div>
+                                                {/* Mobile: show phone inline under name */}
+                                                {r.phone && <div className="sm:hidden text-xs text-gray-500 dark:text-gray-400 truncate">{r.phone}</div>}
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm text-gray-700 dark:text-gray-300">{r.email || '-'}</div>
+                                    <td className="px-4 py-3 max-w-[140px] sm:max-w-none">
+                                        <div className="text-sm text-gray-700 dark:text-gray-300 truncate">{r.email || '-'}</div>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
+                                    <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap">
                                         <div className="text-sm text-gray-700 dark:text-gray-300">{r.phone || '-'}</div>
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td className="hidden md:table-cell px-4 py-3">
                                         {r.tags?.length ? (
-                                            <div className="flex flex-wrap gap-2">
+                                            <div className="flex flex-wrap gap-1.5">
                                                 {r.tags.map((t) => (
                                                     <Badge key={t.name} variant="secondary">{t.name}</Badge>
                                                 ))}
@@ -208,7 +215,7 @@ export default function CustomersContacts() {
                                             <span className="text-sm text-gray-500 dark:text-gray-400">-</span>
                                         )}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                                    <td className="hidden lg:table-cell px-4 py-3 whitespace-nowrap text-right">
                                         <span className="text-sm text-gray-700 dark:text-gray-300">{formatDate(r.last_update)}</span>
                                     </td>
                                 </tr>

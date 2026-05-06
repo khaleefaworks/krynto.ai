@@ -6,6 +6,8 @@ import { apiRequest } from '@/services/api'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
 import { Plus, X, Trash2, Users, UserPlus, Shield, Search } from 'lucide-react'
 import DocsLink from '@/components/DocsLink'
+import UserAvatar from '@/components/UserAvatar'
+import { API_BASE } from '@/config/endpoints'
 
 // ─── Types ────────────────────────────────────────────────
 interface WebsiteTeam {
@@ -23,6 +25,7 @@ interface WebsiteAgent {
     role?: string
     is_active?: boolean
     assigned_at?: string | null
+    avatar_url?: string | null
 }
 
 interface TeamMembersResponse {
@@ -344,9 +347,13 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                         <tr key={a.id} className="bg-white dark:bg-gray-800/30 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
-                                                        {(a.name || a.email).charAt(0).toUpperCase()}
-                                                    </div>
+                                                    <UserAvatar
+                                                        seed={a.email}
+                                                        imageUrl={a.avatar_url ? (String(a.avatar_url).startsWith('http') ? a.avatar_url : `${API_BASE}${a.avatar_url}`) : null}
+                                                        className="h-8 w-8 flex-shrink-0"
+                                                        iconClassName="h-8 w-8"
+                                                        title={a.name || a.email}
+                                                    />
                                                     <div className="min-w-0">
                                                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
                                                         {a.name && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.email}</p>}
@@ -636,9 +643,13 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                                             className="rounded border-gray-300 dark:border-gray-600 text-blue-600"
                                                         />
                                                         <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                                            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0">
-                                                                {(a.name || a.email).charAt(0).toUpperCase()}
-                                                            </div>
+                                                            <UserAvatar
+                                                                seed={a.email}
+                                                                imageUrl={a.avatar_url ? (String(a.avatar_url).startsWith('http') ? a.avatar_url : `${API_BASE}${a.avatar_url}`) : null}
+                                                                className="h-7 w-7 flex-shrink-0"
+                                                                iconClassName="h-7 w-7"
+                                                                title={a.name || a.email}
+                                                            />
                                                             <div className="min-w-0">
                                                                 <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
                                                                     {a.name || a.email}

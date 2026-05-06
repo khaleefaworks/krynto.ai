@@ -847,7 +847,7 @@
       activeItem.setAttribute('role', 'button');
       activeItem.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
       const dateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -902,7 +902,7 @@
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
       const dateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');

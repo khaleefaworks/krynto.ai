@@ -1032,6 +1032,11 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
                 setConversation(prev => prev ? { ...prev, is_online: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_rated' && dataConversationId === selectedChat) {
+                const ratingVal = (data as any)?.rating
+                if (typeof ratingVal === 'number') {
+                    setConversationRating({ rating: ratingVal })
+                }
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
@@ -2169,12 +2174,16 @@ export default function ConversationsView() {
                                             />
                                             {(chat as any).assigned_agent_id && (() => {
                                                 const agent = agentsList.find((a) => a.id === (chat as any).assigned_agent_id)
+                                                const agentAvatarUrl = agent?.avatar_url
+                                                    ? (String(agent.avatar_url).startsWith('http') ? agent.avatar_url : `${API_BASE}${agent.avatar_url}`)
+                                                    : null
                                                 return (
                                                     <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
                                                         title={agent?.name || `Agent #${(chat as any).assigned_agent_id}`}
                                                     >
                                                         <UserAvatar
                                                             seed={agent?.email || String((chat as any).assigned_agent_id)}
+                                                            imageUrl={agentAvatarUrl}
                                                             className="w-4 h-4"
                                                             iconClassName="w-4 h-4"
                                                             title={agent?.name}
@@ -2279,14 +2288,14 @@ export default function ConversationsView() {
                                         const lastActiveTs = (conversation as any)?.last_visitor_message_at || conversation?.last_seen_at
                                         if (isOnline) {
                                             return (
-                                                <p className="hidden sm:flex text-xs text-green-500 items-center gap-1">
+                                                <p className="flex text-xs text-green-500 items-center gap-1">
                                                     <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
                                                     Online
                                                 </p>
                                             )
                                         }
                                         return lastActiveTs ? (
-                                            <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
+                                            <p className="flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
                                                 Last seen {formatLastSeen(lastActiveTs)}
                                             </p>
                                         ) : null

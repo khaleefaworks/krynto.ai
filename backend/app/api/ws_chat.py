@@ -742,6 +742,22 @@ async def chat_ws(
                                 )
                             except Exception:
                                 pass
+                            # Broadcast to agents so the right panel updates immediately.
+                            try:
+                                _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                await agent_service.broadcast_to_active_agents(
+                                    website_id=website_id,
+                                    conversation_id=conv_id,
+                                    message={
+                                        "type": "visitor_rated",
+                                        "conversation_id": conv_id,
+                                        "rating": rating_val,
+                                        "rating_label": _rating_labels.get(rating_val, str(rating_val)),
+                                        "website_id": website_id,
+                                    },
+                                )
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.warning("rating_submit_failed", error=str(e))
                         try:
@@ -1297,6 +1313,22 @@ async def chat_ws_with_conversation(
                                 await orchestrator.visitor_rated(
                                     conversation_id=conv.id,
                                     rating_val=rating_val,
+                                )
+                            except Exception:
+                                pass
+                            # Broadcast to agents so the right panel updates immediately.
+                            try:
+                                _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                await agent_service.broadcast_to_active_agents(
+                                    website_id=website_id,
+                                    conversation_id=conv.id,
+                                    message={
+                                        "type": "visitor_rated",
+                                        "conversation_id": conv.id,
+                                        "rating": rating_val,
+                                        "rating_label": _rating_labels.get(rating_val, str(rating_val)),
+                                        "website_id": website_id,
+                                    },
                                 )
                             except Exception:
                                 pass

@@ -47,11 +47,21 @@ const _lastToastByKey = new Map<string, number>()
 // Prevents rapid-fire stacking when many events arrive at once.
 let _lastAnySoundAt = 0
 const _SOUND_MIN_INTERVAL_MS = 1500
+// Cross-tab dedup key: any tab that plays a sound writes this key to localStorage
+// so other tabs skip their own playback within the same window.
+const _SOUND_CROSS_TAB_KEY = 'ai_chatassist_last_sound_at'
 
 function _shouldPlaySound(): boolean {
   const now = Date.now()
+  // In-process gate
   if (now - _lastAnySoundAt < _SOUND_MIN_INTERVAL_MS) return false
+  // Cross-tab gate: check if another tab already played recently
+  try {
+    const crossTabTs = Number(localStorage.getItem(_SOUND_CROSS_TAB_KEY) || 0)
+    if (now - crossTabTs < _SOUND_MIN_INTERVAL_MS) return false
+  } catch { /* ignore */ }
   _lastAnySoundAt = now
+  try { localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now)) } catch { /* ignore */ }
   return true
 }
 

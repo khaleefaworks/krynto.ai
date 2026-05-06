@@ -190,6 +190,7 @@ def get_website_agents(
             "name": u.name,
             "role": u.role.value,
             "is_active": u.is_active,
+            "avatar_url": u.avatar_url,
             "assigned_at": assignment_map[u.id].created_at.isoformat() if u.id in assignment_map and assignment_map[u.id].created_at else None,
         }
         for u in users
