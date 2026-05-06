@@ -735,6 +735,13 @@ async def chat_ws(
                                 conversation_id=conv_id,
                                 rating=rating_val,
                             )
+                            try:
+                                await orchestrator.visitor_rated(
+                                    conversation_id=conv_id,
+                                    rating_val=rating_val,
+                                )
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.warning("rating_submit_failed", error=str(e))
                         try:
@@ -1283,6 +1290,13 @@ async def chat_ws_with_conversation(
                                 )
                                 db.add(new_rating)
                                 db.commit()
+                            try:
+                                await orchestrator.visitor_rated(
+                                    conversation_id=conv.id,
+                                    rating_val=rating_val,
+                                )
+                            except Exception:
+                                pass
                         except Exception as e:
                             logger.warning("rating_submit_failed", error=str(e))
                             try:

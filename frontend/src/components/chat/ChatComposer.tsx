@@ -667,8 +667,8 @@ export default function ChatComposer({
                     </div>
                 )}
 
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
-                    <div className="px-3 py-4 max-h-36 overflow-y-auto min-h-[40px]">
+                <div className={`rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden${disabled ? ' cursor-not-allowed' : ''}`}>
+                    <div className={`px-3 py-4 max-h-36 overflow-y-auto min-h-[40px]${disabled ? ' pointer-events-none select-none opacity-50' : ''}`}>
                         <EditorContent editor={editor} />
                     </div>
 
@@ -799,10 +799,6 @@ export default function ChatComposer({
                     <span className="px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700">enter</span>
                 </div>
             </div>
-
-            {disabled && readOnlyText ? (
-                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{readOnlyText}</p>
-            ) : null}
 
         </div>
     )

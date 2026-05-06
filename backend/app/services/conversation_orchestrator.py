@@ -1242,6 +1242,32 @@ class ConversationOrchestrator:
 
         return {"success": True}
 
+    async def visitor_rated(self, *, conversation_id: int, rating_val: int) -> dict:
+        """Visitor submitted a conversation rating — fires visitor_rated_conversation automation.
+
+        Passes {rating_label} into the automation context so Bot message nodes can
+        reference it, e.g. "Visitor rated this conversation: {rating_label}".
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        _labels = {1: "� Good", 0: "😐 Neutral", -1: "😞 Bad"}
+        rating_label = _labels.get(rating_val, str(rating_val))
+
+        await self._run_automation_flows(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_rated_conversation",
+            log_key="visitor_rated_automation_failed",
+            send_to_visitor=False,
+            context={"rating_label": rating_label},
+        )
+
+        return {"success": True}
+
     async def visitor_socket_connected(self, *, conversation_id: int) -> dict:
         """Visitor websocket connected for an existing conversation.
 
@@ -1513,6 +1539,7 @@ class ConversationOrchestrator:
             elif node_type == "send_bot_message":
                 message = str(cfg.get("message") or "").strip()
                 event_type = str(cfg.get("event_type") or f"bot_{automation.trigger}").strip()
+                node_send_to_visitor = send_to_visitor and cfg.get("send_to_visitor", True)
                 if message:
                     if _should_skip_due_to_repeat(
                         db=self.db, conversation_id=conversation_id,
@@ -1525,13 +1552,19 @@ class ConversationOrchestrator:
                         message = message.format_map(ctx)
                     except Exception:
                         pass
-                    saved = self.conversation_service.add_bot_message(
-                        conversation_id, message, event_type=event_type
-                    )
-                    if send_to_visitor:
+                    if node_send_to_visitor:
+                        saved = self.conversation_service.add_bot_message(
+                            conversation_id, message, event_type=event_type
+                        )
                         await ChatService.send_to_visitor(
                             conversation_id,
                             {"type": "bot", "message": message, "message_obj": serialize_message(self.db, saved)},
+                        )
+                    else:
+                        # Agent-only bot message: stored with is_agent_only=True, never sent to visitor.
+                        saved = self.conversation_service.add_system_message(
+                            conversation_id, message, event_type=event_type,
+                            sender="bot", is_agent_only=True,
                         )
                     # Always broadcast bot messages to agents so the dashboard reflects them.
                     await self.agent_service.broadcast_to_active_agents(

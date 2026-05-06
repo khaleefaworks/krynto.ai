@@ -1102,6 +1102,14 @@ export default function ConversationsView() {
                 } else {
                     loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
                 }
+            } else if (data.type === 'bot_message' && dataConversationId === selectedChat) {
+                // Bot messages from automation flows (waiting message, visitor ended hint, etc.)
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    addMessage(dto)
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
             } else if (data.type === 'page_view' && dataConversationId === selectedChat) {
                 getBrowsingHistory(selectedChat)
                     .then((hist) => setBrowsingHistory(Array.isArray(hist) ? hist : []))
@@ -1795,7 +1803,7 @@ export default function ConversationsView() {
                 </div>
             )}
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-48'}`}
+            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col flex-shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-48'}`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     {!leftFilterCollapsed && (
@@ -2554,6 +2562,7 @@ export default function ConversationsView() {
                             <>
                                 {[...messages]
                                     .sort(compareMessagesChronologically)
+                                    .filter((msg) => (msg as any).event_type !== 'rating_popup_shown')
                                     .map((msg, index, sortedMessages) => {
                                         const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
                                         const actor = (msg as any).actor || senderType
@@ -2683,7 +2692,6 @@ export default function ConversationsView() {
                         disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
-                        readOnlyText={isVisitorEnded ? 'The visitor has ended the conversation. You can now close or resolve it.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />
@@ -2706,7 +2714,7 @@ export default function ConversationsView() {
             {/* COLUMN 4: Visitor Details (Collapsible) */}
             {selectedChat && conversation && (
                 <div
-                    className={`hidden lg:flex bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} h-full min-h-0`}
+                    className={`hidden lg:flex bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-[width] duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} h-full min-h-0`}
                 >
                     {rightSidebarCollapsed ? (
                         <div className="h-full flex flex-col items-center gap-4 py-4 px-2">

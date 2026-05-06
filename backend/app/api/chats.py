@@ -165,17 +165,17 @@ def get_active_chats(
         db, user_id=current_user.id, conversation_ids=conversation_ids
     )
 
-    # Batch-fetch visitor_left events to avoid N+1 queries.
+    # Batch-fetch visitor_ended flag directly from the Conversation model column.
     visitor_ended_ids: set[int] = set()
     if conversation_ids:
+        from app.models.conversation import Conversation as Conv
         visitor_ended_ids = {
             int(row[0])
-            for row in db.query(Message.conversation_id)
+            for row in db.query(Conv.id)
             .filter(
-                Message.conversation_id.in_(conversation_ids),
-                Message.event_type == "visitor_left",
+                Conv.id.in_(conversation_ids),
+                Conv.visitor_ended == True,  # noqa: E712
             )
-            .distinct()
             .all()
         }
 
@@ -264,12 +264,7 @@ def get_chat_summary(
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
         "assigned_agent_id": getattr(conv, "assigned_agent_id", None),
         "closed_by": getattr(conv, "closed_by", None),
-        "visitor_ended": db.query(Message)
-            .filter(
-                Message.conversation_id == conv.id,
-                Message.event_type == "visitor_left",
-            )
-            .first() is not None,
+        "visitor_ended": bool(getattr(conv, "visitor_ended", False)),
         "title": getattr(conv, "title", None),
         "message_count": 0,
         "unread_count": 0,
@@ -385,6 +380,22 @@ async def close_conversation(
     """
     conv = _resolve_conversation(db, conversation_id)
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
+
+    # Guard: refuse to resolve conversations where the visitor never sent a message.
+    # This prevents agents from bulk-closing bot-only / zero-interaction conversations.
+    prior_visitor_msg_count = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conv.id,
+            Message.sender_type == MessageSenderType.VISITOR,
+        )
+        .count()
+    )
+    if prior_visitor_msg_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot resolve a conversation with no visitor messages",
+        )
 
     orchestrator = ConversationOrchestrator(db)
 

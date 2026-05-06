@@ -28,7 +28,7 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "trigger": "visitor_reconnected",
         "category": "auto_message",
         "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
             {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
@@ -79,12 +79,16 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "category": "auto_message",
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended"}, "position": {"x": 0, "y": 150}},
-            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+            {"id": "n_agent_hint", "type": "send_bot_message", "config": {"message": "Visitor ended the chat. You can go ahead and resolve this conversation.", "event_type": "visitor_ended_agent_note", "send_to_visitor": False}, "position": {"x": 0, "y": 450}},
         ],
         "edges": [
             {"id": "e1", "from": "trigger", "to": "n1"},
-            {"id": "e2", "from": "n1", "to": "n2"},
+            {"id": "e_wait", "from": "n1", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n2"},
+            {"id": "e_agent_hint", "from": "n2", "to": "n_agent_hint"},
         ],
     },
     # ── Resolved ─────────────────────────────────────────────────────────────
@@ -95,13 +99,27 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "category": "auto_message",
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message"}, "position": {"x": 0, "y": 150}},
-            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 300}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
         ],
         "edges": [
             {"id": "e1", "from": "trigger", "to": "n1"},
-            {"id": "e2", "from": "n1", "to": "n2"},
+            {"id": "e_wait", "from": "n1", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n2"},
         ],
+    },
+    # ── Rating note ──────────────────────────────────────────────────────────
+    {
+        "name": "Visitor rated",
+        "description": "Send an agent-only note when a visitor submits a rating.",
+        "trigger": "visitor_rated_conversation",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Visitor rated this conversation: {rating_label}", "event_type": "visitor_rating_note", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },
     # ── Chatbot ───────────────────────────────────────────────────────────────
     {
@@ -110,8 +128,12 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "trigger": "conversation_created",
         "category": "chatbot_flow",
         "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": []}, "position": {"x": 0, "y": 150}},
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": [
+                {"label": "Office Space", "reply": "", "team_id": None},
+                {"label": "Investments", "reply": "", "team_id": None},
+                {"label": "Job", "reply": "", "team_id": None},
+            ]}, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },

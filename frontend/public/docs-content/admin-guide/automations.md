@@ -38,6 +38,9 @@ Every automation has four core concepts:
 | **No Agent Assigned (After Delay)** | Fires after a configurable number of seconds if no agent has joined the conversation. |
 | **Website Offline — First Message** | Visitor sends a message while the website is in offline mode. |
 | **Agent Joined** | An agent opens and joins the conversation. |
+| **Conversation Visitor Ended** | Visitor clicks "End chat" in the widget. |
+| **Conversation Resolved** | An agent marks the conversation as resolved. |
+| **Visitor Rated Conversation** | Visitor submits a satisfaction rating (fires again if they change their rating). |
 
 ---
 
@@ -45,11 +48,13 @@ Every automation has four core concepts:
 
 | Node | What It Does |
 | :--- | :--- |
-| **Send Bot Message** | Delivers a text message from the "bot" sender in the chat. |
+| **Send Bot Message** | Delivers a text message from the "bot" sender in the chat. Supports `{visitor_name}`, `{phone}`, `{email}`, `{contact_info}`, and `{rating_label}` template variables. Set **Send to visitor: off** to make the message agent-only (visible only in the dashboard). |
 | **Bot Prompt (Buttons)** | Sends a message with selectable reply buttons. Each button can optionally route the conversation to a specific team. |
 | **Assign Team** | Assigns the conversation to a chosen team. |
 | **Tag with Agent Name** | Applies a tag containing the joining agent's name to the conversation. |
-| **Emit System Event** | Records a system event in the conversation timeline (visible to agents, not visitors). |
+| **Emit System Event** | Records a timeline event visible to agents in the dashboard. Optionally also sends a different message to the visitor. |
+| **Wait** | Pauses the flow for a specified number of seconds before continuing to the next node. |
+| **Show Rating Popup** | Sends a CSAT rating prompt to the visitor widget (thumbs up / neutral / thumbs down). |
 
 ---
 
@@ -59,14 +64,14 @@ The **Library** tab on the Automations screen offers pre-built flows you can act
 
 | Template | Trigger | Purpose |
 | :--- | :--- | :--- |
-| **New visitor welcome** | New Visitor | Greets first-time visitors immediately. |
-| **Returning visitor welcome** | Returning Visitor | Personalised welcome-back message. |
-| **Visitor connected event** | Visitor Connected | Logs a system event when the visitor socket connects. |
-| **Visitor dropped event** | Visitor Disconnected | Logs when the visitor leaves the page. |
-| **Visitor reconnected** | Visitor Reconnected | Logs when the visitor returns. |
+| **Visitor dropped event** | Visitor Disconnected | Logs a system event when the visitor leaves the page. |
+| **Visitor reconnected** | Visitor Reconnected | Logs when the visitor returns to the page. |
 | **Waiting message** | No Agent Assigned (30 s) | Reassures visitors that an agent is on the way. |
 | **Offline prompt** | Website Offline — First Message | Informs visitors the team is unavailable and collects their query. |
 | **Agent joined** | Agent Joined | Tags the conversation with the joining agent's name. |
+| **Visitor ended chat** | Conversation Visitor Ended | Sends a system event to the visitor, waits 2 s, shows a rating popup, then drops an agent-only note prompting resolution. |
+| **Resolved rating** | Conversation Resolved | Notifies the visitor the chat is resolved, waits 2 s, then shows a rating popup. |
+| **Visitor rated** | Visitor Rated Conversation | Sends an agent-only bot message showing what rating the visitor gave (e.g. "😊 Good"). |
 | **Team routing chatbot** | Conversation Created | Shows a button menu at conversation start so visitors self-select the right team. |
 
 ---

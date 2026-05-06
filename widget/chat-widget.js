@@ -325,8 +325,10 @@
     if (_widgetStateRestored) return;
     _widgetStateRestored = true;
     try {
-      const saved = localStorage.getItem('ai_chatassist_widget_open_' + CONFIG.websiteId);
-      if (saved === '1') {
+      var _woRaw = localStorage.getItem('ai_chatassist_widget_open_' + CONFIG.websiteId);
+      var _woOpen = false;
+      try { var _woObj = JSON.parse(_woRaw); _woOpen = _woObj && _woObj.v === 1 && (Date.now() - _woObj.ts) < 12 * 60 * 60 * 1000; } catch (e) { _woOpen = _woRaw === '1'; }
+      if (_woOpen) {
         const bubble = $id('chatassist-bubble');
         const win = $id('chatassist-window');
         if (bubble && win && win.style.display === 'none') {
@@ -1195,7 +1197,10 @@
         // the flow itself. Without automation the timer fires and reveals the
         // input so the visitor can type, which triggers the contact overlay on send.
         clearTimeout(_inputRevealTimer);
-        _inputRevealTimer = setTimeout(showInputContainer, 2500);
+        // Don't auto-reveal input for read-only (ended/resolved) threads.
+        if (!isReadOnlyThread) {
+          _inputRevealTimer = setTimeout(showInputContainer, 2500);
+        }
       };
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -1293,6 +1298,8 @@
         if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
           return;
         }
+        // Internal automation placeholder stored by show_rating_popup node — never render as text.
+        if (eventType === 'rating_popup_shown') return;
 
         if (actor === 'visitor') {
           appendMessage('visitor', m.content, m.created_at, null, m.id);
@@ -1346,8 +1353,8 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
-        // Reveal input unless a bot_prompt is still pending a visitor selection.
-        if (!hasPendingBotPrompt) {
+        // Reveal input unless a bot_prompt is pending, or this is a read-only (ended/resolved) thread.
+        if (!hasPendingBotPrompt && !isReadOnlyThread) {
           showInputContainer();
         } else {
           // Cancel the connect-time reveal timer so it doesn't override the
@@ -1363,7 +1370,7 @@
       // Re-inject the "Start new chat" banner if we're restoring a closed
       // conversation on reload (history disabled). The banner was wiped above
       // by container.innerHTML = '' but belongs at the bottom of the thread.
-      const hasVisitorLeftMsg = data.messages.some(function (m) { return m.event_type === 'visitor_left'; });
+      const hasVisitorLeftMsg = data.messages.some(function (m) { return m.event_type === 'visitor_left' || m.event_type === 'visitor_ended'; });
       if ((data.status === 'resolved' || hasVisitorLeftMsg) && isReadOnlyThread && !widgetShowHistory) {
         _appendClosedBanner();
       }
@@ -2826,8 +2833,8 @@
       hideNewMsgIndicator();
       setTimeout(function () { scrollToBottom(false); }, 50);
       if (endChatDisabled) setEndChatDisabled(true);
-      // Persist open state
-      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '1'); } catch (e) { }
+      // Persist open state (with timestamp for 12h TTL)
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, JSON.stringify({v:1, ts:Date.now()})); } catch (e) { }
       // Notify backend that widget was opened (triggers welcome if not yet sent)
       try {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2844,8 +2851,8 @@
         win.style.display = 'none';
         bubble.style.display = 'inline-flex';
       }, { once: true });
-      // Persist minimized state
-      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '0'); } catch (e) { }
+      // Persist minimized state (clear timestamp so it won't restore)
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, JSON.stringify({v:1, ts:0})); } catch (e) { }
       if (restoreOverlay) hideContactOverlay(true);
       hideEndOverlay();
     }

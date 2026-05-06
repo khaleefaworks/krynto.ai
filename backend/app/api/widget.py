@@ -648,15 +648,6 @@ async def get_widget_conversations(
         from app.models.user import User as UserModel
         agent = db.query(UserModel).filter(UserModel.id == conv.assigned_agent_id).first() if conv.assigned_agent_id else None
 
-        visitor_left_event = (
-            db.query(Message)
-            .filter(
-                Message.conversation_id == conv.id,
-                Message.event_type == "visitor_left",
-            )
-            .first()
-        )
-
         return {
             "id": conv.id,
             "status": conv.status.value,
@@ -667,7 +658,7 @@ async def get_widget_conversations(
             "is_rated": rating_row is not None,
             "created_at": conv.created_at.isoformat() if conv.created_at else None,
             "closed_by": conv.closed_by,
-            "visitor_ended": visitor_left_event is not None,
+            "visitor_ended": bool(conv.visitor_ended),
         }
 
     # Active (OPEN) conversation
@@ -729,14 +720,7 @@ async def create_new_widget_conversation(
         # If the visitor previously ended this conversation, properly resolve it
         # via the orchestrator so the agent dashboard receives a conversation_closed
         # broadcast and the conv moves to the Resolved tab cleanly.
-        visitor_ended_flag = (
-            db.query(Message)
-            .filter(
-                Message.conversation_id == existing_open.id,
-                Message.event_type == "visitor_left",
-            )
-            .first()
-        )
+        visitor_ended_flag = existing_open.visitor_ended
         if visitor_ended_flag:
             from app.services.conversation_orchestrator import ConversationOrchestrator
             orchestrator = ConversationOrchestrator(db)

@@ -213,11 +213,13 @@ class AutomationService:
                     {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
                     {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
                     {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+                    {"id": "n_agent_hint", "type": "send_bot_message", "config": {"message": "Visitor ended the chat. You can go ahead and resolve this conversation.", "event_type": "visitor_ended_agent_note", "send_to_visitor": False}, "position": {"x": 0, "y": 450}},
                 ],
                 "edges": [
                     {"id": "e1", "from": "trigger", "to": "n1"},
                     {"id": "e_wait", "from": "n1", "to": "n_wait"},
                     {"id": "e2", "from": "n_wait", "to": "n2"},
+                    {"id": "e_agent_hint", "from": "n2", "to": "n_agent_hint"},
                 ],
             },
             # ─── Conversation resolved ────────────────────────────────────────
@@ -235,6 +237,19 @@ class AutomationService:
                     {"id": "e1", "from": "trigger", "to": "n1"},
                     {"id": "e_wait", "from": "n1", "to": "n_wait"},
                     {"id": "e2", "from": "n_wait", "to": "n2"},
+                ],
+            },
+            # ─── Visitor rated ────────────────────────────────────────────────
+            {
+                "name": "Visitor rated",
+                "trigger": "visitor_rated_conversation",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "send_bot_message", "config": {"message": "Visitor rated this conversation: {rating_label}", "event_type": "visitor_rating_note", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
                 ],
             },
         ]
