@@ -1922,8 +1922,8 @@
       { type: 'bold_italic', re: /\*\*\*([^*\n]+)\*\*\*/g },
       { type: 'bold', re: /\*\*([^*]+)\*\*/g },
       { type: 'italic', re: /\*([^*\n]+)\*/g },
-      // Bare domains like abc.com, docs.example.co.uk/path
-      { type: 'bare', re: /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
+      // Bare domains like abc.com, docs.example.co.uk/path — exclude email addresses via negative lookbehind
+      { type: 'bare', re: /(?<!@)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
       { type: 'url', re: /https?:\/\/[^\s<]+/g },
     ];
 

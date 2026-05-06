@@ -210,8 +210,8 @@ export default function VisitorDetailsPanel({
       {/* Contact Information */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
         {/* Name */}
-        <div className="flex items-start gap-2">
-          <User className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingName ? (
               <div className="flex gap-1">
@@ -237,8 +237,8 @@ export default function VisitorDetailsPanel({
         </div>
 
         {/* Email */}
-        <div className="flex items-start gap-2">
-          <Mail className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingEmail ? (
               <div className="flex gap-1">
@@ -264,8 +264,8 @@ export default function VisitorDetailsPanel({
         </div>
 
         {/* Phone */}
-        <div className="flex items-start gap-2">
-          <Phone className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <Phone className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingPhone ? (
               <div className="flex gap-1">

@@ -198,6 +198,13 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             if not conversation or conversation.assigned_agent_id:
                 return
 
+            # Skip waiting message when website is offline — the
+            # website_offline_first_message automation already told the visitor
+            # we'll contact them, so "An agent will be with you shortly" would
+            # be misleading.
+            if not is_website_online(website_id):
+                return
+
             orchestrator = ConversationOrchestrator(db)
             await orchestrator._run_automation_flows(
                 conversation_id=conversation_id,
@@ -499,18 +506,22 @@ class ConversationOrchestrator:
 
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
-        # Send a single bot prompt (no repeats).
-        if (not is_website_online(website_id)) and not (
-            prior_message_count > 0 and getattr(conversation, "assigned_agent_id", None)
-        ):
-            if prior_message_count == 0:
-                await self._run_automation_flows(
-                    conversation_id=conversation.id,
-                    website_id=website_id,
-                    trigger="website_offline_first_message",
-                    log_key="offline_first_message_automation_failed",
-                    send_to_visitor=True,
-                )
+        # Fire website_offline_first_message once per conversation regardless
+        # of whether this is the first message — covers the mid-conversation
+        # case where the website goes offline after a chat has started.
+        # The automation's repeat=once policy prevents duplicate sends.
+        if not is_website_online(website_id) and not conversation.assigned_agent_id:
+            await self._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=website_id,
+                trigger="website_offline_first_message",
+                log_key="offline_first_message_automation_failed",
+                send_to_visitor=True,
+                context={
+                    "phone": conversation.visitor_phone or "",
+                    "email": conversation.visitor_email or "",
+                },
+            )
             return None
 
         # Someone is online.
@@ -835,11 +846,26 @@ class ConversationOrchestrator:
         except Exception:
             pass
 
-        # Schedule the waiting bot message if this is the visitor's first action
-        # and no agent is assigned yet. Regular messages schedule it in
-        # handle_visitor_message; button clicks are a separate code path so we
-        # must handle it here too.
-        if not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
+        # If website is offline and no agent assigned, fire the offline prompt
+        # immediately (the repeat=once policy prevents duplicates).  Skip the
+        # waiting-message timer since it would contradict the offline message.
+        if not conversation.assigned_agent_id and not is_website_online(int(conversation.website_id)):
+            await self._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=int(conversation.website_id),
+                trigger="website_offline_first_message",
+                log_key="offline_first_message_from_button_click_failed",
+                send_to_visitor=True,
+                context={
+                    "phone": conversation.visitor_phone or "",
+                    "email": conversation.visitor_email or "",
+                },
+            )
+        elif not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
+            # Schedule the waiting bot message if this is the visitor's first action
+            # and no agent is assigned yet. Regular messages schedule it in
+            # handle_visitor_message; button clicks are a separate code path so we
+            # must handle it here too.
             _waiting_bot_message_scheduled.add(conversation.id)
             automation_service = AutomationService(self.db)
             delay_seconds = automation_service.get_delay_seconds(
@@ -1404,6 +1430,30 @@ class ConversationOrchestrator:
         if not nodes_list:
             return
 
+        # Enrich ctx with conversation contact fields so any automation node
+        # can reference {phone}, {email}, {visitor_name}, {contact_info} in template strings.
+        # visitor_name falls back to "there" so "Hi {visitor_name}" → "Hi there" gracefully.
+        # {contact_info} is built dynamically: shows whichever contact fields are filled.
+        try:
+            _enrich_conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
+            if _enrich_conv:
+                ctx = dict(ctx)
+                ctx.setdefault("phone", _enrich_conv.visitor_phone or "")
+                ctx.setdefault("email", _enrich_conv.visitor_email or "")
+                ctx.setdefault("visitor_name", _enrich_conv.visitor_name or "there")
+                _p = _enrich_conv.visitor_phone or ""
+                _e = _enrich_conv.visitor_email or ""
+                if _p and _e:
+                    ctx.setdefault("contact_info", f"{_p} or {_e}")
+                elif _p:
+                    ctx.setdefault("contact_info", _p)
+                elif _e:
+                    ctx.setdefault("contact_info", _e)
+                else:
+                    ctx.setdefault("contact_info", "the contact details you provided")
+        except Exception:
+            pass
+
         nodes = {n["id"]: n for n in nodes_list if isinstance(n, dict) and n.get("id")}
 
         # adjacency: from_id -> list of {to, branch}
@@ -1470,6 +1520,11 @@ class ConversationOrchestrator:
                         repeat_cooldown_seconds=cooldown_secs,
                     ):
                         continue
+                    # Substitute template variables ({phone}, {email}, etc.)
+                    try:
+                        message = message.format_map(ctx)
+                    except Exception:
+                        pass
                     saved = self.conversation_service.add_bot_message(
                         conversation_id, message, event_type=event_type
                     )
@@ -1478,6 +1533,17 @@ class ConversationOrchestrator:
                             conversation_id,
                             {"type": "bot", "message": message, "message_obj": serialize_message(self.db, saved)},
                         )
+                    # Always broadcast bot messages to agents so the dashboard reflects them.
+                    await self.agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data={
+                            "type": "bot_message",
+                            "conversation_id": conversation_id,
+                            "website_id": website_id,
+                            "message_obj": serialize_message(self.db, saved),
+                        },
+                        include_global=True,
+                    )
 
             elif node_type == "emit_system_event":
                 raw_content = str(cfg.get("content") or "").strip()

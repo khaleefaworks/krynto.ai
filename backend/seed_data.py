@@ -52,9 +52,13 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "category": "auto_message",
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "send_bot_message", "config": {"message": "We're offline right now. Leave us a message and we'll get back to you soon.", "event_type": "bot_offline"}, "position": {"x": 0, "y": 150}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 150}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi {visitor_name}, thanks for reaching out! We're currently offline, but we've received your message. We'll get back to you at {contact_info} as soon as possible. Feel free to leave any additional details below.", "event_type": "bot_offline"}, "position": {"x": 0, "y": 300}},
         ],
-        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n1"},
+        ],
     },
     {
         "name": "Agent joined",

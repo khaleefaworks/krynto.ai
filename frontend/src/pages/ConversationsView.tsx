@@ -1795,8 +1795,7 @@ export default function ConversationsView() {
                 </div>
             )}
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div className={`hidden lg:flex dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-46'
-                }`}
+            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-48'}`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     {!leftFilterCollapsed && (
@@ -2146,7 +2145,7 @@ export default function ConversationsView() {
                                 <button
                                     key={chat.id}
                                     onClick={() => handleChatSelect(chat.id)}
-                                    className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
+                                    className={`w-full text-left px-3 py-2.5 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 [box-shadow:inset_4px_0_0_#2563eb]' : 'hover:bg-gray-50 dark:hover:bg-gray-700 hover:[box-shadow:inset_4px_0_0_#d1d5db] dark:hover:[box-shadow:inset_4px_0_0_#4b5563]'}`}
                                 >
                                     <div className="flex items-start gap-2.5">
                                         {/* Visitor avatar with assigned-agent badge */}
@@ -2239,8 +2238,8 @@ export default function ConversationsView() {
             {selectedChat ? (
                 <div className="flex-1 flex flex-col min-w-0">
                     {/* Chat Header */}
-                    <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
-                        <div className="flex items-center justify-between">
+                    <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 h-16 px-4">
                             <div className="flex items-center gap-3 min-w-0">
                                 <button
                                     className="md:hidden flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
@@ -2257,7 +2256,7 @@ export default function ConversationsView() {
                                     title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
-                                    <h2 className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
+                                    <h2 className="text-sm sm:text-base md:text-sm font-semibold text-gray-900 dark:text-white truncate">
                                         {conversationDisplayName(conversation as any)}
                                     </h2>
                                     {isVisitorEnded && !isResolvedSelected && (
@@ -2308,7 +2307,7 @@ export default function ConversationsView() {
                         </div>
 
                         {/* Second row: Tag conversation (left) | Assign team (right) */}
-                        <div className="mt-2 flex items-start justify-between gap-4">
+                        <div className="flex items-center justify-between gap-4 px-4 py-2">
                             {/* LEFT — Tag conversation + tag badges */}
                             <div className="flex flex-wrap items-center gap-2 min-w-0">
                                 {conversationTags
@@ -2730,7 +2729,7 @@ export default function ConversationsView() {
                         </div>
                     ) : (
                         <div className="flex h-full flex-col w-full">
-                            <div className="flex items-center justify-end gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
+                            <div className="h-16 flex items-center justify-end gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
                                 <Button
                                     variant="ghost"
                                     size="icon"
