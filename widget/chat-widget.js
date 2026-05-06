@@ -99,6 +99,10 @@
   let _pingInterval = null;
   let pendingOfflineMessage = null;
   let pendingOfflineAttachments = [];
+  // Deferred bot button click (when offline form intercepts a button press).
+  let pendingBotButtonClick = null;
+  // Set true once contact info is sent for this conversation; clears on enterStartView().
+  let _contactVerifiedThisConversation = false;
 
   let uploadingAttachmentsCount = 0;
   let draftAttachments = [];
@@ -148,6 +152,80 @@
   function _closedStateKey() {
     if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
     return `aichatassist_closed_conv_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  // --- Welcome popup dismissal (12h cooldown, per websiteId across sessions) ---
+  function _welcomePopupDismissedKey() {
+    if (!CONFIG.websiteId) return null;
+    return `ai_chatassist_welcome_popup_dismissed_${CONFIG.websiteId}`;
+  }
+
+  function _saveWelcomePopupDismissed() {
+    try {
+      const k = _welcomePopupDismissedKey();
+      if (k) localStorage.setItem(k, String(Date.now()));
+    } catch (e) { }
+  }
+
+  // Returns true if the popup was dismissed within the last 12 hours.
+  function _isWelcomePopupRecentlyDismissed() {
+    try {
+      const k = _welcomePopupDismissedKey();
+      if (!k) return false;
+      const v = localStorage.getItem(k);
+      if (!v) return false;
+      return (Date.now() - parseInt(v, 10)) < 12 * 60 * 60 * 1000;
+    } catch (e) { return false; }
+  }
+
+  // --- Contact verification (offline form, 12h cooldown per websiteId) ---
+  function _contactVerifiedKey() {
+    if (!CONFIG.websiteId) return null;
+    return `ai_chatassist_contact_verified_${CONFIG.websiteId}`;
+  }
+
+  function _saveContactVerified(name, phone, email) {
+    try {
+      const k = _contactVerifiedKey();
+      if (k) localStorage.setItem(k, JSON.stringify({ ts: Date.now(), name, phone, email: email || '' }));
+    } catch (e) { }
+  }
+
+  // Returns { name, phone, email } if stored within 12h, otherwise null.
+  function _loadContactVerified() {
+    try {
+      const k = _contactVerifiedKey();
+      if (!k) return null;
+      const raw = localStorage.getItem(k);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !obj.name || !obj.phone) return null;
+      if ((Date.now() - obj.ts) > 12 * 60 * 60 * 1000) return null;
+      return obj;
+    } catch (e) { return null; }
+  }
+
+  // Checks if contact requirement can be satisfied without showing the form.
+  // If yes: sends visitor_contact WS frame silently and returns true.
+  // If no: returns false (caller must show form).
+  function _checkAndSendContactSilently() {
+    if (_contactVerifiedThisConversation) return true;
+    const stored = _loadContactVerified();
+    if (stored) {
+      _contactVerifiedThisConversation = true;
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'visitor_contact',
+            visitor_name: stored.name,
+            visitor_phone: stored.phone,
+            visitor_email: stored.email || undefined,
+          }));
+        }
+      } catch (e) { }
+      return true;
+    }
+    return false;
   }
 
   // --- Resolved-at expiry (24h) ---
@@ -885,6 +963,8 @@
     isReadOnlyThread = false;
     ratingTriggeredByVisitorEnd = false;
     CONFIG.conversationId = 0;
+    _contactVerifiedThisConversation = false;
+    pendingBotButtonClick = null;
 
     // Ensure any existing WS is closed before connecting fresh
     _closeWsCleanly();
@@ -1287,6 +1367,56 @@
       if ((data.status === 'resolved' || hasVisitorLeftMsg) && isReadOnlyThread && !widgetShowHistory) {
         _appendClosedBanner();
       }
+
+      // Welcome popup re-show on return visit.
+      // Conditions: open conversation, widget is minimized, visitor has NOT sent
+      // any message yet, and the popup was not dismissed within the last 12h.
+      if (data.status !== 'resolved' && !isWidgetOpen() && !_isWelcomePopupRecentlyDismissed()) {
+        var hasVisitorMsg = data.messages.some(function (m) {
+          return (m.sender_type || m.sender) === 'visitor' || m.actor === 'visitor';
+        });
+        if (!hasVisitorMsg) {
+          // Find the first bot/ai message to show in the popup.
+          var firstBotMsg = null;
+          for (var _wi = 0; _wi < data.messages.length; _wi++) {
+            var _wm = data.messages[_wi];
+            var _wactor = _wm.actor || _wm.sender_type || _wm.sender || '';
+            var _wkind = _wm.kind || (_wactor === 'system' ? 'event' : 'chat');
+            if (_wactor === 'bot' || _wactor === 'ai' ||
+                (_wactor === 'system' && _wkind === 'chat') ||
+                (_wm.event_type === 'bot_prompt_buttons')) {
+              firstBotMsg = _wm;
+              break;
+            }
+          }
+          if (firstBotMsg) {
+            var _popupText = firstBotMsg.content || '';
+            // For bot_prompt_buttons, extract the message field from JSON content.
+            if (firstBotMsg.event_type === 'bot_prompt_buttons') {
+              try {
+                var _pd = JSON.parse(firstBotMsg.raw_content || firstBotMsg.content);
+                if (_pd && _pd.message) _popupText = _pd.message;
+              } catch (e) { }
+            }
+            if (_popupText) {
+              // Delay so the bubble finishes its entrance animation, then run
+              // the same dots → sound → popup sequence as notifyNewMessage().
+              var _wpText = _popupText;
+              setTimeout(function () {
+                if (isWidgetOpen()) return; // visitor opened widget during delay
+                bumpUnread();
+                showDotsPreview();
+                dotsPreviewTimer = setTimeout(function () {
+                  hideDotsPreview();
+                  playNotificationSound('collapsed');
+                  showMessagePopup(null, null, _wpText);
+                }, 1200);
+              }, 1500);
+            }
+          }
+        }
+      }
+
       return;
     }
 
@@ -1408,23 +1538,11 @@
       // overlay so the visitor can provide their details.
       try {
         if (data.message_obj && data.message_obj.event_type === 'bot_offline') {
-          const storedName = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`) || '';
-          const storedPhone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`) || '';
-          const storedEmail = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`) || '';
-          if (storedName && storedPhone) {
-            // Auto-send stored contact info to back-end; show the input so visitor
-            // can type their message normally.
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'visitor_contact',
-                visitor_name: storedName,
-                visitor_phone: storedPhone,
-                visitor_email: storedEmail || undefined,
-              }));
-            }
+          // Immediately check if contact info can be satisfied silently.
+          // Show the form right away (before visitor tries to send) if not.
+          if (_checkAndSendContactSilently()) {
             showInputContainer();
           } else {
-            // No stored info — show the form so the visitor can fill it in.
             showContactOverlay();
           }
         }
@@ -2184,6 +2302,13 @@
           // Highlight selected
           btnEl.classList.add('chatassist-prompt-btn-selected');
 
+          // If offline and contact not yet on file, collect it before firing.
+          if (!presenceOnline && !_checkAndSendContactSilently()) {
+            pendingBotButtonClick = { automationId: automationId, idx: idx, label: btn.label || 'Option ' + (idx + 1) };
+            showContactOverlay();
+            return;
+          }
+
           // Input reveal is deferred: the server sends automation_complete
           // after processing (so the reply appears before the input opens).
           // A 5-second fallback fires if the event never arrives.
@@ -2300,15 +2425,9 @@
       return;
     }
 
-    const _prefillName = $id('chatassist-contact-name')?.value.trim();
-    const _prefillPhone = $id('chatassist-contact-phone')?.value.trim();
-    const _prefillEmail = $id('chatassist-contact-email')?.value.trim();
-    if (_prefillName && _prefillPhone) {
-      const meta = {
-        visitor_name: _prefillName,
-        visitor_phone: _prefillPhone,
-        visitor_email: _prefillEmail || undefined
-      };
+    // Check if contact info is already on file (in-memory or localStorage 12h).
+    if (_checkAndSendContactSilently()) {
+      const meta = {};
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
@@ -2465,6 +2584,10 @@
       if (visitorPhone) localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, visitorPhone);
       if (visitorEmail) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitorEmail);
     } catch (e) { }
+    // Persist to the 12h verified cache and mark in-memory for this conversation.
+    _saveContactVerified(visitorName, visitorPhone, visitorEmail || '');
+    _contactVerifiedThisConversation = true;
+
     if (msg || (atts && atts.length)) {
       const meta = { visitor_name: visitorName, visitor_phone: visitorPhone, visitor_email: visitorEmail || undefined };
       try {
@@ -2477,8 +2600,8 @@
       sendMessage(outgoing, meta);
       smartScroll();
     } else {
-      // No pending message (overlay shown via bot_offline after the message was already sent).
-      // Send a contact-only frame so the backend can still store the visitor details.
+      // No pending message (overlay shown via bot_offline before visitor typed).
+      // Send a contact-only frame so the backend stores the visitor details.
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'visitor_contact',
@@ -2487,6 +2610,18 @@
           visitor_email: visitorEmail || undefined,
         }));
       }
+    }
+
+    // If a bot button click was deferred waiting for contact, fire it now.
+    if (pendingBotButtonClick) {
+      const pbc = pendingBotButtonClick;
+      pendingBotButtonClick = null;
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = setTimeout(showInputContainer, 5000);
+      appendMessage('visitor', pbc.label, new Date().toISOString(), null, null);
+      isAtBottom = true;
+      smartScroll();
+      sendBotButtonClick(pbc.automationId, pbc.idx);
     }
   }
 
@@ -2794,6 +2929,8 @@
     $id('chatassist-popup-close').addEventListener('click', function (e) {
       e.stopPropagation();
       hideMessagePopup();
+      // Record dismissal time so we don't re-show the welcome popup for 12h.
+      _saveWelcomePopupDismissed();
     });
     $id('chatassist-popup-reply').addEventListener('click', function (e) {
       e.stopPropagation();

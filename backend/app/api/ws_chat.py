@@ -1233,6 +1233,34 @@ async def chat_ws_with_conversation(
                             logger.warning("bot_button_click_failed", error=str(e))
                     continue
 
+                if message_type == "visitor_contact":
+                    vc_name = payload.get("visitor_name")
+                    vc_email = payload.get("visitor_email")
+                    vc_phone = payload.get("visitor_phone")
+                    if vc_name or vc_email or vc_phone:
+                        try:
+                            db.expire_all()
+                            fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
+                            if fresh_conv:
+                                changed = False
+                                if vc_name and not fresh_conv.visitor_name:
+                                    fresh_conv.visitor_name = str(vc_name)
+                                    changed = True
+                                if vc_email and not fresh_conv.visitor_email:
+                                    fresh_conv.visitor_email = str(vc_email)
+                                    changed = True
+                                if vc_phone and not fresh_conv.visitor_phone:
+                                    fresh_conv.visitor_phone = str(vc_phone)
+                                    changed = True
+                                if changed:
+                                    db.commit()
+                        except Exception:
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                    continue
+
                 if message_type == "submit_rating":
                     rating_val = payload.get("rating")
                     if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
@@ -1288,6 +1316,10 @@ async def chat_ws_with_conversation(
                     message=user_message,
                     visitor_ws=websocket,
                     visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
+                    visitor_name=payload.get("visitor_name"),
+                    visitor_email=payload.get("visitor_email"),
+                    visitor_phone=payload.get("visitor_phone"),
+                    client_message_id=str(payload.get("message_id") or payload.get("client_message_id")) if (payload.get("message_id") or payload.get("client_message_id")) else None,
                 )
                 if response:
                     await websocket.send_json({"type": "system", "message": response})
