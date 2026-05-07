@@ -42,11 +42,11 @@ def delete_tag(db: Session, tag_id: int) -> bool:
     if not db_tag:
         return False
 
-    # Explicitly remove all conversation-tag associations before deleting the
-    # tag itself.  This is a safe cascade that works regardless of whether the
-    # database schema has ON DELETE CASCADE wired on the FK (older migrations
-    # may not have it).
-    db.query(ConversationTag).filter_by(tag_id=tag_id).delete(synchronize_session="fetch")
+    usage_count = db.query(ConversationTag).filter_by(tag_id=tag_id).count()
+    if usage_count:
+        raise ValueError(
+            f"This tag is used in {usage_count} conversation{'s' if usage_count != 1 else ''} and cannot be deleted."
+        )
 
     db.delete(db_tag)
     db.commit()

@@ -94,7 +94,7 @@ export default function TagsSettings() {
     }
 
     const deleteTag = async (id: number) => {
-        if (!confirm('Deleting this tag will remove it from all conversations where it is used. This cannot be undone. Continue?')) return
+        if (!confirm('Delete this tag?')) return
         setSaving(true)
         setError(null)
         setSuccess(null)
