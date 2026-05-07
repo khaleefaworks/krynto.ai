@@ -116,6 +116,10 @@ export const automationsApi = {
     apiRequest<void>(`/automations/${id}`, {
       method: 'DELETE',
     }),
+  resetToDefault: (id: number) =>
+    apiRequest<Automation>(`/automations/${id}/reset-to-default`, {
+      method: 'POST',
+    }),
 }
 
 export const automationTemplatesApi = {

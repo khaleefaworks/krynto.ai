@@ -712,15 +712,20 @@ export default function ConversationsView() {
         stopAgentTyping(null)
     }, [isChatsListRoute, selectedChat, reset, stopAgentTyping])
 
-    // Ensure conversation details populate once chats load (handles refresh on deep links)
+    // Ensure conversation details populate once chats load (handles refresh on deep links).
+    // NOTE: We use a ref for getChatById so this effect only re-runs when selectedChat changes,
+    // NOT every time activeChats/resolvedChats change. Previously, every fetchActiveChats() call
+    // would trigger this effect and overwrite optimistic tag/team updates with stale cache data.
+    const getChatByIdRef = useRef(getChatById)
+    getChatByIdRef.current = getChatById
     useEffect(() => {
         if (selectedChat) {
-            const chatData = getChatById(selectedChat)
+            const chatData = getChatByIdRef.current(selectedChat)
             if (chatData) {
                 setConversation(chatData as any)
             }
         }
-    }, [selectedChat, getChatById])
+    }, [selectedChat]) // intentionally omit getChatById — use ref to avoid stale rewrites
 
     // Handle conversation selection from URL.
     // Canonical URL is /dashboard/chats/:chatId where chatId is the conversation PK.
@@ -1439,12 +1444,19 @@ export default function ConversationsView() {
             if (tag) {
                 setConversationTags(prev => [...prev.filter(t => Number((t as any)?.id) !== tagId), tag])
             }
-            // Also update in activeChats list to keep it in sync
+            // Update both activeChats and resolvedChats so getChatById returns fresh data
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
                     ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId), tag] }
                     : c
             ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat
+                        ? { ...c, tags: [...((c.tags || []).filter((t: any) => Number(t?.id) !== tagId)), tag] }
+                        : c
+                )
+            )
         } catch (error) {
             console.error("Failed to add tag:", error)
         }
@@ -1458,12 +1470,19 @@ export default function ConversationsView() {
             })
             // Update local state
             setConversationTags(prev => prev.filter(t => Number((t as any)?.id) !== tagId))
-            // Also update in activeChats list
+            // Update both activeChats and resolvedChats
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
                     ? { ...c, tags: ((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId) }
                     : c
             ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat
+                        ? { ...c, tags: ((c.tags || []).filter((t: any) => Number(t?.id) !== tagId)) }
+                        : c
+                )
+            )
         } catch (error) {
             console.error("Failed to remove tag:", error)
         }
@@ -1478,6 +1497,17 @@ export default function ConversationsView() {
             })
 
             setConversation((prev) => (prev ? ({ ...(prev as any), team_id: teamId } as any) : prev))
+
+            // Update both lists so getChatById returns fresh data (prevents the stale-ref
+            // useEffect from re-reading the old team_id and overwriting the optimistic update)
+            setActiveChats(activeChats.map(c =>
+                c.id === selectedChat ? { ...c, team_id: teamId } as any : c
+            ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat ? { ...c, team_id: teamId } : c
+                )
+            )
 
             // Re-fetch from server so visibility / team-scope filtering is applied
             await fetchActiveChats({ showSpinner: false })

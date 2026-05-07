@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Trash2 } from 'lucide-react'
+import { X, Plus, Trash2, RotateCcw } from 'lucide-react'
 import { apiRequest } from '@/services/api'
 import {
   automationsApi,
@@ -481,6 +481,8 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
   const [enabled, setEnabled] = useState(automation?.enabled ?? true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [resetConfirm, setResetConfirm] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [websiteTeams, setWebsiteTeams] = useState<{ id: number; name: string }[]>([])
   const [colorMode, setColorMode] = useState<ColorMode>(() =>
@@ -599,6 +601,28 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
     }
   }
 
+  const handleResetToDefault = async () => {
+    if (!resetConfirm) {
+      setResetConfirm(true)
+      return
+    }
+    setResetting(true)
+    setError(null)
+    try {
+      const updated = await automationsApi.resetToDefault(automation!.id)
+      setNodes(updated.nodes?.length ? toRFNodes(updated.nodes) : [makeTriggerNode(trigger)])
+      setEdges(updated.edges?.length ? toRFEdges(updated.edges) : [])
+      setName(updated.name)
+      setTrigger(updated.trigger)
+      setEnabled(updated.enabled)
+      setResetConfirm(false)
+    } catch (e: any) {
+      setError(e?.message || 'Failed to reset')
+    } finally {
+      setResetting(false)
+    }
+  }
+
   return (
     <div className="absolute inset-0 z-50 flex flex-col bg-gray-50 dark:bg-gray-950">
       {/* Header */}
@@ -635,6 +659,41 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
         </div>
         <div className="ml-auto flex items-center gap-2">
           {error && <span className="text-sm text-red-500">{error}</span>}
+          {automation?.id && automation?.template_id ? (
+            resetConfirm ? (
+              <>
+                <span className="text-sm text-amber-600 dark:text-amber-400">Reset to template defaults?</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setResetConfirm(false)}
+                  disabled={resetting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetToDefault}
+                  disabled={resetting}
+                  className="text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-900/20"
+                >
+                  {resetting ? 'Resetting…' : 'Confirm reset'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetToDefault}
+                title="Reset nodes and edges back to the library template defaults"
+                className="text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-900/20"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                Reset to default
+              </Button>
+            )
+          ) : null}
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save flow'}

@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 from app.repos import automations as automations_repo
+from app.models.automation_template import AutomationTemplate
 from app.models.website import Website
 from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
@@ -144,3 +145,32 @@ def delete_automation(
 
     automations_repo.delete_automation(db, automation=automation)
     return None
+
+
+@router.post("/{automation_id}/reset-to-default", response_model=AutomationResponse)
+def reset_automation_to_default(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Reset an automation's nodes/edges back to the library template it was created from."""
+    automation = automations_repo.get_automation(db, automation_id=automation_id)
+    if not automation:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    _enforce_website_access(db, website_id=automation.website_id, user=_admin)
+
+    if not automation.template_id:
+        raise HTTPException(
+            status_code=400,
+            detail="This automation was not created from a library template and cannot be reset."
+        )
+
+    template = db.query(AutomationTemplate).filter_by(id=automation.template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Source template not found")
+
+    automation.nodes = template.nodes
+    automation.edges = template.edges
+    db.commit()
+    db.refresh(automation)
+    return automation

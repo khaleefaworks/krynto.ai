@@ -327,6 +327,16 @@ export default function ChatComposer({
 
     const uploadingAttachment = uploadingCount > 0
 
+    // Stable refs for values that are captured by the handleKeyDown closure inside useEditor.
+    // useEditor creates the editor once and the editorProps closures are stale after first render.
+    // By capturing a ref object (stable identity), handleKeyDown can always read the LATEST value
+    // via ref.current instead of a stale closure variable.
+    const shortcutMenuOpenRef = useRef(false)
+    const shortcutMatchesRef = useRef<ShortcutMatch[]>([])
+    const shortcutMenuIndexRef = useRef(0)
+    const sendNowRef = useRef<() => void>(() => { })
+    const applyPickedShortcutRef = useRef<(msg: string) => void>(() => { })
+
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -392,10 +402,10 @@ export default function ChatComposer({
                     return true
                 }
 
-                if (shortcutMenuOpen) {
+                if (shortcutMenuOpenRef.current) {
                     if (e.key === 'ArrowDown') {
                         e.preventDefault()
-                        setShortcutMenuIndex((i) => Math.min(i + 1, shortcutMatches.length - 1))
+                        setShortcutMenuIndex((i) => Math.min(i + 1, shortcutMatchesRef.current.length - 1))
                         return true
                     }
                     if (e.key === 'ArrowUp') {
@@ -405,9 +415,9 @@ export default function ChatComposer({
                     }
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
-                        const picked = shortcutMatches[shortcutMenuIndex] || shortcutMatches[0]
+                        const picked = shortcutMatchesRef.current[shortcutMenuIndexRef.current] || shortcutMatchesRef.current[0]
                         if (picked) {
-                            applyPickedShortcut(picked.message)
+                            applyPickedShortcutRef.current(picked.message)
                             setShortcutMenuIndex(0)
                         }
                         return true
@@ -434,7 +444,7 @@ export default function ChatComposer({
                     }
 
                     e.preventDefault()
-                    sendNow()
+                    sendNowRef.current()
                     return true
                 }
 
@@ -548,6 +558,13 @@ export default function ChatComposer({
         setShortcutMenuIndex(0)
     }, [buildAttachmentsMarkdown, conversationId, disabled, editor, getMarkdown, onSend, onTyping])
 
+    // Keep refs in sync every render so handleKeyDown inside useEditor always reads fresh values.
+    shortcutMenuOpenRef.current = shortcutMenuOpen
+    shortcutMatchesRef.current = shortcutMatches
+    shortcutMenuIndexRef.current = shortcutMenuIndex
+    sendNowRef.current = sendNow
+    applyPickedShortcutRef.current = applyPickedShortcut
+
     const uploadAndInsertFile = useCallback(
         async (file: File, opts?: { asPaste?: boolean; preferImageNode?: boolean }) => {
             if (!conversationId) return
@@ -557,7 +574,6 @@ export default function ChatComposer({
             try {
                 const form = new FormData()
                 form.append('file', file)
-
                 const token = localStorage.getItem('auth_token')
                 const resp = await fetch(`${API_BASE}/attachments/upload?conversation_id=${conversationId}`, {
                     method: 'POST',

@@ -1254,7 +1254,7 @@ class ConversationOrchestrator:
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
-        _labels = {1: "� Good", 0: "😐 Neutral", -1: "😞 Bad"}
+        _labels = {1: "😊 Good", 0: "😐 Neutral", -1: "😞 Bad"}
         rating_label = _labels.get(rating_val, str(rating_val))
 
         await self._run_automation_flows(
