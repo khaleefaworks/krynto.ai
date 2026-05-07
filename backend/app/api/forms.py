@@ -76,6 +76,7 @@ MAX_SUBMISSION_FIELDS = 50
 MAX_SUBMISSION_FIELD_NAME_CHARS = 100
 MAX_SUBMISSION_FIELD_VALUE_CHARS = 2000
 MAX_SUBMISSION_TOTAL_CHARS = 20000
+MAX_SUBMISSION_FIELD_NAME_PREVIEW_CHARS = 32
 
 
 def _normalize_form_field_defs(form_fields: list[Any] | None) -> dict[str, dict[str, Any]]:
@@ -103,7 +104,10 @@ def _validate_submission_data(data: dict[str, Any], *, form_fields: list[Any] | 
     total_chars = 0
     for key, value in data.items():
         if len(key) > MAX_SUBMISSION_FIELD_NAME_CHARS:
-            raise HTTPException(status_code=422, detail=f"Field name too long: {key[:32]}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Field name too long: {key[:MAX_SUBMISSION_FIELD_NAME_PREVIEW_CHARS]}",
+            )
         if isinstance(value, (dict, list, tuple, set)):
             raise HTTPException(status_code=422, detail=f"Invalid value type for field: {key}")
         if value is not None and not isinstance(value, (str, int, float, bool)):

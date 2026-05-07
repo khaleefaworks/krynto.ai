@@ -9,6 +9,7 @@ import { Bold, Italic, ListOrdered, Smile } from 'lucide-react'
 import EmojiPicker, { Theme, type EmojiClickData } from 'emoji-picker-react'
 
 // ── Markdown serializer (same logic as ChatComposer) ──────────────────────────
+const BULLET_LIST_PATTERN = /^[-*]\s+/
 
 function escapeMarkdownText(value: string): string {
   return value.replace(/[\\`*_\[\]]/g, (m) => `\\${m}`)
@@ -147,12 +148,12 @@ function markdownToDoc(md: string): JSONContent {
   for (const para of paragraphs) {
     const lines = para.split('\n')
     // Bullet list
-    if (lines.length > 0 && /^[-*]\s+/.test(lines[0])) {
+    if (lines.length > 0 && BULLET_LIST_PATTERN.test(lines[0])) {
       const items = lines
-        .filter((l) => /^[-*]\s+/.test(l))
+        .filter((l) => BULLET_LIST_PATTERN.test(l))
         .map((l) => ({
           type: 'listItem',
-          content: [{ type: 'paragraph', content: parseInlineMarkdown(l.replace(/^[-*]\s+/, '')) }],
+          content: [{ type: 'paragraph', content: parseInlineMarkdown(l.replace(BULLET_LIST_PATTERN, '')) }],
         }))
       if (items.length) blocks.push({ type: 'bulletList', content: items })
       continue
