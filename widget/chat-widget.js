@@ -1512,6 +1512,13 @@
       // Clear deferred-close flag (rating popup handles navigation).
       clearTimeout(_resolveRatingTimeout);
       _awaitingRatingAfterResolve = false;
+      // Immediately transition the input to read-only so the visitor can no
+      // longer type into a resolved conversation while the overlay is visible.
+      isReadOnlyThread = true;
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      const _rpInputCont = $id('chatassist-input-container');
+      if (_rpInputCont) _rpInputCont.style.display = 'none';
       // ratingTriggeredByAgentResolve is already set; showRatingOverlay is idempotent.
       showRatingOverlay(ratingConversationId);
       return;

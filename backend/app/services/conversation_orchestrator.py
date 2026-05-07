@@ -227,6 +227,63 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
         _waiting_bot_message_scheduled.discard(conversation_id)
 
 
+async def _fallback_resolve_notification(*, conversation_id: int, resolved_name: str) -> None:
+    """Safety-net fired as a background task when the agent resolves a conversation.
+
+    Waits 5 seconds (enough time for any automation to run), then checks whether
+    the automation already delivered a `show_rating_popup` event.  If it did, we
+    do nothing.  If not (no automation configured, or automation flow had no
+    show_rating_popup node), we send the bare minimum needed so the visitor's
+    widget transitions to the closed / read-only state:
+      1. A `conversation_resolved` system notification (triggers the 7-second
+         safety-timeout in the widget that hides the input).
+      2. A `show_rating_popup` message (shows rating overlay immediately).
+
+    Using a fresh DB session is intentional — the orchestrator's session is
+    already closed by the time this coroutine resumes.
+    """
+    await asyncio.sleep(5)
+
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        already_shown = (
+            db.query(Message)
+            .filter_by(conversation_id=conversation_id, event_type="rating_popup_shown")
+            .first()
+        )
+    finally:
+        db.close()
+
+    if already_shown:
+        # Automation handled it — nothing to do.
+        return
+
+    logger.info(
+        "resolve_rating_fallback_triggered",
+        conversation_id=conversation_id,
+    )
+
+    # Send conversation_resolved first so the widget sets ratingTriggeredByAgentResolve
+    # and starts its own safety timeout (hides input after 7 s even if popup is missed).
+    await ChatService.send_to_visitor(
+        conversation_id,
+        {
+            "type": "system",
+            "event_type": "conversation_resolved",
+            "message": f"{resolved_name} has resolved this conversation.",
+            "conversation_id": conversation_id,
+        },
+    )
+    await asyncio.sleep(1)
+    # Send show_rating_popup so the rating overlay appears immediately.
+    await ChatService.send_to_visitor(
+        conversation_id,
+        {"type": "show_rating_popup", "conversation_id": conversation_id},
+    )
+
+
 class ConversationOrchestrator:
     """Coordinates visitor/agent events and enforces chat invariants."""
 
@@ -1163,6 +1220,17 @@ class ConversationOrchestrator:
             log_key="conversation_resolve_automation_failed",
             send_to_visitor=True,
             context={"agent_name": resolved_name},
+        )
+
+        # Safety-net: if no automation delivered show_rating_popup, send it
+        # directly after a short delay.  This guarantees the visitor's widget
+        # always transitions to read-only state (hides input, shows new-chat
+        # button) even when no conversation_resolved automation is configured.
+        asyncio.create_task(
+            _fallback_resolve_notification(
+                conversation_id=conversation_id,
+                resolved_name=resolved_name,
+            )
         )
 
         # Notify dashboards to remove/refresh the closed conversation.
