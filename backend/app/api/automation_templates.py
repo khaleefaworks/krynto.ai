@@ -6,12 +6,22 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.auth import get_current_user
+from app.api.deps import require_admin, require_authenticated_user
 from app.models.user import User
 from app.models.automation_template import AutomationTemplate
 from app.models.automation import Automation
+from app.models.website import Website
+from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
 router = APIRouter(prefix="/automation-templates", tags=["automation-templates"])
+
+
+def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
+    scope = compute_visibility_scope(db, user=user)
+    try:
+        ensure_website_visible(scope, website_id=int(website_id))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Website not assigned")
 
 
 class TemplateResponse(BaseModel):
@@ -54,7 +64,7 @@ class AutomationResponse(BaseModel):
 @router.get("", response_model=List[TemplateResponse])
 def list_templates(
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(require_authenticated_user),
 ):
     return db.query(AutomationTemplate).order_by(AutomationTemplate.id).all()
 
@@ -64,11 +74,15 @@ def use_template(
     template_id: int,
     payload: UseTemplatePayload,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ):
     template = db.query(AutomationTemplate).filter(AutomationTemplate.id == template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
+    website = db.query(Website).filter_by(id=payload.website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    _enforce_website_access(db, website_id=payload.website_id, user=_admin)
 
     import copy
     automation = Automation(

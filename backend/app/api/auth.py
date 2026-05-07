@@ -211,6 +211,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
 
 
 @router.post("/login", response_model=LoginResponse)
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def login(request: Request, login_request: LoginRequest, db: Session = Depends(get_db)):
     """
     User login endpoint with JWT authentication.

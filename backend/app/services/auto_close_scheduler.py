@@ -149,12 +149,7 @@ def _run_auto_resolve_visitor_ended() -> None:
             finally:
                 db2.close()
 
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        loop.run_until_complete(_resolve_all())
+        asyncio.run(_resolve_all())
 
         logger.info("auto_resolve_visitor_ended", resolved=len(resolved_ids))
     except Exception:

@@ -9,7 +9,7 @@ Responsibilities:
 - Enforce conversation state rules
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
@@ -53,7 +53,7 @@ class ConversationService:
         # ended AND that has been active within the cooldown window. Stale or
         # visitor-ended conversations stay OPEN for agent follow-up, but the
         # visitor gets a fresh conversation on their next connect.
-        cutoff = datetime.utcnow() - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
         conversation = (
             self.db.query(Conversation)
             .filter(

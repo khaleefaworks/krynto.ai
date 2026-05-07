@@ -119,6 +119,7 @@ function App() {
 
         const title = String(data?.title || '')
         try {
+          if (!_shouldPlaySound()) return
           // Match the sound to the push type: new-chat vs regular message.
           if (title.toLowerCase().startsWith('new chat')) {
             playNewVisitorNotificationSound()

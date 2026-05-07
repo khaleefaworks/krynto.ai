@@ -431,7 +431,10 @@ export default function VisitorDetailsPanel({
             {formSubmissions.map((sub) => {
               const when = sub.created_at ? formatDistanceToNow(new Date(sub.created_at), { addSuffix: true }) : ''
               const labelMap: Record<string, string> = {}
-              ;(sub.form_fields || []).forEach((f) => { labelMap[f.name] = f.label })
+              ;(sub.form_fields || []).forEach((f) => {
+                const key = f?.name || f?.field_name
+                if (key) labelMap[key] = f?.label || key
+              })
               return (
                 <div key={sub.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
                   <div className="flex items-center justify-between">

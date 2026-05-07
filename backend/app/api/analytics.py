@@ -992,7 +992,7 @@ def export_transcripts(
     rating: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
 ):
-    """Export full conversation transcripts as XLSX with one sheet per conversation."""
+    """Export full conversation transcripts as a flat XLSX table (one row per message)."""
     start_dt, end_dt = _date_range(start, end)
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
 
@@ -1071,6 +1071,17 @@ def export_transcripts(
         for r in db.query(ConversationRating).filter(ConversationRating.conversation_id.in_(conv_ids)).all():
             ratings_map[r.conversation_id] = r.rating
 
+    # Batch load messages by conversation to avoid N+1 queries.
+    messages_map: dict[int, list[Message]] = {}
+    if conv_ids:
+        for msg in (
+            db.query(Message)
+            .filter(Message.conversation_id.in_(conv_ids))
+            .order_by(Message.conversation_id.asc(), Message.created_at.asc(), Message.id.asc())
+            .all()
+        ):
+            messages_map.setdefault(msg.conversation_id, []).append(msg)
+
     # Batch load tags per conversation
     tags_map: dict[int, str] = {}
     if conv_ids:
@@ -1100,12 +1111,7 @@ def export_transcripts(
     ])
 
     for conv in conversations:
-        msgs = (
-            db.query(Message)
-            .filter(Message.conversation_id == conv.id)
-            .order_by(Message.created_at.asc())
-            .all()
-        )
+        msgs = messages_map.get(conv.id, [])
         conv_short = conv.short_id or str(conv.id)
         status = conv.status.value if hasattr(conv.status, "value") else str(conv.status)
         website = websites_map.get(conv.website_id, f"Website {conv.website_id}")

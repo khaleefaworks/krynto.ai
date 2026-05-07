@@ -1,4 +1,7 @@
 """Seed database with initial test data"""
+import os
+import secrets
+
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole
 from app.models.website import Website
@@ -177,15 +180,19 @@ def seed_automation_library(db=None) -> None:
 
 def seed_database():
     db = SessionLocal()
+    admin_email = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com").strip().lower()
+    admin_password = os.getenv("SEED_ADMIN_PASSWORD") or secrets.token_urlsafe(16)
+    agent_email = os.getenv("SEED_AGENT_EMAIL", "agent@example.com").strip().lower()
+    agent_password = os.getenv("SEED_AGENT_PASSWORD") or secrets.token_urlsafe(16)
     
     try:
         # Check if system manager already exists
-        existing_admin = db.query(User).filter_by(email="ragul.k@noveloffice.in").first()
+        existing_admin = db.query(User).filter_by(email=admin_email).first()
         if not existing_admin:
             admin = User(
                 name="Administrator",
-                email="ragul.k@noveloffice.in",
-                password_hash=get_password_hash("$0ft%963$"),
+                email=admin_email,
+                password_hash=get_password_hash(admin_password),
                 role=UserRole.SYSTEM_MANAGER,
                 is_active=True,
                 is_available=True
@@ -198,12 +205,12 @@ def seed_database():
             print(f"ℹ️  Admin already exists: {existing_admin.email} (ID: {existing_admin.id})")
         
         # Check if test agent exists
-        existing_agent = db.query(User).filter_by(email="agent@test.com").first()
+        existing_agent = db.query(User).filter_by(email=agent_email).first()
         if not existing_agent:
             agent = User(
                 name="Test Agent",
-                email="agent@test.com",
-                password_hash=get_password_hash("agent123"),
+                email=agent_email,
+                password_hash=get_password_hash(agent_password),
                 role=UserRole.AGENT,
                 is_active=True,
                 is_available=True
@@ -291,10 +298,7 @@ def seed_database():
         # Seed automation library templates
         print("\n📚 Seeding automation library templates...")
         seed_automation_library(db)
-
-        print("\n📋 Login Credentials:")
-        print("   Admin: ragul.k@noveloffice.in / $0ft%963$")
-        print("   Agent: agent@test.com / agent123")
+        print("\nℹ️  Seed users are ready (passwords are not printed).")
 
     except Exception as e:
         print(f"❌ Error seeding database: {e}")

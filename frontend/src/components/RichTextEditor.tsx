@@ -146,6 +146,17 @@ function markdownToDoc(md: string): JSONContent {
   const paragraphs = md.split(/\n\n+/)
   for (const para of paragraphs) {
     const lines = para.split('\n')
+    // Bullet list
+    if (lines.length > 0 && /^[-*]\s+/.test(lines[0])) {
+      const items = lines
+        .filter((l) => /^[-*]\s+/.test(l))
+        .map((l) => ({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: parseInlineMarkdown(l.replace(/^[-*]\s+/, '')) }],
+        }))
+      if (items.length) blocks.push({ type: 'bulletList', content: items })
+      continue
+    }
     // Ordered list
     if (lines.length > 0 && /^\d+\.\s+/.test(lines[0])) {
       const items = lines

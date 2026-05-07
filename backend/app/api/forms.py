@@ -12,6 +12,7 @@ from app.api.deps import require_admin
 from app.models.user import User
 from app.repos import forms as forms_repo
 from app.models.website import Website
+from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
 router = APIRouter(prefix="/websites/{website_id}/forms", tags=["forms"])
 
@@ -63,6 +64,72 @@ def _require_website(website_id: int, db: Session) -> Website:
     return website
 
 
+def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
+    scope = compute_visibility_scope(db, user=user)
+    try:
+        ensure_website_visible(scope, website_id=int(website_id))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Website not assigned")
+
+
+MAX_SUBMISSION_FIELDS = 50
+MAX_SUBMISSION_FIELD_NAME_CHARS = 100
+MAX_SUBMISSION_FIELD_VALUE_CHARS = 2000
+MAX_SUBMISSION_TOTAL_CHARS = 20000
+
+
+def _normalize_form_field_defs(form_fields: list[Any] | None) -> dict[str, dict[str, Any]]:
+    allowed: dict[str, dict[str, Any]] = {}
+    for field in form_fields or []:
+        if not isinstance(field, dict):
+            continue
+        key = str(field.get("name") or field.get("field_name") or "").strip()
+        if not key:
+            continue
+        allowed[key] = {"required": bool(field.get("required"))}
+    return allowed
+
+
+def _validate_submission_data(data: dict[str, Any], *, form_fields: list[Any] | None) -> dict[str, Any]:
+    if len(data) > MAX_SUBMISSION_FIELDS:
+        raise HTTPException(status_code=422, detail="Too many submitted fields")
+
+    allowed_fields = _normalize_form_field_defs(form_fields)
+    unknown_keys = [k for k in data.keys() if k not in allowed_fields]
+    if unknown_keys:
+        raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(unknown_keys)}")
+
+    normalized: dict[str, Any] = {}
+    total_chars = 0
+    for key, value in data.items():
+        if len(key) > MAX_SUBMISSION_FIELD_NAME_CHARS:
+            raise HTTPException(status_code=422, detail=f"Field name too long: {key[:32]}")
+        if isinstance(value, (dict, list, tuple, set)):
+            raise HTTPException(status_code=422, detail=f"Invalid value type for field: {key}")
+        if value is not None and not isinstance(value, (str, int, float, bool)):
+            raise HTTPException(status_code=422, detail=f"Invalid value type for field: {key}")
+        value_text = "" if value is None else str(value)
+        if len(value_text) > MAX_SUBMISSION_FIELD_VALUE_CHARS:
+            raise HTTPException(status_code=422, detail=f"Field value too long: {key}")
+        total_chars += len(key) + len(value_text)
+        normalized[key] = value
+
+    if total_chars > MAX_SUBMISSION_TOTAL_CHARS:
+        raise HTTPException(status_code=422, detail="Submission payload too large")
+
+    missing_required: list[str] = []
+    for key, field in allowed_fields.items():
+        if not field.get("required"):
+            continue
+        value = normalized.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing_required.append(key)
+    if missing_required:
+        raise HTTPException(status_code=422, detail=f"Missing required fields: {', '.join(missing_required)}")
+
+    return normalized
+
+
 def _form_to_dict(form):
     return {
         "id": form.id,
@@ -100,6 +167,7 @@ def list_forms(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     forms = forms_repo.get_forms(db, website_id)
     return [_form_to_dict(f) for f in forms]
 
@@ -112,6 +180,7 @@ def create_form(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     # Enforce unique slug per website
     if forms_repo.get_form_by_slug(db, website_id, body.slug):
         raise HTTPException(status_code=409, detail="A form with this slug already exists for this website")
@@ -135,6 +204,7 @@ def get_form(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -150,6 +220,7 @@ def update_form(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -178,6 +249,7 @@ def delete_form(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id:
         raise HTTPException(status_code=404, detail="Form not found")
@@ -199,10 +271,11 @@ def submit_form(
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id or not form.enabled:
         raise HTTPException(status_code=404, detail="Form not found")
+    validated_data = _validate_submission_data(body.data, form_fields=form.fields)
     sub = forms_repo.create_submission(
         db,
         form_id=form_id,
-        data=body.data,
+        data=validated_data,
         conversation_id=body.conversation_id,
         session_id=body.session_id,
     )
@@ -219,6 +292,7 @@ def list_submissions(
     current_user: User = Depends(require_admin),
 ):
     _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id:
         raise HTTPException(status_code=404, detail="Form not found")

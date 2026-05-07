@@ -340,7 +340,10 @@ export default function CustomersContacts() {
                                             <div className="px-4 pb-4 space-y-3">
                                                 {details.form_submissions.map((sub: any) => {
                                                     const labelMap: Record<string, string> = {}
-                                                    ;(sub.form_fields || []).forEach((f: any) => { labelMap[f.name] = f.label })
+                                                    ;(sub.form_fields || []).forEach((f: any) => {
+                                                        const key = f?.name || f?.field_name
+                                                        if (key) labelMap[key] = f?.label || key
+                                                    })
                                                     return (
                                                         <div key={sub.id} className="rounded border border-gray-100 dark:border-gray-700 p-3 space-y-1">
                                                             <div className="flex items-center justify-between">

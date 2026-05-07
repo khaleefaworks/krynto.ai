@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
@@ -22,7 +22,7 @@ def get_conversation_by_short_id(db: Session, short_id: str) -> Conversation | N
 
 
 def get_open_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
-    cutoff = datetime.utcnow() - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
     return (
         db.query(Conversation)
         .filter(
