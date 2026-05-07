@@ -353,7 +353,7 @@ export default function ConversationsView() {
     const [filterAgentId, setFilterAgentId] = useState<number | null>(null)
     const [filterTeamId, setFilterTeamId] = useState<number | null>(null)
     const [filterTagIds, setFilterTagIds] = useState<number[]>([])
-    const [agentsList, setAgentsList] = useState<{ id: number; name: string; email: string }[]>([])
+    const [agentsList, setAgentsList] = useState<{ id: number; name: string; email: string; avatar_url?: string | null }[]>([])
 
     // Chat state
     const [selectedChat, setSelectedChat] = useState<number | null>(null)
@@ -474,7 +474,7 @@ export default function ConversationsView() {
             ; (async () => {
                 try {
                     const data = await apiRequest<any[]>('/users')
-                    if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email })) : [])
+                    if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email, avatar_url: u.avatar_url ?? null })) : [])
                 } catch {
                     if (!cancelled) setAgentsList([])
                 }
@@ -2848,13 +2848,13 @@ export default function ConversationsView() {
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
                                                             <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                                                {vc.title || `Conversation #${vc.id}`}
+                                                                {vc.title || (vc.short_id ? `Conversation ${vc.short_id}` : `Conversation #${vc.id}`)}
                                                             </p>
-                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${(vc.status || '').toLowerCase() === 'open'
                                                                 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                                                                 : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                                                                 }`}>
-                                                                {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                                {(vc.status || '').toLowerCase() === 'open' ? 'Open' : 'Resolved'}
                                                             </span>
                                                         </div>
                                                         {vc.created_at && (
@@ -2965,13 +2965,13 @@ export default function ConversationsView() {
                                             >
                                                 <div className="flex items-center justify-between gap-2">
                                                     <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                                        {vc.title || `Conversation #${vc.id}`}
+                                                        {vc.title || (vc.short_id ? `Conversation ${vc.short_id}` : `Conversation #${vc.id}`)}
                                                     </p>
-                                                    <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                    <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${(vc.status || '').toLowerCase() === 'open'
                                                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                                                         : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                                                         }`}>
-                                                        {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                        {(vc.status || '').toLowerCase() === 'open' ? 'Open' : 'Resolved'}
                                                     </span>
                                                 </div>
                                                 {vc.created_at && (

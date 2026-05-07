@@ -651,6 +651,7 @@ async def get_widget_conversations(
         return {
             "id": conv.id,
             "short_id": conv.short_id,
+            "title": getattr(conv, "title", None),
             "status": conv.status.value,
             "last_message_preview": preview,
             "last_message_at": last_at,

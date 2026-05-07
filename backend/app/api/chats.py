@@ -22,6 +22,21 @@ from app.services.visibility import compute_visibility_scope
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
+def _utc_iso(dt) -> str | None:
+    """Serialize a datetime to ISO-8601 string, always appending '+00:00' for
+    naive (timezone-unaware) datetimes so browsers correctly interpret them as UTC.
+    SQLAlchemy DateTime columns without timezone=True return naive datetimes that
+    are stored as UTC in PostgreSQL. Without the suffix, JS Date() parses them as
+    local time, producing wrong 'last seen' / 'last message' timestamps."""
+    if dt is None:
+        return None
+    s = dt.isoformat()
+    # If no timezone info already present, mark as UTC
+    if '+' not in s[10:] and not s.endswith('Z') and not s.endswith('z'):
+        s += '+00:00'
+    return s
+
+
 def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> None:
     scope = compute_visibility_scope(db, user=current_user)
 
@@ -200,7 +215,7 @@ def get_active_chats(
                 "visitor_ip": getattr(conv, "visitor_ip", None),
                 "visitor_avatar_color": getattr(conv, "visitor_avatar_color", None),
                 "visit_count": int(conv.visit_count or 0) if hasattr(conv, "visit_count") else None,
-                "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
+                "last_seen_at": _utc_iso(getattr(conv, "last_seen_at", None)),
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
                 "assigned_agent_id": conv.assigned_agent_id,
@@ -217,8 +232,8 @@ def get_active_chats(
                 )
                 else 0,
                 "last_message": last_message_val,
-                "last_message_at": last_message_at.isoformat() if last_message_at else None,
-                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "last_message_at": _utc_iso(last_message_at),
+                "created_at": _utc_iso(conv.created_at),
                 "tags": _safe_serialize_conversation_tags(conv),
             }
         )
@@ -260,8 +275,8 @@ def get_chat_summary(
         "visitor_ip": getattr(conv, "visitor_ip", None),
         "visitor_avatar_color": getattr(conv, "visitor_avatar_color", None),
         "visit_count": int(getattr(conv, "visit_count", 0) or 0) if hasattr(conv, "visit_count") else None,
-        "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
-        "last_visitor_message_at": conv.last_visitor_message_at.isoformat() if getattr(conv, "last_visitor_message_at", None) else None,
+        "last_seen_at": _utc_iso(getattr(conv, "last_seen_at", None)),
+        "last_visitor_message_at": _utc_iso(getattr(conv, "last_visitor_message_at", None)),
         "is_online": int(conv.id) in ChatService.active_visitors,
         "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
@@ -273,8 +288,8 @@ def get_chat_summary(
         "unread_count": 0,
         "last_message": None,
         "last_message_at": None,
-        "created_at": conv.created_at.isoformat() if conv.created_at else None,
-        "closed_at": conv.updated_at.isoformat() if getattr(conv, "updated_at", None) else None,
+        "created_at": _utc_iso(conv.created_at),
+        "closed_at": _utc_iso(getattr(conv, "updated_at", None)),
         "tags": _safe_serialize_conversation_tags(conv),
     }
 
@@ -351,7 +366,7 @@ def get_resolved_conversations(
                 "visitor_ip": getattr(conv, "visitor_ip", None),
                 "visitor_avatar_color": getattr(conv, "visitor_avatar_color", None),
                 "visit_count": int(conv.visit_count or 0) if hasattr(conv, "visit_count") else None,
-                "last_seen_at": conv.last_seen_at.isoformat() if getattr(conv, "last_seen_at", None) else None,
+                "last_seen_at": _utc_iso(getattr(conv, "last_seen_at", None)),
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
                 "closed_by": getattr(conv, "closed_by", None),
@@ -359,9 +374,9 @@ def get_resolved_conversations(
                 "message_count": int(message_count or 0),
                 "unread_count": 0,
                 "last_message": last_message_val,
-                "last_message_at": last_message_at.isoformat() if last_message_at else None,
-                "created_at": conv.created_at.isoformat() if conv.created_at else None,
-                "closed_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                "last_message_at": _utc_iso(last_message_at),
+                "created_at": _utc_iso(conv.created_at),
+                "closed_at": _utc_iso(getattr(conv, "updated_at", None)),
                 "tags": _safe_serialize_conversation_tags(conv),
             }
         )
@@ -448,8 +463,8 @@ def get_visitor_history(
                 "status": c.status.value if hasattr(c.status, "value") else c.status,
                 "title": getattr(c, "title", None),
                 "closed_by": getattr(c, "closed_by", None),
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-                "last_visitor_message_at": c.last_visitor_message_at.isoformat() if getattr(c, "last_visitor_message_at", None) else None,
+                "created_at": _utc_iso(c.created_at),
+                "last_visitor_message_at": _utc_iso(getattr(c, "last_visitor_message_at", None)),
             }
         )
 
@@ -531,7 +546,7 @@ def get_chat_read_state(
 
     return {
         "conversation_id": conv.id,
-        "last_read_at": last_read_at.isoformat() if last_read_at else None,
+        "last_read_at": _utc_iso(last_read_at),
         "first_unread_message_id": first_unread_message_id,
     }
 
@@ -559,6 +574,6 @@ def get_conversation_form_submissions(
             "form_name": form.name if form else None,
             "form_fields": form.fields if form else [],
             "data": sub.data,
-            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+            "created_at": _utc_iso(sub.created_at),
         })
     return result

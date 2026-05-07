@@ -295,26 +295,36 @@ function App() {
             void 0  // in-app toasts removed; desktop push + sounds handle notifications
           }
         } else if (data.type === 'visitor_message') {
-          // Delay 200 ms: if a new_chat event arrives for the same conversation
-          // within that window it will cancel this timer and play the correct
-          // "New chat" sound. For all subsequent messages the timer simply fires
-          // and plays the message sound normally.
-          // If a timer is already pending for this conversation (rapid messages),
-          // do NOT skip — cancel the old one and start a fresh 200 ms window.
-          if (conversationId) {
-            const existing = _pendingMsgSoundTimers.get(conversationId)
-            if (existing !== undefined) clearTimeout(existing)
-            const timer = setTimeout(() => {
-              _pendingMsgSoundTimers.delete(conversationId)
+          // If the backend broadcast includes _assigned_agent_id, the conversation
+          // is assigned to a specific agent. Non-assigned agents are spectating
+          // only — skip the notification sound so they aren't confused by alerts
+          // for conversations that belong to a colleague.
+          const assignedAgentId = (data as any)?._assigned_agent_id
+          const currentUserId = useAppStore.getState().user?.id
+          const isSpectating = assignedAgentId != null && assignedAgentId !== currentUserId
+
+          if (!isSpectating) {
+            // Delay 200 ms: if a new_chat event arrives for the same conversation
+            // within that window it will cancel this timer and play the correct
+            // "New chat" sound. For all subsequent messages the timer simply fires
+            // and plays the message sound normally.
+            // If a timer is already pending for this conversation (rapid messages),
+            // do NOT skip — cancel the old one and start a fresh 200 ms window.
+            if (conversationId) {
+              const existing = _pendingMsgSoundTimers.get(conversationId)
+              if (existing !== undefined) clearTimeout(existing)
+              const timer = setTimeout(() => {
+                _pendingMsgSoundTimers.delete(conversationId)
+                if (_shouldPlaySound()) {
+                  try { playMessageNotificationSound() } catch { }
+                }
+              }, 200)
+              _pendingMsgSoundTimers.set(conversationId, timer)
+            } else {
+              // No conversation id — play immediately (fallback, should be rare).
               if (_shouldPlaySound()) {
                 try { playMessageNotificationSound() } catch { }
               }
-            }, 200)
-            _pendingMsgSoundTimers.set(conversationId, timer)
-          } else {
-            // No conversation id — play immediately (fallback, should be rare).
-            if (_shouldPlaySound()) {
-              try { playMessageNotificationSound() } catch { }
             }
           }
 

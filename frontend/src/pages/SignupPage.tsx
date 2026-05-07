@@ -37,9 +37,11 @@ export default function SignupPage() {
     // Track whether the user arrived from a login redirect (vs organic signup)
     const cameFromLogin = locationState?.step === 'verify'
 
-    // OTP step state — can be pre-seeded by login redirect
+    // OTP step state — can be pre-seeded by login redirect.
+    // When coming from login (unverified account), skip verify_pending and go
+    // directly to the OTP input so the user doesn't have to click "Send OTP" again.
     const [step, setStep] = useState<'signup' | 'verify_pending' | 'verify'>(
-        cameFromLogin ? 'verify_pending' : 'signup'
+        cameFromLogin ? 'verify' : 'signup'
     )
     const [pendingEmail, setPendingEmail] = useState(locationState?.email || '')
     const [otp, setOtp] = useState('')
@@ -54,9 +56,19 @@ export default function SignupPage() {
     })
 
     // When landing on this page from a login redirect (email not yet verified),
-    // reset the form so react-hook-form's internal state is clean.
+    // reset the form so react-hook-form's internal state is clean,
+    // and auto-send the OTP so the user can immediately enter the code.
     useEffect(() => {
-        if (locationState?.step !== 'verify') reset()
+        if (locationState?.step !== 'verify') { reset(); return }
+        reset()
+        // Auto-send OTP for login-redirect flow (user already registered, just not verified yet)
+        if (locationState?.email) {
+            fetch(`${API_BASE}/auth/resend-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: locationState.email }),
+            }).catch(() => { /* best-effort */ })
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
