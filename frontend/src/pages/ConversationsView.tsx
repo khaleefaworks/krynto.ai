@@ -47,6 +47,7 @@ import {
     SlidersHorizontal,
     Globe,
     UserRound,
+    Calendar,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -353,6 +354,8 @@ export default function ConversationsView() {
     const [filterAgentId, setFilterAgentId] = useState<number | null>(null)
     const [filterTeamId, setFilterTeamId] = useState<number | null>(null)
     const [filterTagIds, setFilterTagIds] = useState<number[]>([])
+    const [filterDateFrom, setFilterDateFrom] = useState<string>('')
+    const [filterDateTo, setFilterDateTo] = useState<string>('')
     const [agentsList, setAgentsList] = useState<{ id: number; name: string; email: string; avatar_url?: string | null }[]>([])
 
     // Chat state
@@ -1720,6 +1723,13 @@ export default function ConversationsView() {
             const chatTagIds = ((chat as any).tags || []).map((t: any) => Number(t?.id))
             if (!filterTagIds.every(id => chatTagIds.includes(id))) return false
         }
+        if (filterDateFrom || filterDateTo) {
+            const ts = new Date((chat as any).created_at || '').getTime()
+            if (Number.isFinite(ts)) {
+                if (filterDateFrom && ts < new Date(filterDateFrom).getTime()) return false
+                if (filterDateTo && ts > new Date(filterDateTo).getTime()) return false
+            }
+        }
 
         // Category filter
         switch (activeFilter) {
@@ -1736,7 +1746,7 @@ export default function ConversationsView() {
         }
     })
 
-    const hasAdvancedFilters = !!(filterWebsiteId || filterAgentId || filterTeamId || filterTagIds.length > 0)
+    const hasAdvancedFilters = !!(filterWebsiteId || filterAgentId || filterTeamId || filterTagIds.length > 0 || filterDateFrom || filterDateTo)
 
     // Distinct website options from loaded chats (for filter dropdown)
     const websiteOptions = useMemo(() => {
@@ -2129,6 +2139,32 @@ export default function ConversationsView() {
                                 </div>
                             )}
                             {/* Clear all */}
+                            {/* Date range */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <Calendar className="h-3 w-3" /> Date range (created)
+                                </label>
+                                <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] text-gray-400 w-6 flex-shrink-0">From</span>
+                                        <input
+                                            type="datetime-local"
+                                            value={filterDateFrom}
+                                            onChange={e => setFilterDateFrom(e.target.value)}
+                                            className="flex-1 min-w-0 text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] text-gray-400 w-6 flex-shrink-0">To</span>
+                                        <input
+                                            type="datetime-local"
+                                            value={filterDateTo}
+                                            onChange={e => setFilterDateTo(e.target.value)}
+                                            className="flex-1 min-w-0 text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
                             {hasAdvancedFilters && (
                                 <button
                                     onClick={() => {
@@ -2136,6 +2172,8 @@ export default function ConversationsView() {
                                         setFilterAgentId(null)
                                         setFilterTeamId(null)
                                         setFilterTagIds([])
+                                        setFilterDateFrom('')
+                                        setFilterDateTo('')
                                     }}
                                     className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400"
                                 >
