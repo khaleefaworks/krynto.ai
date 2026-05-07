@@ -964,9 +964,22 @@
     viewMode = 'start';
     isReadOnlyThread = false;
     ratingTriggeredByVisitorEnd = false;
+    ratingTriggeredByAgentResolve = false;
+    _awaitingRatingAfterResolve = false;
+    clearTimeout(_resolveRatingTimeout);
+    _resolveRatingTimeout = null;
+    // Reset per-conversation rating state so the overlay can show for a new conversation.
+    hasRatedSession = false;
+    ratingConversationId = null;
     CONFIG.conversationId = 0;
     _contactVerifiedThisConversation = false;
     pendingBotButtonClick = null;
+    // Clear the welcome-popup dismissed key so the popup can appear fresh for
+    // the new conversation (it was suppressed for the just-closed conversation).
+    try {
+      const _wpk = _welcomePopupDismissedKey();
+      if (_wpk) localStorage.removeItem(_wpk);
+    } catch (e) { }
 
     // Ensure any existing WS is closed before connecting fresh
     _closeWsCleanly();
@@ -1512,6 +1525,12 @@
       // Clear deferred-close flag (rating popup handles navigation).
       clearTimeout(_resolveRatingTimeout);
       _awaitingRatingAfterResolve = false;
+      // Ensure hideRatingOverlay() will call afterConversationClose() even when
+      // the automation sent show_rating_popup without a prior conversation_resolved
+      // system event (which normally sets ratingTriggeredByAgentResolve).
+      if (!ratingTriggeredByVisitorEnd && !ratingTriggeredByAgentResolve) {
+        ratingTriggeredByAgentResolve = true;
+      }
       // Immediately transition the input to read-only so the visitor can no
       // longer type into a resolved conversation while the overlay is visible.
       isReadOnlyThread = true;
@@ -1519,7 +1538,6 @@
       _inputRevealTimer = null;
       const _rpInputCont = $id('chatassist-input-container');
       if (_rpInputCont) _rpInputCont.style.display = 'none';
-      // ratingTriggeredByAgentResolve is already set; showRatingOverlay is idempotent.
       showRatingOverlay(ratingConversationId);
       return;
     }

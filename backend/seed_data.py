@@ -100,7 +100,7 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
             {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
-            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 1}, "position": {"x": 0, "y": 250}},
             {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
         ],
         "edges": [
@@ -116,7 +116,7 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "trigger": "visitor_rated_conversation",
         "category": "auto_message",
         "nodes": [
-            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
             {"id": "n1", "type": "send_bot_message", "config": {"message": "Visitor rated this conversation: {rating_label}", "event_type": "visitor_rating_note", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
