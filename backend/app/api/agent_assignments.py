@@ -35,11 +35,18 @@ def assign_agent_to_website(
     user = db.query(User).filter(User.id == agent_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Verify website exists
     website = db.query(Website).filter(Website.id == website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
+
+    # Enforce org boundary — non-superadmin admins can only assign within their own org
+    if not admin.is_superadmin():
+        if user.organization_id != admin.organization_id:
+            raise HTTPException(status_code=403, detail="Agent does not belong to your organisation")
+        if website.organization_id != admin.organization_id:
+            raise HTTPException(status_code=403, detail="Website does not belong to your organisation")
     
     # Check if assignment already exists
     existing = (
@@ -93,7 +100,16 @@ def unassign_agent_from_website(
     """
     agent_id = payload["agent_id"]
     website_id = payload["website_id"]
-    
+
+    # Enforce org boundary before any mutation
+    if not admin.is_superadmin():
+        user = db.query(User).filter(User.id == agent_id).first()
+        website = db.query(Website).filter(Website.id == website_id).first()
+        if user and user.organization_id != admin.organization_id:
+            raise HTTPException(status_code=403, detail="Agent does not belong to your organisation")
+        if website and website.organization_id != admin.organization_id:
+            raise HTTPException(status_code=403, detail="Website does not belong to your organisation")
+
     assignment = (
         db.query(AgentWebsiteAssignment)
         .filter(
@@ -102,7 +118,7 @@ def unassign_agent_from_website(
         )
         .first()
     )
-    
+
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
 

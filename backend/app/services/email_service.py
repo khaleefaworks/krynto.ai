@@ -107,6 +107,40 @@ class EmailService:
             logger.exception("welcome_email_failed", to=to_email)
             return False
 
+    def send_welcome_verify(self, to_email: str, name: str, org_name: str, verify_url: str) -> bool:
+        """Send a welcome email with a verification link to a new org owner. Returns True on success."""
+        try:
+            r = self._client()
+            from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
+            r.Emails.send({
+                "from": from_email,
+                "to": [self._to(to_email)],
+                "subject": "Verify your email — AI ChatAssist",
+                "html": _welcome_verify_html(name=name, org_name=org_name, verify_url=verify_url),
+            })
+            logger.info("welcome_verify_email_sent", to=to_email, override=self._to(to_email) != to_email)
+            return True
+        except Exception:
+            logger.exception("welcome_verify_email_failed", to=to_email)
+            return False
+
+    def send_invite_verify(self, to_email: str, name: str, org_name: str, verify_url: str) -> bool:
+        """Send an invitation email with a verification link to an admin-created user. Returns True on success."""
+        try:
+            r = self._client()
+            from_email = getattr(settings, "FROM_EMAIL", "noreply@example.com")
+            r.Emails.send({
+                "from": from_email,
+                "to": [self._to(to_email)],
+                "subject": f"You've been invited to {org_name} — AI ChatAssist",
+                "html": _invite_verify_html(name=name, org_name=org_name, verify_url=verify_url),
+            })
+            logger.info("invite_verify_email_sent", to=to_email, override=self._to(to_email) != to_email)
+            return True
+        except Exception:
+            logger.exception("invite_verify_email_failed", to=to_email)
+            return False
+
     def send_user_invite(self, to_email: str, name: str, org_name: str, otp: str) -> bool:
         """Send an invite + OTP email to a newly admin-created user. Returns True on success."""
         try:
@@ -212,6 +246,66 @@ def _otp_html(*, name: str, otp: str) -> str:
   </div>
   <p style="color:#6b7280;font-size:13px">
     If you did not sign up for AI ChatAssist, please ignore this email.
+  </p>
+  <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
+</body>
+</html>
+"""
+
+
+def _welcome_verify_html(*, name: str, org_name: str, verify_url: str) -> str:
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:480px;margin:40px auto;color:#1a1a1a">
+  <h2>Welcome to AI ChatAssist!</h2>
+  <p>Hi {name},</p>
+  <p>Thanks for signing up. Your organisation <strong>{org_name}</strong> is almost ready —
+     just verify your email address to get started.</p>
+  <p style="margin:32px 0">
+    <a href="{verify_url}"
+       style="background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;
+              text-decoration:none;font-weight:600;display:inline-block">
+      Verify my email
+    </a>
+  </p>
+  <p style="color:#6b7280;font-size:13px">
+    This link expires in <strong>2 hours</strong>. If you didn't sign up, you can safely ignore this email.
+  </p>
+  <p style="color:#6b7280;font-size:13px">
+    Or copy this link into your browser:<br>
+    <a href="{verify_url}" style="color:#2563eb">{verify_url}</a>
+  </p>
+  <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
+</body>
+</html>
+"""
+
+
+def _invite_verify_html(*, name: str, org_name: str, verify_url: str) -> str:
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:480px;margin:40px auto;color:#1a1a1a">
+  <h2>You've been invited to {org_name}</h2>
+  <p>Hi {name},</p>
+  <p>An administrator has created an account for you on <strong>AI ChatAssist</strong>
+     under the organisation <strong>{org_name}</strong>.</p>
+  <p>Click the button below to verify your email address and activate your account.</p>
+  <p style="margin:32px 0">
+    <a href="{verify_url}"
+       style="background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;
+              text-decoration:none;font-weight:600;display:inline-block">
+      Verify my email
+    </a>
+  </p>
+  <p style="color:#6b7280;font-size:13px">
+    This link expires in <strong>48 hours</strong>. If you weren't expecting this invitation,
+    you can safely ignore this email.
+  </p>
+  <p style="color:#6b7280;font-size:13px">
+    Or copy this link into your browser:<br>
+    <a href="{verify_url}" style="color:#2563eb">{verify_url}</a>
   </p>
   <p style="color:#6b7280;font-size:13px">— The AI ChatAssist team</p>
 </body>

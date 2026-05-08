@@ -14,6 +14,7 @@ from app.models.user import User, UserRole
 from app.models.organization import Organization
 from app.models.password_reset_token import PasswordResetToken
 from app.models.email_otp import EmailOTP
+from app.models.verification_token import VerificationToken
 from app.models.system_settings import SystemSettings
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
@@ -316,14 +317,34 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
                 detail="Your organization has been deactivated. Please contact your platform administrator."
             )
 
-    # Block login if email not yet verified (OTP flow)
+    # Block login if email not yet verified — generate a fresh verification link and resend it
     if not user.is_email_verified:
+        try:
+            raw_token = _create_verification_token(db, user.id, ttl_hours=24)
+            db.commit()
+            from app.services.email_service import EmailService
+            from app.models.organization import Organization as OrgModel
+            frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+            verify_url = f"{frontend_url}/verify-email?token={raw_token}"
+            org = db.query(OrgModel).filter_by(id=user.organization_id).first()
+            org_name = org.name if org else "your organisation"
+            if user.role == UserRole.OWNER:
+                EmailService().send_welcome_verify(
+                    to_email=user.email, name=user.name, org_name=org_name, verify_url=verify_url
+                )
+            else:
+                EmailService().send_invite_verify(
+                    to_email=user.email, name=user.name, org_name=org_name, verify_url=verify_url
+                )
+        except Exception:
+            pass
+
         return JSONResponse(
             status_code=200,
             content={
                 "needs_verification": True,
                 "email": user.email,
-                "message": "Please verify your email address before logging in.",
+                "message": "Your email is not yet verified. We've sent a new verification link to your inbox.",
             }
         )
 
@@ -396,25 +417,23 @@ async def signup(request: Request, signup_request: SignupRequest, db: Session = 
 
         org.owner_id = user.id
 
-        # Generate and store OTP
-        raw_otp = f"{random.randint(0, 999999):06d}"
-        otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
-        otp_record = EmailOTP(
-            user_id=user.id,
-            otp_hash=otp_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
-        )
-        db.add(otp_record)
+        # Generate a VerificationToken (2-hour TTL) — OTP is NOT sent yet.
+        # The user must click the link in the welcome email to reach the
+        # "Send Verification Code" page, then explicitly trigger the OTP.
+        raw_token = _create_verification_token(db, user.id, ttl_hours=2)
         db.commit()
         db.refresh(user)
 
-        # Send OTP email (best-effort)
+        # Send welcome email with verification link (best-effort)
         try:
             from app.services.email_service import EmailService
-            EmailService().send_otp_verification(
+            frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+            verify_url = f"{frontend_url}/verify-email?token={raw_token}"
+            EmailService().send_welcome_verify(
                 to_email=user.email,
                 name=user.name,
-                otp=raw_otp,
+                org_name=org.name,
+                verify_url=verify_url,
             )
         except Exception:
             pass
@@ -426,7 +445,7 @@ async def signup(request: Request, signup_request: SignupRequest, db: Session = 
     return {
         "needs_verification": True,
         "email": user.email,
-        "message": "Account created. Check your email for the verification code.",
+        "message": "Account created. Check your email for a verification link.",
     }
 
 
@@ -528,6 +547,135 @@ async def resend_otp(request: Request, body: ResendOTPRequest, db: Session = Dep
             pass
 
     return {"message": "If that email is pending verification, a new code has been sent."}
+
+
+def _create_verification_token(db: Session, user_id: int, ttl_hours: int) -> str:
+    """Generate a VerificationToken, persist it, and return the raw (unhashed) token."""
+    # Invalidate any existing unused tokens for this user
+    db.query(VerificationToken).filter(
+        VerificationToken.user_id == user_id,
+        VerificationToken.used_at.is_(None),
+    ).delete(synchronize_session=False)
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    vt = VerificationToken(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
+    )
+    db.add(vt)
+    db.flush()  # persist without committing so callers can batch with other writes
+    return raw_token
+
+
+@router.get("/verify-email")
+async def get_verify_email(token: str, db: Session = Depends(get_db)):
+    """
+    Validate a magic-link verification token and return the associated user's
+    email and name for display on the frontend.
+
+    Does NOT consume the token — user can reload the page safely.
+    Returns HTTP 200 in all cases; check the 'valid' field.
+    """
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    vt = db.query(VerificationToken).filter_by(token_hash=token_hash).first()
+
+    if not vt:
+        return {"valid": False, "message": "This verification link is invalid."}
+
+    if vt.used_at is not None:
+        return {"valid": False, "message": "This verification link has already been used."}
+
+    now = datetime.now(timezone.utc)
+    expires = vt.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        return {"valid": False, "message": "This verification link has expired."}
+
+    user = db.query(User).filter_by(id=vt.user_id, is_deleted=False).first()
+    if not user or not user.is_active:
+        return {"valid": False, "message": "This verification link is invalid."}
+
+    if user.is_email_verified:
+        return {"valid": False, "message": "Your email is already verified. Please log in."}
+
+    return {"valid": True, "email": user.email, "name": user.name}
+
+
+class SendOTPRequest(BaseModel):
+    token: str
+
+
+@router.post("/send-otp")
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def send_otp(request: Request, body: SendOTPRequest, db: Session = Depends(get_db)):
+    """
+    Consume a VerificationToken, generate a fresh OTP, and send it to the user's email.
+
+    This is the second step of the magic-link verification flow:
+    1. User clicks /verify-email?token=xxx link in email
+    2. Frontend calls GET /auth/verify-email to display the user's email
+    3. User clicks "Send verification code" → this endpoint is called
+    4. User enters the OTP → POST /auth/verify-otp issues a JWT
+
+    Returns { email } so the frontend can pre-fill the OTP form.
+    """
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    vt = db.query(VerificationToken).filter_by(token_hash=token_hash).first()
+
+    now = datetime.now(timezone.utc)
+
+    if not vt:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
+    if vt.used_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This verification link has already been used")
+
+    expires = vt.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This verification link has expired")
+
+    user = db.query(User).filter_by(id=vt.user_id, is_deleted=False).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
+    if user.is_email_verified:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already verified — please log in")
+
+    # Mark token as used
+    vt.used_at = now
+
+    # Invalidate previous unused OTPs and generate a fresh one
+    db.query(EmailOTP).filter(
+        EmailOTP.user_id == user.id,
+        EmailOTP.used_at.is_(None),
+    ).delete(synchronize_session=False)
+
+    raw_otp = f"{random.randint(0, 999999):06d}"
+    otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+    otp_record = EmailOTP(
+        user_id=user.id,
+        otp_hash=otp_hash,
+        expires_at=now + timedelta(minutes=15),
+    )
+    db.add(otp_record)
+    db.commit()
+
+    try:
+        from app.services.email_service import EmailService
+        EmailService().send_otp_verification(
+            to_email=user.email,
+            name=user.name,
+            otp=raw_otp,
+        )
+    except Exception:
+        pass
+
+    return {"email": user.email}
 
 
 @router.post("/forgot-password")
@@ -652,15 +800,8 @@ async def register(
             existing_user.password_hash = get_password_hash(register_request.password)
             existing_user.role = register_request.role
 
-            # Fresh OTP for re-invited user
-            raw_otp = f"{random.randint(0, 999999):06d}"
-            otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
-            otp_record = EmailOTP(
-                user_id=existing_user.id,
-                otp_hash=otp_hash,
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
-            )
-            db.add(otp_record)
+            # Fresh VerificationToken for re-invited user (48-hour TTL)
+            raw_token = _create_verification_token(db, existing_user.id, ttl_hours=48)
             db.commit()
             db.refresh(existing_user)
 
@@ -669,18 +810,20 @@ async def register(
                 from app.models.organization import Organization as OrgModel
                 org = db.query(OrgModel).filter_by(id=existing_user.organization_id).first()
                 org_name = org.name if org else "your organisation"
-                EmailService().send_user_invite(
+                frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+                verify_url = f"{frontend_url}/verify-email?token={raw_token}"
+                EmailService().send_invite_verify(
                     to_email=existing_user.email,
                     name=existing_user.name,
                     org_name=org_name,
-                    otp=raw_otp,
+                    verify_url=verify_url,
                 )
             except Exception:
                 pass
 
             return {
                 "needs_verification": True,
-                "message": "User re-enabled. An invite email with a verification code has been sent.",
+                "message": "User re-enabled. An invitation email with a verification link has been sent.",
                 "user": {
                     "id": existing_user.id,
                     "name": existing_user.name,
@@ -733,36 +876,31 @@ async def register(
     db.add(user)
     db.flush()  # get user.id without committing
 
-    # Generate and store OTP for email verification
-    raw_otp = f"{random.randint(0, 999999):06d}"
-    otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
-    otp_record = EmailOTP(
-        user_id=user.id,
-        otp_hash=otp_hash,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
-    )
-    db.add(otp_record)
+    # Generate a VerificationToken (48-hour TTL for invites — OTP is NOT sent yet)
+    raw_token = _create_verification_token(db, user.id, ttl_hours=48)
     db.commit()
     db.refresh(user)
 
-    # Send invite email with OTP (best-effort — failure must not block user creation)
+    # Send invite email with verification link (best-effort — failure must not block user creation)
     try:
         from app.services.email_service import EmailService
         from app.models.organization import Organization as OrgModel
         org = db.query(OrgModel).filter_by(id=user.organization_id).first()
         org_name = org.name if org else "your organisation"
-        EmailService().send_user_invite(
+        frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        verify_url = f"{frontend_url}/verify-email?token={raw_token}"
+        EmailService().send_invite_verify(
             to_email=user.email,
             name=user.name,
             org_name=org_name,
-            otp=raw_otp,
+            verify_url=verify_url,
         )
     except Exception:
         pass
 
     return {
         "needs_verification": True,
-        "message": "User created. An invite email with a verification code has been sent.",
+        "message": "User created. An invitation email with a verification link has been sent.",
         "user": {
             "id": user.id,
             "name": user.name,
@@ -787,7 +925,13 @@ async def list_users(
     List all users (for admin purposes).
     Only accessible by admins.
     """
-    users = db.query(User).all()
+    if _admin.is_superadmin():
+        users = db.query(User).filter(User.is_deleted == False).all()
+    else:
+        users = db.query(User).filter(
+            User.organization_id == _admin.organization_id,
+            User.is_deleted == False,
+        ).all()
     return [
         {
             "id": user.id,
