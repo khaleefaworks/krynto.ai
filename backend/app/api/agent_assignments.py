@@ -4,6 +4,7 @@ from typing import List
 
 from app.core.database import get_db
 from app.models.agent_website_assignment import AgentWebsiteAssignment
+from app.models.website_team import WebsiteTeam, WebsiteTeamMember
 from app.models.user import User
 from app.models.website import Website
 from app.api.deps import require_admin, require_authenticated_user
@@ -104,10 +105,19 @@ def unassign_agent_from_website(
     
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    
+
+    # Also remove the agent from all teams that belong to this website.
+    # Keeping a removed agent in a team would leave a stale member count and
+    # allow routing to someone who no longer has access to the website.
+    team_ids = db.query(WebsiteTeam.id).filter_by(website_id=website_id).subquery()
+    db.query(WebsiteTeamMember).filter(
+        WebsiteTeamMember.team_id.in_(team_ids),
+        WebsiteTeamMember.user_id == agent_id,
+    ).delete(synchronize_session="fetch")
+
     db.delete(assignment)
     db.commit()
-    
+
     return {
         "success": True,
         "message": "Agent unassigned from website",
@@ -190,6 +200,7 @@ def get_website_agents(
             "name": u.name,
             "role": u.role.value,
             "is_active": u.is_active,
+            "avatar_url": u.avatar_url,
             "assigned_at": assignment_map[u.id].created_at.isoformat() if u.id in assignment_map and assignment_map[u.id].created_at else None,
         }
         for u in users

@@ -10,6 +10,7 @@ import { playNewVisitorOnWebsiteSound } from '@/lib/notificationSound'
 import { websitesApi } from '@/services/websites'
 import { agentAssignmentsApi } from '@/services/agentAssignments'
 import UserAvatar from '@/components/UserAvatar'
+import DocsLink from '@/components/DocsLink'
 import { API_BASE } from '@/config/endpoints'
 
 function formatOnlineSeconds(seconds: number | null): string {
@@ -68,8 +69,11 @@ export default function CustomersVisitors() {
     const [error, setError] = useState<string | null>(null)
     const [rows, setRows] = useState<CustomerVisitor[]>([])
     const [query, setQuery] = useState('')
+    const [filterWebsite, setFilterWebsite] = useState<number | 'all'>('all')
+    const [filterOnline, setFilterOnline] = useState<'all' | 'online' | 'offline'>('all')
 
     const [websiteLabels, setWebsiteLabels] = useState<Record<number, string>>({})
+    const [websiteIds, setWebsiteIds] = useState<number[]>([])
 
     const [selected, setSelected] = useState<{ websiteId: number; sessionId: string } | null>(null)
     const [detailsLoading, setDetailsLoading] = useState(false)
@@ -148,26 +152,32 @@ export default function CustomersVisitors() {
                     const sites = await websitesApi.list()
                     if (cancelled) return
                     const next: Record<number, string> = {}
+                    const ids: number[] = []
                     for (const s of (Array.isArray(sites) ? sites : [])) {
                         const id = Number((s as any).id)
                         if (!Number.isFinite(id)) continue
                         const domain = String((s as any).domain || '').trim()
                         const name = String((s as any).name || '').trim()
                         next[id] = domain || name || `#${id}`
+                        ids.push(id)
                     }
                     setWebsiteLabels(next)
+                    setWebsiteIds(ids)
                 } else {
                     const sites = await agentAssignmentsApi.getAgentWebsites(user.id)
                     if (cancelled) return
                     const next: Record<number, string> = {}
+                    const ids: number[] = []
                     for (const s of (Array.isArray(sites) ? sites : [])) {
                         const id = Number((s as any).id)
                         if (!Number.isFinite(id)) continue
                         const domain = String((s as any).domain || '').trim()
                         const name = String((s as any).name || '').trim()
                         next[id] = domain || name || `#${id}`
+                        ids.push(id)
                     }
                     setWebsiteLabels(next)
+                    setWebsiteIds(ids)
                 }
             } catch {
                 // ignore - fallback will render website_id
@@ -264,8 +274,14 @@ export default function CustomersVisitors() {
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase()
-        if (!q) return rows
         return rows.filter((r) => {
+            // Website filter
+            if (filterWebsite !== 'all' && r.website_id !== filterWebsite) return false
+            // Online filter
+            if (filterOnline === 'online' && !r.is_online) return false
+            if (filterOnline === 'offline' && r.is_online) return false
+            // Text search
+            if (!q) return true
             const pageHost = safeHostFromUrl(r.current_page?.url)
             const cameFrom = r.came_from || ''
             return (
@@ -273,10 +289,11 @@ export default function CustomersVisitors() {
                 String((r as any).visitor_name || '').toLowerCase().includes(q) ||
                 (r.current_page?.title || '').toLowerCase().includes(q) ||
                 (pageHost || '').toLowerCase().includes(q) ||
-                cameFrom.toLowerCase().includes(q)
+                cameFrom.toLowerCase().includes(q) ||
+                String((r as any).visitor_email || '').toLowerCase().includes(q)
             )
         })
-    }, [rows, query])
+    }, [rows, query, filterWebsite, filterOnline])
 
     if (loading) {
         return (
@@ -300,43 +317,85 @@ export default function CustomersVisitors() {
 
     return (
         <div>
-            <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-6">
-                <div>
+            <div className="h-16 flex items-center justify-between gap-4 border-b dark:border-gray-700 px-4 sm:px-6">
+                <div className="flex items-center gap-2">
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Visitors</h1>
+                    <DocsLink slug="agent-guide/visitors" />
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Number of visitors <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span> visitors
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 px-6 py-4">
-                <div className="relative w-full max-w-sm">
+            {/* Filters row */}
+            <div className="flex flex-wrap items-center gap-2 px-4 sm:px-6 py-3 border-b dark:border-gray-700">
+                <div className="relative flex-1 min-w-[160px] max-w-xs">
                     <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search..."
-                        className="w-full pl-9 pr-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                        placeholder="Search name, email, page..."
+                        className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                     />
+                    {query && (
+                        <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
+
+                {/* Website filter — only show when multiple websites */}
+                {websiteIds.length > 1 && (
+                    <select
+                        value={filterWebsite === 'all' ? 'all' : String(filterWebsite)}
+                        onChange={(e) => setFilterWebsite(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                        className="py-1.5 pl-3 pr-8 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    >
+                        <option value="all">All websites</option>
+                        {websiteIds.map((id) => (
+                            <option key={id} value={String(id)}>{websiteLabels[id] || `#${id}`}</option>
+                        ))}
+                    </select>
+                )}
+
+                {/* Online/offline filter */}
+                <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden text-sm">
+                    {(['all', 'online', 'offline'] as const).map((val) => (
+                        <button
+                            key={val}
+                            onClick={() => setFilterOnline(val)}
+                            className={`px-3 py-1.5 capitalize transition-colors ${filterOnline === val ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                        >
+                            {val}
+                        </button>
+                    ))}
+                </div>
+
+                {(query || filterWebsite !== 'all' || filterOnline !== 'all') && (
+                    <button
+                        onClick={() => { setQuery(''); setFilterWebsite('all'); setFilterOnline('all') }}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                        Clear filters
+                    </button>
+                )}
             </div>
 
             {filtered.length === 0 ? (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-6 mb-6">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-12 text-center mx-4 sm:mx-6 mb-6 mt-4">
                     <div className="text-gray-600 dark:text-gray-400">No visitors found</div>
                 </div>
             ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto mx-6 mb-6">
-                    <table className="w-full min-w-[640px]">
+                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mx-4 sm:mx-6 mb-6 mt-4">
+                    <table className="w-full">
                         <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visitor</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Website</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Online</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current page</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Came from</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visits</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Chats</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visitor</th>
+                                {websiteIds.length > 1 && <th className="hidden sm:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Website</th>}
+                                <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current page</th>
+                                <th className="hidden lg:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Came from</th>
+                                <th className="hidden sm:table-cell px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visits</th>
+                                <th className="hidden sm:table-cell px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Chats</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -348,23 +407,23 @@ export default function CustomersVisitors() {
                                         onClick={() => setSelected({ websiteId: r.website_id, sessionId: r.session_id })}
                                         className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
                                     >
-                                        <td className="px-6 py-4 whitespace-nowrap">
+                                        <td className="px-4 py-3">
                                             <div className="flex items-center gap-3">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-shrink-0">
                                                     {r.visitor_initiated_chat ? (
-                                                        <span className="w-7 h-7 flex items-center justify-center" title="Visitor initiated chat">
-                                                            <MessageCircle className="w-5 h-5 text-green-600 fill-green-200" />
+                                                        <span className="hidden sm:flex w-5 h-5 items-center justify-center" title="Visitor initiated chat">
+                                                            <MessageCircle className="w-4 h-4 text-green-600 fill-green-200" />
                                                         </span>
                                                     ) : (
-                                                        <span className="w-7 h-7" />
+                                                        <span className="hidden sm:block w-5 h-5" />
                                                     )}
 
                                                     <div className="relative">
                                                         <UserAvatar
                                                             seed={String(r.session_id || 'visitor')}
                                                             bgColor={r.visitor_avatar_color}
-                                                            className="w-10 h-10"
-                                                            iconClassName="w-10 h-10"
+                                                            className="w-9 h-9"
+                                                            iconClassName="w-9 h-9"
                                                             title={shortSessionId(r.session_id)}
                                                         />
 
@@ -380,12 +439,12 @@ export default function CustomersVisitors() {
                                                                         <img
                                                                             src={avatarUrl}
                                                                             alt={r.assigned_agent.name || 'Agent'}
-                                                                            className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full object-cover border-2 border-white dark:border-gray-800"
+                                                                            className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full object-cover border-2 border-white dark:border-gray-800"
                                                                         />
                                                                     )
                                                                 }
                                                                 return (
-                                                                    <span className="absolute -right-1 -bottom-1 w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-semibold text-gray-700 dark:text-gray-200 border-2 border-white dark:border-gray-800">
+                                                                    <span className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[9px] font-semibold text-gray-700 dark:text-gray-200 border-2 border-white dark:border-gray-800">
                                                                         {getInitials(r.assigned_agent.name, 'A')}
                                                                     </span>
                                                                 )
@@ -395,25 +454,25 @@ export default function CustomersVisitors() {
                                                 </div>
 
                                                 <div className="min-w-0">
-                                                    <div
-                                                        className="text-sm font-medium text-gray-900 dark:text-white truncate"
-                                                        title={r.session_id}
-                                                    >
+                                                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate" title={r.session_id}>
                                                         {getVisitorDisplayName(r)}
+                                                    </div>
+                                                    {/* Mobile: show page title inline */}
+                                                    <div className="md:hidden text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                        {r.current_page?.title || pageHost || r.came_from || (r.is_online ? 'Online' : '')}
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">
-                                                {websiteLabels[r.website_id] || `#${r.website_id}`}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">{formatOnlineSeconds(r.online_seconds)}</span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="min-w-0">
+                                        {websiteIds.length > 1 && (
+                                            <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap">
+                                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                                    {websiteLabels[r.website_id] || `#${r.website_id}`}
+                                                </span>
+                                            </td>
+                                        )}
+                                        <td className="hidden md:table-cell px-4 py-3">
+                                            <div className="min-w-0 max-w-[200px]">
                                                 <div className="text-sm text-gray-900 dark:text-white truncate">
                                                     {r.current_page?.title || pageHost || r.current_page?.url}
                                                 </div>
@@ -422,13 +481,13 @@ export default function CustomersVisitors() {
                                                 ) : null}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.came_from || 'Direct'}</span>
+                                        <td className="hidden lg:table-cell px-4 py-3 whitespace-nowrap">
+                                            <span className="text-sm text-gray-700 dark:text-gray-300 truncate max-w-[140px] block">{r.came_from || 'Direct'}</span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                        <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-right">
                                             <span className="text-sm text-gray-700 dark:text-gray-300">{r.visits}</span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                        <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-right">
                                             <span className="text-sm text-gray-700 dark:text-gray-300">{r.chats}</span>
                                         </td>
                                     </tr>
@@ -484,10 +543,10 @@ export default function CustomersVisitors() {
                                             <span className="mx-2">·</span>
                                             Chats <span className="font-medium text-gray-900 dark:text-white">{details.chats}</span>
                                         </div>
-                                        {details.conversations?.length ? (
+                                        {details.conversations?.some((c: any) => c.has_visitor_message) ? (
                                             <button
                                                 onClick={() => {
-                                                    const latest = details.conversations?.[0]
+                                                    const latest = details.conversations?.find((c: any) => c.has_visitor_message)
                                                     const cid = Number(latest?.conversation_id)
                                                     if (Number.isFinite(cid) && cid > 0) {
                                                         openConversation(latest?.short_id || null, cid)

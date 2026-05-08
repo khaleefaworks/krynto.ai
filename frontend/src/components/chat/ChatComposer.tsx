@@ -106,17 +106,103 @@ function escapeMarkdownText(value: string): string {
     return value.replace(/[\\`*_\[\]]/g, (m) => `\\${m}`)
 }
 
+// Parse inline markdown (bold/italic) into an array of Tiptap inline nodes.
+function parseInlineMarkdownNodes(text: string): any[] {
+    const nodes: any[] = []
+    let i = 0
+    while (i < text.length) {
+        if (text[i] === '*') {
+            // Bold + Italic: ***text*** — must check before ** to avoid partial consume
+            if (text[i + 1] === '*' && text[i + 2] === '*') {
+                const close = text.indexOf('***', i + 3)
+                if (close !== -1) {
+                    const inner = text.slice(i + 3, close)
+                    if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }, { type: 'italic' }] })
+                    i = close + 3
+                    continue
+                }
+            }
+            // Bold: **text**
+            if (text[i + 1] === '*') {
+                const close = text.indexOf('**', i + 2)
+                if (close !== -1) {
+                    const inner = text.slice(i + 2, close)
+                    if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'bold' }] })
+                    i = close + 2
+                    continue
+                }
+            }
+            // Italic: *text*
+            const close = text.indexOf('*', i + 1)
+            if (close !== -1) {
+                const inner = text.slice(i + 1, close)
+                if (inner) nodes.push({ type: 'text', text: inner, marks: [{ type: 'italic' }] })
+                i = close + 1
+                continue
+            }
+            // Unmatched * — emit as literal and advance to prevent infinite loop
+            nodes.push({ type: 'text', text: '*' })
+            i += 1
+            continue
+        }
+        // Plain text up to the next * (or end)
+        const next = text.indexOf('*', i)
+        const plain = next === -1 ? text.slice(i) : text.slice(i, next)
+        if (plain) nodes.push({ type: 'text', text: plain })
+        i = next === -1 ? text.length : next
+    }
+    return nodes
+}
+
+// Convert a markdown string (from a shortcut) into Tiptap JSONContent so that
+// bold/italic marks survive the round-trip through serializeDocToMarkdown.
+function parseShortcutMarkdown(md: string): any {
+    const blocks: any[] = []
+    const paragraphs = String(md || '').split(/\n\n+/)
+    for (const para of paragraphs) {
+        const lines = para.split('\n')
+        // Ordered list
+        if (lines.length > 0 && /^\d+\.\s+/.test(lines[0])) {
+            const items = lines
+                .filter((l) => /^\d+\.\s+/.test(l))
+                .map((l) => ({
+                    type: 'listItem',
+                    content: [{ type: 'paragraph', content: parseInlineMarkdownNodes(l.replace(/^\d+\.\s+/, '')) }],
+                }))
+            if (items.length) blocks.push({ type: 'orderedList', content: items })
+            continue
+        }
+        // Regular paragraph (with hard breaks for single newlines)
+        const content: any[] = []
+        for (let idx = 0; idx < lines.length; idx++) {
+            if (idx > 0) content.push({ type: 'hardBreak' })
+            content.push(...parseInlineMarkdownNodes(lines[idx]))
+        }
+        if (content.length) blocks.push({ type: 'paragraph', content })
+    }
+    return blocks.length
+        ? { type: 'doc', content: blocks }
+        : { type: 'doc', content: [{ type: 'paragraph' }] }
+}
+
 function escapeMarkdownLinkText(value: string): string {
     // Link labels also need to escape parentheses.
     return String(value || '').replace(/[\\`*_\[\]()/]/g, (m) => `\\${m}`)
 }
 
 function wrapInline(text: string, marks: { bold?: boolean; italic?: boolean; linkHref?: string | null }): string {
-    let out = text
-    if (marks.italic) out = `*${out}*`
-    if (marks.bold) out = `**${out}**`
-    if (marks.linkHref) out = `[${out}](${marks.linkHref})`
-    return out
+    // Move surrounding whitespace OUTSIDE the delimiters so we never produce
+    // `***Hello! ***` (space adjacent to closing delimiter is invalid GFM).
+    const leadMatch = /^\s+/.exec(text)
+    const trailMatch = /\s+$/.exec(text)
+    const leading = leadMatch ? leadMatch[0] : ''
+    const trailing = trailMatch ? trailMatch[0] : ''
+    let inner = text.slice(leading.length, trailing.length ? text.length - trailing.length : undefined)
+    if (!inner) return text  // whitespace-only: skip wrapping
+    if (marks.italic) inner = `*${inner}*`
+    if (marks.bold) inner = `**${inner}**`
+    if (marks.linkHref) inner = `[${inner}](${marks.linkHref})`
+    return leading + inner + trailing
 }
 
 function serializeInline(node: any): string {
@@ -241,6 +327,16 @@ export default function ChatComposer({
 
     const uploadingAttachment = uploadingCount > 0
 
+    // Stable refs for values that are captured by the handleKeyDown closure inside useEditor.
+    // useEditor creates the editor once and the editorProps closures are stale after first render.
+    // By capturing a ref object (stable identity), handleKeyDown can always read the LATEST value
+    // via ref.current instead of a stale closure variable.
+    const shortcutMenuOpenRef = useRef(false)
+    const shortcutMatchesRef = useRef<ShortcutMatch[]>([])
+    const shortcutMenuIndexRef = useRef(0)
+    const sendNowRef = useRef<() => void>(() => { })
+    const applyPickedShortcutRef = useRef<(msg: string) => void>(() => { })
+
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -306,10 +402,10 @@ export default function ChatComposer({
                     return true
                 }
 
-                if (shortcutMenuOpen) {
+                if (shortcutMenuOpenRef.current) {
                     if (e.key === 'ArrowDown') {
                         e.preventDefault()
-                        setShortcutMenuIndex((i) => Math.min(i + 1, shortcutMatches.length - 1))
+                        setShortcutMenuIndex((i) => Math.min(i + 1, shortcutMatchesRef.current.length - 1))
                         return true
                     }
                     if (e.key === 'ArrowUp') {
@@ -319,9 +415,9 @@ export default function ChatComposer({
                     }
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
-                        const picked = shortcutMatches[shortcutMenuIndex] || shortcutMatches[0]
+                        const picked = shortcutMatchesRef.current[shortcutMenuIndexRef.current] || shortcutMatchesRef.current[0]
                         if (picked) {
-                            applyPickedShortcut(picked.message)
+                            applyPickedShortcutRef.current(picked.message)
                             setShortcutMenuIndex(0)
                         }
                         return true
@@ -348,7 +444,7 @@ export default function ChatComposer({
                     }
 
                     e.preventDefault()
-                    sendNow()
+                    sendNowRef.current()
                     return true
                 }
 
@@ -424,7 +520,7 @@ export default function ChatComposer({
             if (!editor) return
             const from = shortcutCtx.start
             const to = shortcutCtx.end
-            editor.chain().focus().deleteRange({ from, to }).insertContent(message).run()
+            editor.chain().focus().deleteRange({ from, to }).insertContent(parseShortcutMarkdown(message)).run()
         },
         [editor, shortcutCtx.end, shortcutCtx.start]
     )
@@ -462,6 +558,13 @@ export default function ChatComposer({
         setShortcutMenuIndex(0)
     }, [buildAttachmentsMarkdown, conversationId, disabled, editor, getMarkdown, onSend, onTyping])
 
+    // Keep refs in sync every render so handleKeyDown inside useEditor always reads fresh values.
+    shortcutMenuOpenRef.current = shortcutMenuOpen
+    shortcutMatchesRef.current = shortcutMatches
+    shortcutMenuIndexRef.current = shortcutMenuIndex
+    sendNowRef.current = sendNow
+    applyPickedShortcutRef.current = applyPickedShortcut
+
     const uploadAndInsertFile = useCallback(
         async (file: File, opts?: { asPaste?: boolean; preferImageNode?: boolean }) => {
             if (!conversationId) return
@@ -471,7 +574,6 @@ export default function ChatComposer({
             try {
                 const form = new FormData()
                 form.append('file', file)
-
                 const token = localStorage.getItem('auth_token')
                 const resp = await fetch(`${API_BASE}/attachments/upload?conversation_id=${conversationId}`, {
                     method: 'POST',
@@ -581,8 +683,8 @@ export default function ChatComposer({
                     </div>
                 )}
 
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
-                    <div className="px-3 py-4 max-h-36 overflow-y-auto min-h-[40px]">
+                <div className={`rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden${disabled ? ' cursor-not-allowed' : ''}`}>
+                    <div className={`px-3 py-4 max-h-36 overflow-y-auto min-h-[40px]${disabled ? ' pointer-events-none select-none opacity-50' : ''}`}>
                         <EditorContent editor={editor} />
                     </div>
 
@@ -713,10 +815,6 @@ export default function ChatComposer({
                     <span className="px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700">enter</span>
                 </div>
             </div>
-
-            {disabled && readOnlyText ? (
-                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{readOnlyText}</p>
-            ) : null}
 
         </div>
     )

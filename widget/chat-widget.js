@@ -60,6 +60,13 @@
   };
 
   // State
+  // Shadow DOM root — set once in createWidget(). All widget DOM queries go through
+  // $id() / $qs() so host-page CSS can't leak into the widget and vice-versa.
+  let __shadow = null;
+  function $id(id) { return __shadow ? __shadow.querySelector('#' + id) : document.getElementById(id); }
+  function $qs(sel) { return __shadow ? __shadow.querySelector(sel) : document.querySelector(sel); }
+  function $qsAll(sel) { return __shadow ? __shadow.querySelectorAll(sel) : document.querySelectorAll(sel); }
+
   let ws = null;
   let presenceWs = null;
   let isConnecting = false;
@@ -83,8 +90,19 @@
   let presenceOnline = true;
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
+
+  // Input reveal state machine.
+  // The input container starts hidden. It is revealed after 2500ms if no
+  // chatbot_pending / bot_prompt message arrives first. On bot_prompt the
+  // visitor must click a button (or allow_input=true) to reveal it.
+  let _inputRevealTimer = null;
+  let _pingInterval = null;
   let pendingOfflineMessage = null;
   let pendingOfflineAttachments = [];
+  // Deferred bot button click (when offline form intercepts a button press).
+  let pendingBotButtonClick = null;
+  // Set true once contact info is sent for this conversation; clears on enterStartView().
+  let _contactVerifiedThisConversation = false;
 
   let uploadingAttachmentsCount = 0;
   let draftAttachments = [];
@@ -107,6 +125,12 @@
   // Set when the visitor intentionally clicks "End chat" so the rating overlay
   // knows to minimise (not run afterConversationClose) on dismiss.
   let ratingTriggeredByVisitorEnd = false;
+  // Set when agent resolves so the rating overlay minimises the widget after dismiss.
+  let ratingTriggeredByAgentResolve = false;
+  // Deferred flag: set when conversation_resolved arrives; cleared once show_rating_popup fires.
+  // Safety timeout calls afterConversationClose() if show_rating_popup never arrives.
+  let _awaitingRatingAfterResolve = false;
+  let _resolveRatingTimeout = null;
 
   // --- Multi-conversation view state ---
   // viewMode: 'start' | 'list' | 'thread'
@@ -128,6 +152,113 @@
   function _closedStateKey() {
     if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
     return `aichatassist_closed_conv_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  // --- Welcome popup dismissal (12h cooldown, per websiteId across sessions) ---
+  function _welcomePopupDismissedKey() {
+    if (!CONFIG.websiteId) return null;
+    return `ai_chatassist_welcome_popup_dismissed_${CONFIG.websiteId}`;
+  }
+
+  function _saveWelcomePopupDismissed() {
+    try {
+      const k = _welcomePopupDismissedKey();
+      if (k) localStorage.setItem(k, String(Date.now()));
+    } catch (e) { }
+  }
+
+  // Returns true if the popup was dismissed within the last 12 hours.
+  function _isWelcomePopupRecentlyDismissed() {
+    try {
+      const k = _welcomePopupDismissedKey();
+      if (!k) return false;
+      const v = localStorage.getItem(k);
+      if (!v) return false;
+      return (Date.now() - parseInt(v, 10)) < 12 * 60 * 60 * 1000;
+    } catch (e) { return false; }
+  }
+
+  // --- Contact verification (offline form, 12h cooldown per websiteId) ---
+  function _contactVerifiedKey() {
+    if (!CONFIG.websiteId) return null;
+    return `ai_chatassist_contact_verified_${CONFIG.websiteId}`;
+  }
+
+  function _saveContactVerified(name, phone, email) {
+    try {
+      const k = _contactVerifiedKey();
+      if (k) localStorage.setItem(k, JSON.stringify({ ts: Date.now(), name, phone, email: email || '' }));
+    } catch (e) { }
+  }
+
+  // Returns { name, phone, email } if stored within 12h, otherwise null.
+  function _loadContactVerified() {
+    try {
+      const k = _contactVerifiedKey();
+      if (!k) return null;
+      const raw = localStorage.getItem(k);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !obj.name || !obj.phone) return null;
+      if ((Date.now() - obj.ts) > 12 * 60 * 60 * 1000) return null;
+      return obj;
+    } catch (e) { return null; }
+  }
+
+  // Checks if contact requirement can be satisfied without showing the form.
+  // If yes: sends visitor_contact WS frame silently and returns true.
+  // If no: returns false (caller must show form).
+  function _checkAndSendContactSilently() {
+    if (_contactVerifiedThisConversation) return true;
+    const stored = _loadContactVerified();
+    if (stored) {
+      _contactVerifiedThisConversation = true;
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'visitor_contact',
+            visitor_name: stored.name,
+            visitor_phone: stored.phone,
+            visitor_email: stored.email || undefined,
+          }));
+        }
+      } catch (e) { }
+      return true;
+    }
+    return false;
+  }
+
+  // --- Resolved-at expiry (24h) ---
+  function _resolvedAtKey() {
+    if (!CONFIG.websiteId || !CONFIG.sessionId) return null;
+    return `aichatassist_resolved_at_${CONFIG.websiteId}_${CONFIG.sessionId}`;
+  }
+
+  function _saveResolvedAt(isoString) {
+    try {
+      const k = _resolvedAtKey();
+      if (k && isoString) localStorage.setItem(k, isoString);
+    } catch (e) { }
+  }
+
+  function _clearResolvedAt() {
+    try {
+      const k = _resolvedAtKey();
+      if (k) localStorage.removeItem(k);
+    } catch (e) { }
+  }
+
+  // Returns true if the session's resolved conversation is older than 24 hours.
+  function _isResolvedConvExpired() {
+    try {
+      const k = _resolvedAtKey();
+      if (!k) return false;
+      const v = localStorage.getItem(k);
+      if (!v) return false;
+      const resolvedMs = new Date(v).getTime();
+      if (isNaN(resolvedMs)) return false;
+      return (Date.now() - resolvedMs) > 24 * 60 * 60 * 1000;
+    } catch (e) { return false; }
   }
 
   function _saveClosedState(convId) {
@@ -155,7 +286,7 @@
 
   function setEndChatDisabled(disabled) {
     endChatDisabled = Boolean(disabled);
-    const endBtn = document.getElementById('chatassist-end');
+    const endBtn = $id('chatassist-end');
     if (endBtn) {
       // Only toggle visibility in active (non-readonly) thread mode
       const inActiveThread = viewMode === 'thread' && !isReadOnlyThread;
@@ -194,10 +325,12 @@
     if (_widgetStateRestored) return;
     _widgetStateRestored = true;
     try {
-      const saved = localStorage.getItem('ai_chatassist_widget_open_' + CONFIG.websiteId);
-      if (saved === '1') {
-        const bubble = document.getElementById('chatassist-bubble');
-        const win = document.getElementById('chatassist-window');
+      var _woRaw = localStorage.getItem('ai_chatassist_widget_open_' + CONFIG.websiteId);
+      var _woOpen = false;
+      try { var _woObj = JSON.parse(_woRaw); _woOpen = _woObj && _woObj.v === 1 && (Date.now() - _woObj.ts) < 12 * 60 * 60 * 1000; } catch (e) { _woOpen = _woRaw === '1'; }
+      if (_woOpen) {
+        const bubble = $id('chatassist-bubble');
+        const win = $id('chatassist-window');
         if (bubble && win && win.style.display === 'none') {
           bubble.style.display = 'none';
           win.style.display = 'flex';
@@ -211,13 +344,13 @@
   }
 
   function isWidgetOpen() {
-    const win = document.getElementById('chatassist-window');
+    const win = $id('chatassist-window');
     return !!(win && win.style.display !== 'none');
   }
 
   function setUnreadCount(next) {
     unreadCount = Math.max(0, Number(next) || 0);
-    const el = document.getElementById('chatassist-bubble-unread');
+    const el = $id('chatassist-bubble-unread');
     if (el) {
       if (unreadCount <= 0) {
         el.style.display = 'none';
@@ -235,7 +368,7 @@
   }
 
   function showToast(message) {
-    const container = document.getElementById('chatassist-toast-container');
+    const container = $id('chatassist-toast-container');
     if (!container) return;
     container.textContent = message;
     container.style.display = 'block';
@@ -245,7 +378,7 @@
   }
 
   function hideToast() {
-    const container = document.getElementById('chatassist-toast-container');
+    const container = $id('chatassist-toast-container');
     if (!container) return;
     container.classList.remove('chatassist-toast-visible');
     container.style.display = 'none';
@@ -258,12 +391,12 @@
 
   function showDotsPreview() {
     hideMessagePopup(true);
-    const el = document.getElementById('chatassist-dots-preview');
+    const el = $id('chatassist-dots-preview');
     if (el) el.classList.add('chatassist-dots-visible');
   }
 
   function hideDotsPreview() {
-    const el = document.getElementById('chatassist-dots-preview');
+    const el = $id('chatassist-dots-preview');
     if (el) el.classList.remove('chatassist-dots-visible');
     if (dotsPreviewTimer) {
       clearTimeout(dotsPreviewTimer);
@@ -274,24 +407,40 @@
   function showMessagePopup(senderName, avatarUrl, messageText) {
     hideDotsPreview();
 
-    const popup = document.getElementById('chatassist-msg-popup');
-    const nameEl = document.getElementById('chatassist-popup-name');
-    const bodyEl = document.getElementById('chatassist-popup-body');
-    const avatarWrap = document.getElementById('chatassist-popup-avatar-wrap');
+    const popup = $id('chatassist-msg-popup');
+    const nameEl = $id('chatassist-popup-name');
+    const bodyEl = $id('chatassist-popup-body');
+    const avatarWrap = $id('chatassist-popup-avatar-wrap');
 
     if (!popup) return;
 
     if (nameEl) nameEl.textContent = senderName || CONFIG.popupName;
     if (bodyEl) {
-      var raw = String(messageText || '');
-      var plain = raw.replace(/!?\[[^\]]*\]\([^)]+\)/g, '').trim();
+      var raw = unescapeMarkdown(String(messageText || ''));
+      // Build a plain-text version for length check and image/file fallback detection.
+      var plain = raw
+        .replace(/!?\[[^\]]*\]\([^)]+\)/g, '')   // strip markdown links/images
+        .replace(/\*\*\*([^*\n]*)\*\*\*/g, '$1') // bold+italic
+        .replace(/\*\*([^*\n]*)\*\*/g, '$1')      // bold
+        .replace(/\*([^*\n]*)\*/g, '$1')           // italic
+        .replace(/\\([\\`*_[\]()/])/g, '$1')       // remaining escapes
+        .trim();
       if (!plain) {
+        // Content was purely images or links — show a friendly fallback.
         if (/!\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcf7 Sent an image';
         else if (/\[[^\]]*\]\([^)]+\)/.test(raw)) plain = '\ud83d\udcce Sent a file';
         else plain = 'New message';
+        bodyEl.textContent = plain;
+      } else {
+        // Truncate the markdown source proportionally to plain length so that
+        // rendered output roughly fits within 150 visible characters.
+        var mdSrc = plain.length > 150 ? raw.slice(0, raw.length * 150 / plain.length | 0) : raw;
+        bodyEl.textContent = '';
+        bodyEl.appendChild(renderInlineMarkdown(mdSrc));
+        if (plain.length > 150) {
+          bodyEl.appendChild(document.createTextNode('\u2026'));
+        }
       }
-      var truncated = plain.slice(0, 150);
-      bodyEl.textContent = truncated + (plain.length > 150 ? '\u2026' : '');
     }
     if (avatarWrap) {
       const url = getFullAssetUrl(avatarUrl) || getFullAssetUrl(CONFIG.headerIconUrl);
@@ -319,7 +468,7 @@
   }
 
   function hideMessagePopup(skipAnimation) {
-    const popup = document.getElementById('chatassist-msg-popup');
+    const popup = $id('chatassist-msg-popup');
     if (!popup) return;
     if (msgPopupTimer) {
       clearTimeout(msgPopupTimer);
@@ -359,7 +508,7 @@
   }
 
   function setAgentTyping(isTyping, name) {
-    const el = document.getElementById('chatassist-typing');
+    const el = $id('chatassist-typing');
     if (!el) return;
     if (isTyping) {
       const label = el.querySelector('.chatassist-typing-label');
@@ -404,11 +553,16 @@
       if (key && localStorage.getItem(key) === '1') { hasRatedSession = true; return; }
     } catch (e) { }
 
-    ratingConversationId = conversationId || null;
-    const el = document.getElementById('chatassist-rating-overlay');
+    const el = $id('chatassist-rating-overlay');
     if (!el) return;
+    // If already visible, just update the conversationId without resetting the UI.
+    if (el.classList.contains('chatassist-rating-overlay-visible')) {
+      if (conversationId) ratingConversationId = conversationId;
+      return;
+    }
+    ratingConversationId = conversationId || ratingConversationId || null;
     // Reset state
-    const thanks = document.getElementById('chatassist-rating-thanks');
+    const thanks = $id('chatassist-rating-thanks');
     if (thanks) thanks.style.display = 'none';
     const emojis = el.querySelector('.chatassist-rating-emojis');
     if (emojis) emojis.style.display = 'flex';
@@ -418,17 +572,21 @@
   }
 
   function hideRatingOverlay() {
-    const el = document.getElementById('chatassist-rating-overlay');
+    const el = $id('chatassist-rating-overlay');
     if (el) {
       el.classList.remove('chatassist-rating-overlay-visible');
       el.style.display = 'none';
     }
-    if (ratingTriggeredByVisitorEnd) {
-      // Visitor intentionally ended — transition view same as an agent-resolved close.
+    clearTimeout(_resolveRatingTimeout);
+    _awaitingRatingAfterResolve = false;
+    if (ratingTriggeredByVisitorEnd || ratingTriggeredByAgentResolve) {
+      // Visitor ended or agent resolved — transition to closed/list view then
+      // minimize the widget so the visitor isn't forced into a new chat.
       ratingTriggeredByVisitorEnd = false;
+      ratingTriggeredByAgentResolve = false;
       afterConversationClose();
+      try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
     } else if (viewMode === 'thread' && !isReadOnlyThread) {
-      // Agent resolved — transition view as usual.
       afterConversationClose();
     }
   }
@@ -466,8 +624,8 @@
     }
 
     // Show thank you & auto-close
-    const thanks = document.getElementById('chatassist-rating-thanks');
-    const emojis = document.querySelector('.chatassist-rating-emojis');
+    const thanks = $id('chatassist-rating-thanks');
+    const emojis = $qs('.chatassist-rating-emojis');
     if (thanks) thanks.style.display = 'block';
     if (emojis) emojis.style.display = 'none';
     setTimeout(() => hideRatingOverlay(), 1500);
@@ -499,7 +657,16 @@
       document.addEventListener('pointerdown', _arm, { once: true, passive: true });
       document.addEventListener('keydown', _arm, { once: true });
       document.addEventListener('touchstart', _arm, { once: true, passive: true });
+      document.addEventListener('scroll', _arm, { once: true, passive: true });
+      document.addEventListener('mousemove', _arm, { once: true, passive: true });
     } catch (e) { }
+  }
+
+  function showInputContainer() {
+    clearTimeout(_inputRevealTimer);
+    _inputRevealTimer = null;
+    const inputCont = $id('chatassist-input-container');
+    if (inputCont) inputCont.style.display = '';
   }
 
   // --- API & State Management ---
@@ -628,8 +795,8 @@
   }
 
   function _updateHeaderButtons() {
-    const backBtn = document.getElementById('chatassist-back');
-    const endBtn = document.getElementById('chatassist-end');
+    const backBtn = $id('chatassist-back');
+    const endBtn = $id('chatassist-end');
     if (backBtn) {
       // Show back button only when history is enabled (there is a list to go back to).
       // When history is disabled and we are in read-only (closed) mode, the back
@@ -652,7 +819,7 @@
   }
 
   function renderConvList(listData) {
-    const body = document.getElementById('chatassist-conv-list-body');
+    const body = $id('chatassist-conv-list-body');
     if (!body) return;
     body.innerHTML = '';
 
@@ -680,7 +847,7 @@
       activeItem.setAttribute('role', 'button');
       activeItem.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
       const dateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -735,7 +902,7 @@
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('#' + conv.id);
+      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
       const dateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
@@ -775,11 +942,11 @@
 
     _closeWsCleanly();
 
-    const el_messages = document.getElementById('chatassist-messages');
-    const el_empty = document.getElementById('chatassist-empty-state');
-    const el_list = document.getElementById('chatassist-conv-list');
-    const el_footer = document.getElementById('chatassist-footer');
-    const el_newMsg = document.getElementById('chatassist-new-msg-indicator');
+    const el_messages = $id('chatassist-messages');
+    const el_empty = $id('chatassist-empty-state');
+    const el_list = $id('chatassist-conv-list');
+    const el_footer = $id('chatassist-footer');
+    const el_newMsg = $id('chatassist-new-msg-indicator');
 
     if (el_messages) el_messages.style.display = 'none';
     if (el_empty) el_empty.style.display = 'none';
@@ -797,15 +964,30 @@
     viewMode = 'start';
     isReadOnlyThread = false;
     ratingTriggeredByVisitorEnd = false;
+    ratingTriggeredByAgentResolve = false;
+    _awaitingRatingAfterResolve = false;
+    clearTimeout(_resolveRatingTimeout);
+    _resolveRatingTimeout = null;
+    // Reset per-conversation rating state so the overlay can show for a new conversation.
+    hasRatedSession = false;
+    ratingConversationId = null;
     CONFIG.conversationId = 0;
+    _contactVerifiedThisConversation = false;
+    pendingBotButtonClick = null;
+    // Clear the welcome-popup dismissed key so the popup can appear fresh for
+    // the new conversation (it was suppressed for the just-closed conversation).
+    try {
+      const _wpk = _welcomePopupDismissedKey();
+      if (_wpk) localStorage.removeItem(_wpk);
+    } catch (e) { }
 
     // Ensure any existing WS is closed before connecting fresh
     _closeWsCleanly();
 
-    const el_messages = document.getElementById('chatassist-messages');
-    const el_empty = document.getElementById('chatassist-empty-state');
-    const el_list = document.getElementById('chatassist-conv-list');
-    const el_footer = document.getElementById('chatassist-footer');
+    const el_messages = $id('chatassist-messages');
+    const el_empty = $id('chatassist-empty-state');
+    const el_list = $id('chatassist-conv-list');
+    const el_footer = $id('chatassist-footer');
 
     if (el_list) el_list.style.display = 'none';
     if (el_messages) el_messages.style.display = '';
@@ -820,7 +1002,7 @@
     renderAttachmentChips();
 
     // Clear input (may retain stale text if coming from a just-closed thread)
-    const el_input = document.getElementById('chatassist-input');
+    const el_input = $id('chatassist-input');
     if (el_input) { el_input.value = ''; autoResizeInput(); }
 
     _updateHeaderButtons();
@@ -839,11 +1021,11 @@
     CONFIG.conversationId = convId || 0;
 
     // Reset message area
-    const el_messages = document.getElementById('chatassist-messages');
-    const el_empty = document.getElementById('chatassist-empty-state');
-    const el_list = document.getElementById('chatassist-conv-list');
-    const el_footer = document.getElementById('chatassist-footer');
-    const el_newMsg = document.getElementById('chatassist-new-msg-indicator');
+    const el_messages = $id('chatassist-messages');
+    const el_empty = $id('chatassist-empty-state');
+    const el_list = $id('chatassist-conv-list');
+    const el_footer = $id('chatassist-footer');
+    const el_newMsg = $id('chatassist-new-msg-indicator');
 
     if (el_list) el_list.style.display = 'none';
     if (el_messages) { el_messages.style.display = ''; el_messages.innerHTML = ''; }
@@ -864,7 +1046,7 @@
     } else {
       if (el_footer) el_footer.style.display = '';
       // Restore draft for this conversation
-      const input = document.getElementById('chatassist-input');
+      const input = $id('chatassist-input');
       draftAttachments = loadDraftAttachments();
       renderAttachmentChips();
       if (input) { input.value = loadDraft(); autoResizeInput(); }
@@ -886,7 +1068,7 @@
 
   function goBack() {
     // Persist draft before leaving
-    const input = document.getElementById('chatassist-input');
+    const input = $id('chatassist-input');
     if (input && !isReadOnlyThread) saveDraft(input.value);
     if (!isReadOnlyThread) saveDraftAttachments(draftAttachments);
 
@@ -913,10 +1095,10 @@
 
   function _appendClosedBanner() {
     // Remove any existing banner first (idempotent).
-    const existing = document.getElementById('chatassist-closed-banner');
+    const existing = $id('chatassist-closed-banner');
     if (existing) existing.remove();
 
-    const el_messages = document.getElementById('chatassist-messages');
+    const el_messages = $id('chatassist-messages');
     if (!el_messages) return;
 
     const banner = document.createElement('div');
@@ -966,7 +1148,7 @@
     // Persist so the closed view survives a page reload.
     if (convId) _saveClosedState(convId);
 
-    const el_footer = document.getElementById('chatassist-footer');
+    const el_footer = $id('chatassist-footer');
     if (el_footer) el_footer.style.display = 'none';
     _updateHeaderButtons();
 
@@ -1013,6 +1195,25 @@
           clearTimeout(reconnectTimeout);
           reconnectTimeout = null;
         }
+        // Heartbeat: send ping every 15s so the server knows the visitor is still on the page.
+        // Keeps the 45-second visitor_dropped debounce from firing on slow pages.
+        if (_pingInterval) clearInterval(_pingInterval);
+        _pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+          }
+        }, 15000);
+        // Start the input reveal timer. If no chatbot_pending / bot_prompt
+        // arrives within 2500ms the input area is revealed (no chatbot active).
+        // Run even when offline: if an offline automation is configured it sends
+        // chatbot_pending quickly (~200ms) which cancels this timer and manages
+        // the flow itself. Without automation the timer fires and reveals the
+        // input so the visitor can type, which triggers the contact overlay on send.
+        clearTimeout(_inputRevealTimer);
+        // Don't auto-reveal input for read-only (ended/resolved) threads.
+        if (!isReadOnlyThread) {
+          _inputRevealTimer = setTimeout(showInputContainer, 2500);
+        }
       };
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -1022,6 +1223,7 @@
       ws.onclose = () => {
         isConnecting = false;
         ws = null;
+        if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
         showToast('Connection lost. Reconnecting...');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
@@ -1068,11 +1270,37 @@
         historyQueue = data;
         return;
       }
-      const container = document.getElementById('chatassist-messages');
+
+      // ── 24-hour expiry for resolved conversations ──────────────────────────
+      // If the session's last resolved conv is older than 24h, discard history
+      // and start a fresh session so the welcome automation fires again.
+      if (data.status === 'resolved') {
+        const resolvedAt = data.resolved_at || null;
+        if (resolvedAt) {
+          _saveResolvedAt(resolvedAt);
+        }
+        if (_isResolvedConvExpired()) {
+          // Clear stored conversation so widget reconnects cleanly.
+          _clearResolvedAt();
+          _clearClosedState();
+          CONFIG.conversationId = 0;
+          _closeWsCleanly();
+          enterStartView();
+          return;
+        }
+        // Not expired: fall through and show read-only thread.
+        isReadOnlyThread = true;
+      } else {
+        // Active conversation — clear any stale resolved_at for this session.
+        _clearResolvedAt();
+      }
+      // ─────────────────────────────────────────────────────────────────────
+      const container = $id('chatassist-messages');
       if (!container) return;
       container.innerHTML = '';
       lastAppendedDateStr = null;
       container.classList.add('chatassist-no-animate');
+      var hasPendingBotPrompt = false;
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -1083,6 +1311,8 @@
         if (actor === 'system' && kind === 'event' && (eventType === 'visitor_connected' || eventType === 'visitor_socket_connected' || eventType === 'visitor_left_website')) {
           return;
         }
+        // Internal automation placeholder stored by show_rating_popup node — never render as text.
+        if (eventType === 'rating_popup_shown') return;
 
         if (actor === 'visitor') {
           appendMessage('visitor', m.content, m.created_at, null, m.id);
@@ -1109,6 +1339,7 @@
           if (!hasResponse && pButtons.length > 0) {
             // Pending prompt: show interactive buttons + hide input.
             appendBotPromptWithButtons(displayText, m.created_at, pButtons, pAutoId, m.id);
+            hasPendingBotPrompt = true;
           } else {
             // Already responded: show as plain text.
             appendMessage('ai', displayText, m.created_at, null, m.id);
@@ -1118,6 +1349,7 @@
         } else if (actor === 'system') {
           if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
           else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
+          else if (eventType === 'visitor_ended') showSystemMessage('You ended the chat.');
           else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
         } else {
@@ -1134,15 +1366,77 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
+        // Reveal input unless a bot_prompt is pending, or this is a read-only (ended/resolved) thread.
+        if (!hasPendingBotPrompt && !isReadOnlyThread) {
+          showInputContainer();
+        } else {
+          // Cancel the connect-time reveal timer so it doesn't override the
+          // hidden input state after a page reload with a pending button prompt.
+          clearTimeout(_inputRevealTimer);
+          _inputRevealTimer = null;
+        }
       }
+      // If 0 history messages (brand-new session): keep the _inputRevealTimer
+      // running. The chatbot_pending signal (if any) will cancel it; otherwise
+      // it fires after 2500ms and shows the input.
 
       // Re-inject the "Start new chat" banner if we're restoring a closed
       // conversation on reload (history disabled). The banner was wiped above
       // by container.innerHTML = '' but belongs at the bottom of the thread.
-      const hasVisitorLeftMsg = data.messages.some(function (m) { return m.event_type === 'visitor_left'; });
+      const hasVisitorLeftMsg = data.messages.some(function (m) { return m.event_type === 'visitor_left' || m.event_type === 'visitor_ended'; });
       if ((data.status === 'resolved' || hasVisitorLeftMsg) && isReadOnlyThread && !widgetShowHistory) {
         _appendClosedBanner();
       }
+
+      // Welcome popup re-show on return visit.
+      // Conditions: open conversation, widget is minimized, visitor has NOT sent
+      // any message yet, and the popup was not dismissed within the last 12h.
+      if (data.status !== 'resolved' && !isWidgetOpen() && !_isWelcomePopupRecentlyDismissed()) {
+        var hasVisitorMsg = data.messages.some(function (m) {
+          return (m.sender_type || m.sender) === 'visitor' || m.actor === 'visitor';
+        });
+        if (!hasVisitorMsg) {
+          // Find the first bot/ai message to show in the popup.
+          var firstBotMsg = null;
+          for (var _wi = 0; _wi < data.messages.length; _wi++) {
+            var _wm = data.messages[_wi];
+            var _wactor = _wm.actor || _wm.sender_type || _wm.sender || '';
+            var _wkind = _wm.kind || (_wactor === 'system' ? 'event' : 'chat');
+            if (_wactor === 'bot' || _wactor === 'ai' ||
+                (_wactor === 'system' && _wkind === 'chat') ||
+                (_wm.event_type === 'bot_prompt_buttons')) {
+              firstBotMsg = _wm;
+              break;
+            }
+          }
+          if (firstBotMsg) {
+            var _popupText = firstBotMsg.content || '';
+            // For bot_prompt_buttons, extract the message field from JSON content.
+            if (firstBotMsg.event_type === 'bot_prompt_buttons') {
+              try {
+                var _pd = JSON.parse(firstBotMsg.raw_content || firstBotMsg.content);
+                if (_pd && _pd.message) _popupText = _pd.message;
+              } catch (e) { }
+            }
+            if (_popupText) {
+              // Delay so the bubble finishes its entrance animation, then run
+              // the same dots → sound → popup sequence as notifyNewMessage().
+              var _wpText = _popupText;
+              setTimeout(function () {
+                if (isWidgetOpen()) return; // visitor opened widget during delay
+                bumpUnread();
+                showDotsPreview();
+                dotsPreviewTimer = setTimeout(function () {
+                  hideDotsPreview();
+                  playNotificationSound('collapsed');
+                  showMessagePopup(null, null, _wpText);
+                }, 1200);
+              }, 1500);
+            }
+          }
+        }
+      }
+
       return;
     }
 
@@ -1151,6 +1445,15 @@
     // rendered as a plain AI message via the generic fallback below.
     if (data.type === 'resolved') {
       // Banner already appended by the history handler above; nothing to do.
+      return;
+    }
+
+    // Chatbot is about to send a prompt — keep input hidden until button click.
+    if (data.type === 'chatbot_pending') {
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      const inputCont = $id('chatassist-input-container');
+      if (inputCont) inputCont.style.display = 'none';
       return;
     }
 
@@ -1186,21 +1489,22 @@
 
       if (actor === 'system' && kind === 'event') {
         if (eventType === 'agent_join') showJoinMessage(data.message, createdAt);
-        else showSystemMessage(data.message);
-        // When conversation is resolved, show rating overlay (skip for inactivity closes)
+        else if (eventType !== 'conversation_resolved') showSystemMessage(data.message);
+        // conversation_resolved UI transition handled by show_rating_popup from automation (2s wait + delivery).
+        // Safety timeout (7s = 2s wait + 2s delivery buffer + 3s extra) in case show_rating_popup never arrives.
         if (eventType === 'conversation_resolved') {
-          const closedBy = (dto && dto.closed_by) || (data && data.closed_by) || null;
-          const convId = (dto && dto.conversation_id) || (data && data.conversation_id) || ratingConversationId;
-          if (ratingTriggeredByVisitorEnd) {
-            // Visitor's confirm-button click already showed the rating overlay and
-            // is handling the whole transition. Suppress the duplicate server echo.
-            // Silently update ratingConversationId in case it wasn't set yet.
-            if (convId) ratingConversationId = convId;
-          } else if (closedBy !== 'inactivity') {
-            showRatingOverlay(convId);
-          } else {
-            // Inactivity: visitor was offline anyway; just transition view
-            afterConversationClose();
+          if (!ratingTriggeredByVisitorEnd) {
+            _awaitingRatingAfterResolve = true;
+            ratingTriggeredByAgentResolve = true;
+            clearTimeout(_resolveRatingTimeout);
+            _resolveRatingTimeout = setTimeout(function () {
+              if (_awaitingRatingAfterResolve) {
+                _awaitingRatingAfterResolve = false;
+                ratingTriggeredByAgentResolve = false;
+                afterConversationClose();
+                try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+              }
+            }, 7000);
           }
         }
       } else {
@@ -1214,12 +1518,40 @@
       return;
     }
 
+    // Automation-driven rating popup (decoupled from conversation_resolved/visitor_ended system event).
+    if (data.type === 'show_rating_popup') {
+      const convId = data.conversation_id || ratingConversationId;
+      if (convId) ratingConversationId = convId;
+      // Clear deferred-close flag (rating popup handles navigation).
+      clearTimeout(_resolveRatingTimeout);
+      _awaitingRatingAfterResolve = false;
+      // Ensure hideRatingOverlay() will call afterConversationClose() even when
+      // the automation sent show_rating_popup without a prior conversation_resolved
+      // system event (which normally sets ratingTriggeredByAgentResolve).
+      if (!ratingTriggeredByVisitorEnd && !ratingTriggeredByAgentResolve) {
+        ratingTriggeredByAgentResolve = true;
+      }
+      // Immediately transition the input to read-only so the visitor can no
+      // longer type into a resolved conversation while the overlay is visible.
+      isReadOnlyThread = true;
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      const _rpInputCont = $id('chatassist-input-container');
+      if (_rpInputCont) _rpInputCont.style.display = 'none';
+      showRatingOverlay(ratingConversationId);
+      return;
+    }
+
     // Bot prompt with interactive buttons (team routing chatbot).
     if (data.type === 'bot_prompt') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
-      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id);
+      const allowInput = data.allow_input === true;
+      // Cancel any pending input-reveal timer — buttons control input visibility.
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput);
       notifyNewMessage(null, null, data.message);
       if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
@@ -1232,6 +1564,21 @@
     if (data.type === 'ai' || data.type === 'bot') {
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
+      // If this is the offline automation bot message, collect visitor contact info.
+      // If localStorage already has name + phone, send them silently to the backend
+      // (so the conversation stores them) and skip the overlay. Otherwise show the
+      // overlay so the visitor can provide their details.
+      try {
+        if (data.message_obj && data.message_obj.event_type === 'bot_offline') {
+          // Immediately check if contact info can be satisfied silently.
+          // Show the form right away (before visitor tries to send) if not.
+          if (_checkAndSendContactSilently()) {
+            showInputContainer();
+          } else {
+            showContactOverlay();
+          }
+        }
+      } catch (e) { }
       notifyNewMessage(null, null, data.message);
       if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
@@ -1284,6 +1631,12 @@
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
+    } else if (data.type === 'automation_complete') {
+      // IVR flow is done — reveal the free-form input and clear any fallback timer.
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = null;
+      showInputContainer();
+      try { $id('chatassist-input')?.focus(); } catch (e) { }
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -1299,14 +1652,14 @@
   // --- Scrolling Logic ---
 
   function smartScroll() {
-    const el = document.getElementById('chatassist-messages');
+    const el = $id('chatassist-messages');
     if (!el) return;
 
     // Use multiple requestAnimationFrame to ensure the browser has actually painted
     // and layout is fully recalculated, which is critical for accurate scrollHeight.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const unreadDivider = document.getElementById('chatassist-unread-divider');
+        const unreadDivider = $id('chatassist-unread-divider');
 
         // If widget is closed, we can't accurately scroll, but we mark it as "needs scroll"
         if (!isWidgetOpen()) {
@@ -1327,7 +1680,7 @@
   }
 
   function scrollToBottom(smooth) {
-    const el = document.getElementById('chatassist-messages');
+    const el = $id('chatassist-messages');
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
@@ -1336,7 +1689,7 @@
   }
 
   function handleMessagesScroll() {
-    const el = document.getElementById('chatassist-messages');
+    const el = $id('chatassist-messages');
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     isAtBottom = nearBottom;
@@ -1345,7 +1698,7 @@
       hideNewMsgIndicator();
     }
     // Remove unread divider once the user scrolls past it.
-    const divider = document.getElementById('chatassist-unread-divider');
+    const divider = $id('chatassist-unread-divider');
     if (divider && el) {
       try {
         const dividerTop = divider.offsetTop;
@@ -1360,7 +1713,7 @@
 
   function showNewMsgIndicator() {
     if (isAtBottom || !isWidgetOpen()) return;
-    const el = document.getElementById('chatassist-new-msg-indicator');
+    const el = $id('chatassist-new-msg-indicator');
     if (el) {
       el.style.display = 'flex';
       el.style.opacity = '1';
@@ -1368,7 +1721,7 @@
   }
 
   function hideNewMsgIndicator() {
-    const el = document.getElementById('chatassist-new-msg-indicator');
+    const el = $id('chatassist-new-msg-indicator');
     if (el) {
       el.style.display = 'none';
       el.style.opacity = '0';
@@ -1383,7 +1736,7 @@
   }
 
   function setHeaderIcon(urlOrNull) {
-    const iconInner = document.getElementById('chatassist-header-icon-inner');
+    const iconInner = $id('chatassist-header-icon-inner');
     if (!iconInner) return;
     const url = getFullAssetUrl(urlOrNull);
     if (!url) {
@@ -1487,8 +1840,8 @@
 
   function setUploadingAttachmentsCount(next) {
     uploadingAttachmentsCount = Math.max(0, Number(next) || 0);
-    const attachBtn = document.getElementById('chatassist-attach');
-    const sendBtn = document.getElementById('chatassist-send');
+    const attachBtn = $id('chatassist-attach');
+    const sendBtn = $id('chatassist-send');
     if (attachBtn) {
       attachBtn.classList.toggle('chatassist-attach-uploading', uploadingAttachmentsCount > 0);
       attachBtn.setAttribute('aria-busy', uploadingAttachmentsCount > 0 ? 'true' : 'false');
@@ -1499,7 +1852,7 @@
   }
 
   function renderAttachmentChips() {
-    const wrap = document.getElementById('chatassist-attachments');
+    const wrap = $id('chatassist-attachments');
     if (!wrap) return;
     wrap.innerHTML = '';
     saveDraftAttachments(draftAttachments);
@@ -1582,7 +1935,13 @@
 
   function unescapeMarkdown(str) {
     // Reverse markdown backslash escapes (e.g. \* → *, \\ → \, \_ → _)
-    return String(str || '').replace(/\\([\\`*_\[\]()/])/g, '$1');
+    // Also normalise trailing whitespace inside closing delimiters (old message
+    // format): "***Hello! ***" → "***Hello!***" so the renderer sees valid markup.
+    return String(str || '')
+      .replace(/\\([\\`*_\[\]()/])/g, '$1')
+      .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
+      .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
+      .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*');
   }
 
   function renderInlineMarkdown(text) {
@@ -1592,10 +1951,11 @@
     const patterns = [
       { type: 'image', re: /!\[([^\]]*)\]\(([^)]+)\)/g },
       { type: 'link', re: /\[([^\]]+)\]\(([^)]+)\)/g },
+      { type: 'bold_italic', re: /\*\*\*([^*\n]+)\*\*\*/g },
       { type: 'bold', re: /\*\*([^*]+)\*\*/g },
       { type: 'italic', re: /\*([^*\n]+)\*/g },
-      // Bare domains like abc.com, docs.example.co.uk/path
-      { type: 'bare', re: /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
+      // Bare domains like abc.com, docs.example.co.uk/path — exclude email addresses via negative lookbehind
+      { type: 'bare', re: /(?<!@)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[\w\-./?%#=&+]*)?/gi },
       { type: 'url', re: /https?:\/\/[^\s<]+/g },
     ];
 
@@ -1662,6 +2022,16 @@
         } else {
           frag.appendChild(document.createTextNode(full));
         }
+        i = best.index + full.length;
+        continue;
+      }
+
+      if (best.type === 'bold_italic') {
+        const strong = document.createElement('strong');
+        const em = document.createElement('em');
+        em.textContent = String(m[1] || '');
+        strong.appendChild(em);
+        frag.appendChild(strong);
         i = best.index + full.length;
         continue;
       }
@@ -1805,11 +2175,11 @@
   }
 
   function appendMessage(sender, content, createdAtIso, meta, messageId) {
-    const container = document.getElementById('chatassist-messages');
+    const container = $id('chatassist-messages');
     if (!container) return;
 
     // Hide empty state once a message is added.
-    const emptyEl = document.getElementById('chatassist-empty-state');
+    const emptyEl = $id('chatassist-empty-state');
     if (emptyEl) emptyEl.style.display = 'none';
 
     // Date separator: insert when the date changes between messages.
@@ -1892,12 +2262,12 @@
     } catch (e) { }
   }
 
-  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId) {
-    const container = document.getElementById('chatassist-messages');
+  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput) {
+    const container = $id('chatassist-messages');
     if (!container) return;
 
     // Hide empty state
-    const emptyEl = document.getElementById('chatassist-empty-state');
+    const emptyEl = $id('chatassist-empty-state');
     if (emptyEl) emptyEl.style.display = 'none';
 
     // Date separator
@@ -1964,11 +2334,18 @@
           // Highlight selected
           btnEl.classList.add('chatassist-prompt-btn-selected');
 
-          // Show the input area now that user has made a selection
-          const inputCont = document.getElementById('chatassist-input-container');
-          if (inputCont) inputCont.style.display = '';
-          const inputEl = document.getElementById('chatassist-input');
-          if (inputEl) inputEl.focus();
+          // If offline and contact not yet on file, collect it before firing.
+          if (!presenceOnline && !_checkAndSendContactSilently()) {
+            pendingBotButtonClick = { automationId: automationId, idx: idx, label: btn.label || 'Option ' + (idx + 1) };
+            showContactOverlay();
+            return;
+          }
+
+          // Input reveal is deferred: the server sends automation_complete
+          // after processing (so the reply appears before the input opens).
+          // A 5-second fallback fires if the event never arrives.
+          clearTimeout(_inputRevealTimer);
+          _inputRevealTimer = setTimeout(showInputContainer, 5000);
 
           // Optimistically append the visitor's selection as a visitor message
           appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
@@ -1988,10 +2365,16 @@
     messageDiv.appendChild(row);
     container.appendChild(messageDiv);
 
-    // Hide input area until visitor selects an option
+    // Manage input visibility based on buttons and allow_input flag.
     if (Array.isArray(buttons) && buttons.length > 0) {
-      const inputCont = document.getElementById('chatassist-input-container');
-      if (inputCont) inputCont.style.display = 'none';
+      if (allowInput) {
+        // Chatbot step allows free-form input alongside buttons.
+        showInputContainer();
+      } else {
+        // Hide input until visitor clicks a button.
+        const inputCont = $id('chatassist-input-container');
+        if (inputCont) inputCont.style.display = 'none';
+      }
     }
   }
 
@@ -2005,10 +2388,15 @@
       automation_id: automationId,
       button_index: buttonIndex,
     }));
+    // Button click counts as a visitor action — re-enable the end button
+    // in case it was hidden after a previous "End chat".
+    if (endChatDisabled) {
+      setEndChatDisabled(false);
+    }
   }
 
   function showSystemMessage(content) {
-    const container = document.getElementById('chatassist-messages');
+    const container = $id('chatassist-messages');
     if (!container) return;
     const div = document.createElement('div');
     div.className = 'chatassist-message chatassist-message-system';
@@ -2018,7 +2406,7 @@
   }
 
   function showJoinMessage(content, createdAtIso) {
-    const container = document.getElementById('chatassist-messages');
+    const container = $id('chatassist-messages');
     if (!container) return;
     const div = document.createElement('div');
     div.className = 'chatassist-message chatassist-message-join';
@@ -2030,7 +2418,7 @@
   // --- Event Handlers ---
 
   function handleUserMessage() {
-    const input = document.getElementById('chatassist-input');
+    const input = $id('chatassist-input');
     if (!input) return;
     const message = input.value.trim();
     if (uploadingAttachmentsCount > 0) {
@@ -2069,15 +2457,9 @@
       return;
     }
 
-    const _prefillName = document.getElementById('chatassist-contact-name')?.value.trim();
-    const _prefillPhone = document.getElementById('chatassist-contact-phone')?.value.trim();
-    const _prefillEmail = document.getElementById('chatassist-contact-email')?.value.trim();
-    if (_prefillName && _prefillPhone) {
-      const meta = {
-        visitor_name: _prefillName,
-        visitor_phone: _prefillPhone,
-        visitor_email: _prefillEmail || undefined
-      };
+    // Check if contact info is already on file (in-memory or localStorage 12h).
+    if (_checkAndSendContactSilently()) {
+      const meta = {};
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
@@ -2105,30 +2487,59 @@
     showContactOverlay();
   }
 
-  function showContactOverlay() {
-    const el = document.getElementById('chatassist-contact-overlay');
-    if (el) {
-      // Show pending message preview so visitor knows their message is safe.
-      const preview = document.getElementById('chatassist-contact-msg-preview');
-      if (preview) {
-        if (pendingOfflineMessage) {
-          const truncated = pendingOfflineMessage.length > 120
-            ? pendingOfflineMessage.slice(0, 120) + '…'
-            : pendingOfflineMessage;
-          preview.textContent = '"' + truncated + '"';
-          preview.style.display = 'block';
-        } else {
-          preview.style.display = 'none';
-        }
+  // Show the legacy hardcoded contact overlay. If forceEmpty is true the
+  // input fields will be cleared (used for offline automation prompts).
+  function showContactOverlay(forceEmpty) {
+    const el = $id('chatassist-contact-overlay');
+    if (!el) return;
+
+    // Show pending message preview so visitor knows their message is safe.
+    const preview = $id('chatassist-contact-msg-preview');
+    if (preview) {
+      if (pendingOfflineMessage) {
+        const truncated = pendingOfflineMessage.length > 120
+          ? pendingOfflineMessage.slice(0, 120) + '…'
+          : pendingOfflineMessage;
+        preview.textContent = '"' + truncated + '"';
+        preview.style.display = 'block';
+      } else {
+        preview.style.display = 'none';
       }
-      el.style.display = 'flex';
-      el.classList.add('chatassist-contact-overlay-visible');
-      document.getElementById('chatassist-contact-name')?.focus();
     }
+
+    // Always use the legacy hardcoded fields in the overlay (name, phone, email).
+    // Do not replace the form markup with dynamic website forms here.
+    try {
+      const panel = el.querySelector('.chatassist-contact-overlay-panel');
+      if (panel) {
+        const titleEl = panel.querySelector('.chatassist-contact-overlay-title');
+        const subtitleEl = panel.querySelector('.chatassist-contact-overlay-subtitle');
+        if (titleEl) titleEl.textContent = 'Please introduce yourself';
+        if (subtitleEl) subtitleEl.textContent = panel.querySelector('#chatassist-contact-msg-preview')?.style.display === 'block' ? subtitleEl.textContent : (subtitleEl.textContent || 'Leave your contact info so we can get back to you.');
+      }
+    } catch (e) { }
+
+    // If requested, clear the legacy input values so the visitor sees an empty form.
+    try {
+      if (forceEmpty) {
+        const nameEl = $id('chatassist-contact-name');
+        const phoneEl = $id('chatassist-contact-phone');
+        const emailEl = $id('chatassist-contact-email');
+        if (nameEl) nameEl.value = '';
+        if (phoneEl) phoneEl.value = '';
+        if (emailEl) emailEl.value = '';
+      }
+    } catch (e) { }
+
+    el.style.display = 'flex';
+    el.classList.add('chatassist-contact-overlay-visible');
+    // Focus first input (name field)
+    const firstField = $id('chatassist-contact-name');
+    try { firstField && firstField.focus(); } catch (e) { }
   }
 
   function hideContactOverlay(restore) {
-    const el = document.getElementById('chatassist-contact-overlay');
+    const el = $id('chatassist-contact-overlay');
     if (!el) return;
     // Only act if the overlay is actually visible; prevents clearing the input
     // when applyPresence() calls hideContactOverlay(false) on every presence tick.
@@ -2137,7 +2548,7 @@
     el.style.display = 'none';
     if (!wasVisible) return;
     if (restore) {
-      const input = document.getElementById('chatassist-input');
+      const input = $id('chatassist-input');
       if (input && pendingOfflineMessage != null) input.value = pendingOfflineMessage;
       if (pendingOfflineAttachments && pendingOfflineAttachments.length) {
         draftAttachments = pendingOfflineAttachments.slice();
@@ -2145,13 +2556,13 @@
       }
     } else {
       // Clear the input after successful submit.
-      const input = document.getElementById('chatassist-input');
+      const input = $id('chatassist-input');
       if (input) input.value = '';
     }
   }
 
   function showEndOverlay() {
-    const el = document.getElementById('chatassist-end-overlay');
+    const el = $id('chatassist-end-overlay');
     if (el) {
       el.style.display = 'flex';
       el.classList.add('chatassist-end-overlay-visible');
@@ -2159,7 +2570,7 @@
   }
 
   function hideEndOverlay() {
-    const el = document.getElementById('chatassist-end-overlay');
+    const el = $id('chatassist-end-overlay');
     if (el) {
       el.classList.remove('chatassist-end-overlay-visible');
       el.style.display = 'none';
@@ -2167,41 +2578,50 @@
   }
 
   function submitContactAndSendPending() {
-    const name = document.getElementById('chatassist-contact-name')?.value.trim();
-    const phone = document.getElementById('chatassist-contact-phone')?.value.trim();
-    const email = document.getElementById('chatassist-contact-email')?.value.trim();
+    const name = $id('chatassist-contact-name')?.value.trim();
+    const phone = $id('chatassist-contact-phone')?.value.trim();
+    const email = $id('chatassist-contact-email')?.value.trim();
     if (!name) {
       showToast('Please enter your name.');
-      document.getElementById('chatassist-contact-name')?.focus();
+      $id('chatassist-contact-name')?.focus();
       return;
     }
     if (!phone) {
       showToast('Please enter your phone number.');
-      document.getElementById('chatassist-contact-phone')?.focus();
+      $id('chatassist-contact-phone')?.focus();
       return;
     }
-    // Exactly 10 digits required.
     const phoneDigits = phone.replace(/\D/g, '');
     if (phoneDigits.length !== 10) {
       showToast('Please enter a valid 10-digit phone number.');
-      document.getElementById('chatassist-contact-phone')?.focus();
+      $id('chatassist-contact-phone')?.focus();
       return;
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       showToast('Please enter a valid email address.');
-      document.getElementById('chatassist-contact-email')?.focus();
+      $id('chatassist-contact-email')?.focus();
       return;
     }
+    const visitorName = name;
+    const visitorPhone = phone;
+    const visitorEmail = email;
+
     const msg = pendingOfflineMessage;
     const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
     pendingOfflineAttachments = [];
     hideContactOverlay(false);
-    localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, name);
-    localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, phone);
-    if (email) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, email);
+    try {
+      if (visitorName) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitorName);
+      if (visitorPhone) localStorage.setItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`, visitorPhone);
+      if (visitorEmail) localStorage.setItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`, visitorEmail);
+    } catch (e) { }
+    // Persist to the 12h verified cache and mark in-memory for this conversation.
+    _saveContactVerified(visitorName, visitorPhone, visitorEmail || '');
+    _contactVerifiedThisConversation = true;
+
     if (msg || (atts && atts.length)) {
-      const meta = { visitor_name: name, visitor_phone: phone, visitor_email: email || undefined };
+      const meta = { visitor_name: visitorName, visitor_phone: visitorPhone, visitor_email: visitorEmail || undefined };
       try {
         meta._client_message_id = (window.crypto && window.crypto.randomUUID)
           ? window.crypto.randomUUID()
@@ -2211,6 +2631,29 @@
       appendMessage('visitor', outgoing, new Date().toISOString(), meta, null);
       sendMessage(outgoing, meta);
       smartScroll();
+    } else {
+      // No pending message (overlay shown via bot_offline before visitor typed).
+      // Send a contact-only frame so the backend stores the visitor details.
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'visitor_contact',
+          visitor_name: visitorName,
+          visitor_phone: visitorPhone,
+          visitor_email: visitorEmail || undefined,
+        }));
+      }
+    }
+
+    // If a bot button click was deferred waiting for contact, fire it now.
+    if (pendingBotButtonClick) {
+      const pbc = pendingBotButtonClick;
+      pendingBotButtonClick = null;
+      clearTimeout(_inputRevealTimer);
+      _inputRevealTimer = setTimeout(showInputContainer, 5000);
+      appendMessage('visitor', pbc.label, new Date().toISOString(), null, null);
+      isAtBottom = true;
+      smartScroll();
+      sendBotButtonClick(pbc.automationId, pbc.idx);
     }
   }
 
@@ -2340,7 +2783,7 @@
               <span></span><span></span><span></span>
             </span>
           </div>
-          <div id="chatassist-input-container">
+          <div id="chatassist-input-container" style="display:none;">
             <div id="chatassist-attachments" style="display:none;"></div>
             <div id="chatassist-input-row">
             ${CONFIG.showAttachments ? `
@@ -2363,13 +2806,32 @@
       </div>
       <div id="chatassist-toast-container" style="display:none;"></div>
     `;
-    document.body.appendChild(container);
+    // Attach a Shadow DOM so widget CSS is fully isolated from the host page.
+    // The host is a plain block element; the widget's own CSS handles all positioning.
+    const __host = document.createElement('div');
+    __host.style.cssText = 'display:block;margin:0;padding:0;border:0;';
+    document.body.appendChild(__host);
+    __shadow = __host.attachShadow({ mode: 'open' });
+
+    // Inject the widget stylesheet into the shadow root.
+    try {
+      const src = scriptElement && scriptElement.src ? scriptElement.src : '';
+      const cssUrl = src ? src.replace(/chat-widget\.js(\?.*)?$/, 'chat-widget.css') : null;
+      if (cssUrl) {
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = cssUrl;
+        __shadow.appendChild(cssLink);
+      }
+    } catch (e) {}
+
+    __shadow.appendChild(container);
     setTimeout(() => container.classList.add('chatassist-visible'), 100);
 
     // Event Listeners
-    const bubble = document.getElementById('chatassist-bubble');
-    const win = document.getElementById('chatassist-window');
-    const input = document.getElementById('chatassist-input');
+    const bubble = $id('chatassist-bubble');
+    const win = $id('chatassist-window');
+    const input = $id('chatassist-input');
 
     function openWidget() {
       enableNotificationSound();
@@ -2396,8 +2858,14 @@
       hideNewMsgIndicator();
       setTimeout(function () { scrollToBottom(false); }, 50);
       if (endChatDisabled) setEndChatDisabled(true);
-      // Persist open state
-      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '1'); } catch (e) { }
+      // Persist open state (with timestamp for 12h TTL)
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, JSON.stringify({v:1, ts:Date.now()})); } catch (e) { }
+      // Notify backend that widget was opened (triggers welcome if not yet sent)
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'widget_opened' }));
+        }
+      } catch (e) { }
     }
 
     function closeWidget(restoreOverlay) {
@@ -2408,89 +2876,103 @@
         win.style.display = 'none';
         bubble.style.display = 'inline-flex';
       }, { once: true });
-      // Persist minimized state
-      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, '0'); } catch (e) { }
+      // Persist minimized state (clear timestamp so it won't restore)
+      try { localStorage.setItem('ai_chatassist_widget_open_' + CONFIG.websiteId, JSON.stringify({v:1, ts:0})); } catch (e) { }
       if (restoreOverlay) hideContactOverlay(true);
       hideEndOverlay();
     }
 
     bubble.addEventListener('click', openWidget);
 
-    document.getElementById('chatassist-minimize').addEventListener('click', () => {
+    $id('chatassist-minimize').addEventListener('click', () => {
       closeWidget(true);
     });
 
-    document.getElementById('chatassist-back').addEventListener('click', () => {
+    $id('chatassist-back').addEventListener('click', () => {
       goBack();
     });
 
-    document.getElementById('chatassist-end').addEventListener('click', () => {
+    $id('chatassist-end').addEventListener('click', () => {
       showEndOverlay();
     });
 
-    document.getElementById('chatassist-end-cancel').addEventListener('click', () => {
+    $id('chatassist-end-cancel').addEventListener('click', () => {
       hideEndOverlay();
       closeWidget(true);
     });
 
-    document.getElementById('chatassist-new-msg-indicator').addEventListener('click', () => {
+    $id('chatassist-new-msg-indicator').addEventListener('click', () => {
       hideNewMsgIndicator();
       scrollToBottom(true);
       markRead();
     });
 
-    document.getElementById('chatassist-end-confirm').addEventListener('click', () => {
+    $id('chatassist-end-confirm').addEventListener('click', () => {
       hideEndOverlay();
       try {
         const ok = sendEndChat();
         if (ok) setEndChatDisabled(true);
       } catch (e) { }
-      // Show rating overlay so we capture feedback before the visitor leaves.
-      // Conversation stays OPEN on the server — agents follow up and resolve manually.
+      // Mark that visitor intentionally ended so the rating overlay minimises on dismiss.
       ratingTriggeredByVisitorEnd = true;
-      showRatingOverlay(CONFIG.conversationId || null);
-      // If the rating overlay was skipped because the visitor already rated
-      // (hasRatedSession=true), transition immediately — don't leave them stuck.
+
+      // If visitor already rated this conversation, skip the overlay entirely.
       if (hasRatedSession) {
         ratingTriggeredByVisitorEnd = false;
         afterConversationClose();
+        try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+        return;
       }
+
+      // Let the backend automation deliver the system message + show_rating_popup
+      // (via "Visitor ended chat" automation: emit_system_event → wait 2s → show_rating_popup).
+      // Fallback: if backend never delivers show_rating_popup within 6s, show it ourselves.
+      _awaitingRatingAfterResolve = true;
+      clearTimeout(_resolveRatingTimeout);
+      _resolveRatingTimeout = setTimeout(function () {
+        if (_awaitingRatingAfterResolve) {
+          _awaitingRatingAfterResolve = false;
+          showRatingOverlay(CONFIG.conversationId || null);
+        }
+      }, 6000);
     });
 
     // Rating overlay buttons
-    document.getElementById('chatassist-rating-close').addEventListener('click', () => {
+    $id('chatassist-rating-close').addEventListener('click', () => {
       hideRatingOverlay();
     });
-    document.querySelectorAll('.chatassist-rating-btn').forEach(btn => {
+    $qsAll('.chatassist-rating-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
+        $qsAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         const val = parseInt(btn.getAttribute('data-rating'), 10);
         submitRating(val);
       });
     });
 
-    document.getElementById('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
-    document.getElementById('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
-    document.getElementById('chatassist-contact-phone').addEventListener('input', function () {
+    $id('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
+    $id('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
+    $id('chatassist-contact-phone').addEventListener('input', function () {
       this.value = this.value.replace(/\D/g, '').slice(0, 10);
     });
-    document.getElementById('chatassist-send').addEventListener('click', handleUserMessage);
+    $id('chatassist-send').addEventListener('click', handleUserMessage);
 
     // Popup notification buttons
-    document.getElementById('chatassist-popup-close').addEventListener('click', function (e) {
+    $id('chatassist-popup-close').addEventListener('click', function (e) {
       e.stopPropagation();
       hideMessagePopup();
+      // Record dismissal time so we don't re-show the welcome popup for 12h.
+      _saveWelcomePopupDismissed();
     });
-    document.getElementById('chatassist-popup-reply').addEventListener('click', function (e) {
+    $id('chatassist-popup-reply').addEventListener('click', function (e) {
       e.stopPropagation();
       hideMessagePopup(true);
       openWidget();
     });
 
     if (CONFIG.showAttachments) {
-      const fileInput = document.getElementById('chatassist-file');
-      const attachBtn = document.getElementById('chatassist-attach');
+      const fileInput = $id('chatassist-file');
+      const attachBtn = $id('chatassist-attach');
 
       if (attachBtn && fileInput) {
         attachBtn.addEventListener('click', () => {
@@ -2563,7 +3045,7 @@
       }, 1600);
     });
 
-    const messagesContainer = document.getElementById('chatassist-messages');
+    const messagesContainer = $id('chatassist-messages');
     if (messagesContainer) messagesContainer.addEventListener('scroll', handleMessagesScroll);
 
     // Prefill
@@ -2571,9 +3053,9 @@
       const name = localStorage.getItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`);
       const phone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`);
       const email = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
-      if (name) document.getElementById('chatassist-contact-name').value = name;
-      if (phone) document.getElementById('chatassist-contact-phone').value = phone;
-      if (email) document.getElementById('chatassist-contact-email').value = email;
+      if (name) $id('chatassist-contact-name').value = name;
+      if (phone) $id('chatassist-contact-phone').value = phone;
+      if (email) $id('chatassist-contact-email').value = email;
     } catch (e) { }
 
     refreshHeaderIcon();
@@ -2585,7 +3067,7 @@
   }
 
   function autoResizeInput() {
-    const input = document.getElementById('chatassist-input');
+    const input = $id('chatassist-input');
     if (!input) return;
     // Bail when the chat window is hidden: scrollHeight is 0 inside display:none,
     // which would set inline height:0px and cause the cursor to render at the top
@@ -2599,9 +3081,9 @@
   }
 
   function updateEmptyState() {
-    const emptyEl = document.getElementById('chatassist-empty-state');
+    const emptyEl = $id('chatassist-empty-state');
     if (!emptyEl) return;
-    const container = document.getElementById('chatassist-messages');
+    const container = $id('chatassist-messages');
     if (!container) return;
     // Show empty state only when there are no message elements.
     const hasMessages = container.querySelector('.chatassist-message, .chatassist-date-separator');
@@ -2680,8 +3162,8 @@
   }
 
   function applyPresence(presence) {
-    const titleEl = document.querySelector('.chatassist-header-title');
-    const statusTextEl = document.querySelector('.chatassist-online-text');
+    const titleEl = $qs('.chatassist-header-title');
+    const statusTextEl = $qs('.chatassist-online-text');
     if (!titleEl || !statusTextEl) return;
 
     const count = presence.available_agents_count ?? (presence.agents?.length || 0);
@@ -2689,11 +3171,11 @@
     if (presenceOnline) hideContactOverlay(false);
 
     // Update bubble online dot
-    const bubbleDot = document.getElementById('chatassist-bubble-online-dot');
+    const bubbleDot = $id('chatassist-bubble-online-dot');
     if (bubbleDot) bubbleDot.classList.toggle('chatassist-dot-online', presenceOnline);
 
     // Update header online dot
-    const headerDot = document.querySelector('.chatassist-online-dot');
+    const headerDot = $qs('.chatassist-online-dot');
     if (headerDot) headerDot.style.background = presenceOnline ? '#22c55e' : '#ef4444';
 
     if (!presenceOnline) {
@@ -2742,25 +3224,25 @@
 
   function _applyThemeStyles() {
     try {
-      const widget = document.getElementById('chatassist-widget');
+      const widget = $id('chatassist-widget');
       const pos = CONFIG.position.replace('bottom-', 'b-').replace('top-', 't-').replace('left', 'l').replace('right', 'r');
       widget.className = `chatassist-position-${pos} chatassist-theme-${CONFIG.theme}`;
       const themeBackground = CONFIG.colorMode === 'gradient'
         ? `linear-gradient(135deg, ${CONFIG.gradientStart} 0%, ${CONFIG.gradientEnd} 100%)`
         : CONFIG.primaryColor;
-      const pillEl = document.getElementById('chatassist-bubble-pill');
+      const pillEl = $id('chatassist-bubble-pill');
       if (pillEl) pillEl.style.background = themeBackground;
-      document.getElementById('chatassist-header').style.background = themeBackground;
-      document.getElementById('chatassist-send').style.background = themeBackground;
-      const replyBtn = document.getElementById('chatassist-popup-reply');
+      $id('chatassist-header').style.background = themeBackground;
+      $id('chatassist-send').style.background = themeBackground;
+      const replyBtn = $id('chatassist-popup-reply');
       if (replyBtn) replyBtn.style.background = themeBackground;
-      const contactSubmit = document.querySelector('.chatassist-contact-overlay-submit');
+      const contactSubmit = $qs('.chatassist-contact-overlay-submit');
       if (contactSubmit) contactSubmit.style.background = themeBackground;
-      let themeStyle = document.getElementById('chatassist-theme-style');
+      let themeStyle = $id('chatassist-theme-style');
       if (!themeStyle) {
         themeStyle = document.createElement('style');
         themeStyle.id = 'chatassist-theme-style';
-        document.head.appendChild(themeStyle);
+        (__shadow || document.head).appendChild(themeStyle);
       }
       themeStyle.textContent = `.chatassist-message-visitor .chatassist-message-bubble { background: ${themeBackground} !important; }
 .chatassist-prompt-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
@@ -2851,7 +3333,7 @@
 
       // Set popup avatar to headerIconUrl if configured.
       if (CONFIG.headerIconUrl) {
-        const avatarWrap = document.getElementById('chatassist-popup-avatar-wrap');
+        const avatarWrap = $id('chatassist-popup-avatar-wrap');
         if (avatarWrap) {
           const url = getFullAssetUrl(CONFIG.headerIconUrl);
           if (url) {
@@ -2911,9 +3393,9 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 1000));
+    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 3500));
   } else {
-    setTimeout(init, 1000);
+    setTimeout(init, 3500);
   }
 
 })();

@@ -7,6 +7,7 @@ export interface Agent {
   role?: string;
   is_available?: boolean;
   is_active: boolean;
+  avatar_url?: string | null;
 }
 
 export interface AgentWebsiteAssignment {

@@ -89,6 +89,16 @@ export async function initiateVisitorConversation(params: {
     )
 }
 
+export interface FormSubmission {
+    id: number
+    form_id: number
+    form_name: string | null
+    form_fields: Array<{ name: string; label: string; type: string; required?: boolean }>
+    data: Record<string, string>
+    conversation_id: number | null
+    created_at: string | null
+}
+
 export interface CustomerContactDetails {
     contact_key: string
     website_id: number | null
@@ -108,6 +118,7 @@ export interface CustomerContactDetails {
         status: string
         created_at: string | null
     }>
+    form_submissions: FormSubmission[]
 }
 
 export async function fetchVisitors(params?: {

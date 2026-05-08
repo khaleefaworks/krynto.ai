@@ -104,5 +104,8 @@ def delete_tag(
     tag = tag_repo.get_tag(db, tag_id=tag_id)
     if not tag or tag.website_id != website_id:
         raise HTTPException(status_code=404, detail="Tag not found")
-    tag_repo.delete_tag(db, tag_id)
+    try:
+        tag_repo.delete_tag(db, tag_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"message": "Tag deleted successfully"}

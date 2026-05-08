@@ -47,11 +47,21 @@ const _lastToastByKey = new Map<string, number>()
 // Prevents rapid-fire stacking when many events arrive at once.
 let _lastAnySoundAt = 0
 const _SOUND_MIN_INTERVAL_MS = 1500
+// Cross-tab dedup key: any tab that plays a sound writes this key to localStorage
+// so other tabs skip their own playback within the same window.
+const _SOUND_CROSS_TAB_KEY = 'ai_chatassist_last_sound_at'
 
 function _shouldPlaySound(): boolean {
   const now = Date.now()
+  // In-process gate
   if (now - _lastAnySoundAt < _SOUND_MIN_INTERVAL_MS) return false
+  // Cross-tab gate: check if another tab already played recently
+  try {
+    const crossTabTs = Number(localStorage.getItem(_SOUND_CROSS_TAB_KEY) || 0)
+    if (now - crossTabTs < _SOUND_MIN_INTERVAL_MS) return false
+  } catch { /* ignore */ }
   _lastAnySoundAt = now
+  try { localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now)) } catch { /* ignore */ }
   return true
 }
 
@@ -61,10 +71,6 @@ function _shouldToast(key: string, minIntervalMs: number): boolean {
   if (now - prev < minIntervalMs) return false
   _lastToastByKey.set(key, now)
   return true
-}
-
-function _shouldBeep(key: string, minIntervalMs: number): boolean {
-  return _shouldToast(`beep:${key}`, minIntervalMs)
 }
 
 // Race-fix: visitor_message often arrives a few ms before new_chat for the same
@@ -106,16 +112,21 @@ function App() {
         const data: any = event?.data || {}
         if (data?.type !== 'push') return
 
-        // If WS is connected it will handle the sound — never double-play from SW push.
-        const isRealtimeConnected = Boolean((useAppStore as any).getState?.()?.isConnected)
-        if (isRealtimeConnected) return
+        // Only play sound when the tab is hidden. Visible tabs handle sound via the
+        // WS event handler. In hidden tabs, WS event audio is blocked by autoplay
+        // policy, so the SW postMessage is the reliable trigger for sound.
+        if (!document.hidden) return
 
-        if (_shouldPlaySound()) {
-          try { playMessageNotificationSound() } catch { }
-        }
-
-        const title = String(data?.title || 'Notification')
-        void title
+        const title = String(data?.title || '')
+        try {
+          if (!_shouldPlaySound()) return
+          // Match the sound to the push type: new-chat vs regular message.
+          if (title.toLowerCase().startsWith('new chat')) {
+            playNewVisitorNotificationSound()
+          } else {
+            playMessageNotificationSound()
+          }
+        } catch { }
       } catch {
         // ignore
       }
@@ -219,7 +230,8 @@ function App() {
           if (typeof window === 'undefined') return
           if (!('Notification' in window)) return
           if (Notification.permission !== 'granted') return
-          // Prevent duplicates: if push is supported, rely on SW push for OS notifications.
+          // Backend always sends a web push (handled by the SW push event) — avoid
+          // a duplicate OS notification from the page when push is supported.
           if (isPushSupported()) return
 
           // Only show OS notifications when the tab isn't visible.
@@ -233,16 +245,8 @@ function App() {
           const url = opts.url ? String(opts.url) : ''
           if (url) {
             n.onclick = () => {
-              try {
-                window.focus()
-              } catch {
-                // ignore
-              }
-              try {
-                window.location.assign(url)
-              } catch {
-                // ignore
-              }
+              try { window.focus() } catch { }
+              try { window.location.assign(url) } catch { }
             }
           }
         } catch {
@@ -258,10 +262,6 @@ function App() {
             ? (data as any).conversation_id
             : Number((data as any)?.conversation_id) || undefined
 
-        const websiteId =
-          typeof (data as any)?.website_id === 'number'
-            ? (data as any).website_id
-            : Number((data as any)?.website_id) || undefined
 
         if (data.type === 'new_chat') {
           // Cancel any pending visitor_message sound for this conversation —
@@ -296,28 +296,39 @@ function App() {
             void 0  // in-app toasts removed; desktop push + sounds handle notifications
           }
         } else if (data.type === 'visitor_message') {
-          // Delay 200 ms: if a new_chat event arrives for the same conversation
-          // within that window it will cancel this timer and play the correct
-          // "New chat" sound. For all subsequent messages the timer simply fires
-          // and plays the message sound normally.
-          // If a timer is already pending for this conversation (rapid messages),
-          // do NOT skip — cancel the old one and start a fresh 200 ms window.
-          if (conversationId) {
-            const existing = _pendingMsgSoundTimers.get(conversationId)
-            if (existing !== undefined) clearTimeout(existing)
-            const timer = setTimeout(() => {
-              _pendingMsgSoundTimers.delete(conversationId)
+          // If the backend broadcast includes _assigned_agent_id, the conversation
+          // is assigned to a specific agent. Non-assigned agents are spectating
+          // only — skip the notification sound so they aren't confused by alerts
+          // for conversations that belong to a colleague.
+          const assignedAgentId = (data as any)?._assigned_agent_id
+          const currentUserId = useAppStore.getState().user?.id
+          const isSpectating = assignedAgentId != null && assignedAgentId !== currentUserId
+
+          if (!isSpectating) {
+            // Delay 200 ms: if a new_chat event arrives for the same conversation
+            // within that window it will cancel this timer and play the correct
+            // "New chat" sound. For all subsequent messages the timer simply fires
+            // and plays the message sound normally.
+            // If a timer is already pending for this conversation (rapid messages),
+            // do NOT skip — cancel the old one and start a fresh 200 ms window.
+            if (conversationId) {
+              const existing = _pendingMsgSoundTimers.get(conversationId)
+              if (existing !== undefined) clearTimeout(existing)
+              const timer = setTimeout(() => {
+                _pendingMsgSoundTimers.delete(conversationId)
+                if (_shouldPlaySound()) {
+                  try { playMessageNotificationSound() } catch { }
+                }
+              }, 200)
+              _pendingMsgSoundTimers.set(conversationId, timer)
+            } else {
+              // No conversation id — play immediately (fallback, should be rare).
               if (_shouldPlaySound()) {
                 try { playMessageNotificationSound() } catch { }
               }
-            }, 200)
-            _pendingMsgSoundTimers.set(conversationId, timer)
-          } else {
-            // No conversation id — play immediately (fallback, should be rare).
-            if (_shouldPlaySound()) {
-              try { playMessageNotificationSound() } catch { }
             }
           }
+
         }
       } catch {
         // Never break realtime handling because of toast UI.

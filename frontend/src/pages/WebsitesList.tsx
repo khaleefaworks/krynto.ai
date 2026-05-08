@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, X, Globe, ExternalLink, Search } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
+import DocsLink from '@/components/DocsLink'
 
 interface Website {
   id: number
@@ -125,7 +126,10 @@ export default function WebsitesList() {
     <div className="flex flex-col h-full relative overflow-hidden">
       {/* Header */}
       <div className="h-16 flex items-center justify-between border-b dark:border-gray-700 px-6 flex-shrink-0">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Websites</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Websites</h1>
+          <DocsLink slug="admin-guide/websites" />
+        </div>
         <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4 mr-1.5" />
           Add Website

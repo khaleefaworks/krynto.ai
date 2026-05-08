@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import ChatComposer from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import Logo from '@/components/Logo'
+import DocsLink from '@/components/DocsLink'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { isAdmin, isAgent } from '@/lib/roles'
@@ -42,12 +43,81 @@ import {
     Bot,
     Plus,
     X,
-    HelpCircle
+    HelpCircle,
+    SlidersHorizontal,
+    Globe,
+    UserRound,
+    Calendar,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import UserAvatar from '@/components/UserAvatar'
 import { formatDistanceToNow } from 'date-fns'
+
+// Reverse backslash-escape sequences added by the markdown serializer
+// (e.g. \* → *, \\ → \). Matches what the widget's unescapeMarkdown does.
+// Also normalises trailing whitespace *inside* closing delimiters (old message
+// format bug): e.g. "***Hello! ***" → "***Hello!***".  CommonMark requires
+// closing * delimiters to be right-flanking (not preceded by whitespace),
+// otherwise ReactMarkdown falls back to rendering them as raw asterisks.
+function unescapeMarkdown(s: string | null | undefined): string {
+    return String(s || '')
+        .replace(/\\([\\`*_[\]()/])/g, '$1')
+        .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
+        .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
+        .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*')
+}
+
+// Strip markdown syntax for plain-text previews (chat list last message).
+function stripMarkdownPreview(s: string | null | undefined): string {
+    return String(s || '')
+        .replace(/\\([\\`*_[\]()/])/g, '$1')    // unescape \* \_ etc. FIRST so patterns below see clean text
+        .replace(/\*\*\*(.*?)\*\*\*/g, '$1')    // bold+italic ***text***
+        .replace(/\*\*(.*?)\*\*/g, '$1')        // bold **text**
+        .replace(/\*(.*?)\*/g, '$1')            // italic *text*
+        .replace(/\n+/g, ' ')
+        .trim()
+}
+
+function formatWhatsAppDate(dateLike: any): string {
+    const t = dateLike ? new Date(dateLike).getTime() : NaN
+    if (!Number.isFinite(t)) return ''
+
+    const now = new Date()
+    const then = new Date(t)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const yesterdayStart = todayStart - 86400000
+    const weekStart = todayStart - 6 * 86400000
+
+    const time = then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })
+
+    if (t >= todayStart) return time
+    if (t >= yesterdayStart) return 'Yesterday'
+    if (t >= weekStart) return then.toLocaleDateString(undefined, { weekday: 'long' })
+    if (then.getFullYear() === now.getFullYear())
+        return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    return `${then.getDate()}/${then.getMonth() + 1}/${then.getFullYear()}`
+}
+
+function formatLastSeen(dateLike: any): string {
+    const t = dateLike ? new Date(dateLike).getTime() : NaN
+    if (!Number.isFinite(t)) return ''
+
+    const now = new Date()
+    const then = new Date(t)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const yesterdayStart = todayStart - 86400000
+    const weekStart = todayStart - 6 * 86400000
+
+    const time = then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })
+
+    if (t >= todayStart) return `today at ${time}`
+    if (t >= yesterdayStart) return `yesterday at ${time}`
+    if (t >= weekStart) return `${then.toLocaleDateString(undefined, { weekday: 'long' })} at ${time}`
+    if (then.getFullYear() === now.getFullYear())
+        return `${then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} at ${time}`
+    return `${then.getDate()}/${then.getMonth() + 1}/${then.getFullYear()} at ${time}`
+}
 import { API_BASE } from '@/config/endpoints'
 
 function getMessageTimestamp(m: any): number {
@@ -79,18 +149,7 @@ function compareMessagesChronologically(a: any, b: any): number {
 }
 
 function formatShortAge(dateLike: any): string {
-    const t = dateLike ? new Date(dateLike).getTime() : NaN
-    if (!Number.isFinite(t)) return ''
-
-    const deltaMs = Math.max(0, Date.now() - t)
-    const minutes = Math.floor(deltaMs / 60000)
-    if (minutes < 60) return `${minutes}m`
-
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h`
-
-    const days = Math.floor(hours / 24)
-    return `${days}d`
+    return formatWhatsAppDate(dateLike)
 }
 
 function shortSessionId(sessionId: string | null | undefined): string {
@@ -201,6 +260,7 @@ interface ConversationDetails {
     visitor_phone?: string
     device_info?: string
     browser_info?: string
+    visitor_ip?: string | null
     visit_count?: number
     last_seen_at?: string
     visitor_avatar_color?: string | null
@@ -224,6 +284,14 @@ interface VisitorConversation {
 }
 
 type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
+
+function sortChatsByActivity(chats: any[]): any[] {
+    return [...chats].sort((a, b) => {
+        const ta = a.last_message_at || a.created_at || ''
+        const tb = b.last_message_at || b.created_at || ''
+        return tb < ta ? -1 : tb > ta ? 1 : 0
+    })
+}
 
 export default function ConversationsView() {
     const { chatId: chatIdParam, conversationId } = useParams<{ chatId?: string; conversationId?: string }>()
@@ -280,6 +348,16 @@ export default function ConversationsView() {
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
 
+    // Advanced conversation filters
+    const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+    const [filterWebsiteId, setFilterWebsiteId] = useState<number | null>(null)
+    const [filterAgentId, setFilterAgentId] = useState<number | null>(null)
+    const [filterTeamId, setFilterTeamId] = useState<number | null>(null)
+    const [filterTagIds, setFilterTagIds] = useState<number[]>([])
+    const [filterDateFrom, setFilterDateFrom] = useState<string>('')
+    const [filterDateTo, setFilterDateTo] = useState<string>('')
+    const [agentsList, setAgentsList] = useState<{ id: number; name: string; email: string; avatar_url?: string | null }[]>([])
+
     // Chat state
     const [selectedChat, setSelectedChat] = useState<number | null>(null)
     const [input, setInput] = useState('')
@@ -311,6 +389,7 @@ export default function ConversationsView() {
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
+    const [formSubmissions, setFormSubmissions] = useState<any[]>([])
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
     const [visitorConversations, setVisitorConversations] = useState<VisitorConversation[]>([])
@@ -392,6 +471,33 @@ export default function ConversationsView() {
         }
     }, [])
 
+    // Load agents list for advanced filters
+    useEffect(() => {
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const data = await apiRequest<any[]>('/users')
+                    if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email, avatar_url: u.avatar_url ?? null })) : [])
+                } catch {
+                    if (!cancelled) setAgentsList([])
+                }
+                try {
+                    const data = await apiRequest<any[]>('/teams/overview')
+                    if (!cancelled) setAvailableTeams(
+                        Array.isArray(data)
+                            ? data.flatMap((w: any) => w.teams || [])
+                            : []
+                    )
+                } catch {
+                    // Teams will be loaded per-conversation as a fallback
+                }
+                try {
+                    // Load any tags from any accessible website as filter options
+                    // Tags are also derived from loaded chats below (allTagsFromChats)
+                } catch { /* no-op */ }
+            })()
+        return () => { cancelled = true }
+    }, [])
 
     // Listen to global notification changes and refresh list (only on ConversationsView)
     const { unreadChatsCount } = useAppStore()
@@ -591,8 +697,10 @@ export default function ConversationsView() {
 
     // When navigating back to the chats list (/dashboard/chats), clear any previously
     // selected chat so the empty-state screen renders (instead of persisting the thread view).
+    // Always reset the filter to 'all' so the sidebar Chats link brings you to open conversations.
     useEffect(() => {
         if (!isChatsListRoute) return
+        setActiveFilter('all')
         if (selectedChat === null) return
         setSelectedChat(null)
         setConversation(null)
@@ -607,15 +715,20 @@ export default function ConversationsView() {
         stopAgentTyping(null)
     }, [isChatsListRoute, selectedChat, reset, stopAgentTyping])
 
-    // Ensure conversation details populate once chats load (handles refresh on deep links)
+    // Ensure conversation details populate once chats load (handles refresh on deep links).
+    // NOTE: We use a ref for getChatById so this effect only re-runs when selectedChat changes,
+    // NOT every time activeChats/resolvedChats change. Previously, every fetchActiveChats() call
+    // would trigger this effect and overwrite optimistic tag/team updates with stale cache data.
+    const getChatByIdRef = useRef(getChatById)
+    getChatByIdRef.current = getChatById
     useEffect(() => {
         if (selectedChat) {
-            const chatData = getChatById(selectedChat)
+            const chatData = getChatByIdRef.current(selectedChat)
             if (chatData) {
                 setConversation(chatData as any)
             }
         }
-    }, [selectedChat, getChatById])
+    }, [selectedChat]) // intentionally omit getChatById — use ref to avoid stale rewrites
 
     // Handle conversation selection from URL.
     // Canonical URL is /dashboard/chats/:chatId where chatId is the conversation PK.
@@ -624,10 +737,13 @@ export default function ConversationsView() {
         if (preferredId) {
             if (preferredId !== selectedChat) {
                 openChat(preferredId)
+                // Auto-switch the filter tab so the conversation is visible in the list.
+                const inResolved = resolvedChats.some((c: any) => c.id === preferredId)
+                setActiveFilter(inResolved ? 'resolved' : 'all')
             }
             return
         }
-    }, [getPreferredConversationId, selectedChat, openChat])
+    }, [getPreferredConversationId, selectedChat, openChat, resolvedChats])
 
     // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
     // fetch the conversation from the API and inject it so it can be selected.
@@ -647,8 +763,17 @@ export default function ConversationsView() {
                         headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
                     })
                     if (cancelled || !summary?.id) return
-                    // Inject into activeChats so it appears in the left list
-                    setActiveChats([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats])
+                    const isResolved = summary.status === 'resolved'
+                    if (isResolved) {
+                        setResolvedChats((prev: any[]) => {
+                            const exists = prev.some((c) => c.id === summary.id)
+                            return exists ? prev : [summary, ...prev]
+                        })
+                        setActiveFilter('resolved')
+                    } else {
+                        setActiveChats(sortChatsByActivity([{ ...summary, current_agent_id: summary.assigned_agent_id }, ...activeChats]))
+                        setActiveFilter('all')
+                    }
                     openChat(summary.id)
                 } catch {
                     // Conversation not found or no access — ignore
@@ -784,7 +909,7 @@ export default function ConversationsView() {
                     if (idx >= 0) {
                         const next = [...latest]
                         next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                        setActiveChats(next)
+                        setActiveChats(sortChatsByActivity(next))
                     }
                 }
             } else if (data.type === 'conversation_unread' && dataConversationId) {
@@ -830,7 +955,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -880,7 +1005,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -898,6 +1023,7 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
+                setConversation(prev => prev ? { ...prev, is_online: false } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
                 const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
@@ -912,7 +1038,13 @@ export default function ConversationsView() {
                 }
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
+                setConversation(prev => prev ? { ...prev, is_online: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_rated' && dataConversationId === selectedChat) {
+                const ratingVal = (data as any)?.rating
+                if (typeof ratingVal === 'number') {
+                    setConversationRating({ rating: ratingVal })
+                }
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
@@ -971,7 +1103,7 @@ export default function ConversationsView() {
                         if (idx >= 0) {
                             const next = [...latest]
                             next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
-                            setActiveChats(next)
+                            setActiveChats(sortChatsByActivity(next))
                         }
                     }
                 } else {
@@ -979,6 +1111,14 @@ export default function ConversationsView() {
                 }
             } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
                 // System events (e.g. "Agent joined the chat.") broadcast to all spectating agents.
+                const dto = (data as any)?.message_obj
+                if (dto && typeof dto === 'object') {
+                    addMessage(dto)
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+            } else if (data.type === 'bot_message' && dataConversationId === selectedChat) {
+                // Bot messages from automation flows (waiting message, visitor ended hint, etc.)
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
                     addMessage(dto)
@@ -1033,7 +1173,7 @@ export default function ConversationsView() {
         }
         try {
             const chats = await fetchChatsApi()
-            setActiveChats(chats)
+            setActiveChats(sortChatsByActivity(chats as any[]))
             hasLoadedChatsRef.current = true
 
             // Hydrate per-conversation unread counts from server truth.
@@ -1210,7 +1350,7 @@ export default function ConversationsView() {
                         // Temporarily inject into activeChats so it appears in the left list
                         // (e.g. bot-only conversations opened from the Visitors page).
                         if (!activeChats.some(c => c.id === chatId)) {
-                            setActiveChats([summary as any, ...activeChats])
+                            setActiveChats(sortChatsByActivity([summary as any, ...activeChats]))
                         }
                     }
 
@@ -1265,6 +1405,17 @@ export default function ConversationsView() {
             setBrowsingHistory(Array.isArray(fetchedHistory) ? fetchedHistory : [])
             setConversationRating(fetchedRating)
 
+            // Fetch form submissions for this conversation (best-effort).
+            apiRequest<any[]>(`/chats/${chatId}/form-submissions`)
+                .then((data) => {
+                    if (loadDetailsTokenRef.current === token) {
+                        setFormSubmissions(Array.isArray(data) ? data : [])
+                    }
+                })
+                .catch(() => {
+                    if (loadDetailsTokenRef.current === token) setFormSubmissions([])
+                })
+
             // Fetch other conversations from this visitor (best-effort, non-blocking).
             apiRequest<VisitorConversation[]>(`/chats/${chatId}/visitor-history`)
                 .then((data) => {
@@ -1296,12 +1447,19 @@ export default function ConversationsView() {
             if (tag) {
                 setConversationTags(prev => [...prev.filter(t => Number((t as any)?.id) !== tagId), tag])
             }
-            // Also update in activeChats list to keep it in sync
+            // Update both activeChats and resolvedChats so getChatById returns fresh data
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
                     ? { ...c, tags: [...((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId), tag] }
                     : c
             ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat
+                        ? { ...c, tags: [...((c.tags || []).filter((t: any) => Number(t?.id) !== tagId)), tag] }
+                        : c
+                )
+            )
         } catch (error) {
             console.error("Failed to add tag:", error)
         }
@@ -1315,12 +1473,19 @@ export default function ConversationsView() {
             })
             // Update local state
             setConversationTags(prev => prev.filter(t => Number((t as any)?.id) !== tagId))
-            // Also update in activeChats list
+            // Update both activeChats and resolvedChats
             setActiveChats(activeChats.map(c =>
                 c.id === selectedChat
                     ? { ...c, tags: ((c as any).tags || []).filter((t: any) => Number(t?.id) !== tagId) }
                     : c
             ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat
+                        ? { ...c, tags: ((c.tags || []).filter((t: any) => Number(t?.id) !== tagId)) }
+                        : c
+                )
+            )
         } catch (error) {
             console.error("Failed to remove tag:", error)
         }
@@ -1335,6 +1500,17 @@ export default function ConversationsView() {
             })
 
             setConversation((prev) => (prev ? ({ ...(prev as any), team_id: teamId } as any) : prev))
+
+            // Update both lists so getChatById returns fresh data (prevents the stale-ref
+            // useEffect from re-reading the old team_id and overwriting the optimistic update)
+            setActiveChats(activeChats.map(c =>
+                c.id === selectedChat ? { ...c, team_id: teamId } as any : c
+            ))
+            setResolvedChats((prev: any[]) =>
+                (Array.isArray(prev) ? prev : []).map((c: any) =>
+                    c.id === selectedChat ? { ...c, team_id: teamId } : c
+                )
+            )
 
             // Re-fetch from server so visibility / team-scope filtering is applied
             await fetchActiveChats({ showSpinner: false })
@@ -1411,7 +1587,7 @@ export default function ConversationsView() {
                 if (idx >= 0) {
                     const next = [...latest]
                     next[idx] = { ...next[idx], last_message: messageContent, last_message_at: optimisticCreatedAt }
-                    setActiveChats(next)
+                    setActiveChats(sortChatsByActivity(next))
                 }
             } catch {
                 // ignore
@@ -1526,17 +1702,36 @@ export default function ConversationsView() {
         : activeChats
 
     const filteredChats = chatsForList.filter(chat => {
-        // Apply search filter
+        // Search: name, email, short_id, session_id, last_message
         if (searchQuery) {
             const q = searchQuery.toLowerCase().trim()
-            const matchesSession = chat.session_id.toLowerCase().includes(q)
-            const matchesName = String((chat as any).visitor_name || '').toLowerCase().includes(q)
-            if (!matchesSession && !matchesName) {
-                return false
+            const fields = [
+                String((chat as any).visitor_name || ''),
+                String((chat as any).visitor_email || ''),
+                String((chat as any).short_id || ''),
+                String(chat.session_id || ''),
+                String((chat as any).last_message || ''),
+            ]
+            if (!fields.some(f => f.toLowerCase().includes(q))) return false
+        }
+
+        // Advanced filters
+        if (filterWebsiteId && (chat as any).website_id !== filterWebsiteId) return false
+        if (filterAgentId && (chat as any).assigned_agent_id !== filterAgentId) return false
+        if (filterTeamId && (chat as any).team_id !== filterTeamId) return false
+        if (filterTagIds.length > 0) {
+            const chatTagIds = ((chat as any).tags || []).map((t: any) => Number(t?.id))
+            if (!filterTagIds.every(id => chatTagIds.includes(id))) return false
+        }
+        if (filterDateFrom || filterDateTo) {
+            const ts = new Date((chat as any).created_at || '').getTime()
+            if (Number.isFinite(ts)) {
+                if (filterDateFrom && ts < new Date(filterDateFrom).getTime()) return false
+                if (filterDateTo && ts > new Date(filterDateTo).getTime()) return false
             }
         }
 
-        // Apply category filter
+        // Category filter
         switch (activeFilter) {
             case 'all':
                 return chat.status === 'open'
@@ -1550,6 +1745,34 @@ export default function ConversationsView() {
                 return chat.status === 'open'
         }
     })
+
+    const hasAdvancedFilters = !!(filterWebsiteId || filterAgentId || filterTeamId || filterTagIds.length > 0 || filterDateFrom || filterDateTo)
+
+    // Distinct website options from loaded chats (for filter dropdown)
+    const websiteOptions = useMemo(() => {
+        const seen = new Map<number, string>()
+        for (const c of [...activeChats, ...resolvedChats]) {
+            const id = (c as any).website_id
+            const name = (c as any).website_name || `Website ${id}`
+            if (id && !seen.has(id)) seen.set(id, name)
+        }
+        return Array.from(seen.entries()).map(([id, name]) => ({ id, name }))
+    }, [activeChats, resolvedChats])
+
+    // Unique tags derived from loaded chats (supplements availableTags)
+    const allTagsFromChats = useMemo(() => {
+        const seen = new Map<number, { id: number; name: string; color: string }>()
+        for (const c of [...activeChats, ...resolvedChats]) {
+            for (const tag of ((c as any).tags || [])) {
+                if (tag?.id && !seen.has(Number(tag.id))) seen.set(Number(tag.id), tag)
+            }
+        }
+        // Merge with availableTags (loaded per-conversation)
+        for (const tag of availableTags) {
+            if (tag?.id && !seen.has(Number(tag.id))) seen.set(Number(tag.id), tag)
+        }
+        return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name))
+    }, [activeChats, resolvedChats, availableTags])
 
     useEffect(() => {
         let cancelled = false
@@ -1627,8 +1850,7 @@ export default function ConversationsView() {
                 </div>
             )}
             {/* COLUMN 1: Filter/Category Sidebar */}
-            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col transition-all duration-300 ease-in-out ${leftFilterCollapsed ? 'w-20' : 'w-52'
-                }`}
+            <div className={`hidden lg:flex bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col flex-shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${leftFilterCollapsed ? 'w-16' : 'w-48'}`}
             >
                 <div className="h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     {!leftFilterCollapsed && (
@@ -1664,14 +1886,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <MessageCircle className="h-5 w-5 flex-shrink-0" />
+                                                <MessageCircle className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <MessageCircle className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">All</span>
+                                                    <MessageCircle className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open').length}
@@ -1694,14 +1916,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Users className="h-5 w-5 flex-shrink-0" />
+                                                <Users className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Users className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Mine</span>
+                                                    <Users className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Mine</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}
@@ -1724,14 +1946,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Inbox className="h-5 w-5 flex-shrink-0" />
+                                                <Inbox className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Inbox className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Unassigned</span>
+                                                    <Inbox className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Unassigned</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}
@@ -1766,14 +1988,14 @@ export default function ConversationsView() {
                                     >
                                         {leftFilterCollapsed ? (
                                             <>
-                                                <Check className="h-5 w-5 flex-shrink-0" />
+                                                <Check className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">{resolvedChats.length}</span>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
-                                                    <Check className="h-5 w-5 flex-shrink-0" />
-                                                    <span className="flex-1 text-left">Resolved</span>
+                                                    <Check className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Resolved</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
                                                     {resolvedChats.length}
@@ -1794,25 +2016,172 @@ export default function ConversationsView() {
                 {/* Header */}
                 <div>
                     <div className='h-16 p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between'>
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             {getFilterIcon()}
                             {getFilterHeaderText()}
+                            <DocsLink slug="agent-guide/conversations" />
                         </h2>
-                        <a href="/docs/agent-guide/conversations" target="_blank" rel="noreferrer" title="View conversations guide" className="text-gray-400 hover:text-blue-500 transition-colors">
-                            <HelpCircle className="w-4 h-4" />
-                        </a>
                     </div>
 
-                    {/* Search */}
-                    <div className="relative p-4 border-b border-gray-200 dark:border-gray-700">
-                        <Search className="absolute left-7 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <Input
-                            placeholder="Search..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10 dark:bg-gray-700 dark:border-gray-600"
-                        />
+                    {/* Search + Filter button */}
+                    <div className="flex items-center gap-2 p-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Input
+                                placeholder="Search name, email, ID…"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 dark:bg-gray-700 dark:border-gray-600"
+                            />
+                        </div>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        onClick={() => setFilterPanelOpen(v => !v)}
+                                        className={`relative flex-shrink-0 p-2 rounded-lg border transition-colors ${filterPanelOpen || hasAdvancedFilters
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400'
+                                            : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            }`}
+                                    >
+                                        <SlidersHorizontal className="h-4 w-4" />
+                                        {hasAdvancedFilters && (
+                                            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-blue-600 border-2 border-white dark:border-gray-800" />
+                                        )}
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Advanced Filters</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     </div>
+
+                    {/* Advanced filter panel */}
+                    {filterPanelOpen && (
+                        <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-3 space-y-3">
+                            {/* Website */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <Globe className="h-3 w-3" /> Website
+                                </label>
+                                <select
+                                    value={filterWebsiteId ?? ''}
+                                    onChange={e => setFilterWebsiteId(e.target.value ? Number(e.target.value) : null)}
+                                    className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                >
+                                    <option value="">All websites</option>
+                                    {websiteOptions.map(w => (
+                                        <option key={w.id} value={w.id}>{w.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {/* Agent */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <UserRound className="h-3 w-3" /> Agent
+                                </label>
+                                <select
+                                    value={filterAgentId ?? ''}
+                                    onChange={e => setFilterAgentId(e.target.value ? Number(e.target.value) : null)}
+                                    className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                >
+                                    <option value="">All agents</option>
+                                    {agentsList.map(a => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {/* Team */}
+                            {availableTeams.length > 0 && (
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                        <Users className="h-3 w-3" /> Team
+                                    </label>
+                                    <select
+                                        value={filterTeamId ?? ''}
+                                        onChange={e => setFilterTeamId(e.target.value ? Number(e.target.value) : null)}
+                                        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    >
+                                        <option value="">All teams</option>
+                                        {availableTeams.map((t: any) => (
+                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            {/* Tags */}
+                            {allTagsFromChats.length > 0 && (
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                        <TagIcon className="h-3 w-3" /> Tags
+                                    </label>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {allTagsFromChats.map((tag: any) => {
+                                            const active = filterTagIds.includes(Number(tag.id))
+                                            return (
+                                                <button
+                                                    key={tag.id}
+                                                    onClick={() => setFilterTagIds(prev =>
+                                                        active ? prev.filter(id => id !== Number(tag.id)) : [...prev, Number(tag.id)]
+                                                    )}
+                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${active
+                                                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                        }`}
+                                                >
+                                                    {tag.color && (
+                                                        <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color }} />
+                                                    )}
+                                                    {tag.name}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            {/* Clear all */}
+                            {/* Date range */}
+                            <div>
+                                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">
+                                    <Calendar className="h-3 w-3" /> Date range (created)
+                                </label>
+                                <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] text-gray-400 w-6 flex-shrink-0">From</span>
+                                        <input
+                                            type="datetime-local"
+                                            value={filterDateFrom}
+                                            onChange={e => setFilterDateFrom(e.target.value)}
+                                            className="flex-1 min-w-0 text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] text-gray-400 w-6 flex-shrink-0">To</span>
+                                        <input
+                                            type="datetime-local"
+                                            value={filterDateTo}
+                                            onChange={e => setFilterDateTo(e.target.value)}
+                                            className="flex-1 min-w-0 text-xs border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            {hasAdvancedFilters && (
+                                <button
+                                    onClick={() => {
+                                        setFilterWebsiteId(null)
+                                        setFilterAgentId(null)
+                                        setFilterTeamId(null)
+                                        setFilterTagIds([])
+                                        setFilterDateFrom('')
+                                        setFilterDateTo('')
+                                    }}
+                                    className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400"
+                                >
+                                    Clear all filters
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     {/* Filter tabs — visible below lg (when Col1 sidebar is hidden) */}
                     <div className="lg:hidden flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
@@ -1825,16 +2194,14 @@ export default function ConversationsView() {
                             <button
                                 key={tab.key}
                                 onClick={() => setActiveFilter(tab.key)}
-                                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                    activeFilter === tab.key
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                }`}
+                                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFilter === tab.key
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                    }`}
                             >
                                 {tab.label}
-                                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${
-                                    activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                                }`}>{tab.count}</span>
+                                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                                    }`}>{tab.count}</span>
                             </button>
                         ))}
                     </div>
@@ -1861,44 +2228,90 @@ export default function ConversationsView() {
                                 <button
                                     key={chat.id}
                                     onClick={() => handleChatSelect(chat.id)}
-                                    className={`w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600' : ''
-                                        }`}
+                                    className={`w-full text-left px-3 py-2.5 transition-colors ${selectedChat === chat.id ? 'bg-blue-50 dark:bg-blue-900/20 [box-shadow:inset_4px_0_0_#2563eb]' : 'hover:bg-gray-50 dark:hover:bg-gray-700 hover:[box-shadow:inset_4px_0_0_#d1d5db] dark:hover:[box-shadow:inset_4px_0_0_#4b5563]'}`}
                                 >
-                                    <div className="flex items-start gap-3">
-                                        <UserAvatar
-                                            seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
-                                            bgColor={(chat as any).visitor_avatar_color}
-                                            className="w-10 h-10 flex-shrink-0"
-                                            iconClassName="w-10 h-10"
-                                            title={conversationDisplayName(chat as any)}
-                                        />
+                                    <div className="flex items-start gap-2.5">
+                                        {/* Visitor avatar with assigned-agent badge */}
+                                        <div className="relative flex-shrink-0">
+                                            <UserAvatar
+                                                seed={getVisitorAvatarSeed((chat as any).visitor_name, chat.session_id)}
+                                                bgColor={(chat as any).visitor_avatar_color}
+                                                className="w-9 h-9"
+                                                iconClassName="w-9 h-9"
+                                                title={conversationDisplayName(chat as any)}
+                                            />
+                                            {(chat as any).assigned_agent_id && (() => {
+                                                const agent = agentsList.find((a) => a.id === (chat as any).assigned_agent_id)
+                                                const agentAvatarUrl = agent?.avatar_url
+                                                    ? (String(agent.avatar_url).startsWith('http') ? agent.avatar_url : `${API_BASE}${agent.avatar_url}`)
+                                                    : null
+                                                return (
+                                                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
+                                                        title={agent?.name || `Agent #${(chat as any).assigned_agent_id}`}
+                                                    >
+                                                        <UserAvatar
+                                                            seed={agent?.email || String((chat as any).assigned_agent_id)}
+                                                            imageUrl={agentAvatarUrl}
+                                                            className="w-4 h-4"
+                                                            iconClassName="w-4 h-4"
+                                                            title={agent?.name}
+                                                        />
+                                                    </div>
+                                                )
+                                            })()}
+                                        </div>
+
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <span className="font-semibold text-gray-900 dark:text-white truncate">
-                                                    {conversationDisplayName(chat as any)}
-                                                </span>
-                                                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-                                                    {((chat as any).last_message_at || (chat as any).created_at)
-                                                        ? formatShortAge((chat as any).last_message_at || (chat as any).created_at)
-                                                        : ''}
+                                            {/* Row 1: name + website+ time */}
+                                            <div className="flex items-baseline justify-between gap-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-[14px] font-semibold text-gray-900 dark:text-white truncate leading-tight">
+                                                        {conversationDisplayName(chat as any)}
+                                                    </span>
+                                                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] max-w-28 truncate rounded">
+                                                        {(chat as any).website_name || `Site #${(chat as any).website_id}`}
+                                                    </Badge>
+                                                </div>
+                                                <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0 leading-tight">
+                                                    {formatShortAge((chat as any).last_message_at || (chat as any).created_at)}
                                                 </span>
                                             </div>
 
-                                            <div className="mt-1 flex items-center justify-between gap-2">
-                                                <Badge variant="secondary" className="h-5 px-2 text-[10px] max-w-44 truncate">
-                                                    {(chat as any).website_name
-                                                        ? (chat as any).website_name
-                                                        : `Website #${(chat as any).website_id}`}
-                                                </Badge>
+                                            {/* Row 2: last message + unread badge */}
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                {(chat as any).last_message && (
+                                                    <p className="text-[12px] text-gray-500 dark:text-gray-400 truncate mt-0.5 leading-tight">
+                                                        {stripMarkdownPreview((chat as any).last_message)}
+                                                    </p>
+                                                )}
                                                 {chat.id !== selectedChat && Boolean(unreadByConversationId[chat.id]) && (
-                                                    <Badge
-                                                        variant="destructive"
-                                                        className="h-5 min-w-5 justify-center rounded-full px-1.5 text-xs flex-shrink-0"
-                                                    >
+                                                    <Badge variant="destructive" className="h-4 min-w-4 justify-center rounded-full px-1 text-[10px] flex-shrink-0 ml-auto">
                                                         {unreadByConversationId[chat.id] > 99 ? '99+' : unreadByConversationId[chat.id]}
                                                     </Badge>
                                                 )}
                                             </div>
+
+                                            {/* Row 3: tags */}
+                                            {((chat as any).tags || []).length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {((chat as any).tags as any[]).slice(0, 3).map((tag: any) => (
+                                                        <span
+                                                            key={tag.id}
+                                                            className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-full border leading-none"
+                                                            style={{
+                                                                backgroundColor: getTagPillBackground(tag.color),
+                                                                borderColor: tag.color || '#d1d5db',
+                                                                color: tag.color || 'inherit',
+                                                            }}
+                                                        >
+                                                            {tag.name}
+                                                        </span>
+                                                    ))}
+                                                    {((chat as any).tags as any[]).length > 3 && (
+                                                        <span className="text-[9px] text-gray-400">+{((chat as any).tags as any[]).length - 3}</span>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </button>
@@ -1912,8 +2325,8 @@ export default function ConversationsView() {
             {selectedChat ? (
                 <div className="flex-1 flex flex-col min-w-0">
                     {/* Chat Header */}
-                    <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
-                        <div className="flex items-center justify-between">
+                    <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 h-16 px-4">
                             <div className="flex items-center gap-3 min-w-0">
                                 <button
                                     className="md:hidden flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
@@ -1925,12 +2338,12 @@ export default function ConversationsView() {
                                 <UserAvatar
                                     seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
                                     bgColor={conversation?.visitor_avatar_color}
-                                    className="w-10 h-10 flex-shrink-0"
-                                    iconClassName="w-10 h-10"
+                                    className="w-9 h-9 flex-shrink-0"
+                                    iconClassName="w-9 h-9"
                                     title={conversationDisplayName(conversation as any)}
                                 />
                                 <div className="min-w-0 flex-1">
-                                    <h2 className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
+                                    <h2 className="text-sm sm:text-base md:text-sm font-semibold text-gray-900 dark:text-white truncate">
                                         {conversationDisplayName(conversation as any)}
                                     </h2>
                                     {isVisitorEnded && !isResolvedSelected && (
@@ -1938,11 +2351,23 @@ export default function ConversationsView() {
                                             Visitor ended
                                         </span>
                                     )}
-                                    {conversation?.last_seen_at && (
-                                        <p className="hidden sm:flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
-                                            Last seen {formatDistanceToNow(new Date(conversation.last_seen_at), { addSuffix: true })}
-                                        </p>
-                                    )}
+                                    {(() => {
+                                        const isOnline = Boolean((conversation as any)?.is_online)
+                                        const lastActiveTs = (conversation as any)?.last_visitor_message_at || conversation?.last_seen_at
+                                        if (isOnline) {
+                                            return (
+                                                <p className="flex text-xs text-green-500 items-center gap-1">
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                                                    Online
+                                                </p>
+                                            )
+                                        }
+                                        return lastActiveTs ? (
+                                            <p className="flex text-xs text-gray-500 dark:text-gray-400 items-center gap-1">
+                                                Last seen {formatLastSeen(lastActiveTs)}
+                                            </p>
+                                        ) : null
+                                    })()}
                                 </div>
                             </div>
 
@@ -1978,7 +2403,7 @@ export default function ConversationsView() {
                         </div>
 
                         {/* Second row: Tag conversation (left) | Assign team (right) */}
-                        <div className="mt-2 flex items-start justify-between gap-4">
+                        <div className="flex items-center justify-between gap-4 px-4 py-2">
                             {/* LEFT — Tag conversation + tag badges */}
                             <div className="flex flex-wrap items-center gap-2 min-w-0">
                                 {conversationTags
@@ -2225,6 +2650,7 @@ export default function ConversationsView() {
                             <>
                                 {[...messages]
                                     .sort(compareMessagesChronologically)
+                                    .filter((msg) => (msg as any).event_type !== 'rating_popup_shown')
                                     .map((msg, index, sortedMessages) => {
                                         const senderType = (msg as any).sender_type || (msg as any).sender || 'system'
                                         const actor = (msg as any).actor || senderType
@@ -2284,7 +2710,7 @@ export default function ConversationsView() {
                                                     <div className="flex justify-end">
                                                         <div className="flex items-end gap-2 max-w-[70%] min-w-0">
                                                             <div className="group relative bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700 min-w-0">
-                                                                <MarkdownMessage content={msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={unescapeMarkdown(msg.content)} className="text-sm" />
                                                                 <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                 </div>
@@ -2307,7 +2733,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : msg.content} className="text-inherit" />
+                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : unescapeMarkdown(msg.content)} className="text-sm" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (
@@ -2354,7 +2780,6 @@ export default function ConversationsView() {
                         disabled={isResolvedSelected || isVisitorEnded}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
-                        readOnlyText={isVisitorEnded ? 'The visitor has ended the conversation. You can now close or resolve it.' : 'This conversation is resolved and read-only.'}
                         personalShortcuts={personalShortcuts}
                         websiteShortcuts={selectedWebsiteId ? (websiteShortcutsByWebsiteId[selectedWebsiteId] || []) : []}
                     />
@@ -2377,7 +2802,7 @@ export default function ConversationsView() {
             {/* COLUMN 4: Visitor Details (Collapsible) */}
             {selectedChat && conversation && (
                 <div
-                    className={`hidden lg:flex bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} h-full min-h-0`}
+                    className={`hidden lg:flex bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex-shrink-0 transition-[width] duration-300 ease-in-out ${rightSidebarCollapsed ? 'w-16' : 'w-80'} h-full min-h-0`}
                 >
                     {rightSidebarCollapsed ? (
                         <div className="h-full flex flex-col items-center gap-4 py-4 px-2">
@@ -2400,7 +2825,7 @@ export default function ConversationsView() {
                         </div>
                     ) : (
                         <div className="flex h-full flex-col w-full">
-                            <div className="flex items-center justify-end gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
+                            <div className="h-16 flex items-center justify-end gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
                                 <Button
                                     variant="ghost"
                                     size="icon"
@@ -2421,6 +2846,7 @@ export default function ConversationsView() {
                                     }))}
                                     browsingHistory={browsingHistory}
                                     rating={conversationRating}
+                                    formSubmissions={formSubmissions}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {
@@ -2457,8 +2883,6 @@ export default function ConversationsView() {
                                     onAddNote={handleAddNote}
                                     onDeleteNote={handleDeleteNote}
                                 />
-
-                                {/* Closed by label (only for resolved conversations) */}
                                 {conversation.closed_by && conversation.status === 'resolved' && (
                                     <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
                                         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
@@ -2492,13 +2916,13 @@ export default function ConversationsView() {
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
                                                             <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                                                {vc.title || `Conversation #${vc.id}`}
+                                                                {vc.title || (vc.short_id ? `Conversation ${vc.short_id}` : `Conversation #${vc.id}`)}
                                                             </p>
-                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                            <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${(vc.status || '').toLowerCase() === 'open'
                                                                 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                                                                 : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                                                                 }`}>
-                                                                {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                                {(vc.status || '').toLowerCase() === 'open' ? 'Open' : 'Resolved'}
                                                             </span>
                                                         </div>
                                                         {vc.created_at && (
@@ -2540,6 +2964,7 @@ export default function ConversationsView() {
                             }))}
                             browsingHistory={browsingHistory}
                             rating={conversationRating}
+                            formSubmissions={formSubmissions}
                             onUpdateMetadata={async (data) => {
                                 if (!conversation?.id) return
                                 try {
@@ -2608,13 +3033,13 @@ export default function ConversationsView() {
                                             >
                                                 <div className="flex items-center justify-between gap-2">
                                                     <p className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                                        {vc.title || `Conversation #${vc.id}`}
+                                                        {vc.title || (vc.short_id ? `Conversation ${vc.short_id}` : `Conversation #${vc.id}`)}
                                                     </p>
-                                                    <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${vc.status === 'open'
+                                                    <span className={`text-[10px] font-medium shrink-0 px-1.5 py-0.5 rounded-full ${(vc.status || '').toLowerCase() === 'open'
                                                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                                                         : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                                                         }`}>
-                                                        {vc.status === 'open' ? 'Open' : 'Resolved'}
+                                                        {(vc.status || '').toLowerCase() === 'open' ? 'Open' : 'Resolved'}
                                                     </span>
                                                 </div>
                                                 {vc.created_at && (

@@ -2,7 +2,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { clearToken } from '@/services/api'
 import { isAdmin } from '@/lib/roles'
-import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket } from 'lucide-react'
+import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket, HelpCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -175,6 +175,15 @@ export default function DashboardLayout() {
           >
             {darkMode ? <Sun className="h-5 w-5 text-gray-700 dark:text-gray-300" /> : <Moon className="h-5 w-5 text-gray-700 dark:text-gray-300" />}
           </button>
+          <Link
+            to="/docs/getting-started/introduction"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            title="Help Center"
+          >
+            <HelpCircle className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          </Link>
         </div>
       </header>
 
@@ -368,6 +377,22 @@ export default function DashboardLayout() {
               </TooltipTrigger>
               <TooltipContent side="right">
                 <p>{darkMode ? 'Light mode' : 'Dark mode'}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/docs/getting-started/introduction"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                >
+                  <HelpCircle className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Help Center</p>
               </TooltipContent>
             </Tooltip>
 

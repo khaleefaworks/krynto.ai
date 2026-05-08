@@ -62,6 +62,11 @@ class User(Base):
     # Heartbeat (presence)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
+    # Account Lockout tracking
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    temp_lockout_until = Column(DateTime(timezone=True), nullable=True)
+    is_locked_out = Column(Boolean, default=False, nullable=False)
+
     # Per-user notification sound preferences stored as JSON.
     # Keys: new_chat_sound, message_sound, new_visitor_website_sound (filename strings)
     notification_preferences = Column(JSON, nullable=True, default=None)

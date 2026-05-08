@@ -1,23 +1,198 @@
 """Seed database with initial test data"""
+import os
+import secrets
+
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole
 from app.models.website import Website
 from app.models.agent_website_assignment import AgentWebsiteAssignment
 from app.models.website_message_shortcut import WebsiteMessageShortcut
 from app.models.system_settings import SystemSettings
+from app.models.automation_template import AutomationTemplate
 from app.core.security import get_password_hash
+
+
+AUTOMATION_LIBRARY_TEMPLATES = [
+    # ── Presence timeline ────────────────────────────────────────────────────
+    {
+        "name": "Visitor dropped event",
+        "description": "Log a system event when the visitor leaves the page.",
+        "trigger": "visitor_dropped",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Visitor reconnected",
+        "description": "Log a system event when the visitor returns to the page after a disconnect.",
+        "trigger": "visitor_reconnected",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── During conversation ──────────────────────────────────────────────────
+    {
+        "name": "Waiting message",
+        "description": "Reassure the visitor after 30 seconds with no agent response.",
+        "trigger": "no_agent_assigned_for",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"delay_seconds": 30}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks! An agent will be with you shortly.", "event_type": "bot_waiting"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    {
+        "name": "Offline prompt",
+        "description": "Inform the visitor the team is offline and invite them to leave a message.",
+        "trigger": "website_offline_first_message",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 150}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi {visitor_name}, thanks for reaching out! We're currently offline, but we've received your message. We'll get back to you at {contact_info} as soon as possible. Feel free to leave any additional details below.", "event_type": "bot_offline"}, "position": {"x": 0, "y": 300}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n1"},
+        ],
+    },
+    {
+        "name": "Agent joined",
+        "description": "Tag the conversation with the agent's name when they join.",
+        "trigger": "agent_joined",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "tag_with_agent_name", "config": {}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Visitor ended ────────────────────────────────────────────────────────
+    {
+        "name": "Visitor ended chat",
+        "description": "Show a system event and prompt a CSAT rating when the visitor ends the chat.",
+        "trigger": "conversation_visitor_ended",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+            {"id": "n_agent_hint", "type": "send_bot_message", "config": {"message": "Visitor ended the chat. You can go ahead and resolve this conversation.", "event_type": "visitor_ended_agent_note", "send_to_visitor": False}, "position": {"x": 0, "y": 450}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n1"},
+            {"id": "e_wait", "from": "n1", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n2"},
+            {"id": "e_agent_hint", "from": "n2", "to": "n_agent_hint"},
+        ],
+    },
+    # ── Resolved ─────────────────────────────────────────────────────────────
+    {
+        "name": "Resolved rating",
+        "description": "Notify the visitor the conversation is resolved and show a CSAT rating prompt.",
+        "trigger": "conversation_resolved",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+            {"id": "n_wait", "type": "wait", "config": {"seconds": 1}, "position": {"x": 0, "y": 250}},
+            {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "trigger", "to": "n1"},
+            {"id": "e_wait", "from": "n1", "to": "n_wait"},
+            {"id": "e2", "from": "n_wait", "to": "n2"},
+        ],
+    },
+    # ── Rating note ──────────────────────────────────────────────────────────
+    {
+        "name": "Visitor rated",
+        "description": "Send an agent-only note when a visitor submits a rating.",
+        "trigger": "visitor_rated_conversation",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "send_bot_message", "config": {"message": "Visitor rated this conversation: {rating_label}", "event_type": "visitor_rating_note", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+    # ── Chatbot ───────────────────────────────────────────────────────────────
+    {
+        "name": "Team routing chatbot",
+        "description": "Present visitors with department buttons on connect so they self-route to the right team.",
+        "trigger": "conversation_created",
+        "category": "chatbot_flow",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": [
+                {"label": "Office Space", "reply": "", "team_id": None},
+                {"label": "Investments", "reply": "", "team_id": None},
+                {"label": "Job", "reply": "", "team_id": None},
+            ]}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
+]
+
+
+def seed_automation_library(db=None) -> None:
+    """Insert library templates that are missing. Safe to call multiple times."""
+    own_session = db is None
+    if own_session:
+        db = SessionLocal()
+    try:
+        existing_names = {
+            name for (name,) in db.query(AutomationTemplate.name).all()
+        }
+        added = 0
+        for tpl in AUTOMATION_LIBRARY_TEMPLATES:
+            if tpl["name"] in existing_names:
+                continue
+            db.add(AutomationTemplate(
+                name=tpl["name"],
+                description=tpl.get("description"),
+                trigger=tpl["trigger"],
+                category=tpl.get("category", "auto_message"),
+                nodes=tpl.get("nodes", []),
+                edges=tpl.get("edges", []),
+            ))
+            added += 1
+        if added:
+            db.commit()
+            print(f"✅ Seeded {added} automation library template(s)")
+        else:
+            print("ℹ️  Automation library templates already present")
+    except Exception as e:
+        print(f"❌ Error seeding automation library: {e}")
+        db.rollback()
+    finally:
+        if own_session:
+            db.close()
+
 
 def seed_database():
     db = SessionLocal()
+    admin_email = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com").strip().lower()
+    admin_password = os.getenv("SEED_ADMIN_PASSWORD") or secrets.token_urlsafe(16)
+    agent_email = os.getenv("SEED_AGENT_EMAIL", "agent@example.com").strip().lower()
+    agent_password = os.getenv("SEED_AGENT_PASSWORD") or secrets.token_urlsafe(16)
     
     try:
         # Check if system manager already exists
-        existing_admin = db.query(User).filter_by(email="ragul.k@noveloffice.in").first()
+        existing_admin = db.query(User).filter_by(email=admin_email).first()
         if not existing_admin:
             admin = User(
                 name="Administrator",
-                email="ragul.k@noveloffice.in",
-                password_hash=get_password_hash("$0ft%963$"),
+                email=admin_email,
+                password_hash=get_password_hash(admin_password),
                 role=UserRole.SYSTEM_MANAGER,
                 is_active=True,
                 is_available=True
@@ -30,12 +205,12 @@ def seed_database():
             print(f"ℹ️  Admin already exists: {existing_admin.email} (ID: {existing_admin.id})")
         
         # Check if test agent exists
-        existing_agent = db.query(User).filter_by(email="agent@test.com").first()
+        existing_agent = db.query(User).filter_by(email=agent_email).first()
         if not existing_agent:
             agent = User(
                 name="Test Agent",
-                email="agent@test.com",
-                password_hash=get_password_hash("agent123"),
+                email=agent_email,
+                password_hash=get_password_hash(agent_password),
                 role=UserRole.AGENT,
                 is_active=True,
                 is_available=True
@@ -120,10 +295,11 @@ def seed_database():
             else:
                 print("ℹ️  System already initialized")
         
-        print("\n📋 Login Credentials:")
-        print("   Admin: ragul.k@noveloffice.in / $0ft%963$")
-        print("   Agent: agent@test.com / agent123")
-        
+        # Seed automation library templates
+        print("\n📚 Seeding automation library templates...")
+        seed_automation_library(db)
+        print("\nℹ️  Seed users are ready (passwords are not printed).")
+
     except Exception as e:
         print(f"❌ Error seeding database: {e}")
         db.rollback()

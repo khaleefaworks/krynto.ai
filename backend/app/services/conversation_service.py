@@ -9,12 +9,13 @@ Responsibilities:
 - Enforce conversation state rules
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
+from app.repos.conversations import CONVERSATION_RESUME_CUTOFF_HOURS
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.avatar_colors import pick_avatar_color
@@ -48,12 +49,20 @@ class ConversationService:
         Returns:
             Conversation object with status=OPEN
         """
-        # Only resume an OPEN conversation — never route back into a resolved one.
-        # This is the core fix for the session/conversation refactor: a returning
-        # visitor whose previous conversation is RESOLVED gets a fresh start.
+        # Only resume an OPEN conversation that the visitor has NOT intentionally
+        # ended AND that has been active within the cooldown window. Stale or
+        # visitor-ended conversations stay OPEN for agent follow-up, but the
+        # visitor gets a fresh conversation on their next connect.
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
         conversation = (
             self.db.query(Conversation)
-            .filter_by(session_id=session_id, website_id=website_id, status=ConversationStatus.OPEN)
+            .filter(
+                Conversation.session_id == session_id,
+                Conversation.website_id == website_id,
+                Conversation.status == ConversationStatus.OPEN,
+                Conversation.visitor_ended == False,  # noqa: E712
+                Conversation.updated_at > cutoff,
+            )
             .order_by(Conversation.id.desc())
             .first()
         )
@@ -155,6 +164,7 @@ class ConversationService:
         *,
         event_type: str | None = None,
         sender: str = "system",
+        is_agent_only: bool = False,
     ) -> Message:
         """
         Add a system-generated message to a conversation.
@@ -172,6 +182,7 @@ class ConversationService:
             sender=sender,
             event_type=event_type,
             content=content,
+            is_agent_only=is_agent_only,
         )
         
         self.db.add(message)

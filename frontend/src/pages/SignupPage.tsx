@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useState, useEffect } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Mail } from 'lucide-react'
 import Logo from '@/components/Logo'
 import { API_BASE } from '@/config/endpoints'
 
@@ -34,15 +34,21 @@ export default function SignupPage() {
     const [showPassword, setShowPassword] = useState(false)
     const [showConfirm, setShowConfirm] = useState(false)
 
-    // OTP step state — can be pre-seeded by login redirect
-    const [step, setStep] = useState<'signup' | 'verify'>(
-        locationState?.step === 'verify' ? 'verify' : 'signup'
+    // Track whether the user arrived from a login redirect (vs organic signup)
+    const cameFromLogin = locationState?.step === 'verify'
+
+    // OTP step state — can be pre-seeded by login redirect.
+    // When coming from login (unverified account), skip verify_pending and go
+    // directly to the OTP input so the user doesn't have to click "Send OTP" again.
+    const [step, setStep] = useState<'signup' | 'verify_pending' | 'verify'>(
+        cameFromLogin ? 'verify' : 'signup'
     )
     const [pendingEmail, setPendingEmail] = useState(locationState?.email || '')
     const [otp, setOtp] = useState('')
     const [otpLoading, setOtpLoading] = useState(false)
     const [resendLoading, setResendLoading] = useState(false)
     const [resendMsg, setResendMsg] = useState<string | null>(null)
+    const [sendOtpLoading, setSendOtpLoading] = useState(false)
 
     const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<SignupForm>({
         resolver: zodResolver(signupSchema),
@@ -50,9 +56,19 @@ export default function SignupPage() {
     })
 
     // When landing on this page from a login redirect (email not yet verified),
-    // reset the form so react-hook-form's internal state is clean.
+    // reset the form so react-hook-form's internal state is clean,
+    // and auto-send the OTP so the user can immediately enter the code.
     useEffect(() => {
-        if (locationState?.step !== 'verify') reset()
+        if (locationState?.step !== 'verify') { reset(); return }
+        reset()
+        // Auto-send OTP for login-redirect flow (user already registered, just not verified yet)
+        if (locationState?.email) {
+            fetch(`${API_BASE}/auth/resend-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: locationState.email }),
+            }).catch(() => { /* best-effort */ })
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -77,9 +93,9 @@ export default function SignupPage() {
             const result = await response.json()
 
             if (result.needs_verification) {
-                // OTP step — show verification form
+                // Show pending step — user must explicitly request the code
                 setPendingEmail(result.email || data.email)
-                setStep('verify')
+                setStep('verify_pending')
                 return
             }
 
@@ -127,6 +143,23 @@ export default function SignupPage() {
         }
     }
 
+    const handleSendOtp = async () => {
+        setSendOtpLoading(true)
+        setError(null)
+        try {
+            await fetch(`${API_BASE}/auth/resend-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: pendingEmail }),
+            })
+            setStep('verify')
+        } catch {
+            setError('Failed to send verification code. Please try again.')
+        } finally {
+            setSendOtpLoading(false)
+        }
+    }
+
     const handleResend = async () => {
         setResendLoading(true)
         setResendMsg(null)
@@ -157,6 +190,13 @@ export default function SignupPage() {
                             <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">Create a free account</CardTitle>
                             <CardDescription className="dark:text-gray-400">
                                 Get started with AI ChatAssist — free forever, no card required.
+                            </CardDescription>
+                        </>
+                    ) : step === 'verify_pending' ? (
+                        <>
+                            <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">Verify your email</CardTitle>
+                            <CardDescription className="dark:text-gray-400">
+                                Confirm your email address to continue.
                             </CardDescription>
                         </>
                     ) : (
@@ -221,6 +261,51 @@ export default function SignupPage() {
                                 {isSubmitting ? 'Creating account…' : 'Create free account'}
                             </Button>
                         </form>
+                    ) : step === 'verify_pending' ? (
+                        <div className="space-y-4">
+                            {error && (
+                                <div className="rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+                                    {error}
+                                </div>
+                            )}
+
+                            <div className="flex items-start gap-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-4 py-3">
+                                <Mail className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+                                <p className="text-sm text-blue-700 dark:text-blue-300">
+                                    A 6-digit verification code will be sent to{' '}
+                                    <strong className="font-semibold">{pendingEmail}</strong>
+                                </p>
+                            </div>
+
+                            <Button
+                                type="button"
+                                onClick={handleSendOtp}
+                                disabled={sendOtpLoading}
+                                className="w-full"
+                            >
+                                {sendOtpLoading ? 'Sending…' : 'Send verification code'}
+                            </Button>
+
+                            <div className="text-center">
+                                {cameFromLogin ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate('/login')}
+                                        className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                    >
+                                        ← Back to login
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setStep('signup'); setError(null); reset() }}
+                                        className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                    >
+                                        ← Back to signup
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     ) : (
                         <form onSubmit={handleVerifyOtp} className="space-y-4">
                             {error && (

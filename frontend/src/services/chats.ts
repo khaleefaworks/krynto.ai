@@ -14,6 +14,7 @@ export type ActiveChat = {
   browser_info?: string | null
   visit_count?: number | null
   last_seen_at?: string | null
+  is_online?: boolean
   visitor_avatar_color?: string | null
   last_message?: string
   last_message_at?: string

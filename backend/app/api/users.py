@@ -47,6 +47,9 @@ def list_users(
             "is_connected": int(u.id) in connected_ids,
             "can_receive_chats": is_agent_eligible(u, int(u.id) in connected_ids),
             "avatar_url": getattr(u, "avatar_url", None),
+            "is_locked_out": getattr(u, "is_locked_out", False),
+            "failed_login_attempts": getattr(u, "failed_login_attempts", 0),
+            "is_email_verified": bool(getattr(u, "is_email_verified", False)),
         }
         for u in users
     ]
@@ -118,6 +121,51 @@ def update_user(
             "is_active": user.is_active,
             "avatar_url": user.avatar_url,
         },
+    }
+
+
+class ToggleLockRequest(BaseModel):
+    is_locked: bool
+
+
+@router.post("/{user_id}/toggle-lock")
+def toggle_user_lock(
+    user_id: int,
+    payload: ToggleLockRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Toggle the lock status of a user. Only OWNER can do this."""
+    if current_user.role != UserRole.OWNER:
+        raise HTTPException(status_code=403, detail="Only the organization owner can manage account locks.")
+
+    user = db.query(User).filter(User.id == user_id, User.is_deleted == False).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Scope check
+    org_id = get_org_scope(current_user)
+    if org_id is not None and user.organization_id != org_id:
+        raise HTTPException(status_code=403, detail="User not found in your organization")
+
+    # Prevent locking oneself
+    if user.id == current_user.id and payload.is_locked:
+        raise HTTPException(status_code=400, detail="You cannot lock your own account")
+
+    if payload.is_locked:
+        user.is_locked_out = True
+        user.failed_login_attempts = 6
+    else:
+        user.is_locked_out = False
+        user.failed_login_attempts = 0
+        user.temp_lockout_until = None
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User lock status updated",
+        "is_locked_out": user.is_locked_out
     }
 
 

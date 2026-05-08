@@ -7,6 +7,7 @@ import { Plus, X, Trash2, Users, Search, Mail, Lock, Camera, Loader2, Eye, EyeOf
 import { API_BASE } from '@/config/endpoints'
 import { addMessageHandler } from '@/services/agentSocket'
 import { useAppStore } from '@/store/appStore'
+import DocsLink from '@/components/DocsLink'
 
 interface Agent {
   id: number
@@ -18,6 +19,8 @@ interface Agent {
   is_connected?: boolean
   can_receive_chats?: boolean
   avatar_url?: string | null
+  is_locked_out?: boolean
+  is_email_verified?: boolean
 }
 
 type PanelMode = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; item: Agent }
@@ -39,6 +42,8 @@ export default function AgentsList() {
   // Password reveal toggles
   const [showCreatePassword, setShowCreatePassword] = useState(false)
   const [showNewPassword, setShowNewPassword] = useState(false)
+
+  const [formLocked, setFormLocked] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -122,6 +127,7 @@ export default function AgentsList() {
     setAvatarPreview(null)
     setError(null)
     resetPasswordState()
+    setFormLocked(false)
     setPanel({ kind: 'create' })
   }
 
@@ -132,11 +138,13 @@ export default function AgentsList() {
     setAvatarPreview(getFullAvatarUrl(item.avatar_url))
     setError(null)
     resetPasswordState()
+    setFormLocked(!!item.is_locked_out)
     setPanel({ kind: 'edit', item })
   }
 
   const closePanel = () => {
     resetPasswordState()
+    setFormLocked(false)
     setPanel({ kind: 'closed' })
   }
 
@@ -275,6 +283,13 @@ export default function AgentsList() {
           }
         }
 
+        if (formLocked !== !!item.is_locked_out) {
+          await apiRequest(`/users/${item.id}/toggle-lock`, {
+            method: 'POST',
+            body: JSON.stringify({ is_locked: formLocked }),
+          })
+        }
+
         await refresh()
         closePanel()
       }
@@ -342,7 +357,10 @@ export default function AgentsList() {
     <div className="flex flex-col h-full relative overflow-hidden">
       {/* Header */}
       <div className="h-16 flex items-center justify-between border-b dark:border-gray-700 px-6 flex-shrink-0">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Users</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Users</h1>
+          <DocsLink slug="admin-guide/agents" />
+        </div>
         <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4 mr-1.5" />
           Add User
@@ -570,6 +588,24 @@ export default function AgentsList() {
                       {editItem.can_receive_chats ? 'Available' : 'Not Available'}
                     </span>
                   </div>
+                  {panel.kind === 'edit' && editItem && currentRole === 'owner' && !isSelfAccount && !isAdminAccount && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Account Lock</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${formLocked ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                          {formLocked ? (
+                            <><Lock className="h-3 w-3" /> Locked</>
+                          ) : (
+                            'Unlocked'
+                          )}
+                        </span>
+                        <Switch
+                          checked={formLocked}
+                          onCheckedChange={setFormLocked}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -597,6 +633,7 @@ export default function AgentsList() {
                   onChange={e => setFormEmail(e.target.value)}
                   placeholder="john@example.com"
                   className="dark:bg-gray-800 dark:border-gray-700"
+                  disabled={panel.kind === 'edit' && panel.item.is_email_verified}
                 />
               </div>
 

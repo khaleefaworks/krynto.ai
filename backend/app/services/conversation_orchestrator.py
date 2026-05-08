@@ -185,7 +185,7 @@ def _should_skip_due_to_repeat(
 
 
 async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
-    """After 60s, if still unassigned, send a single bot message to the visitor."""
+    """After delay_seconds, if still unassigned, run the no_agent_assigned_for automation flow."""
     try:
         from app.core.database import SessionLocal
         from app.models.conversation import Conversation
@@ -195,52 +195,24 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
         db = SessionLocal()
         try:
             conversation = db.query(Conversation).filter_by(id=conversation_id).first()
-            if not conversation:
+            if not conversation or conversation.assigned_agent_id:
                 return
 
-            if conversation.assigned_agent_id:
+            # Skip waiting message when website is offline — the
+            # website_offline_first_message automation already told the visitor
+            # we'll contact them, so "An agent will be with you shortly" would
+            # be misleading.
+            if not is_website_online(website_id):
                 return
 
-            # Only send if visitor is connected.
-            # Persist as a bot message so both widget + agent dashboard show it.
-            from app.services.conversation_service import ConversationService
-            from app.services.automation_service import AutomationService
-            from app.repos import messages as messages_repo
-
-            automation_service = AutomationService(db)
-            actions = automation_service.get_bot_message_actions(
+            orchestrator = ConversationOrchestrator(db)
+            await orchestrator._run_automation_flows(
+                conversation_id=conversation_id,
                 website_id=website_id,
                 trigger="no_agent_assigned_for",
+                log_key="delayed_waiting_message_failed",
+                send_to_visitor=True,
             )
-
-            if not actions:
-                return
-
-            for action in actions:
-                event_type = action.get("event_type") or "bot_waiting"
-                if _should_skip_due_to_repeat(
-                    db=db,
-                    conversation_id=conversation_id,
-                    event_type=str(event_type),
-                    repeat=action.get("repeat"),
-                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                ):
-                    continue
-
-                saved = ConversationService(db).add_bot_message(
-                    conversation_id,
-                    action["message"],
-                    event_type=event_type,
-                )
-
-                await ChatService.send_to_visitor(
-                    conversation_id,
-                    {
-                        "type": "bot",
-                        "message": action["message"],
-                        "message_obj": serialize_message(db, saved),
-                    },
-                )
         finally:
             db.close()
     except Exception as e:
@@ -251,6 +223,8 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             error=str(e),
             exc_info=True,
         )
+    finally:
+        _waiting_bot_message_scheduled.discard(conversation_id)
 
 
 class ConversationOrchestrator:
@@ -270,11 +244,11 @@ class ConversationOrchestrator:
         return False
 
     def _should_record_presence_event(self, *, conversation: Conversation) -> bool:
-        """Presence timeline events should only be recorded for meaningful scenarios.
+        """Presence timeline events should only be recorded once the visitor has
+        actually initiated a chat (sent at least one message or clicked a button).
 
-        Current rule (simple + practical): only record presence events when the
-        last *human* message is from the agent (i.e. the visitor likely left after
-        receiving an agent reply).
+        This prevents noisy dropped/reconnected events for visitors who only
+        browsed without engaging.
         """
 
         try:
@@ -283,30 +257,27 @@ class ConversationOrchestrator:
         except Exception:
             return False
 
-        # Require that the agent has actually participated.
+        # Record if the visitor has sent at least one message.
         try:
-            if not getattr(conversation, "last_agent_message_at", None):
-                return False
-        except Exception:
-            return False
-
-        try:
-            from app.repos import messages as messages_repo
-            from app.models.message import MessageSenderType
-
-            last = messages_repo.get_last_human_message(self.db, int(conversation.id))
-            if not last:
-                return False
-
-            sender_type = getattr(last, "sender_type", None)
-            # sender_type is usually a MessageSenderType enum value.
-            if sender_type == MessageSenderType.AGENT:
+            has_visitor_message = getattr(conversation, "last_visitor_message_at", None) is not None
+            if has_visitor_message:
                 return True
-            # Defensive: if DB/model ever returns a raw string.
-            try:
-                return str(getattr(sender_type, "value", sender_type) or "").strip().lower() == "agent"
-            except Exception:
-                return False
+        except Exception:
+            pass
+
+        # Fallback: count visitor messages directly.
+        try:
+            from app.models.message import MessageSenderType as _ST
+            count = (
+                self.db.query(Message)
+                .filter(
+                    Message.conversation_id == conversation.id,
+                    Message.sender_type == _ST.VISITOR,
+                )
+                .limit(1)
+                .count()
+            )
+            return count > 0
         except Exception:
             return False
 
@@ -535,46 +506,48 @@ class ConversationOrchestrator:
 
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
-        # Send a single bot prompt (no repeats).
-        if (not is_website_online(website_id)) and not (
-            prior_message_count > 0 and getattr(conversation, "assigned_agent_id", None)
-        ):
-            if prior_message_count == 0:
-                automation_service = AutomationService(self.db)
-                from app.repos import messages as messages_repo
-
-                actions = automation_service.get_bot_message_actions(
-                    website_id=website_id,
-                    trigger="website_offline_first_message",
-                )
-
-                if not actions:
-                    return None
-
-                for action in actions:
-                    event_type = action.get("event_type") or "bot_offline"
-                    existing = messages_repo.get_last_event_message(
-                        self.db, conversation.id, event_type
-                    )
-                    if existing:
-                        continue
-
-                    saved = self.conversation_service.add_bot_message(
-                        conversation.id,
-                        action["message"],
-                        event_type=event_type,
-                    )
-                    await ChatService.send_to_visitor(
-                        conversation.id,
-                        {
-                            "type": "bot",
-                            "message": action["message"],
-                            "message_obj": serialize_message(self.db, saved),
-                        },
-                    )
+        # Fire website_offline_first_message once per conversation regardless
+        # of whether this is the first message — covers the mid-conversation
+        # case where the website goes offline after a chat has started.
+        # The automation's repeat=once policy prevents duplicate sends.
+        if not is_website_online(website_id) and not conversation.assigned_agent_id:
+            await self._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=website_id,
+                trigger="website_offline_first_message",
+                log_key="offline_first_message_automation_failed",
+                send_to_visitor=True,
+                context={
+                    "phone": conversation.visitor_phone or "",
+                    "email": conversation.visitor_email or "",
+                },
+            )
             return None
 
         # Someone is online.
+        # Fire visitor_new / visitor_returning on the very first message.
+        if prior_message_count == 0:
+            try:
+                prior_conv_count = (
+                    self.db.query(Conversation)
+                    .filter(
+                        Conversation.session_id == session_id,
+                        Conversation.website_id == website_id,
+                        Conversation.id != conversation.id,
+                    )
+                    .count()
+                )
+                visitor_type_trigger = "visitor_returning" if prior_conv_count > 0 else "visitor_new"
+                await self._run_automation_flows(
+                    conversation_id=conversation.id,
+                    website_id=website_id,
+                    trigger=visitor_type_trigger,
+                    log_key=f"{visitor_type_trigger}_automation_failed",
+                    send_to_visitor=True,
+                )
+            except Exception as e:
+                logger.warning("visitor_type_trigger_failed", error=str(e))
+
         # Fire "conversation_created" automations (e.g., team routing chatbot).
         if prior_message_count == 0:
             try:
@@ -675,86 +648,26 @@ class ConversationOrchestrator:
         website_id: int,
         visitor_ws: Any | None = None,
     ) -> None:
-        """Fire 'conversation_created' automations such as bot_prompt_buttons.
+        """Fire 'conversation_created' automation flows.
 
-        If a bot_prompt_buttons action is found, send the prompt + buttons to
-        the visitor via WebSocket so the widget can render interactive buttons.
-        The prompt message is also persisted as a bot message for history replay.
-
-        Skipped when the bot prompt was already sent during the welcome flow
-        (``_send_delayed_welcome`` with ``chatbot_buttons``).
+        Delegates entirely to the graph executor. Skipped if bot_prompt_buttons
+        was already sent (guard via idempotency check inside _execute_flow).
         """
         from app.repos import messages as messages_repo
 
-        # Guard: skip if bot prompt buttons already sent (e.g. during welcome).
         existing = messages_repo.get_last_event_message(
             self.db, conversation.id, "bot_prompt_buttons"
         )
         if existing:
             return
 
-        automation_service = AutomationService(self.db)
-        prompt_actions = automation_service.get_actions_by_type(
+        await self._run_automation_flows(
+            conversation_id=conversation.id,
             website_id=website_id,
             trigger="conversation_created",
-            action_type="bot_prompt_buttons",
+            log_key="conversation_created_automation_failed",
+            send_to_visitor=True,
         )
-
-        if not prompt_actions:
-            return
-
-        action = prompt_actions[0]  # Only first prompt for now
-        message_text = action.get("message", "")
-        buttons = action.get("buttons") or []
-        automation_id = action.get("automation_id")
-
-        if not message_text or not isinstance(message_text, str):
-            return
-
-        # Validate buttons — each needs a label; team_id is optional
-        validated_buttons = []
-        for i, btn in enumerate(buttons):
-            if not isinstance(btn, dict):
-                continue
-            label = btn.get("label", "").strip()
-            if not label:
-                continue
-            validated_buttons.append({
-                "label": label,
-                "team_id": btn.get("team_id"),
-                "reply": btn.get("reply", ""),
-            })
-
-        # Persist with enriched JSON content for history replay
-        enriched_content = json.dumps({
-            "message": message_text.strip(),
-            "automation_id": automation_id,
-            "buttons": validated_buttons,
-        })
-        saved = self.conversation_service.add_bot_message(
-            conversation.id,
-            enriched_content,
-            event_type="bot_prompt_buttons",
-        )
-
-        # Build the WS payload with buttons metadata
-        ws_payload = {
-            "type": "bot_prompt",
-            "message": message_text.strip(),
-            "conversation_id": conversation.id,
-            "automation_id": automation_id,
-            "buttons": validated_buttons,
-            "message_obj": serialize_message(self.db, saved),
-        }
-
-        # Send to visitor
-        if visitor_ws is not None:
-            try:
-                await visitor_ws.send_json(ws_payload)
-            except Exception:
-                pass
-        else:
-            await ChatService.send_to_visitor(conversation.id, ws_payload)
 
     async def handle_bot_button_click(
         self,
@@ -781,31 +694,18 @@ class ConversationOrchestrator:
             logger.warning("bot_button_click_no_automation", automation_id=automation_id)
             return None
 
-        # Extract the button from the automation's actions
-        raw_actions = automation.actions or {}
-        if isinstance(raw_actions, str):
-            try:
-                raw_actions = json.loads(raw_actions)
-            except Exception:
-                return None
-
-        if isinstance(raw_actions, dict):
-            raw_actions = [raw_actions]
-        elif not isinstance(raw_actions, list):
-            return None
-
-        # Find the bot_prompt_buttons action
-        prompt_action = None
-        for act in raw_actions:
-            if isinstance(act, dict) and str(act.get("type", "")).lower() == "bot_prompt_buttons":
-                prompt_action = act
+        # Find the bot_prompt_buttons node in the automation graph
+        prompt_node_cfg = None
+        for node in (automation.nodes or []):
+            if isinstance(node, dict) and str(node.get("type", "")).lower() == "bot_prompt_buttons":
+                prompt_node_cfg = node.get("config") or {}
                 break
 
-        if not prompt_action:
-            logger.warning("bot_button_click_no_prompt_action", automation_id=automation_id)
+        if prompt_node_cfg is None:
+            logger.warning("bot_button_click_no_prompt_node", automation_id=automation_id)
             return None
 
-        buttons = prompt_action.get("buttons") or []
+        buttons = prompt_node_cfg.get("buttons") or []
         if not isinstance(buttons, list) or button_index < 0 or button_index >= len(buttons):
             logger.warning("bot_button_click_invalid_index", automation_id=automation_id, button_index=button_index)
             return None
@@ -937,6 +837,50 @@ class ConversationOrchestrator:
             else:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
+        # IVR complete: tell the widget it can now reveal the free-form input.
+        try:
+            await ChatService.send_to_visitor(
+                conversation.id,
+                {"type": "automation_complete", "conversation_id": conversation.id},
+            )
+        except Exception:
+            pass
+
+        # If website is offline and no agent assigned, fire the offline prompt
+        # immediately (the repeat=once policy prevents duplicates).  Skip the
+        # waiting-message timer since it would contradict the offline message.
+        if not conversation.assigned_agent_id and not is_website_online(int(conversation.website_id)):
+            await self._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=int(conversation.website_id),
+                trigger="website_offline_first_message",
+                log_key="offline_first_message_from_button_click_failed",
+                send_to_visitor=True,
+                context={
+                    "phone": conversation.visitor_phone or "",
+                    "email": conversation.visitor_email or "",
+                },
+            )
+        elif not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
+            # Schedule the waiting bot message if this is the visitor's first action
+            # and no agent is assigned yet. Regular messages schedule it in
+            # handle_visitor_message; button clicks are a separate code path so we
+            # must handle it here too.
+            _waiting_bot_message_scheduled.add(conversation.id)
+            automation_service = AutomationService(self.db)
+            delay_seconds = automation_service.get_delay_seconds(
+                website_id=int(conversation.website_id),
+                trigger="no_agent_assigned_for",
+                default_seconds=60,
+            )
+            asyncio.create_task(
+                _send_delayed_waiting_message_if_unassigned(
+                    conversation_id=conversation.id,
+                    website_id=int(conversation.website_id),
+                    delay_seconds=delay_seconds,
+                )
+            )
+
         return result
 
     async def handle_agent_join(self, *, conversation_id: int, agent_id: int) -> dict:
@@ -1013,6 +957,20 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
+        # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
+        website_id_int = int(conversation.website_id)
+        try:
+            await self._run_automation_flows(
+                conversation_id=conversation_id,
+                website_id=website_id_int,
+                trigger="agent_joined",
+                log_key="agent_joined_automation_failed",
+                send_to_visitor=False,
+                context={"agent_name": agent_name},
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),
@@ -1054,7 +1012,7 @@ class ConversationOrchestrator:
             conversation_id,
             {
                 "type": "agent_joined",
-                "message": "A support agent has joined the chat",
+                "message": f"{agent_name} joined the chat.",
                 "message_obj": serialize_message(self.db, saved),
                 "agent_avatar": user.avatar_url,
                 "agent_name": agent_name,
@@ -1086,6 +1044,19 @@ class ConversationOrchestrator:
             include_global=True,
         )
 
+        # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
+        try:
+            await self._run_automation_flows(
+                conversation_id=conversation_id,
+                website_id=int(conversation.website_id),
+                trigger="agent_joined",
+                log_key="agent_joined_automation_failed",
+                send_to_visitor=False,
+                context={"agent_name": agent_name},
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "message_id": getattr(saved, "id", None),
@@ -1104,6 +1075,9 @@ class ConversationOrchestrator:
 
         if conversation.status == ConversationStatus.RESOLVED:
             return {"error": "Conversation is closed"}
+
+        if getattr(conversation, "visitor_ended", False):
+            return {"error": "Visitor has ended this conversation"}
 
         if conversation.assigned_agent_id != agent_id:
             return {"error": "Conversation is assigned to another agent"}
@@ -1166,7 +1140,7 @@ class ConversationOrchestrator:
             "availability_changed": availability_changed,
         }
 
-    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent") -> dict:
+    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent", agent_name: str | None = None) -> dict:
         """Close a conversation.
 
         A canonical `conversation_resolved` event is always recorded so visitor
@@ -1180,20 +1154,15 @@ class ConversationOrchestrator:
             return {"error": "Conversation not found"}
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
+        resolved_name = agent_name or "Support"
 
-        await self._run_automation_trigger(
+        await self._run_automation_flows(
             conversation_id=conversation_id,
             website_id=website_id,
             trigger="conversation_resolved",
-            default_system_event_type="conversation_resolved",
-            default_bot_event_type="bot_closing",
             log_key="conversation_resolve_automation_failed",
-            ensure_system_event=True,
-            fallback_system_content=(
-                "Visitor ended the chat."
-                if closed_by == "visitor"
-                else "This conversation has been resolved."
-            ),
+            send_to_visitor=True,
+            context={"agent_name": resolved_name},
         )
 
         # Notify dashboards to remove/refresh the closed conversation.
@@ -1224,10 +1193,60 @@ class ConversationOrchestrator:
         return await self.close_conversation(conversation_id=conversation_id, closed_by="visitor")
 
     async def visitor_left_chat(self, *, conversation_id: int) -> dict:
-        """Visitor clicked 'End chat' — records a timeline event but keeps the
-        conversation OPEN so agents can still follow up and no lead is lost.
+        """Visitor clicked 'End chat' — fires conversation_visitor_ended automation.
 
-        The conversation status is NOT changed. Agents must manually resolve it.
+        Conversation stays OPEN so agents can follow up. No lead is lost.
+        visitor_ended=True prevents the backend from resuming this conversation
+        if the visitor reconnects and requests a fresh start.
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        # Mark that the visitor intentionally ended this conversation so a
+        # subsequent "Start new chat" creates a new conversation rather than
+        # resuming this one.
+        try:
+            conversation.visitor_ended = True
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        # Automations handle all messaging (emit_system_event, show_rating_popup, etc.)
+        # for this trigger. Nothing is hardcoded here so agents can configure the
+        # flow — including wait nodes and agent-only messages — via the automation editor.
+        await self._run_automation_flows(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="conversation_visitor_ended",
+            log_key="visitor_ended_automation_failed",
+            send_to_visitor=True,
+        )
+
+        # Signal the agent dashboard in real-time (UI update only, no message stored).
+        if website_id:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_closed_chat",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+
+        return {"success": True}
+
+    async def visitor_rated(self, *, conversation_id: int, rating_val: int) -> dict:
+        """Visitor submitted a conversation rating — fires visitor_rated_conversation automation.
+
+        Passes {rating_label} into the automation context so Bot message nodes can
+        reference it, e.g. "Visitor rated this conversation: {rating_label}".
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
@@ -1235,53 +1254,17 @@ class ConversationOrchestrator:
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
-        # Persist agent-facing system message (content seen in agent dashboard).
-        saved = self.conversation_service.add_system_message(
-            conversation_id,
-            "Visitor ended the chat.",
-            event_type="visitor_left",
-        )
+        _labels = {1: "😊 Good", 0: "😐 Neutral", -1: "😞 Bad"}
+        rating_label = _labels.get(rating_val, str(rating_val))
 
-        message_obj = serialize_message(self.db, saved)
-
-        # Echo to visitor WS with visitor-friendly wording.
-        await ChatService.send_to_visitor(
-            conversation_id,
-            {
-                "type": "system",
-                "event_type": "visitor_left",
-                "message": "You ended the chat.",
-                "message_obj": message_obj,
-                "conversation_id": conversation_id,
-            },
-        )
-
-        # Notify agent dashboards so the timeline updates in real-time.
-        await self.agent_service.broadcast_to_active_agents(
+        await self._run_automation_flows(
+            conversation_id=conversation_id,
             website_id=website_id,
-            message_data={
-                "type": "system_message",
-                "conversation_id": conversation_id,
-                "website_id": website_id,
-                "message_obj": message_obj,
-                "visitor_ended": True,
-            },
-            include_global=True,
+            trigger="visitor_rated_conversation",
+            log_key="visitor_rated_automation_failed",
+            send_to_visitor=False,
+            context={"rating_label": rating_label},
         )
-
-        # Fire visitor_left automation trigger so agents can configure an
-        # automatic bot message like "Visitor ended the chat. You may now resolve it."
-        if website_id:
-            await self._run_automation_trigger(
-                conversation_id=conversation_id,
-                website_id=website_id,
-                trigger="visitor_left",
-                default_system_event_type=None,
-                default_bot_event_type="bot_visitor_left",
-                log_key="visitor_left_automation_failed",
-                send_system_events_to_visitor=False,
-                send_bot_messages_to_visitor=False,
-            )
 
         return {"success": True}
 
@@ -1304,15 +1287,12 @@ class ConversationOrchestrator:
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
-        await self._run_automation_trigger(
+        await self._run_automation_flows(
             conversation_id=conversation_id,
             website_id=website_id,
             trigger="visitor_socket_connected",
-            default_system_event_type="visitor_socket_connected",
-            default_bot_event_type=None,
             log_key="visitor_socket_connected_automation_failed",
-            send_system_events_to_visitor=False,
-            send_bot_messages_to_visitor=False,
+            send_to_visitor=False,
         )
 
         try:
@@ -1341,17 +1321,17 @@ class ConversationOrchestrator:
         if not conversation:
             return {"error": "Conversation not found"}
 
-        # If the visitor intentionally ended the chat, don't add a redundant
-        # "Visitor left website." noise — the visitor_left event already tells the story.
-        visitor_left_exists = (
+        # If the visitor intentionally ended the chat, suppress the dropped event —
+        # visitor_ended already tells the story.
+        visitor_ended_exists = (
             self.db.query(Message)
             .filter(
                 Message.conversation_id == conversation_id,
-                Message.event_type == "visitor_left",
+                Message.event_type == "visitor_ended",
             )
             .first()
         )
-        if visitor_left_exists:
+        if visitor_ended_exists:
             return {"success": True}
 
         if not self._should_record_presence_event(conversation=conversation):
@@ -1359,22 +1339,19 @@ class ConversationOrchestrator:
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
-        await self._run_automation_trigger(
+        await self._run_automation_flows(
             conversation_id=conversation_id,
             website_id=website_id,
-            trigger="visitor_left_website",
-            default_system_event_type="visitor_left_website",
-            default_bot_event_type=None,
-            log_key="visitor_left_website_automation_failed",
-            send_system_events_to_visitor=False,
-            send_bot_messages_to_visitor=False,
+            trigger="visitor_dropped",
+            log_key="visitor_dropped_automation_failed",
+            send_to_visitor=False,
         )
 
         try:
             await self.agent_service.broadcast_to_active_agents(
                 website_id=website_id,
                 message_data={
-                    "type": "visitor_left_website",
+                    "type": "visitor_dropped",
                     "conversation_id": conversation_id,
                     "website_id": website_id,
                 },
@@ -1385,138 +1362,75 @@ class ConversationOrchestrator:
 
         return {"success": True}
 
-    async def _run_automation_trigger(
+    async def visitor_reconnected(self, *, conversation_id: int) -> dict:
+        """Visitor WS reconnected after a visitor_dropped event was already fired.
+
+        Fires the visitor_reconnected automation trigger and notifies agents.
+        """
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        except Exception:
+            conversation = None
+
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        website_id = int(getattr(conversation, "website_id", None) or 0) or None
+
+        await self._run_automation_flows(
+            conversation_id=conversation_id,
+            website_id=website_id,
+            trigger="visitor_reconnected",
+            log_key="visitor_reconnected_automation_failed",
+            send_to_visitor=False,
+        )
+
+        try:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "visitor_reconnected",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                },
+                include_global=True,
+            )
+        except Exception:
+            pass
+
+        return {"success": True}
+
+    async def _run_automation_flows(
         self,
         *,
         conversation_id: int,
         website_id: int | None,
         trigger: str,
-        default_system_event_type: str | None,
-        default_bot_event_type: str | None,
         log_key: str,
-        send_system_events_to_visitor: bool = True,
-        send_bot_messages_to_visitor: bool = True,
-        ensure_system_event: bool = False,
-        fallback_system_content: str | None = None,
+        send_to_visitor: bool = True,
+        context: dict | None = None,
     ) -> None:
+        """Execute all enabled automation flows for a trigger.
+
+        Walks each automation's node graph starting from the trigger node,
+        dispatching action nodes by type and following edges.
+        """
         if not website_id:
             return
-
         try:
             automation_service = AutomationService(self.db)
-
-            system_actions = automation_service.get_system_event_actions(
+            automations = automation_service.list_enabled_for_trigger(
                 website_id=int(website_id),
                 trigger=str(trigger),
             )
-            emitted_system_event = False
-            for action in system_actions:
-                event_type = action.get("event_type") or default_system_event_type or str(trigger)
-                content = action.get("content")
-                if not content:
-                    continue
-
-                if _should_skip_due_to_repeat(
-                    db=self.db,
+            for automation in automations:
+                await self._execute_flow(
+                    automation=automation,
                     conversation_id=conversation_id,
-                    event_type=str(event_type),
-                    repeat=action.get("repeat"),
-                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                ):
-                    continue
-
-                saved_evt = self.conversation_service.add_system_message(
-                    conversation_id,
-                    str(content),
-                    event_type=str(event_type),
+                    website_id=int(website_id),
+                    send_to_visitor=send_to_visitor,
+                    ctx=context or {},
                 )
-                emitted_system_event = True
-                if send_system_events_to_visitor:
-                    message_obj = serialize_message(self.db, saved_evt)
-                    payload = {
-                        "type": "system",
-                        "message": saved_evt.content,
-                        "message_obj": message_obj,
-                        "conversation_id": conversation_id,
-                        "website_id": website_id,
-                    }
-                    # If this system event resolves the conversation CLOSED_BY=visitor,
-                    # present a visitor-friendly message when delivering to the widget.
-                    try:
-                        if message_obj and message_obj.get("closed_by") == "visitor":
-                            visitor_friendly = "You ended the chat."
-                            payload["message"] = visitor_friendly
-                            # Also patch the message_obj content so the widget displays
-                            # the visitor-friendly text consistently for live frames.
-                            payload["message_obj"]["content"] = visitor_friendly
-                    except Exception:
-                        pass
-                    if message_obj.get("closed_by"):
-                        payload["closed_by"] = message_obj["closed_by"]
-                    await ChatService.send_to_visitor(
-                        conversation_id,
-                        payload,
-                    )
-
-            if ensure_system_event and not emitted_system_event and default_system_event_type and fallback_system_content:
-                saved_evt = self.conversation_service.add_system_message(
-                    conversation_id,
-                    str(fallback_system_content),
-                    event_type=str(default_system_event_type),
-                )
-                if send_system_events_to_visitor:
-                    message_obj = serialize_message(self.db, saved_evt)
-                    payload = {
-                        "type": "system",
-                        "message": saved_evt.content,
-                        "message_obj": message_obj,
-                        "conversation_id": conversation_id,
-                        "website_id": website_id,
-                    }
-                    # Adjust visitor-facing wording when the conversation was closed by the visitor.
-                    try:
-                        if message_obj and message_obj.get("closed_by") == "visitor":
-                            visitor_friendly = "You ended the chat."
-                            payload["message"] = visitor_friendly
-                            payload["message_obj"]["content"] = visitor_friendly
-                    except Exception:
-                        pass
-                    if message_obj.get("closed_by"):
-                        payload["closed_by"] = message_obj["closed_by"]
-                    await ChatService.send_to_visitor(conversation_id, payload)
-
-            bot_actions = automation_service.get_bot_message_actions(
-                website_id=int(website_id),
-                trigger=str(trigger),
-            )
-            for action in bot_actions or []:
-                event_type = action.get("event_type") or default_bot_event_type
-                if not event_type:
-                    continue
-
-                if _should_skip_due_to_repeat(
-                    db=self.db,
-                    conversation_id=conversation_id,
-                    event_type=str(event_type),
-                    repeat=action.get("repeat"),
-                    repeat_cooldown_seconds=action.get("repeat_cooldown_seconds"),
-                ):
-                    continue
-
-                saved_bot = self.conversation_service.add_bot_message(
-                    conversation_id,
-                    action["message"],
-                    event_type=str(event_type),
-                )
-                if send_bot_messages_to_visitor:
-                    await ChatService.send_to_visitor(
-                        conversation_id,
-                        {
-                            "type": "bot",
-                            "message": action["message"],
-                            "message_obj": serialize_message(self.db, saved_bot),
-                        },
-                    )
         except Exception as e:
             logger.error(
                 str(log_key),
@@ -1527,7 +1441,353 @@ class ConversationOrchestrator:
                 exc_info=True,
             )
 
-    async def handle_reconnect(
+    async def _execute_flow(
+        self,
+        *,
+        automation: Automation,
+        conversation_id: int,
+        website_id: int,
+        send_to_visitor: bool,
+        ctx: dict,
+    ) -> None:
+        """Walk one automation's node graph and execute each node in order."""
+        nodes_list = automation.nodes or []
+        edges_list = automation.edges or []
+        if not nodes_list:
+            return
+
+        # Enrich ctx with conversation contact fields so any automation node
+        # can reference {phone}, {email}, {visitor_name}, {contact_info} in template strings.
+        # visitor_name falls back to "there" so "Hi {visitor_name}" → "Hi there" gracefully.
+        # {contact_info} is built dynamically: shows whichever contact fields are filled.
+        try:
+            _enrich_conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
+            if _enrich_conv:
+                ctx = dict(ctx)
+                ctx.setdefault("phone", _enrich_conv.visitor_phone or "")
+                ctx.setdefault("email", _enrich_conv.visitor_email or "")
+                ctx.setdefault("visitor_name", _enrich_conv.visitor_name or "there")
+                _p = _enrich_conv.visitor_phone or ""
+                _e = _enrich_conv.visitor_email or ""
+                if _p and _e:
+                    ctx.setdefault("contact_info", f"{_p} or {_e}")
+                elif _p:
+                    ctx.setdefault("contact_info", _p)
+                elif _e:
+                    ctx.setdefault("contact_info", _e)
+                else:
+                    ctx.setdefault("contact_info", "the contact details you provided")
+        except Exception:
+            pass
+
+        nodes = {n["id"]: n for n in nodes_list if isinstance(n, dict) and n.get("id")}
+
+        # adjacency: from_id -> list of {to, branch}
+        adjacency: dict[str, list[dict]] = {}
+        for edge in edges_list:
+            if not isinstance(edge, dict):
+                continue
+            frm, to = edge.get("from"), edge.get("to")
+            if frm and to:
+                adjacency.setdefault(frm, []).append({"to": to, "branch": edge.get("branch")})
+
+        trigger_node = next((n for n in nodes.values() if n.get("type") == "trigger"), None)
+        if not trigger_node:
+            return
+
+        # Repeat/cooldown live in the trigger node config
+        trigger_cfg = trigger_node.get("config") or {}
+        repeat_str = str(trigger_cfg.get("repeat") or "once").strip().lower()
+        if repeat_str not in {"once", "cooldown", "always"}:
+            repeat_str = "once"
+        cooldown_secs: int | None = None
+        if repeat_str == "cooldown":
+            raw = trigger_cfg.get("cooldown_seconds")
+            if raw is None:
+                hours = trigger_cfg.get("cooldown_hours")
+                if hours is not None:
+                    try:
+                        raw = int(hours) * 3600
+                    except Exception:
+                        pass
+            if raw is not None:
+                try:
+                    cooldown_secs = max(1, int(raw))
+                except Exception:
+                    pass
+
+        queue: list[str] = [trigger_node["id"]]
+        visited: set[str] = set()
+
+        while queue:
+            node_id = queue.pop(0)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+
+            node = nodes.get(node_id)
+            if not node:
+                continue
+
+            node_type = str(node.get("type") or "").lower()
+            cfg = node.get("config") or {}
+            follow_all = True
+
+            if node_type == "trigger":
+                pass  # entry point only
+
+            elif node_type == "send_bot_message":
+                message = str(cfg.get("message") or "").strip()
+                event_type = str(cfg.get("event_type") or f"bot_{automation.trigger}").strip()
+                node_send_to_visitor = send_to_visitor and cfg.get("send_to_visitor", True)
+                if message:
+                    if _should_skip_due_to_repeat(
+                        db=self.db, conversation_id=conversation_id,
+                        event_type=event_type, repeat=repeat_str,
+                        repeat_cooldown_seconds=cooldown_secs,
+                    ):
+                        continue
+                    # Substitute template variables ({phone}, {email}, etc.)
+                    try:
+                        message = message.format_map(ctx)
+                    except Exception:
+                        pass
+                    if node_send_to_visitor:
+                        saved = self.conversation_service.add_bot_message(
+                            conversation_id, message, event_type=event_type
+                        )
+                        await ChatService.send_to_visitor(
+                            conversation_id,
+                            {"type": "bot", "message": message, "message_obj": serialize_message(self.db, saved)},
+                        )
+                    else:
+                        # Agent-only bot message: stored with is_agent_only=True, never sent to visitor.
+                        saved = self.conversation_service.add_system_message(
+                            conversation_id, message, event_type=event_type,
+                            sender="bot", is_agent_only=True,
+                        )
+                    # Always broadcast bot messages to agents so the dashboard reflects them.
+                    await self.agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data={
+                            "type": "bot_message",
+                            "conversation_id": conversation_id,
+                            "website_id": website_id,
+                            "message_obj": serialize_message(self.db, saved),
+                        },
+                        include_global=True,
+                    )
+
+            elif node_type == "emit_system_event":
+                raw_content = str(cfg.get("content") or "").strip()
+                event_type = str(cfg.get("event_type") or automation.trigger).strip()
+                if raw_content:
+                    try:
+                        content = raw_content.format_map(ctx)
+                    except Exception:
+                        content = raw_content
+                    visitor_content = cfg.get("visitor_content")
+                    if visitor_content and ctx:
+                        try:
+                            visitor_content = str(visitor_content).format_map(ctx)
+                        except Exception:
+                            pass
+                    if _should_skip_due_to_repeat(
+                        db=self.db, conversation_id=conversation_id,
+                        event_type=event_type, repeat=repeat_str,
+                        repeat_cooldown_seconds=cooldown_secs,
+                    ):
+                        continue
+                    saved_evt = self.conversation_service.add_system_message(
+                        conversation_id, content, event_type=event_type,
+                        is_agent_only=not (send_to_visitor and cfg.get("send_to_visitor", True)),
+                    )
+                    msg_obj = serialize_message(self.db, saved_evt)
+                    # Per-node send_to_visitor flag (default True) lets automation
+                    # authors configure agent-only messages by setting it to false.
+                    node_sends_to_visitor = send_to_visitor and cfg.get("send_to_visitor", True)
+                    if node_sends_to_visitor:
+                        visitor_text = visitor_content if visitor_content else content
+                        await ChatService.send_to_visitor(
+                            conversation_id,
+                            {"type": "system", "event_type": event_type, "message": visitor_text,
+                             "message_obj": msg_obj, "conversation_id": conversation_id, "website_id": website_id},
+                        )
+                    await self.agent_service.broadcast_to_active_agents(
+                        website_id=website_id,
+                        message_data={"type": "system_message", "conversation_id": conversation_id,
+                                      "website_id": website_id, "message_obj": msg_obj},
+                        include_global=True,
+                    )
+
+            elif node_type == "wait":
+                secs = int(cfg.get("seconds") or 0)
+                if secs > 0:
+                    await asyncio.sleep(secs)
+
+            elif node_type == "condition":
+                field = str(cfg.get("field") or "").strip()
+                result = await self._evaluate_condition(field, conversation_id, website_id, ctx, cfg)
+                branch_str = "true" if result else "false"
+                next_ids = [e["to"] for e in adjacency.get(node_id, []) if e.get("branch") == branch_str]
+                queue.extend(next_ids)
+                follow_all = False
+
+            elif node_type == "show_rating_popup":
+                event_type = str(cfg.get("event_type") or "rating_popup_shown").strip()
+                if _should_skip_due_to_repeat(
+                    db=self.db, conversation_id=conversation_id,
+                    event_type=event_type, repeat=repeat_str,
+                    repeat_cooldown_seconds=cooldown_secs,
+                ):
+                    continue
+                self.conversation_service.add_bot_message(
+                    conversation_id, "__rating_popup__", event_type=event_type
+                )
+                if send_to_visitor:
+                    await ChatService.send_to_visitor(
+                        conversation_id,
+                        {"type": "show_rating_popup", "conversation_id": conversation_id},
+                    )
+
+            elif node_type == "tag_conversation":
+                tag_name = str(cfg.get("tag") or "").strip()
+                if tag_name:
+                    self._apply_tag(conversation_id=conversation_id, website_id=website_id, tag_name=tag_name)
+
+            elif node_type == "tag_with_agent_name":
+                self._apply_agent_name_tag(conversation_id=conversation_id, website_id=website_id)
+
+            elif node_type == "bot_prompt_buttons":
+                message_text = str(cfg.get("message") or "").strip()
+                buttons = cfg.get("buttons") or []
+                automation_id = automation.id
+                if message_text:
+                    validated_buttons = [
+                        {"label": b["label"].strip(), "team_id": b.get("team_id"), "reply": b.get("reply", "")}
+                        for b in buttons
+                        if isinstance(b, dict) and (b.get("label") or "").strip()
+                    ]
+                    enriched = json.dumps({"message": message_text, "automation_id": automation_id, "buttons": validated_buttons})
+                    saved = self.conversation_service.add_bot_message(
+                        conversation_id, enriched, event_type="bot_prompt_buttons"
+                    )
+                    ws_payload = {
+                        "type": "bot_prompt", "message": message_text,
+                        "conversation_id": conversation_id, "automation_id": automation_id,
+                        "buttons": validated_buttons, "message_obj": serialize_message(self.db, saved),
+                    }
+                    if send_to_visitor:
+                        await ChatService.send_to_visitor(conversation_id, ws_payload)
+
+            elif node_type == "end":
+                break
+
+            if follow_all:
+                queue.extend(e["to"] for e in adjacency.get(node_id, []))
+
+    async def _evaluate_condition(
+        self,
+        field: str,
+        conversation_id: int,
+        website_id: int,
+        ctx: dict,
+        cfg: dict | None = None,
+    ) -> bool:
+        """Evaluate a condition node field. Returns True/False to select branch."""
+        if field == "agent_online":
+            return is_website_online(website_id)
+        if field == "is_first_visit":
+            try:
+                conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
+                if conv:
+                    prior = (
+                        self.db.query(Conversation)
+                        .filter(
+                            Conversation.session_id == conv.session_id,
+                            Conversation.website_id == website_id,
+                            Conversation.id != conversation_id,
+                        )
+                        .count()
+                    )
+                    return prior == 0
+            except Exception:
+                pass
+            return True
+        if field == "has_tag":
+            tag_name = str((cfg or {}).get("value") or "").strip()
+            if not tag_name:
+                return False
+            try:
+                from app.models.tag import Tag
+                from app.models.conversation_tag import ConversationTag
+                tag = (
+                    self.db.query(Tag)
+                    .filter_by(name=tag_name, website_id=website_id)
+                    .first()
+                )
+                if not tag:
+                    return False
+                return (
+                    self.db.query(ConversationTag)
+                    .filter_by(conversation_id=conversation_id, tag_id=tag.id)
+                    .first()
+                ) is not None
+            except Exception:
+                return False
+        # Unknown field: default true
+        return True
+
+    def _apply_tag(self, *, conversation_id: int, website_id: int, tag_name: str) -> None:
+        """Upsert a tag by name on the conversation (idempotent)."""
+        try:
+            from app.models.tag import Tag
+            from app.models.conversation_tag import ConversationTag
+
+            tag = (
+                self.db.query(Tag)
+                .filter_by(name=tag_name, website_id=website_id)
+                .first()
+            )
+            if not tag:
+                tag = Tag(name=tag_name, website_id=website_id, color="#6366f1")
+                self.db.add(tag)
+                self.db.flush()
+
+            existing = (
+                self.db.query(ConversationTag)
+                .filter_by(conversation_id=conversation_id, tag_id=tag.id)
+                .first()
+            )
+            if not existing:
+                self.db.add(ConversationTag(conversation_id=conversation_id, tag_id=tag.id))
+            self.db.commit()
+        except Exception as e:
+            logger.warning("apply_tag_failed", conversation_id=conversation_id, tag=tag_name, error=str(e))
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+    def _apply_agent_name_tag(self, *, conversation_id: int, website_id: int) -> None:
+        """Tag the conversation with the assigned agent's name (idempotent)."""
+        try:
+            conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+            if not conversation or not conversation.assigned_agent_id:
+                return
+            agent = self.db.query(User).filter_by(id=conversation.assigned_agent_id).first()
+            if not agent or not agent.name:
+                return
+            tag_name = f"agent:{agent.name}"
+            self._apply_tag(
+                conversation_id=conversation_id,
+                website_id=website_id,
+                tag_name=tag_name,
+            )
+        except Exception as e:
+            logger.warning("apply_agent_name_tag_failed", conversation_id=conversation_id, error=str(e))
+
+    def _reattach_sockets(
         self,
         *,
         conversation_id: int,

@@ -3,6 +3,7 @@ import { Users, ChevronLeft, HelpCircle } from 'lucide-react'
 
 import { API_BASE } from '@/config/endpoints'
 import UserAvatar from '@/components/UserAvatar'
+import DocsLink from '@/components/DocsLink'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { AgentAvailability, TeamOverview, WebsiteTeamsOverview } from '@/services/teams'
 import { teamsApi } from '@/services/teams'
@@ -165,9 +166,7 @@ export default function Teams() {
                 <div>
                     <div className="flex items-center gap-2">
                         <h1 className="text-xl font-bold text-gray-900 dark:text-white">Teams</h1>
-                        <a href="/docs/admin-guide/teams" target="_blank" rel="noreferrer" title="View teams guide" className="text-gray-400 hover:text-blue-500 transition-colors">
-                            <HelpCircle className="w-4 h-4" />
-                        </a>
+                        <DocsLink slug="admin-guide/teams" />
                     </div>
                     <p className="text-xs text-gray-600 dark:text-gray-400">Agent availability by website</p>
                 </div>

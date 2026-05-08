@@ -244,12 +244,62 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             detail="Invalid email or password"
         )
     
+    # Check permanent or 24-hour lockout
+    now = datetime.now(timezone.utc)
+    
+    if getattr(user, 'is_locked_out', False):
+        # If it was an automatic 24-hour lock, check if it expired
+        if getattr(user, 'temp_lockout_until', None):
+            if user.temp_lockout_until <= now:
+                # 24 hours passed, auto-unlock
+                user.is_locked_out = False
+                user.temp_lockout_until = None
+                user.failed_login_attempts = 0
+                db.commit()
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been Locked for 24 hours. Please contact your organization owner to unblock instantly."
+                )
+        else:
+            # Manual owner lock
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account locked. Please contact your organization owner."
+            )
+
+    # Check temporary 5-minute lockout
+    if getattr(user, 'temp_lockout_until', None) and user.temp_lockout_until > now:
+        remaining = user.temp_lockout_until - now
+        minutes = int(remaining.total_seconds() // 60) + 1
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account temporarily locked. Please try again after {minutes} minute{'s' if minutes > 1 else ''}."
+        )
+    
     # Verify password
     if not verify_password(login_request.password, user.password_hash):
+        user.failed_login_attempts = getattr(user, 'failed_login_attempts', 0) + 1
+        
+        if user.failed_login_attempts >= 6:
+            user.is_locked_out = True
+            user.temp_lockout_until = datetime.now(timezone.utc) + timedelta(hours=24)
+        elif user.failed_login_attempts >= 3:
+            user.temp_lockout_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+            
+        db.commit()
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
+    
+    # Reset lockout counters on success
+    if getattr(user, 'failed_login_attempts', 0) > 0 or getattr(user, 'temp_lockout_until', None) or getattr(user, 'is_locked_out', False):
+        user.failed_login_attempts = 0
+        user.temp_lockout_until = None
+        user.is_locked_out = False
+        db.commit()
     
     if not user.is_active:
         raise HTTPException(

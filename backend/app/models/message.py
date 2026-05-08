@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, ForeignKey, Text, String, Enum as SQLEnum
+from sqlalchemy import Boolean, Column, Integer, ForeignKey, Text, String, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 
 from app.models.base import TimestampMixin
@@ -27,5 +27,8 @@ class Message(Base, TimestampMixin):
     # Additional subtype for SYSTEM messages (e.g. automation_welcome, agent_join)
     event_type = Column(String(50), nullable=True)
     content = Column(Text, nullable=False)
+    # True when the message is only for agent eyes (e.g. emit_system_event with send_to_visitor=False).
+    # These are excluded from the history sent to the visitor's widget.
+    is_agent_only = Column(Boolean, nullable=False, default=False, server_default='false')
 
     conversation = relationship("Conversation", back_populates="messages")
