@@ -8,12 +8,12 @@ from app.core.database import get_db
 from app.api.deps import require_authenticated_user, require_admin
 from app.models.user import User
 from app.repos import automations as automations_repo
+from app.models.automation_template import AutomationTemplate
 from app.models.website import Website
 from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
 
 def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None:
-    """Raise 403 if the user doesn't have visibility to this website."""
     scope = compute_visibility_scope(db, user=user)
     try:
         ensure_website_visible(scope, website_id=int(website_id))
@@ -28,16 +28,18 @@ class AutomationCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     trigger: str = Field(..., min_length=1, max_length=100)
     enabled: bool = True
-    conditions: dict | None = None
-    actions: Any | None = None
+    category: str = Field('auto_message', max_length=50)
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
 
 
 class AutomationUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     trigger: Optional[str] = Field(None, min_length=1, max_length=100)
     enabled: Optional[bool] = None
-    conditions: Optional[dict] = None
-    actions: Any | None = None
+    category: Optional[str] = Field(None, max_length=50)
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
 
 
 class AutomationResponse(BaseModel):
@@ -46,8 +48,10 @@ class AutomationResponse(BaseModel):
     name: str
     trigger: str
     enabled: bool
-    conditions: dict | None
-    actions: Any | None
+    category: str = 'auto_message'
+    nodes: Optional[List[Any]] = None
+    edges: Optional[List[Any]] = None
+    template_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -61,12 +65,10 @@ def list_automations(
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_authenticated_user),
 ):
-    """List automations for a website."""
     website = db.query(Website).filter_by(id=website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     _enforce_website_access(db, website_id=website_id, user=_current_user)
-
     return automations_repo.list_automations(db, website_id=website_id)
 
 
@@ -76,7 +78,6 @@ def create_automation(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """Create an automation (Admin only)."""
     website = db.query(Website).filter_by(id=payload.website_id).first()
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
@@ -88,8 +89,9 @@ def create_automation(
         name=payload.name,
         trigger=payload.trigger,
         enabled=payload.enabled,
-        conditions=payload.conditions,
-        actions=payload.actions,
+        category=payload.category,
+        nodes=payload.nodes,
+        edges=payload.edges,
     )
 
 
@@ -124,8 +126,9 @@ def update_automation(
         name=payload.name,
         trigger=payload.trigger,
         enabled=payload.enabled,
-        conditions=payload.conditions,
-        actions=payload.actions,
+        category=payload.category,
+        nodes=payload.nodes,
+        edges=payload.edges,
     )
 
 
@@ -142,3 +145,32 @@ def delete_automation(
 
     automations_repo.delete_automation(db, automation=automation)
     return None
+
+
+@router.post("/{automation_id}/reset-to-default", response_model=AutomationResponse)
+def reset_automation_to_default(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Reset an automation's nodes/edges back to the library template it was created from."""
+    automation = automations_repo.get_automation(db, automation_id=automation_id)
+    if not automation:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    _enforce_website_access(db, website_id=automation.website_id, user=_admin)
+
+    if not automation.template_id:
+        raise HTTPException(
+            status_code=400,
+            detail="This automation was not created from a library template and cannot be reset."
+        )
+
+    template = db.query(AutomationTemplate).filter_by(id=automation.template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Source template not found")
+
+    automation.nodes = template.nodes
+    automation.edges = template.edges
+    db.commit()
+    db.refresh(automation)
+    return automation

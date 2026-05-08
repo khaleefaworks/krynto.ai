@@ -32,6 +32,12 @@ export default function PersonalSettings() {
   }, [])
 
   // Load existing avatar when user data is available
+  useEffect(() => {
+    if (!user?.avatar_url) return
+    const url = user.avatar_url.startsWith('http') ? user.avatar_url : `${API_BASE}${user.avatar_url}`
+    setAvatarPreview(url)
+  }, [user?.avatar_url])
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     // Reset input so the same file can be re-selected

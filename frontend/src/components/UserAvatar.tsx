@@ -29,17 +29,31 @@ export function getSeededAvatarPaletteClass(seed: string): string {
 export default function UserAvatar({
     seed,
     bgColor,
+    imageUrl,
     className,
     iconClassName,
     title,
 }: {
     seed: string
     bgColor?: string | null
+    imageUrl?: string | null
     className?: string
     iconClassName?: string
     title?: string
 }) {
     const palette = getSeededAvatarPaletteClass(seed)
+
+    if (imageUrl) {
+        return (
+            <div
+                className={cn('rounded-full overflow-hidden ring-1 ring-black/5 dark:ring-white/10', className)}
+                title={title}
+                aria-hidden="true"
+            >
+                <img src={imageUrl} alt={title || ''} className="w-full h-full object-cover" />
+            </div>
+        )
+    }
 
     const useInlineColor = Boolean(bgColor && String(bgColor).trim())
     return (

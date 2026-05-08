@@ -65,6 +65,7 @@ class WidgetConfigResponse(BaseModel):
     show_attachments: bool = False
     branding_text: Optional[str] = None
     header_icon_url: Optional[str] = None
+    offline_form: Optional[dict] = None
     
     class Config:
         from_attributes = True
@@ -116,17 +117,6 @@ def create_website(
     db.commit()
     db.refresh(website)
 
-    # Seed default DB-backed automations for this website.
-    try:
-        from app.services.automation_service import AutomationService
-
-        AutomationService(db).ensure_default_automations_for_website(website_id=website.id)
-    except Exception:
-        # Non-fatal: website creation should still succeed.
-        try:
-            db.rollback()
-        except Exception:
-            pass
     return website
 
 
@@ -276,7 +266,7 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
     
     # Get widget config or use defaults
     config = website.widget_config or {}
-    
+
     return {
         "theme": config.get("theme", "dark"),
         "position": config.get("position", "bottom-right"),
@@ -290,6 +280,7 @@ def get_widget_config(request: Request, website_id: int, db: Session = Depends(g
         "show_attachments": config.get("show_attachments", False),
         "branding_text": config.get("branding_text"),
         "header_icon_url": config.get("header_icon_url"),
+        "offline_form": None,
     }
 
 

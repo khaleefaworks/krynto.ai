@@ -7,6 +7,7 @@ import {
   Mail,
   Phone,
   Monitor,
+  Globe,
   Plus,
   X
 } from "lucide-react"
@@ -42,6 +43,7 @@ interface VisitorDetailsPanelProps {
     visitor_phone?: string
     device_info?: string
     browser_info?: string
+    visitor_ip?: string | null
     visit_count?: number
     last_seen_at?: string
     visitor_avatar_color?: string | null
@@ -67,6 +69,21 @@ interface VisitorDetailsPanelProps {
   }>
 
   rating?: { rating: number; feedback?: string } | null
+
+  formSubmissions?: Array<{
+    id: number
+    form_id: number
+    form_name: string | null
+    form_fields: Array<{
+      name?: string
+      field_name?: string
+      label?: string
+      type?: string
+      field_type?: string
+    }>
+    data: Record<string, string>
+    created_at: string | null
+  }>
 }
 
 export default function VisitorDetailsPanel({
@@ -77,6 +94,7 @@ export default function VisitorDetailsPanel({
   onDeleteNote,
   browsingHistory = [],
   rating,
+  formSubmissions = [],
 }: VisitorDetailsPanelProps) {
   const [editingName, setEditingName] = useState(false)
   const [editingEmail, setEditingEmail] = useState(false)
@@ -152,21 +170,25 @@ export default function VisitorDetailsPanel({
         </div>
       </div>
 
-      {/* Device */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Device</h4>
-        <div className="flex items-center gap-2">
-          <Monitor className="h-4 w-4 text-gray-400" />
-          <span className="text-sm text-gray-600 dark:text-gray-400">
-            {(() => {
-              const device = String(conversation.device_info || '').trim()
-              const browser = String(conversation.browser_info || '').trim()
-              if (device && browser) return `${device}, ${browser}`
-              return device || browser || 'Unknown'
-            })()}
-          </span>
+      {/* IP / device rows — no heading, Smartsupp-style */}
+      {(conversation.visitor_ip || conversation.device_info || conversation.browser_info) && (
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 space-y-1.5">
+          {conversation.visitor_ip && (
+            <div className="flex items-center gap-2">
+              <Globe className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+              <span className="text-xs text-gray-600 dark:text-gray-400 font-mono">{conversation.visitor_ip}</span>
+            </div>
+          )}
+          {(conversation.device_info || conversation.browser_info) && (
+            <div className="flex items-center gap-2">
+              <Monitor className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+              <span className="text-xs text-gray-600 dark:text-gray-400">
+                {[conversation.device_info, conversation.browser_info].filter(Boolean).join(', ')}
+              </span>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Visitor Rating */}
       {rating && (
@@ -194,8 +216,8 @@ export default function VisitorDetailsPanel({
       {/* Contact Information */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
         {/* Name */}
-        <div className="flex items-start gap-2">
-          <User className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingName ? (
               <div className="flex gap-1">
@@ -221,8 +243,8 @@ export default function VisitorDetailsPanel({
         </div>
 
         {/* Email */}
-        <div className="flex items-start gap-2">
-          <Mail className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingEmail ? (
               <div className="flex gap-1">
@@ -248,8 +270,8 @@ export default function VisitorDetailsPanel({
         </div>
 
         {/* Phone */}
-        <div className="flex items-start gap-2">
-          <Phone className="h-4 w-4 text-gray-400 mt-2" />
+        <div className="flex items-center gap-2">
+          <Phone className="h-4 w-4 text-gray-400" />
           <div className="flex-1">
             {editingPhone ? (
               <div className="flex gap-1">
@@ -404,6 +426,39 @@ export default function VisitorDetailsPanel({
           </div>
         )}
       </div>
+
+      {/* Form Submissions */}
+      {formSubmissions.length > 0 && (
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Form submissions</h4>
+          </div>
+          <div className="space-y-4">
+            {formSubmissions.map((sub) => {
+              const when = sub.created_at ? formatDistanceToNow(new Date(sub.created_at), { addSuffix: true }) : ''
+              const labelMap: Record<string, string> = {}
+              ;(sub.form_fields || []).forEach((f) => {
+                const key = f?.name || f?.field_name
+                if (key) labelMap[key] = f?.label || key
+              })
+              return (
+                <div key={sub.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{sub.form_name || 'Form'}</span>
+                    {when && <span className="text-xs text-gray-400 dark:text-gray-500">{when}</span>}
+                  </div>
+                  {Object.entries(sub.data || {}).map(([key, val]) => (
+                    <div key={key} className="text-xs">
+                      <span className="text-gray-500 dark:text-gray-400">{labelMap[key] || key}: </span>
+                      <span className="text-gray-900 dark:text-white">{String(val)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
     </div>
   )

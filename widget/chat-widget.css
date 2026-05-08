@@ -52,38 +52,15 @@
   gap: 8px;
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #fff;
-  padding: 5px 5px 5px 10px;
-  border-radius: 28px;
-  font-size: 15px;
-  font-weight: 600;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  position: relative;
-  white-space: nowrap;
-}
-
-#chatassist-bubble-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: #fff;
   padding: 5px 8px 5px 10px;
-  border-radius: 22px;
+  border-radius: 999px;
   font-size: 14px;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28), 0 2px 6px rgba(0,0,0,0.08);
   transition: box-shadow 0.28s cubic-bezier(.2,.9,.3,1), filter 0.28s ease;
   position: relative;
   white-space: nowrap;
 }
 
-/* Soft illumination on hover (gentle light, not dark) */
-#chatassist-bubble-pill:hover {
-  /* no scaling or translation on hover per user preference */
-  box-shadow: 0 10px 30px rgba(59,130,246,0.12), 0 4px 10px rgba(0,0,0,0.06);
-  filter: brightness(1.06);
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-}
 .chatassist-bubble-icon {
   margin-left: 10px;
   width: 40px;
@@ -110,17 +87,15 @@
   background: rgba(255,255,255,0.12);
   z-index: 0;
   transform-origin: center;
-  animation: chatassist-bubble-fill 3s ease-in-out infinite;
   transition: background 180ms, opacity 180ms;
 }
 
 .chatassist-bubble-icon svg {
   width: 24px;
   height: 24px;
-  transition: transform 160ms cubic-bezier(.2,.9,.3,1), color 160ms ease;
+  transition: transform 300ms cubic-bezier(.2,.9,.3,1), color 160ms ease;
   transform-origin: center;
-  /* slightly lift the icon inside the circle by default (no widget movement) */
-  transform: translateY(-2px) scale(1);
+  transform: translateY(-1px) scale(1);
   color: #fff;
   display: block;
   position: relative;
@@ -130,7 +105,6 @@
 /* Hover sequencing: pill -> circle -> icon
    Icon only scales on hover (no upward translation) */
 #chatassist-bubble-pill:hover .chatassist-bubble-icon {
-  /* no widget movement; only a subtle shadow change */
   box-shadow: 0 8px 20px rgba(0,0,0,0.10);
 }
 
@@ -143,19 +117,13 @@
 
 /* Icon scales on hover (only the svg inside the circle) */
 #chatassist-bubble-pill:hover .chatassist-bubble-icon svg {
-  transform: translateY(-2px) scale(1.28);
+  transform: translateY(-1px) scale(1.06);
 }
 
 
 #chatassist-bubble-pill:hover::after {
   transform: translateY(-3px);
   width: 20px;
-}
-
-@keyframes chatassist-bubble-fill {
-  0% { transform: scale(0.96); opacity: 1; }
-  50% { transform: scale(1.04); opacity: 0.6; }
-  100% { transform: scale(0.96); opacity: 1; }
 }
 
 #chatassist-bubble-text {
@@ -167,10 +135,10 @@
 /* Online dot */
 #chatassist-bubble-online-dot {
   position: absolute;
-  bottom: 0px;
-  left: -2px;
-  width: 8px;
-  height: 8px;
+  bottom: -2px;
+  left: 4px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #ef4444;
   /* very small, subtle white border */
@@ -194,8 +162,8 @@
 /* Unread badge */
 #chatassist-bubble-unread {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: 0px;
+  right: 0px;
   min-width: 20px;
   height: 20px;
   border-radius: 9999px;
@@ -408,6 +376,14 @@
   max-height: 80px;
   overflow: hidden;
   word-break: break-word;
+}
+
+.chatassist-popup-body strong {
+  font-weight: 700;
+}
+
+.chatassist-popup-body em {
+  font-style: italic;
 }
 
 .chatassist-popup-reply {
@@ -1141,18 +1117,36 @@
   margin-top: 10px;
 }
 
-.chatassist-contact-form input {
+/* Enforce explicit light-mode appearance for contact inputs so host site
+   CSS cannot unexpectedly style widget inputs. Use ID-scoped selectors for
+   stronger specificity. Dark theme overrides are defined below. */
+#chatassist-widget .chatassist-contact-form input,
+#chatassist-widget .chatassist-contact-form textarea,
+#chatassist-widget .chatassist-contact-form select {
   padding: 10px 12px;
+  background: #ffffff;
+  color: #111827;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   outline: none;
   font-size: 14px;
   width: 100%;
   transition: border-color 0.15s;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.chatassist-contact-form input:focus {
+#chatassist-widget .chatassist-contact-form input:focus,
+#chatassist-widget .chatassist-contact-form textarea:focus,
+#chatassist-widget .chatassist-contact-form select:focus {
   border-color: #3b82f6;
+}
+
+#chatassist-widget .chatassist-contact-form input::placeholder,
+#chatassist-widget .chatassist-contact-form textarea::placeholder,
+#chatassist-widget .chatassist-contact-form select::placeholder {
+  color: #9ca3af;
+  opacity: 1;
 }
 
 .chatassist-contact-overlay-actions {
@@ -2062,13 +2056,18 @@
   color: #94a3b8;
 }
 
-.chatassist-theme-dark .chatassist-contact-form input {
+/* Use ID-scoped selector to ensure dark overrides win over the light rules. */
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form input,
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form textarea,
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form select {
   background: #0f172a;
   border-color: #334155;
   color: #e2e8f0;
 }
 
-.chatassist-theme-dark .chatassist-contact-form input::placeholder {
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form input::placeholder,
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form textarea::placeholder,
+#chatassist-widget.chatassist-theme-dark .chatassist-contact-form select::placeholder {
   color: #64748b;
 }
 
@@ -2077,13 +2076,4 @@
   color: #94a3b8;
 }
 
-/* Final override: ensure message icon hover is medium-sized (not oversized) */
-.chatassist-bubble-icon svg {
-  transform: translateY(-1px) scale(1) !important;
-  transition: transform 300ms cubic-bezier(.2,.9,.3,1) !important;
-}
-
-#chatassist-bubble-pill:hover .chatassist-bubble-icon svg {
-  transform: translateY(-1px) scale(1.06) !important;
-}
 

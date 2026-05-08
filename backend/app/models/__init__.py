@@ -18,9 +18,12 @@ from app.models.conversation_read import ConversationRead
 from app.models.push_subscription import PushSubscription
 from app.models.tag import Tag
 from app.models.automation import Automation
+from app.models.automation_template import AutomationTemplate
 from app.models.conversation_rating import ConversationRating
 from app.models.password_reset_token import PasswordResetToken
 from app.models.email_otp import EmailOTP
+from app.models.website_form import WebsiteForm
+from app.models.website_form_submission import WebsiteFormSubmission
 
 __all__ = [
     "Website",
@@ -48,4 +51,7 @@ __all__ = [
     "Organization",
     "PasswordResetToken",
     "EmailOTP",
+    "WebsiteForm",
+    "WebsiteFormSubmission",
+    "AutomationTemplate",
 ]

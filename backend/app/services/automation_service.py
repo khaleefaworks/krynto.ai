@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional
-import json
+from typing import Any, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -11,11 +10,21 @@ from app.models.automation import Automation
 logger = get_logger(__name__)
 
 
+def _trigger_node_config(automation: Automation) -> dict:
+    """Extract config from the trigger node in an automation's graph."""
+    for node in (automation.nodes or []):
+        if isinstance(node, dict) and node.get("type") == "trigger":
+            return node.get("config") or {}
+    return {}
+
+
 class AutomationService:
-    """Minimal automation runner for MVP triggers (bot message actions only)."""
+    """Query layer and seed helper for the automation graph model."""
 
     def __init__(self, db: Session):
         self.db = db
+
+    # ─── DB queries ───────────────────────────────────────────────────────────
 
     def list_enabled_for_trigger(self, *, website_id: int, trigger: str) -> List[Automation]:
         return (
@@ -30,7 +39,6 @@ class AutomationService:
         )
 
     def list_for_trigger(self, *, website_id: int, trigger: str) -> List[Automation]:
-        """Return all automations for a trigger (enabled or disabled)."""
         return (
             self.db.query(Automation)
             .filter(
@@ -56,480 +64,240 @@ class AutomationService:
         except Exception:
             return False
 
+    # ─── Trigger node config accessors ────────────────────────────────────────
+
     def get_delay_seconds(self, *, website_id: int, trigger: str, default_seconds: int) -> int:
-        """Return the first configured delay_seconds for a trigger, or default."""
-        try:
-            automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-            for automation in automations:
-                conditions = automation.conditions or {}
-                if isinstance(conditions, str):
-                    try:
-                        conditions = json.loads(conditions)
-                    except Exception:
-                        conditions = {}
-                delay = conditions.get("delay_seconds") or conditions.get("wait_seconds")
-                if delay is None:
-                    continue
+        """Return delay_seconds from the trigger node config of the first enabled automation."""
+        for automation in self.list_enabled_for_trigger(website_id=website_id, trigger=trigger):
+            config = _trigger_node_config(automation)
+            delay = config.get("delay_seconds")
+            if delay is not None:
                 try:
                     return max(1, int(delay))
                 except Exception:
                     continue
-        except Exception:
-            pass
         return default_seconds
 
     def get_cooldown_seconds(self, *, website_id: int, trigger: str, default_seconds: int) -> int:
-        """Return cooldown seconds for a trigger, or default.
-
-        Supported condition keys:
-        - cooldown_seconds
-        - cooldown_hours (preferred)
-        - welcome_cooldown_hours (legacy naming)
-        """
-        try:
-            automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-            for automation in automations:
-                conditions = automation.conditions or {}
-                if isinstance(conditions, str):
+        """Return cooldown_seconds from the trigger node config of the first enabled automation."""
+        for automation in self.list_enabled_for_trigger(website_id=website_id, trigger=trigger):
+            config = _trigger_node_config(automation)
+            raw = config.get("cooldown_seconds")
+            if raw is None:
+                hours = config.get("cooldown_hours")
+                if hours is not None:
                     try:
-                        conditions = json.loads(conditions)
-                    except Exception:
-                        conditions = {}
-
-                cooldown_seconds = conditions.get("cooldown_seconds")
-                if cooldown_seconds is not None:
-                    try:
-                        return max(1, int(cooldown_seconds))
+                        return max(1, int(hours)) * 3600
                     except Exception:
                         pass
-
-                cooldown_hours = conditions.get("cooldown_hours")
-                if cooldown_hours is None:
-                    cooldown_hours = conditions.get("welcome_cooldown_hours")
-                if cooldown_hours is not None:
-                    try:
-                        return max(1, int(cooldown_hours)) * 3600
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+            if raw is not None:
+                try:
+                    return max(1, int(raw))
+                except Exception:
+                    pass
         return default_seconds
 
-    def get_actions_by_type(
-        self, *, website_id: int, trigger: str, action_type: str
-    ) -> List[dict]:
-        """Return raw action dicts of a specific type for a trigger.
+    def get_actions_by_type(self, *, website_id: int, trigger: str, action_type: str) -> List[dict]:
+        """Return nodes of a specific type across all enabled automations for a trigger.
 
-        Generic accessor that works for any action type stored in the JSON
-        actions column.  Each returned dict includes the originating
-        ``automation_id`` for traceability.
+        Each returned dict is the node's config merged with automation_id.
         """
-        actions: List[dict] = []
-        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
+        result: List[dict] = []
+        for automation in self.list_enabled_for_trigger(website_id=website_id, trigger=trigger):
+            for node in (automation.nodes or []):
+                if not isinstance(node, dict):
+                    continue
+                if str(node.get("type") or "").lower() == action_type.lower():
+                    config = dict(node.get("config") or {})
+                    config["automation_id"] = automation.id
+                    result.append(config)
+        return result
 
-        for automation in automations:
-            raw_actions = automation.actions or {}
-            if isinstance(raw_actions, str):
-                try:
-                    raw_actions = json.loads(raw_actions)
-                except Exception:
-                    raw_actions = {}
-
-            normalized: Iterable[dict]
-            if isinstance(raw_actions, list):
-                normalized = [a for a in raw_actions if isinstance(a, dict)]
-            elif isinstance(raw_actions, dict):
-                normalized = [raw_actions]
-            else:
-                normalized = []
-
-            for action in normalized:
-                if str(action.get("type") or "").lower() == action_type.lower():
-                    action_copy = dict(action)
-                    action_copy["automation_id"] = getattr(automation, "id", None)
-                    actions.append(action_copy)
-
-        return actions
-
-    def get_first_bot_message_action(self, *, website_id: int, trigger: str) -> dict | None:
-        actions = self.get_bot_message_actions(website_id=website_id, trigger=trigger)
-        return actions[0] if actions else None
-
-    def get_first_system_event_action(self, *, website_id: int, trigger: str) -> dict | None:
-        actions = self.get_system_event_actions(website_id=website_id, trigger=trigger)
-        return actions[0] if actions else None
+    # ─── Default automation seeder ────────────────────────────────────────────
 
     def ensure_default_automations_for_website(self, *, website_id: int) -> None:
-        """Create default automations for a website if missing.
+        """Create default automation flows for a website if missing.
 
-        Safe to call multiple times; only inserts missing triggers.
+        Each automation is stored as a node graph. The trigger node holds
+        repeat/cooldown config; action nodes hold type-specific config.
+        Safe to call multiple times — only inserts missing (trigger, name) pairs.
         """
         defaults = [
-            {
-                "name": "Welcome message",
-                "trigger": "visitor_connected",
-                "enabled": True,
-                "conditions": {"cooldown_hours": 24},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Hi! How can we help you today?",
-                        "event_type": "automation_welcome",
-                    }
-                ],
-            },
-            {
-                "name": "Visitor connected event",
-                "trigger": "visitor_socket_connected",
-                "enabled": False,
-                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor has just connected.",
-                        "event_type": "visitor_socket_connected",
-                    }
-                ],
-            },
-            {
-                "name": "Waiting message",
-                "trigger": "no_agent_assigned_for",
-                "enabled": True,
-                "conditions": {"delay_seconds": 60},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! An agent will be with you shortly.",
-                        "event_type": "bot_waiting",
-                    }
-                ],
-            },
-            {
-                "name": "Offline prompt",
-                "trigger": "website_offline_first_message",
-                "enabled": True,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "We're busy at the moment. Sorry about that. Leave us your email, and we will contact you as soon as possible.",
-                        "event_type": "bot_offline",
-                    }
-                ],
-            },
-            {
-                "name": "Closing message",
-                "trigger": "conversation_resolved",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! This conversation is now closed.",
-                        "event_type": "bot_closing",
-                    }
-                ],
-            },
-            {
-                "name": "Resolved event",
-                "trigger": "conversation_resolved",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "This conversation has been resolved.",
-                        "event_type": "conversation_resolved",
-                    }
-                ],
-            },
-            {
-                "name": "Visitor closed event",
-                "trigger": "visitor_closed_chat",
-                "enabled": True,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor closed chat.",
-                        "event_type": "visitor_closed_chat",
-                    }
-                ],
-            },
-            {
-                "name": "Visitor closed message",
-                "trigger": "visitor_closed_chat",
-                "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "send_bot_message",
-                        "message": "Thanks! If you need anything else, just send another message.",
-                        "event_type": "bot_visitor_closed",
-                    }
-                ],
-            },
-            {
-                "name": "Visitor left website event",
-                "trigger": "visitor_left_website",
-                "enabled": True,
-                "conditions": {"repeat": "cooldown", "repeat_cooldown_seconds": 10},
-                "actions": [
-                    {
-                        "type": "emit_system_event",
-                        "content": "Visitor left website.",
-                        "event_type": "visitor_left_website",
-                    }
-                ],
-            },
+            # ─── Chatbot flow ─────────────────────────────────────────────────
             {
                 "name": "Team routing chatbot",
                 "trigger": "conversation_created",
                 "enabled": False,
-                "conditions": {},
-                "actions": [
-                    {
-                        "type": "bot_prompt_buttons",
-                        "message": "Welcome! What are you looking for?",
-                        "buttons": [],
-                    }
+                "category": "chatbot_flow",
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": []}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
+            # ─── During conversation ──────────────────────────────────────────
+            {
+                "name": "Waiting message",
+                "trigger": "no_agent_assigned_for",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"delay_seconds": 30}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "send_bot_message", "config": {"message": "Thanks! An agent will be with you shortly.", "event_type": "bot_waiting"}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
+            # ─── Presence timeline ────────────────────────────────────────────
+            {
+                "name": "Visitor dropped event",
+                "trigger": "visitor_dropped",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
+            {
+                "name": "Visitor reconnected",
+                "trigger": "visitor_reconnected",
+                "enabled": False,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
+            # ─── Offline ─────────────────────────────────────────────────────
+            {
+                "name": "Offline prompt",
+                "trigger": "website_offline_first_message",
+                "enabled": False,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+                    {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 150}},
+                    {"id": "n1", "type": "send_bot_message", "config": {"message": "Hi {visitor_name}, thanks for reaching out! We're currently offline, but we've received your message. We'll get back to you at {contact_info} as soon as possible. Feel free to leave any additional details below.", "event_type": "bot_offline"}, "position": {"x": 0, "y": 300}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n_wait"},
+                    {"id": "e2", "from": "n_wait", "to": "n1"},
+                ],
+            },
+            # ─── Agent joined ─────────────────────────────────────────────────
+            {
+                "name": "Agent joined",
+                "trigger": "agent_joined",
+                "enabled": False,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "tag_with_agent_name", "config": {}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
+            # ─── Visitor ended chat ───────────────────────────────────────────
+            {
+                "name": "Visitor ended chat",
+                "trigger": "conversation_visitor_ended",
+                "enabled": False,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor ended the chat.", "visitor_content": "You ended the chat.", "event_type": "visitor_ended", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+                    {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+                    {"id": "n_agent_hint", "type": "send_bot_message", "config": {"message": "Visitor ended the chat. You can go ahead and resolve this conversation.", "event_type": "visitor_ended_agent_note", "send_to_visitor": False}, "position": {"x": 0, "y": 450}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                    {"id": "e_wait", "from": "n1", "to": "n_wait"},
+                    {"id": "e2", "from": "n_wait", "to": "n2"},
+                    {"id": "e_agent_hint", "from": "n2", "to": "n_agent_hint"},
+                ],
+            },
+            # ─── Conversation resolved ────────────────────────────────────────
+            {
+                "name": "Resolved rating",
+                "trigger": "conversation_resolved",
+                "enabled": False,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "visitor_content": "{agent_name} has resolved this conversation.", "event_type": "conversation_resolved_message", "send_to_visitor": True}, "position": {"x": 0, "y": 150}},
+                    {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 250}},
+                    {"id": "n2", "type": "show_rating_popup", "config": {"event_type": "rating_popup_shown"}, "position": {"x": 0, "y": 350}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                    {"id": "e_wait", "from": "n1", "to": "n_wait"},
+                    {"id": "e2", "from": "n_wait", "to": "n2"},
+                ],
+            },
+            # ─── Visitor rated ────────────────────────────────────────────────
+            {
+                "name": "Visitor rated",
+                "trigger": "visitor_rated_conversation",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "send_bot_message", "config": {"message": "Visitor rated this conversation: {rating_label}", "event_type": "visitor_rating_note", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
                 ],
             },
         ]
 
         try:
-            existing_pairs = {
-                (str(t or ""), str(n or ""))
-                for (t, n) in (
-                    self.db.query(Automation.trigger, Automation.name)
+            existing_map: dict[tuple[str, str], Automation] = {
+                (str(a.trigger or ""), str(a.name or "")): a
+                for a in (
+                    self.db.query(Automation)
                     .filter(Automation.website_id == website_id)
                     .all()
                 )
             }
         except Exception:
-            existing_pairs = set()
+            existing_map = {}
 
-        created_any = False
+        changed = False
         for payload in defaults:
             trigger = payload.get("trigger")
             name = payload.get("name")
             if not trigger or not name:
                 continue
-            if (str(trigger), str(name)) in existing_pairs:
-                continue
-
+            key = (str(trigger), str(name))
             try:
-                automation = Automation(
-                    website_id=website_id,
-                    name=str(name),
-                    trigger=str(trigger),
-                    enabled=bool(payload.get("enabled", True)),
-                    conditions=payload.get("conditions") or {},
-                    actions=payload.get("actions") or {},
-                )
-                self.db.add(automation)
-                created_any = True
+                if key in existing_map:
+                    # Sync nodes/edges/category from seed; preserve user-set enabled.
+                    record = existing_map[key]
+                    record.nodes = payload.get("nodes") or []
+                    record.edges = payload.get("edges") or []
+                    record.category = str(payload.get("category") or "auto_message")
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(record, "nodes")
+                    flag_modified(record, "edges")
+                    changed = True
+                else:
+                    automation = Automation(
+                        website_id=website_id,
+                        name=str(name),
+                        trigger=str(trigger),
+                        enabled=bool(payload.get("enabled", True)),
+                        category=str(payload.get("category") or "auto_message"),
+                        nodes=payload.get("nodes") or [],
+                        edges=payload.get("edges") or [],
+                    )
+                    self.db.add(automation)
+                    changed = True
             except Exception:
                 continue
 
-        if created_any:
+        if changed:
             self.db.commit()
-
-    def get_bot_message_actions(self, *, website_id: int, trigger: str) -> List[dict]:
-        """Return bot message actions for a trigger.
-
-        Supported actions schema:
-        - actions: [{"type": "send_bot_message", "message": "...", "event_type": "bot_waiting"}]
-        - actions: {"type": "send_bot_message", "message": "..."}
-        """
-        actions: List[dict] = []
-        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-
-        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
-            # repeat: once | cooldown | always
-            try:
-                if isinstance(conditions, str):
-                    conditions_obj = json.loads(conditions)
-                else:
-                    conditions_obj = conditions
-            except Exception:
-                conditions_obj = {}
-            if not isinstance(conditions_obj, dict):
-                conditions_obj = {}
-
-            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
-            if repeat not in {"once", "cooldown", "always"}:
-                # Backward-compatible defaults.
-                repeat = "cooldown" if trigger == "visitor_connected" else "once"
-
-            cooldown_seconds: int | None = None
-            if repeat == "cooldown":
-                raw = (
-                    conditions_obj.get("repeat_cooldown_seconds")
-                    if conditions_obj.get("repeat_cooldown_seconds") is not None
-                    else conditions_obj.get("cooldown_seconds")
-                )
-                if raw is None:
-                    raw = conditions_obj.get("cooldown_hours")
-                    if raw is not None:
-                        try:
-                            raw = int(raw) * 3600
-                        except Exception:
-                            raw = None
-                if raw is not None:
-                    try:
-                        cooldown_seconds = max(1, int(raw))
-                    except Exception:
-                        cooldown_seconds = None
-
-            return repeat, cooldown_seconds
-
-        for automation in automations:
-            raw_actions = automation.actions or {}
-            if isinstance(raw_actions, str):
-                try:
-                    raw_actions = json.loads(raw_actions)
-                except Exception:
-                    raw_actions = {}
-            normalized: Iterable[dict]
-            if isinstance(raw_actions, list):
-                normalized = [a for a in raw_actions if isinstance(a, dict)]
-            elif isinstance(raw_actions, dict):
-                normalized = [raw_actions]
-            else:
-                normalized = []
-
-            for action in normalized:
-                if str(action.get("type") or "").lower() != "send_bot_message":
-                    continue
-
-                # Backward-compatibility: older UI versions stored some system events
-                # as `send_bot_message` with event_type == trigger (e.g. conversation_resolved).
-                # Those should be treated as system events, not bot messages.
-                if trigger == "conversation_resolved":
-                    event_type = action.get("event_type")
-                    if isinstance(event_type, str) and event_type.strip() == trigger:
-                        continue
-
-                message = action.get("message")
-                if not isinstance(message, str) or not message.strip():
-                    continue
-
-                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
-                actions.append(
-                    {
-                        "message": message.strip(),
-                        "event_type": action.get("event_type") or None,
-                        "repeat": repeat,
-                        "repeat_cooldown_seconds": cooldown_seconds,
-                        "automation_id": getattr(automation, "id", None),
-                    }
-                )
-
-        return actions
-
-    def get_system_event_actions(self, *, website_id: int, trigger: str) -> List[dict]:
-        """Return system event actions for a trigger.
-
-        Supported actions schema:
-        - actions: [{"type": "emit_system_event", "content": "...", "event_type": "..."}]
-        - actions: {"type": "emit_system_event", "content": "...", "event_type": "..."}
-
-        Notes:
-        - This does not persist anything by itself; callers decide whether/how to apply these.
-        - `content` may also be provided as `message` for convenience.
-        """
-        actions: List[dict] = []
-        automations = self.list_enabled_for_trigger(website_id=website_id, trigger=trigger)
-
-        def _repeat_config(*, trigger: str, conditions: Any) -> tuple[str, int | None]:
-            try:
-                if isinstance(conditions, str):
-                    conditions_obj = json.loads(conditions)
-                else:
-                    conditions_obj = conditions
-            except Exception:
-                conditions_obj = {}
-            if not isinstance(conditions_obj, dict):
-                conditions_obj = {}
-
-            repeat = str(conditions_obj.get("repeat") or "").strip().lower()
-            if repeat not in {"once", "cooldown", "always"}:
-                repeat = "cooldown" if trigger == "visitor_connected" else "once"
-
-            cooldown_seconds: int | None = None
-            if repeat == "cooldown":
-                raw = (
-                    conditions_obj.get("repeat_cooldown_seconds")
-                    if conditions_obj.get("repeat_cooldown_seconds") is not None
-                    else conditions_obj.get("cooldown_seconds")
-                )
-                if raw is None:
-                    raw = conditions_obj.get("cooldown_hours")
-                    if raw is not None:
-                        try:
-                            raw = int(raw) * 3600
-                        except Exception:
-                            raw = None
-                if raw is not None:
-                    try:
-                        cooldown_seconds = max(1, int(raw))
-                    except Exception:
-                        cooldown_seconds = None
-
-            return repeat, cooldown_seconds
-
-        for automation in automations:
-            raw_actions = automation.actions or {}
-            if isinstance(raw_actions, str):
-                try:
-                    raw_actions = json.loads(raw_actions)
-                except Exception:
-                    raw_actions = {}
-
-            normalized: Iterable[dict]
-            if isinstance(raw_actions, list):
-                normalized = [a for a in raw_actions if isinstance(a, dict)]
-            elif isinstance(raw_actions, dict):
-                normalized = [raw_actions]
-            else:
-                normalized = []
-
-            for action in normalized:
-                action_type = str(action.get("type") or "").lower()
-
-                # Primary supported action type.
-                if action_type == "emit_system_event":
-                    pass
-                # Backward-compatibility: treat `send_bot_message` where event_type == trigger
-                # as a system event (this matches how older templates were saved).
-                elif action_type == "send_bot_message" and trigger == "conversation_resolved":
-                    event_type = action.get("event_type")
-                    if not (isinstance(event_type, str) and event_type.strip() == trigger):
-                        continue
-                else:
-                    continue
-
-                content = action.get("content")
-                if content is None:
-                    content = action.get("message")
-                if not isinstance(content, str) or not content.strip():
-                    continue
-
-                event_type = action.get("event_type")
-                if event_type is not None and not isinstance(event_type, str):
-                    event_type = str(event_type)
-
-                repeat, cooldown_seconds = _repeat_config(trigger=trigger, conditions=automation.conditions)
-
-                actions.append(
-                    {
-                        "content": content.strip(),
-                        "event_type": event_type.strip() if isinstance(event_type, str) and event_type.strip() else None,
-                        "repeat": repeat,
-                        "repeat_cooldown_seconds": cooldown_seconds,
-                        "automation_id": getattr(automation, "id", None),
-                    }
-                )
-
-        return actions

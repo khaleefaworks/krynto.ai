@@ -43,7 +43,7 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
         return dt
 
 
-VISITOR_LEFT_DELAY_SECONDS = 2
+VISITOR_LEFT_DELAY_SECONDS = 15
 _visitor_left_scheduled: set[int] = set()
 
 
@@ -122,84 +122,68 @@ async def _send_delayed_visitor_left_event(*, conversation_id: int, delay_second
 
 async def _send_delayed_welcome(
     *,
-    websocket: WebSocket,
     website_id: int,
     session_id: str,
-    welcome_message: str,
-    delay_seconds: float = 4.0,
-    chatbot_buttons: list | None = None,
-    chatbot_automation_id: int | None = None,
+    delay_seconds: float = 3.0,
 ) -> None:
-    """Send the welcome automation message after a short delay.
+    """Fire the visitor_connected automation flow after a short delay.
 
-    Delaying the welcome creates a more natural "someone is messaging you"
-    feel and gives the widget time to arm notification sounds via user gesture.
-
-    When ``chatbot_buttons`` is provided the welcome is sent as a ``bot_prompt``
-    frame with interactive buttons (team routing chatbot) instead of a plain bot
-    message.
+    Creates a conversation for the session if one doesn't exist yet (proactive
+    welcome — visitor hasn't sent a message yet). The graph executor handles
+    cooldown, message content, and delivery.
     """
     try:
         await asyncio.sleep(delay_seconds)
 
         db2 = SessionLocal()
         try:
+            from app.services.conversation_orchestrator import ConversationOrchestrator
             from app.services.conversation_service import ConversationService
 
-            service = ConversationService(db2)
-
-            conversation = service.get_or_create_conversation(
+            conv_service = ConversationService(db2)
+            conversation = conv_service.get_or_create_conversation(
                 website_id=website_id,
                 session_id=session_id,
             )
-            if not conversation:
-                return
 
-            # Register visitor socket if not already registered.
-            ChatService.register_visitor(conversation.id, websocket)
+            # Link the visitor's already-connected WebSocket to this conversation
+            # so send_to_visitor can deliver the welcome message immediately.
+            from app.services.chat_service import ChatService as _CS
+            was_already_known = conversation.id in _CS.active_visitors
+            _CS.link_session_to_conversation(
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation.id,
+            )
 
-            # Ensure last_seen_at is set for newly created conversations.
-            if not conversation.last_seen_at:
-                conversation.last_seen_at = datetime.utcnow()
-                conversation.visit_count = int(conversation.visit_count or 0) or 1
-                db2.commit()
+            # Notify the widget of the new conversation_id so it stores it
+            # for future outgoing messages (only when we just created it).
+            if not was_already_known:
+                try:
+                    await _CS.send_to_visitor(
+                        conversation.id,
+                        {"type": "conversation_created", "conversation_id": conversation.id},
+                    )
+                except Exception:
+                    pass
 
-            if chatbot_buttons:
-                # Team routing chatbot: send as interactive bot_prompt with buttons.
-                import json as _json2
-                enriched_content = _json2.dumps({
-                    "message": welcome_message,
-                    "automation_id": chatbot_automation_id,
-                    "buttons": chatbot_buttons,
-                })
-                saved = service.add_bot_message(
-                    conversation.id,
-                    enriched_content,
-                    event_type="bot_prompt_buttons",
-                )
-                await websocket.send_json(
-                    {
-                        "type": "bot_prompt",
-                        "message": welcome_message,
-                        "conversation_id": conversation.id,
-                        "automation_id": chatbot_automation_id,
-                        "buttons": chatbot_buttons,
-                        "message_obj": serialize_message(db2, saved),
-                    }
-                )
-            else:
-                saved = service.add_bot_message(
-                    conversation.id,
-                    welcome_message,
-                    event_type="automation_welcome",
-                )
-                await websocket.send_json(
-                    {
-                        "type": "bot",
-                        "message": welcome_message,
-                        "message_obj": serialize_message(db2, saved),
-                    }
-                )
+            orchestrator = ConversationOrchestrator(db2)
+            await orchestrator._run_automation_flows(
+                conversation_id=conversation.id,
+                website_id=website_id,
+                trigger="visitor_connected",
+                log_key="delayed_welcome_failed",
+                send_to_visitor=True,
+            )
+
+            # Fire conversation_created automations (e.g. Team Routing Chatbot)
+            # proactively on connect. The idempotency guard inside this method
+            # prevents re-firing if the visitor sends a message before the delay.
+            await orchestrator._fire_conversation_created_automations(
+                conversation=conversation,
+                website_id=website_id,
+                visitor_ws=None,
+            )
         finally:
             db2.close()
     except Exception as e:
@@ -333,10 +317,7 @@ async def chat_ws(
             pass
 
         # Load history only for an OPEN conversation tied to this session.
-        # IMPORTANT: Do NOT create a new conversation just because the widget connected.
-        # If all prior conversations are resolved, the generic widget route must
-        # start empty; resolved history is opened explicitly via the
-        # /ws/chat/{website_id}/{session_id}/{conversation_id} route.
+        # Do NOT create a new conversation just because the widget connected.
         conversation = None
         try:
             conversation = conversations_repo.get_open_conversation_by_session(
@@ -346,32 +327,6 @@ async def chat_ws(
             )
         except Exception:
             conversation = None
-
-        # If the visitor intentionally ended this conversation, properly resolve it
-        # before starting a fresh one.  Two OPEN conversations per session cannot
-        # coexist, so the visitor-ended conversation must be closed first.
-        # We call close_conversation() (not a raw DB write) so the agent dashboard
-        # receives a clean conversation_closed broadcast and the conv moves to the
-        # Resolved tab explicitly instead of silently disappearing.
-        if conversation:
-            try:
-                from app.models.message import Message as _Msg
-                _visitor_left = (
-                    db.query(_Msg)
-                    .filter(
-                        _Msg.conversation_id == conversation.id,
-                        _Msg.event_type == "visitor_left",
-                    )
-                    .first()
-                )
-                if _visitor_left:
-                    await orchestrator.close_conversation(
-                        conversation_id=int(conversation.id),
-                        closed_by="visitor_ended",
-                    )
-                    conversation = None
-            except Exception:
-                pass
 
         if conversation:
             # Track whether this conversation already had an active visitor socket.
@@ -385,25 +340,55 @@ async def chat_ws(
             registered_conversation_id = conversation.id
 
             # Smartsupp-like: visitor reconnected/connected (internal timeline event).
+            # Use a fresh session to avoid stale transaction state from the current db session.
             try:
-                # If a delayed "left" is scheduled, treat this as a transient reconnect and
-                # avoid persisting a redundant "connected" event (page refresh / quick reconnect).
-                if (not _was_active) and (int(conversation.id) not in _visitor_left_scheduled):
-                    await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
-            except Exception:
-                pass
+                if not _was_active:
+                    from app.models.message import Message as _Msg
+                    from app.core.database import SessionLocal as _SL
+                    _detect_db = _SL()
+                    try:
+                        _last_presence = (
+                            _detect_db.query(_Msg)
+                            .filter(
+                                _Msg.conversation_id == conversation.id,
+                                _Msg.event_type.in_(["visitor_dropped", "visitor_reconnected", "visitor_socket_connected"]),
+                            )
+                            .order_by(_Msg.id.desc())
+                            .first()
+                        )
+                    finally:
+                        _detect_db.close()
+                    if _last_presence and _last_presence.event_type == "visitor_dropped":
+                        await orchestrator.visitor_reconnected(conversation_id=int(conversation.id))
+                    elif int(conversation.id) not in _visitor_left_scheduled:
+                        await orchestrator.visitor_socket_connected(conversation_id=int(conversation.id))
+            except Exception as _exc:
+                logger.warning("reconnect_detection_failed", conversation_id=conversation.id, error=str(_exc), exc_info=True)
 
             try:
                 messages = messages_repo.list_messages_for_conversation(db, conversation.id)
 
                 history_messages = []
                 for msg in messages:
+                    # Exclude agent-only system messages from visitor history.
+                    if getattr(msg, 'is_agent_only', False):
+                        continue
                     history_messages.append(serialize_message(db, msg))
+
+                conv_status = conversation.status.value if hasattr(conversation.status, "value") else str(conversation.status)
+                resolved_at = None
+                if conv_status == "resolved" and conversation.updated_at:
+                    try:
+                        resolved_at = _to_naive_utc(conversation.updated_at).isoformat() + "Z"
+                    except Exception:
+                        pass
 
                 await websocket.send_json(
                     {
                         "type": "history",
                         "conversation_id": conversation.id,
+                        "status": conv_status,
+                        "resolved_at": resolved_at,
                         "messages": history_messages,
                     }
                 )
@@ -428,16 +413,13 @@ async def chat_ws(
         except Exception:
             pass
 
-        # Welcome automation: send on first visit or if returning after cooldown.
-        # DB-backed automation only (no legacy widget_config.automations fallback).
+        # Welcome automation: fire visitor_connected flow after a short delay.
+        # Cooldown and message are defined inside the automation graph nodes.
         try:
-            from app.services.conversation_service import ConversationService
+            now = datetime.utcnow()
             from app.services.automation_service import AutomationService
 
             automation_service = AutomationService(db)
-            action = automation_service.get_first_bot_message_action(website_id=website_id, trigger="visitor_connected")
-            welcome_message = action.get("message").strip() if (action and isinstance(action.get("message"), str)) else None
-
             cooldown_seconds = automation_service.get_cooldown_seconds(
                 website_id=website_id,
                 trigger="visitor_connected",
@@ -445,44 +427,6 @@ async def chat_ws(
             )
             cooldown = timedelta(seconds=max(1, int(cooldown_seconds)))
 
-            now = datetime.utcnow()
-
-            prev_seen_at = None
-
-            should_send = bool(isinstance(welcome_message, str) and welcome_message.strip())
-
-            # Check for team routing chatbot (overrides welcome if active).
-            chatbot_buttons = None
-            chatbot_automation_id = None
-            try:
-                chatbot_actions = automation_service.get_actions_by_type(
-                    website_id=website_id,
-                    trigger="conversation_created",
-                    action_type="bot_prompt_buttons",
-                )
-                if chatbot_actions:
-                    _ca = chatbot_actions[0]
-                    _cb_msg = (_ca.get("message") or "").strip()
-                    _cb_raw = _ca.get("buttons") or []
-                    _cb_auto_id = _ca.get("automation_id")
-                    if _cb_msg and isinstance(_cb_raw, list) and _cb_raw:
-                        _validated = []
-                        for _btn in _cb_raw:
-                            if isinstance(_btn, dict) and (_btn.get("label") or "").strip():
-                                _validated.append({
-                                    "label": _btn["label"].strip(),
-                                    "team_id": _btn.get("team_id"),
-                                    "reply": _btn.get("reply", ""),
-                                })
-                        if _validated:
-                            welcome_message = _cb_msg
-                            chatbot_buttons = _validated
-                            chatbot_automation_id = _cb_auto_id
-                            should_send = True
-            except Exception:
-                pass
-
-            # Update last_seen_at for existing conversations on every connect.
             if conversation:
                 prev_seen_at = _to_naive_utc(conversation.last_seen_at)
                 conversation.last_seen_at = now
@@ -490,59 +434,15 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) + 1
                 db.commit()
 
-            if should_send and conversation:
-                last_welcome = messages_repo.get_last_welcome_message(db, conversation.id)
-                # Also check bot_prompt_buttons (chatbot replaces welcome).
-                if not last_welcome:
-                    last_welcome = messages_repo.get_last_event_message(
-                        db, conversation.id, "bot_prompt_buttons"
-                    )
-
-                if last_welcome and last_welcome.created_at:
-                    last_welcome_at = _to_naive_utc(last_welcome.created_at)
-                    should_send = bool(last_welcome_at and (now - last_welcome_at) > cooldown)
-                else:
-                    # If we've never tracked last_seen_at before, use other activity timestamps.
-                    last_activity = (
-                        prev_seen_at
-                        or conversation.last_visitor_message_at
-                        or conversation.last_agent_message_at
-                        or conversation.updated_at
-                        or conversation.created_at
-                    )
-                    if last_activity:
-                        last_activity_at = _to_naive_utc(last_activity)
-                        should_send = bool(last_activity_at and (now - last_activity_at) > cooldown)
-
-            if should_send:
-                # Read configurable delay from automation conditions (default 3s).
-                welcome_delay = 3.0
-                try:
-                    welcome_automation = automation_service.list_enabled_for_trigger(
-                        website_id=website_id, trigger="visitor_connected"
-                    )
-                    if welcome_automation:
-                        conds = welcome_automation[0].conditions or {}
-                        if isinstance(conds, str):
-                            import json as _json
-                            conds = _json.loads(conds)
-                        raw_delay = conds.get("welcome_delay_seconds")
-                        if raw_delay is not None:
-                            welcome_delay = max(0.0, float(raw_delay))
-                except Exception:
-                    pass
-
-                asyncio.create_task(
-                    _send_delayed_welcome(
-                        websocket=websocket,
-                        website_id=website_id,
-                        session_id=session_id,
-                        welcome_message=str(welcome_message).strip(),
-                        delay_seconds=welcome_delay,
-                        chatbot_buttons=chatbot_buttons,
-                        chatbot_automation_id=chatbot_automation_id,
-                    )
+            # Always schedule the welcome — _send_delayed_welcome will create
+            # the conversation if the visitor hasn't sent a message yet.
+            asyncio.create_task(
+                _send_delayed_welcome(
+                    website_id=website_id,
+                    session_id=session_id,
+                    delay_seconds=3.0,
                 )
+            )
         except Exception as e:
             try:
                 db.rollback()
@@ -583,6 +483,27 @@ async def chat_ws(
                 ws_message(kind="chat", direction="in", message_type=str(message_type or "unknown"))
             except Exception:
                 pass
+
+            # Heartbeat ping — update last_seen_at so the dropped-visitor heuristic
+            # can tell a page reload from a true leave (45-second window).
+            if message_type == "ping":
+                try:
+                    if registered_conversation_id is not None:
+                        from app.models.conversation import Conversation as _Conv
+                        _c = db.query(_Conv).filter_by(id=registered_conversation_id).first()
+                        if _c:
+                            _c.last_seen_at = datetime.utcnow()
+                            db.commit()
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
+                continue
 
             # Page view / browsing history event.
             # This can arrive even before the first visitor message, so it must NOT create
@@ -814,12 +735,60 @@ async def chat_ws(
                                 conversation_id=conv_id,
                                 rating=rating_val,
                             )
+                            try:
+                                await orchestrator.visitor_rated(
+                                    conversation_id=conv_id,
+                                    rating_val=rating_val,
+                                )
+                            except Exception:
+                                pass
+                            # Broadcast to agents so the right panel updates immediately.
+                            try:
+                                _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                await agent_service.broadcast_to_active_agents(
+                                    website_id=website_id,
+                                    conversation_id=conv_id,
+                                    message={
+                                        "type": "visitor_rated",
+                                        "conversation_id": conv_id,
+                                        "rating": rating_val,
+                                        "rating_label": _rating_labels.get(rating_val, str(rating_val)),
+                                        "website_id": website_id,
+                                    },
+                                )
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.warning("rating_submit_failed", error=str(e))
                         try:
                             db.rollback()
                         except Exception:
                             pass
+                continue
+
+            # Widget opened by visitor click — trigger welcome if not yet sent.
+            if message_type == "widget_opened":
+                try:
+                    from app.repos import messages as messages_repo
+                    _wo_conversation = conversations_repo.get_open_conversation_by_session(
+                        db, website_id=website_id, session_id=session_id
+                    )
+                    if _wo_conversation:
+                        last_welcome = messages_repo.get_last_welcome_message(db, _wo_conversation.id)
+                        if not last_welcome:
+                            last_welcome = messages_repo.get_last_event_message(
+                                db, _wo_conversation.id, "bot_prompt_buttons"
+                            )
+                        if not last_welcome:
+                            asyncio.create_task(
+                                _send_delayed_welcome(
+                                    website_id=website_id,
+                                    session_id=session_id,
+                                    delay_seconds=0.5,
+                                )
+                            )
+                except Exception as _e:
+                    logger.warning("widget_opened_handler_failed", error=str(_e))
                 continue
 
             if message_type == "typing":
@@ -872,6 +841,35 @@ async def chat_ws(
                         include_global=True,
                     )
 
+                continue
+
+            if message_type == "visitor_contact":
+                v_name = payload.get("visitor_name")
+                v_email = payload.get("visitor_email")
+                v_phone = payload.get("visitor_phone")
+                if v_name or v_email or v_phone:
+                    try:
+                        conv = conversations_repo.get_open_conversation_by_session(
+                            db, website_id=website_id, session_id=session_id
+                        )
+                        if conv:
+                            changed = False
+                            if v_name and not conv.visitor_name:
+                                conv.visitor_name = str(v_name)
+                                changed = True
+                            if v_email and not conv.visitor_email:
+                                conv.visitor_email = str(v_email)
+                                changed = True
+                            if v_phone and not conv.visitor_phone:
+                                conv.visitor_phone = str(v_phone)
+                                changed = True
+                            if changed:
+                                db.commit()
+                    except Exception:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                 continue
 
             user_message = payload.get("message")
@@ -1093,21 +1091,69 @@ async def chat_ws_with_conversation(
             await websocket.close(code=1008, reason=_ws_close_reason("Conversation not found"))
             return
 
-        # Register visitor presence only for OPEN conversations.
+        # Always register session-level presence so resolved-conv visitors appear in the Visitors page.
         is_open = conv.status not in (ConversationStatus.RESOLVED,)
-        if is_open and str(conv.session_id) == str(session_id):
-            ChatService.register_visitor(conv.id, websocket)
+        _was_active_cid = False
+        try:
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+        except Exception:
+            pass
+        if is_open and str(conv.session_id) == str(session_id):
+            try:
+                _was_active_cid = int(conv.id) in ChatService.active_visitors
+            except Exception:
+                pass
+            ChatService.register_visitor(conv.id, websocket)
 
-        # Send conversation history.
+        # Reconnect detection: if visitor was not already active, check for a prior
+        # visitor_dropped event and fire visitor_reconnected automation if found.
+        if is_open and not _was_active_cid:
+            try:
+                from app.models.message import Message as _MsgCid
+                from app.core.database import SessionLocal as _SLCid
+                _det_db = _SLCid()
+                try:
+                    _last_presence_cid = (
+                        _det_db.query(_MsgCid)
+                        .filter(
+                            _MsgCid.conversation_id == conv.id,
+                            _MsgCid.event_type.in_(["visitor_dropped", "visitor_reconnected", "visitor_socket_connected"]),
+                        )
+                        .order_by(_MsgCid.id.desc())
+                        .first()
+                    )
+                finally:
+                    _det_db.close()
+                if _last_presence_cid and _last_presence_cid.event_type == "visitor_dropped":
+                    _recon_orchestrator = ConversationOrchestrator(db)
+                    await _recon_orchestrator.visitor_reconnected(conversation_id=int(conv.id))
+                elif int(conv.id) not in _visitor_left_scheduled:
+                    _recon_orchestrator = ConversationOrchestrator(db)
+                    await _recon_orchestrator.visitor_socket_connected(conversation_id=int(conv.id))
+            except Exception as _exc:
+                logger.warning("reconnect_detection_failed_cid", conversation_id=conv.id, error=str(_exc), exc_info=True)
+
+        # Send conversation history (excluding agent-only messages).
         try:
             messages = messages_repo.list_messages_for_conversation(db, conv.id)
+            conv_status_str = conv.status.value if hasattr(conv.status, "value") else str(conv.status)
+            resolved_at_str = None
+            if conv_status_str == "resolved" and conv.updated_at:
+                try:
+                    resolved_at_str = _to_naive_utc(conv.updated_at).isoformat() + "Z"
+                except Exception:
+                    pass
+            history_msgs = [
+                serialize_message(db, m) for m in messages
+                if not getattr(m, 'is_agent_only', False)
+            ]
             await websocket.send_json(
                 {
                     "type": "history",
                     "conversation_id": conv.id,
-                    "status": conv.status.value if hasattr(conv.status, "value") else str(conv.status),
-                    "messages": [serialize_message(db, m) for m in messages],
+                    "status": conv_status_str,
+                    "resolved_at": resolved_at_str,
+                    "messages": history_msgs,
                 }
             )
         except Exception as e:
@@ -1213,6 +1259,34 @@ async def chat_ws_with_conversation(
                             logger.warning("bot_button_click_failed", error=str(e))
                     continue
 
+                if message_type == "visitor_contact":
+                    vc_name = payload.get("visitor_name")
+                    vc_email = payload.get("visitor_email")
+                    vc_phone = payload.get("visitor_phone")
+                    if vc_name or vc_email or vc_phone:
+                        try:
+                            db.expire_all()
+                            fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
+                            if fresh_conv:
+                                changed = False
+                                if vc_name and not fresh_conv.visitor_name:
+                                    fresh_conv.visitor_name = str(vc_name)
+                                    changed = True
+                                if vc_email and not fresh_conv.visitor_email:
+                                    fresh_conv.visitor_email = str(vc_email)
+                                    changed = True
+                                if vc_phone and not fresh_conv.visitor_phone:
+                                    fresh_conv.visitor_phone = str(vc_phone)
+                                    changed = True
+                                if changed:
+                                    db.commit()
+                        except Exception:
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                    continue
+
                 if message_type == "submit_rating":
                     rating_val = payload.get("rating")
                     if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
@@ -1235,6 +1309,29 @@ async def chat_ws_with_conversation(
                                 )
                                 db.add(new_rating)
                                 db.commit()
+                            try:
+                                await orchestrator.visitor_rated(
+                                    conversation_id=conv.id,
+                                    rating_val=rating_val,
+                                )
+                            except Exception:
+                                pass
+                            # Broadcast to agents so the right panel updates immediately.
+                            try:
+                                _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                await agent_service.broadcast_to_active_agents(
+                                    website_id=website_id,
+                                    conversation_id=conv.id,
+                                    message={
+                                        "type": "visitor_rated",
+                                        "conversation_id": conv.id,
+                                        "rating": rating_val,
+                                        "rating_label": _rating_labels.get(rating_val, str(rating_val)),
+                                        "website_id": website_id,
+                                    },
+                                )
+                            except Exception:
+                                pass
                         except Exception as e:
                             logger.warning("rating_submit_failed", error=str(e))
                             try:
@@ -1268,6 +1365,10 @@ async def chat_ws_with_conversation(
                     message=user_message,
                     visitor_ws=websocket,
                     visitor_ip=(getattr(getattr(websocket, "client", None), "host", None)),
+                    visitor_name=payload.get("visitor_name"),
+                    visitor_email=payload.get("visitor_email"),
+                    visitor_phone=payload.get("visitor_phone"),
+                    client_message_id=str(payload.get("message_id") or payload.get("client_message_id")) if (payload.get("message_id") or payload.get("client_message_id")) else None,
                 )
                 if response:
                     await websocket.send_json({"type": "system", "message": response})

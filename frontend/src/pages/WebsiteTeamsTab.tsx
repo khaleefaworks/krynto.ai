@@ -5,6 +5,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { apiRequest } from '@/services/api'
 import { agentAssignmentsApi, type Agent } from '@/services/agentAssignments'
 import { Plus, X, Trash2, Users, UserPlus, Shield, Search } from 'lucide-react'
+import DocsLink from '@/components/DocsLink'
+import UserAvatar from '@/components/UserAvatar'
+import { API_BASE } from '@/config/endpoints'
 
 // ─── Types ────────────────────────────────────────────────
 interface WebsiteTeam {
@@ -22,6 +25,7 @@ interface WebsiteAgent {
     role?: string
     is_active?: boolean
     assigned_at?: string | null
+    avatar_url?: string | null
 }
 
 interface TeamMembersResponse {
@@ -213,6 +217,14 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                     body: JSON.stringify({ name, description: formDescription.trim() || null }),
                 })
             } else if (teamPanel.kind === 'edit') {
+                // Save team details if changed
+                if (formName.trim() !== teamPanel.team.name || formDescription.trim() !== (teamPanel.team.description || '')) {
+                    await apiRequest(`/websites/${websiteId}/teams/${teamPanel.team.id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ name: formName.trim(), description: formDescription.trim() || null }),
+                    })
+                }
+
                 // Save members
                 await apiRequest(`/websites/${websiteId}/teams/${teamPanel.team.id}/members`, {
                     method: 'PUT',
@@ -292,6 +304,7 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                         <h2 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                             <Shield className="h-4 w-4 text-gray-400" />
                             Website Agents
+                            <DocsLink slug="admin-guide/agents" />
                         </h2>
                         <Button size="sm" onClick={openAgentPanel}>
                             <UserPlus className="h-4 w-4 mr-1.5" />
@@ -334,9 +347,13 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                         <tr key={a.id} className="bg-white dark:bg-gray-800/30 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
-                                                        {(a.name || a.email).charAt(0).toUpperCase()}
-                                                    </div>
+                                                    <UserAvatar
+                                                        seed={a.email}
+                                                        imageUrl={a.avatar_url ? (String(a.avatar_url).startsWith('http') ? a.avatar_url : `${API_BASE}${a.avatar_url}`) : null}
+                                                        className="h-8 w-8 flex-shrink-0"
+                                                        iconClassName="h-8 w-8"
+                                                        title={a.name || a.email}
+                                                    />
                                                     <div className="min-w-0">
                                                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{a.name || a.email}</p>
                                                         {a.name && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.email}</p>}
@@ -378,6 +395,7 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                         <h2 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                             <Users className="h-4 w-4 text-gray-400" />
                             Teams
+                            <DocsLink slug="admin-guide/teams" />
                         </h2>
                         <Button size="sm" onClick={openTeamCreate}>
                             <Plus className="h-4 w-4 mr-1.5" />
@@ -566,7 +584,6 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                     placeholder="e.g. Support, Sales"
                                     className="dark:bg-gray-800 dark:border-gray-700"
                                     autoFocus
-                                    disabled={teamPanel.kind === 'edit'}
                                 />
                             </div>
 
@@ -579,7 +596,6 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                     placeholder="What is this team responsible for?"
                                     rows={2}
                                     className="dark:bg-gray-800 dark:border-gray-700 resize-none"
-                                    disabled={teamPanel.kind === 'edit'}
                                 />
                             </div>
 
@@ -627,9 +643,13 @@ export default function WebsiteTeamsTab({ websiteId }: { websiteId: number }) {
                                                             className="rounded border-gray-300 dark:border-gray-600 text-blue-600"
                                                         />
                                                         <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                                            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0">
-                                                                {(a.name || a.email).charAt(0).toUpperCase()}
-                                                            </div>
+                                                            <UserAvatar
+                                                                seed={a.email}
+                                                                imageUrl={a.avatar_url ? (String(a.avatar_url).startsWith('http') ? a.avatar_url : `${API_BASE}${a.avatar_url}`) : null}
+                                                                className="h-7 w-7 flex-shrink-0"
+                                                                iconClassName="h-7 w-7"
+                                                                title={a.name || a.email}
+                                                            />
                                                             <div className="min-w-0">
                                                                 <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
                                                                     {a.name || a.email}

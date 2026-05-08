@@ -38,6 +38,7 @@ export const docsNav: DocSection[] = [
       { title: 'Agents & Roles', slug: 'admin-guide/agents' },
       { title: 'Teams', slug: 'admin-guide/teams' },
       { title: 'Automations', slug: 'admin-guide/automations' },
+      { title: 'Analytics', slug: 'admin-guide/analytics' },
     ],
   },
   {

@@ -31,6 +31,7 @@ from app.models.conversation_rating import ConversationRating
 from app.models.tag import Tag
 from app.models.user import User, UserRole
 from app.models.website import Website
+from app.models.website_team import WebsiteTeam
 from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.services.visibility import compute_visibility_scope
@@ -723,18 +724,37 @@ def export_xlsx(
     website_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    agent_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
+    rating: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
 ):
-    """Stream an XLSX report for the selected period and website(s)."""
+    """Stream an XLSX report for the selected period and website(s) with optional filters."""
     start_dt, end_dt = _date_range(start, end)
 
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    # Parse tag_ids CSV
+    parsed_tag_ids: list[int] = []
+    if tag_ids:
+        try:
+            parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
+
+    _REPORT_HEADERS = [
+        "Conversation ID", "Status", "Website", "Team",
+        "Visitor Name", "Visitor Email", "Visitor Phone", "Session ID", "Visitor IP",
+        "Device", "Browser",
+        "Agent Name", "Started At", "Total Duration (s)", "First Response Time (s)",
+        "Rating", "Closed By", "Tags", "Page URL",
+    ]
 
     # Empty workbook if user has no accessible websites
     if allowed_ids is not None and not allowed_ids:
         wb = Workbook(write_only=True)
         ws = wb.create_sheet()
-        headers = ["short_id", "total_time_seconds", "tags", "agent_name", "date_with_time", "page_url", "response_time_seconds"]
-        ws.append(headers)
+        ws.append(_REPORT_HEADERS)
         out = io.BytesIO()
         wb.save(out)
         out.seek(0)
@@ -837,22 +857,41 @@ def export_xlsx(
         .subquery()
     )
 
+    # Aliased joins for new columns
+    website_alias = aliased(Website)
+    team_alias = aliased(WebsiteTeam)
+    rating_alias = aliased(ConversationRating)
+
     # Main query selecting required columns
     q = (
         db.query(
             Conversation.short_id.label("short_id"),
-            # Prefer pageview range when >0, otherwise fallback to last_seen - created_at
+            Conversation.status.label("status"),
+            website_alias.name.label("website_name"),
+            team_alias.name.label("team_name"),
+            Conversation.visitor_name.label("visitor_name"),
+            Conversation.visitor_email.label("visitor_email"),
+            Conversation.visitor_phone.label("visitor_phone"),
+            Conversation.session_id.label("session_id"),
+            Conversation.visitor_ip.label("visitor_ip"),
+            Conversation.device_info.label("device_info"),
+            Conversation.browser_info.label("browser_info"),
+            func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
+            func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at).label("date_with_time"),
             func.coalesce(
                 func.nullif((func.extract("epoch", pv_range.c.last_pv) - func.extract("epoch", pv_range.c.first_pv)), 0),
                 (func.extract("epoch", Conversation.last_seen_at) - func.extract("epoch", Conversation.created_at)),
                 0,
             ).label("total_time_seconds"),
-            func.coalesce(tags_subq.c.tags, "").label("tags"),
-            func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
-            func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at).label("date_with_time"),
-            func.coalesce(first_pv.c.url, first_pv_session.c.session_url).label("page_url"),
             (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", Conversation.created_at)).label("response_time_seconds"),
+            rating_alias.rating.label("rating"),
+            Conversation.closed_by.label("closed_by"),
+            func.coalesce(tags_subq.c.tags, "").label("tags"),
+            func.coalesce(first_pv.c.url, first_pv_session.c.session_url).label("page_url"),
         )
+        .outerjoin(website_alias, website_alias.id == Conversation.website_id)
+        .outerjoin(team_alias, team_alias.id == Conversation.team_id)
+        .outerjoin(rating_alias, rating_alias.conversation_id == Conversation.id)
         .outerjoin(assigned_user, assigned_user.id == Conversation.assigned_agent_id)
         .outerjoin(first_agent_at, first_agent_at.c.conversation_id == Conversation.id)
         .outerjoin(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
@@ -867,53 +906,69 @@ def export_xlsx(
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
 
+    # Optional extra filters
+    if agent_id is not None:
+        q = q.filter(Conversation.assigned_agent_id == agent_id)
+    if team_id is not None:
+        q = q.filter(Conversation.team_id == team_id)
+    if rating is not None:
+        rated_conv_ids = (
+            db.query(ConversationRating.conversation_id)
+            .filter(ConversationRating.rating == rating)
+            .scalar_subquery()
+        )
+        q = q.filter(Conversation.id.in_(rated_conv_ids))
+    if parsed_tag_ids:
+        for tid in parsed_tag_ids:
+            q = q.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tid)
+                )
+            )
+
+    def _fmt_dt(dt_val) -> str:
+        if dt_val is None:
+            return ""
+        if isinstance(dt_val, str):
+            try:
+                dt_val = datetime.fromisoformat(dt_val)
+            except Exception:
+                return str(dt_val)
+        try:
+            return f"{dt_val.date().isoformat()}  {dt_val.strftime('%I:%M:%S%p')}"
+        except Exception:
+            return str(dt_val)
+
+    _RATING_LABEL = {1: "Good", 0: "Neutral", -1: "Bad"}
+
     # Create write-only workbook and stream rows
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title="Analytics")
-    # Human-friendly column headers
-    headers = [
-        "Conversation ID",
-        "Total Time",
-        "Tags",
-        "Agent Name",
-        "Date & Time",
-        "Page URL",
-        "Response Time",
-    ]
-    ws.append(headers)
+    ws.append(_REPORT_HEADERS)
 
-    # Iterate query in batches
     for row in q.yield_per(200):
-        # Format Date & Time as: YYYY-MM-DD<spaces>HH:MM:SSAM/PM
-        try:
-            dt_val = row.date_with_time
-            if dt_val is None:
-                date_val = ""
-            else:
-                # If DB returned a string, try to parse ISO format first
-                if isinstance(dt_val, str):
-                    try:
-                        dt_val = datetime.fromisoformat(dt_val)
-                    except Exception:
-                        pass
-                # Ensure we have a datetime-like object
-                try:
-                    date_part = dt_val.date().isoformat()
-                    time_part = dt_val.strftime('%I:%M:%S%p')
-                    date_val = f"{date_part}      {time_part}"
-                except Exception:
-                    date_val = str(dt_val)
-        except Exception:
-            date_val = str(row.date_with_time) if row.date_with_time is not None else ""
-
+        status_val = row.status.value if hasattr(row.status, "value") else str(row.status or "")
+        rating_val = _RATING_LABEL.get(row.rating, "") if row.rating is not None else ""
         ws.append([
             row.short_id or "",
-            float(row.total_time_seconds) if row.total_time_seconds is not None else 0,
-            row.tags or "",
+            status_val,
+            row.website_name or "",
+            row.team_name or "",
+            row.visitor_name or "",
+            row.visitor_email or "",
+            row.visitor_phone or "",
+            row.session_id or "",
+            row.visitor_ip or "",
+            row.device_info or "",
+            row.browser_info or "",
             row.agent_name or "",
-            date_val,
-            row.page_url or "",
+            _fmt_dt(row.date_with_time),
+            float(row.total_time_seconds) if row.total_time_seconds is not None else 0,
             float(row.response_time_seconds) if row.response_time_seconds is not None else None,
+            rating_val,
+            row.closed_by or "",
+            row.tags or "",
+            row.page_url or "",
         ])
 
     out = io.BytesIO()
@@ -923,3 +978,180 @@ def export_xlsx(
     filename = f"analytics_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
     return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/export_transcripts")
+def export_transcripts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    website_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    agent_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
+    rating: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+):
+    """Export full conversation transcripts as a flat XLSX table (one row per message)."""
+    start_dt, end_dt = _date_range(start, end)
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    parsed_tag_ids: list[int] = []
+    if tag_ids:
+        try:
+            parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
+
+    if allowed_ids is not None and not allowed_ids:
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("Transcripts")
+        ws.append(["No accessible conversations"])
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": 'attachment; filename="transcripts.xlsx"'})
+
+    # Build conversation query
+    conv_q = (
+        db.query(Conversation)
+        .filter(Conversation.created_at >= start_dt, Conversation.created_at <= end_dt)
+        .filter(Conversation.last_visitor_message_at.isnot(None))
+    )
+    if allowed_ids is not None:
+        conv_q = conv_q.filter(Conversation.website_id.in_(allowed_ids))
+    if agent_id is not None:
+        conv_q = conv_q.filter(Conversation.assigned_agent_id == agent_id)
+    if team_id is not None:
+        conv_q = conv_q.filter(Conversation.team_id == team_id)
+    if rating is not None:
+        rated_ids = (
+            db.query(ConversationRating.conversation_id)
+            .filter(ConversationRating.rating == rating)
+            .scalar_subquery()
+        )
+        conv_q = conv_q.filter(Conversation.id.in_(rated_ids))
+    if parsed_tag_ids:
+        for tid in parsed_tag_ids:
+            conv_q = conv_q.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tid)
+                )
+            )
+
+    conversations = conv_q.order_by(Conversation.created_at.desc()).limit(500).all()
+
+    conv_ids = [c.id for c in conversations]
+
+    # Batch load website names
+    website_ids_needed = {c.website_id for c in conversations}
+    websites_map: dict[int, str] = {}
+    if website_ids_needed:
+        for w in db.query(Website).filter(Website.id.in_(website_ids_needed)).all():
+            websites_map[w.id] = w.name
+
+    # Batch load agent names
+    agent_ids_needed = {c.assigned_agent_id for c in conversations if c.assigned_agent_id}
+    agents_map: dict[int, str] = {}
+    if agent_ids_needed:
+        for u in db.query(User).filter(User.id.in_(agent_ids_needed)).all():
+            agents_map[u.id] = u.name or u.email
+
+    # Batch load team names
+    team_ids_needed = {c.team_id for c in conversations if c.team_id}
+    teams_map: dict[int, str] = {}
+    if team_ids_needed:
+        for t in db.query(WebsiteTeam).filter(WebsiteTeam.id.in_(team_ids_needed)).all():
+            teams_map[t.id] = t.name
+
+    # Batch load ratings
+    ratings_map: dict[int, int] = {}
+    if conv_ids:
+        for r in db.query(ConversationRating).filter(ConversationRating.conversation_id.in_(conv_ids)).all():
+            ratings_map[r.conversation_id] = r.rating
+
+    # Batch load messages by conversation to avoid N+1 queries.
+    messages_map: dict[int, list[Message]] = {}
+    if conv_ids:
+        for msg in (
+            db.query(Message)
+            .filter(Message.conversation_id.in_(conv_ids))
+            .order_by(Message.conversation_id.asc(), Message.created_at.asc(), Message.id.asc())
+            .all()
+        ):
+            messages_map.setdefault(msg.conversation_id, []).append(msg)
+
+    # Batch load tags per conversation
+    tags_map: dict[int, str] = {}
+    if conv_ids:
+        tag_rows = (
+            db.query(ConversationTag.conversation_id, Tag.name)
+            .join(Tag, Tag.id == ConversationTag.tag_id)
+            .filter(ConversationTag.conversation_id.in_(conv_ids))
+            .all()
+        )
+        for conv_id_row, tag_name in tag_rows:
+            tags_map.setdefault(conv_id_row, []).append(tag_name)  # type: ignore[arg-type]
+        tags_map = {k: ", ".join(v) for k, v in tags_map.items()}  # type: ignore[assignment]
+
+    _RATING_LABEL_T = {1: "Good", 0: "Neutral", -1: "Bad"}
+
+    # Build XLSX — single flat table: one row per message, conversation
+    # metadata repeated on each row so the sheet is filterable/sortable.
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Transcripts")
+
+    ws.append([
+        "Conversation ID", "Status", "Website", "Team",
+        "Visitor Name", "Visitor Email", "Visitor Phone", "Session ID", "Visitor IP",
+        "Device", "Browser",
+        "Agent", "Rating", "Tags", "Closed By", "Conv Started At",
+        "Timestamp", "Sender", "Message Type", "Message",
+    ])
+
+    for conv in conversations:
+        msgs = messages_map.get(conv.id, [])
+        conv_short = conv.short_id or str(conv.id)
+        status = conv.status.value if hasattr(conv.status, "value") else str(conv.status)
+        website = websites_map.get(conv.website_id, f"Website {conv.website_id}")
+        team = teams_map.get(conv.team_id, "") if conv.team_id else ""
+        visitor_name = conv.visitor_name or ""
+        visitor_email = conv.visitor_email or ""
+        visitor_phone = getattr(conv, "visitor_phone", "") or ""
+        session_id = conv.session_id or ""
+        visitor_ip = getattr(conv, "visitor_ip", "") or ""
+        device = getattr(conv, "device_info", "") or ""
+        browser = getattr(conv, "browser_info", "") or ""
+        agent = agents_map.get(conv.assigned_agent_id, "") if conv.assigned_agent_id else ""
+        raw_rating = ratings_map.get(conv.id)
+        rating = _RATING_LABEL_T.get(raw_rating, "") if raw_rating is not None else ""
+        tags = tags_map.get(conv.id, "")
+        closed_by = getattr(conv, "closed_by", "") or ""
+        started = conv.created_at.strftime("%Y-%m-%d %H:%M") if conv.created_at else ""
+
+        for msg in msgs:
+            sender = msg.sender or (
+                msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type)
+            )
+            ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S") if msg.created_at else ""
+            msg_type = msg.event_type or ""
+            content = msg.content or ""
+            ws.append([
+                conv_short, status, website, team,
+                visitor_name, visitor_email, visitor_phone, session_id, visitor_ip,
+                device, browser,
+                agent, rating, tags, closed_by, started,
+                ts, sender, msg_type, content,
+            ])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    filename = f"transcripts_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

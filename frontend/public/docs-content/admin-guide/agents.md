@@ -6,63 +6,72 @@ AI ChatAssist uses a role-based access control system to manage team permissions
 
 ## Organizational Roles
 
-Roles define the scope of authority and the specific capabilities available to a user.
-
-| Role | Operational Scope | Core Capabilities |
+| Role | Scope | Core Capabilities |
 | :--- | :--- | :--- |
-| **Owner** | Organization-wide | Complete administrative control, including billing, organizational settings, and website management. |
-| **Manager** | Organization-wide | Oversight of agents and conversation data. Can manage team assignments but lacks access to billing and global security settings. |
-| **Agent** | Website-specific | Front-line support. Access is restricted to conversations and data for websites specifically assigned to them. |
-| **System Manager** | Platform-wide | A specialized role for platform maintenance, with access to all organizations and system-level statistics. |
+| **Owner** | Organization-wide | Full administrative control — websites, billing, agents, org settings, security. |
+| **Manager** | Organization-wide | Oversees agents and conversations. Can manage team assignments; no access to billing or global security settings. |
+| **Agent** | Website-specific | Front-line support. Access is limited to conversations and data for websites explicitly assigned to them. |
+| **System Manager** | Platform-wide | Specialized maintenance role with access to all organizations and system-level statistics. Only accessible via the `/superadmin` area. |
 
 ---
 
-## User Onboarding
+## Inviting New Team Members
 
-### Inviting New Team Members
-Follow these steps to add a new agent to your team:
-- **Step 1**: Navigate to **Settings > Users** and select **Invite Agent**.
-- **Step 2**: Provide the user's full name and professional email address.
-- **Step 3**: Assign the appropriate **Role** based on their responsibilities.
-- **Step 4**: Send the invite; an email with a verification link will be dispatched.
+1. Navigate to **Settings → Users** and click **Invite Agent**.
+2. Enter the user's full name and email address.
+3. Select the appropriate **Role**.
+4. Click **Send Invite** — an email with a verification link is dispatched automatically.
 
-> **Email Verification**: For security purposes, invited users must verify their email address before they are granted access to the dashboard.
+> **Email Verification:** Invited users must click the link in the invitation email before they can access the dashboard. The link expires after a short window; you can resend it from the user management panel if needed.
 
 ---
 
-## Access Control & Assignments
+## Access Control & Website Assignments
 
-By default, new agents are not assigned to any website. Access must be granted explicitly to ensure data privacy and accurate routing.
+New agents are not assigned to any website by default. Access must be granted explicitly.
 
-### Assigning Agents to Websites
-1. Go to **Settings > Websites** and select the target property.
+**To assign an agent to a website:**
+1. Go to **Settings → Websites** and select the target property.
 2. Navigate to the **Agents** tab.
-3. Use the toggle next to the agent's name to grant or revoke access.
+3. Toggle the switch next to the agent's name to grant or revoke access.
 
-Once assigned, the agent will appear in the routing pool and can begin receiving notifications for that website.
+Once assigned, the agent enters the routing pool and starts receiving notifications for that website.
 
 ---
 
 ## Presence and Availability
 
-The **Availability Toggle** (located in the agent sidebar) controls the real-time routing logic of the platform.
+The **Availability Toggle** in the agent sidebar controls real-time routing:
 
-### Status Definitions
-- **Available**: The agent is active and eligible to receive new conversation assignments.
-- **Away**: The agent is excluded from new chat routing. Any conversations already assigned to them remain in their inbox but will not trigger new alerts.
+| Status | Effect |
+| :--- | :--- |
+| **Available** | Agent is active and eligible for new conversation assignments. |
+| **Away** | Agent is excluded from new assignments. Existing conversations remain; new alerts are paused. |
 
-### System-Wide Offline State
-If all assigned agents for a website are set to **Away**, or if the current time falls outside of the configured **Office Hours**, the website widget will automatically transition to an offline state.
+If all agents on a website are **Away** or the current time is outside configured **Office Hours**, the widget automatically switches to offline mode.
 
 ---
 
 ## Security and Account Management
 
 ### Account Status
-Owners and Managers can deactivate user accounts at any time. A deactivated account is immediately logged out, blocked from further access, and removed from all active routing pools.
+
+Owners and Managers can deactivate or lock user accounts from the **User Management** panel. A deactivated account is immediately logged out, blocked from further access, and removed from all routing pools.
+
+### Account Lockout
+
+To protect against brute-force attacks, the system automatically locks accounts on repeated failed logins:
+
+| Failed Attempts | Lockout Duration |
+| :--- | :--- |
+| 3 consecutive failures | 5-minute temporary lockout |
+| 6 consecutive failures | 24-hour lockout |
+
+Owners and Managers can manually unlock a locked account from the User Management panel. The lock clears automatically once the lockout period expires.
 
 ### Password Management
-- **Self-Service**: Users can update their own passwords through the **Settings > Profile** panel.
-- **Administrative Reset**: Owners can trigger a password reset for any user within their organization through the **User Management** panel.
 
-> **Owner Protection**: To prevent accidental lockouts, Owners cannot deactivate their own accounts. To transfer ownership, another user must first be promoted to the Owner role.
+- **Self-Service:** Users update their own password via **Settings → Profile**.
+- **Administrative Reset:** Owners can trigger a password reset for any user from the User Management panel.
+
+> **Owner Protection:** Owners cannot deactivate their own account. To transfer ownership, promote another user to Owner first.

@@ -41,7 +41,13 @@ def delete_tag(db: Session, tag_id: int) -> bool:
     db_tag = get_tag(db, tag_id)
     if not db_tag:
         return False
-    
+
+    usage_count = db.query(ConversationTag).filter_by(tag_id=tag_id).count()
+    if usage_count:
+        raise ValueError(
+            f"This tag is used in {usage_count} conversation{'s' if usage_count != 1 else ''} and cannot be deleted."
+        )
+
     db.delete(db_tag)
     db.commit()
     return True

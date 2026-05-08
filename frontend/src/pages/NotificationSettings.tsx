@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, BellOff, Volume2, Play, HelpCircle } from 'lucide-react'
+import { Bell, BellOff, Volume2, Play, HelpCircle, RefreshCcw, AlertTriangle, Lock, Unlock, CheckCircle2 } from 'lucide-react'
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from '@/services/push'
-import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound } from '@/lib/notificationSound'
+import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound, setNotificationAudioSink, ensureHardwareLabelsUnlocked } from '@/lib/notificationSound'
 import { saveNotificationPreferences, syncPrefsToLocalStorage } from '@/services/notificationPrefs'
+
+const SOUND_VERSION = '2024.04.29.v1' // Force update version
 
 // All available dashboard notification sounds
 const DASHBOARD_SOUNDS = [
@@ -79,26 +81,151 @@ export default function NotificationSettings() {
     const [vapidPublicKeyPresent, setVapidPublicKeyPresent] = useState<boolean | null>(null)
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-    // Sound preferences — lifted to parent so we can batch-save to API
-    const [newChatSound, setNewChatSound] = useState(() => getSaved(SOUND_PREF_KEYS.newChat, 'new-notification.mp3'))
-    const [messageSound, setMessageSound] = useState(() => getSaved(SOUND_PREF_KEYS.message, 'notification.mp3'))
-    const [visitorSound, setVisitorSound] = useState(() => getSaved(SOUND_PREF_KEYS.newVisitorWebsite, ''))
+    // Sound preferences
+    const [newChatSound, setNewChatSound] = useState(() => getSaved(SOUND_PREF_KEYS.newChat, 'alarm.mp3'))
+    const [messageSound, setMessageSound] = useState(() => getSaved(SOUND_PREF_KEYS.message, 'blackberry2.mp3'))
+    const [visitorSound, setVisitorSound] = useState(() => getSaved(SOUND_PREF_KEYS.newVisitorWebsite, 'simplesms.mp3'))
+    
+    const [sinkId, setSinkId] = useState(() => getSaved(SOUND_PREF_KEYS.sinkId, 'default'))
+    const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+    const [isSinkSupported, setIsSinkSupported] = useState(true)
+    const [sinkMissing, setSinkMissing] = useState(false)
+    const [permissionLoading, setPermissionLoading] = useState(false)
+    const [isUpToDate, setIsUpToDate] = useState(false)
+
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    // Debounced save: write to localStorage immediately, persist to API after 800 ms idle.
+    // Force-update sound defaults once per agent
+    useEffect(() => {
+        const currentVersion = localStorage.getItem('notif_sound_cfg_ver')
+        if (currentVersion !== SOUND_VERSION) {
+            // Apply new system defaults to localStorage
+            localStorage.setItem(SOUND_PREF_KEYS.newChat, 'alarm.mp3')
+            localStorage.setItem(SOUND_PREF_KEYS.message, 'blackberry2.mp3')
+            localStorage.setItem(SOUND_PREF_KEYS.newVisitorWebsite, 'simplesms.mp3')
+            localStorage.setItem('notif_sound_cfg_ver', SOUND_VERSION)
+            
+            // Sync states
+            setNewChatSound('alarm.mp3')
+            setMessageSound('blackberry2.mp3')
+            setVisitorSound('simplesms.mp3')
+            
+            // Also force-sync to API
+            const prefs = {
+                new_chat_sound: 'alarm.mp3',
+                message_sound: 'blackberry2.mp3',
+                new_visitor_website_sound: 'simplesms.mp3',
+            }
+            syncPrefsToLocalStorage(prefs)
+            saveNotificationPreferences(prefs).catch(() => {})
+        }
+        setIsUpToDate(true)
+    }, [])
+
+    const refreshDevices = useCallback(async () => {
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                setIsSinkSupported(false)
+                return
+            }
+
+            const audio = new Audio()
+            if (typeof (audio as any).setSinkId !== 'function') {
+                setIsSinkSupported(false)
+            }
+
+            const allDevices = await navigator.mediaDevices.enumerateDevices()
+            const outputs = allDevices.filter(d => d.kind === 'audiooutput')
+            setDevices(outputs)
+
+            const savedSinkId = localStorage.getItem(SOUND_PREF_KEYS.sinkId) || 'default'
+            
+            if (savedSinkId === 'default' && outputs.length > 0) {
+                const builtIn = outputs.find(d => 
+                    d.label.toLowerCase().includes('built-in audio') || 
+                    d.label.toLowerCase().includes('analog stereo')
+                )
+                if (builtIn) {
+                    setSinkId(builtIn.deviceId)
+                    setNotificationAudioSink(builtIn.deviceId)
+                    setSinkMissing(false)
+                    return 
+                }
+            }
+
+            if (savedSinkId !== 'default' && outputs.length > 0) {
+                if (!outputs.some(d => d.deviceId === savedSinkId)) {
+                    setSinkMissing(true)
+                } else {
+                    setSinkMissing(false)
+                }
+            } else {
+                setSinkMissing(false)
+            }
+        } catch (err) {
+            console.error('Failed to list audio devices:', err)
+        }
+    }, [])
+
+    useEffect(() => {
+        refreshDevices()
+        
+        if (typeof navigator !== 'undefined' && (navigator as any).permissions && (navigator as any).permissions.query) {
+            (navigator as any).permissions.query({ name: 'microphone' }).then((status: any) => {
+                if (status.state === 'granted') {
+                    ensureHardwareLabelsUnlocked().then(() => refreshDevices())
+                }
+                status.onchange = () => {
+                    if (status.state === 'granted') {
+                        ensureHardwareLabelsUnlocked().then(() => refreshDevices())
+                    }
+                }
+            }).catch(() => {})
+        }
+    }, [refreshDevices])
+
     const handleSoundChange = useCallback((key: keyof typeof SOUND_PREF_KEYS, value: string) => {
         try { localStorage.setItem(SOUND_PREF_KEYS[key], value) } catch { }
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
             const prefs = {
-                new_chat_sound: key === 'newChat' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newChat) ?? 'new-notification.mp3'),
-                message_sound: key === 'message' ? value : (localStorage.getItem(SOUND_PREF_KEYS.message) ?? 'notification.mp3'),
-                new_visitor_website_sound: key === 'newVisitorWebsite' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newVisitorWebsite) ?? ''),
+                new_chat_sound: key === 'newChat' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newChat) ?? 'alarm.mp3'),
+                message_sound: key === 'message' ? value : (localStorage.getItem(SOUND_PREF_KEYS.message) ?? 'blackberry2.mp3'),
+                new_visitor_website_sound: key === 'newVisitorWebsite' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newVisitorWebsite) ?? 'simplesms.mp3'),
             }
             syncPrefsToLocalStorage(prefs)
             saveNotificationPreferences(prefs).catch(() => { })
         }, 800)
     }, [])
+
+    const handleSinkChange = async (newSinkId: string) => {
+        if (newSinkId === '__missing__') return
+        setSinkId(newSinkId)
+        setSinkMissing(false)
+        await setNotificationAudioSink(newSinkId)
+        playMessageNotificationSound()
+    }
+
+    useEffect(() => {
+        if (!sinkMissing) return
+        setSinkId('default')
+        setSinkMissing(false)
+        setNotificationAudioSink('default').catch(() => { })
+    }, [sinkMissing])
+
+    const requestHardwarePermission = async () => {
+        setPermissionLoading(true)
+        try {
+            await ensureHardwareLabelsUnlocked()
+            await refreshDevices()
+            setMessage({ type: 'success', text: 'Hardware labels unlocked.' })
+        } catch (err) {
+            console.error('Permission denied:', err)
+            setMessage({ type: 'error', text: 'Permission denied. Could not unlock device labels.' })
+        } finally {
+            setPermissionLoading(false)
+        }
+    }
 
     useEffect(() => {
         let cancelled = false
@@ -119,6 +246,7 @@ export default function NotificationSettings() {
     const handleEnablePush = async () => {
         setPushLoading(true)
         try {
+            ensureHardwareLabelsUnlocked()
             const perm = await requestPermissionAndSubscribe()
             setPushPermission(perm)
             if (perm === 'granted') {
@@ -128,6 +256,7 @@ export default function NotificationSettings() {
             } else {
                 setMessage({ type: 'error', text: 'Notifications permission was not granted.' })
             }
+            await refreshDevices()
         } catch (e: any) {
             setMessage({ type: 'error', text: e?.message || 'Failed to enable notifications' })
         } finally {
@@ -135,9 +264,11 @@ export default function NotificationSettings() {
         }
     }
 
+    const hasLabels = devices.length > 0 && devices.some(d => !!d.label)
+
     return (
         <div className="flex flex-col h-full">
-            <div className="h-16 flex items-center border-b dark:border-gray-700 px-6 flex-shrink-0">
+            <div className="h-16 flex items-center border-b dark:border-gray-700 px-6 flex-shrink-0 justify-between">
                 <div className="flex items-center gap-2">
                     <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Notifications</h1>
                     <a href="/docs/agent-guide/notifications" target="_blank" rel="noreferrer" title="View notifications guide" className="text-gray-400 hover:text-blue-500 transition-colors">
@@ -200,6 +331,70 @@ export default function NotificationSettings() {
                             <p className="mt-2 text-xs text-red-600 dark:text-red-400">Blocked in browser settings. Update site permissions to allow.</p>
                         )}
                     </div>
+
+                    {/* ─── Audio Output Device ─── */}
+                    {isSinkSupported && (
+                        <div>
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Audio Output Device</h3>
+                                <div className="flex items-center gap-2">
+                                    {!hasLabels && (
+                                        <button
+                                            onClick={requestHardwarePermission}
+                                            disabled={permissionLoading}
+                                            className="text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 uppercase tracking-tighter px-2 py-1 rounded bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 transition-all"
+                                        >
+                                            {permissionLoading ? <RefreshCcw className="w-3 h-3 animate-spin" /> : <Unlock className="w-3 h-3" />}
+                                            Unlock Names
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={refreshDevices}
+                                        className="text-gray-400 hover:text-blue-500 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                                        title="Refresh device list"
+                                    >
+                                        <RefreshCcw className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 p-4">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                                    Force notification sounds to specific speakers.
+                                </p>
+                                <select
+                                    value={sinkMissing ? '__missing__' : sinkId}
+                                    onChange={(e) => handleSinkChange(e.target.value)}
+                                    className={`w-full rounded-lg border bg-white dark:bg-gray-800 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${sinkMissing
+                                        ? 'border-amber-300 dark:border-amber-600 text-amber-900 dark:text-amber-100'
+                                        : 'border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100'
+                                        }`}
+                                >
+                                    <option value="default">Default System Output</option>
+                                    {sinkMissing && <option value="__missing__" disabled>(Device unplugged)</option>}
+                                    {devices.map((d) => (
+                                        <option key={d.deviceId} value={d.deviceId}>
+                                            {d.label || `Unknown Device (${d.deviceId.slice(0, 5)}...)`}
+                                        </option>
+                                    ))}
+                                </select>
+                                
+                                {sinkMissing && (
+                                    <div className="mt-2 p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-2">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                                        <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-tight">
+                                            Selected device not available. Switched to default output.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {!hasLabels && (
+                                    <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400 leading-tight">
+                                        Note: Device names are locked by the browser. Click <strong>Unlock Names</strong> above and select "Allow" to enable hardware identification.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* ─── Sound Notifications ─── */}
                     <div>

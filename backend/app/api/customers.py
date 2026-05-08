@@ -93,6 +93,7 @@ class ContactDetailsResponse(BaseModel):
     visits: int
     chats: int
     conversations: List[dict] = []
+    form_submissions: List[dict] = []
 
 
 class InitiateConversationResponse(BaseModel):
@@ -212,10 +213,38 @@ def get_contact_details(
     if website_id is not None and scope.website_ids is not None:
         if int(website_id) not in set(scope.website_ids):
             raise HTTPException(status_code=403, detail="Contact not available")
-    return customers_repo.get_contact_details(
+    details = customers_repo.get_contact_details(
         db,
         website_id=website_id,
         website_ids=None if scope.website_ids is None else scope.website_ids,
         contact_key=contact_key,
         team_ids=scope.team_ids,
     )
+    # Attach form submissions for this contact (by session_id = contact_key)
+    from app.repos import forms as forms_repo
+    from app.models.website_form import WebsiteForm
+
+    subs = forms_repo.get_submissions_by_session(
+        db,
+        session_id=contact_key,
+        website_id=website_id,
+        limit=50,
+    )
+    form_submissions = []
+    _form_cache: dict[int, Any] = {}
+    for sub in subs:
+        if sub.form_id not in _form_cache:
+            _form_cache[sub.form_id] = db.query(WebsiteForm).filter(WebsiteForm.id == sub.form_id).first()
+        form = _form_cache[sub.form_id]
+        form_submissions.append({
+            "id": sub.id,
+            "form_id": sub.form_id,
+            "form_name": form.name if form else None,
+            "form_fields": form.fields if form else [],
+            "data": sub.data,
+            "conversation_id": sub.conversation_id,
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+        })
+    details_dict = details if isinstance(details, dict) else details.model_dump() if hasattr(details, 'model_dump') else dict(details)
+    details_dict["form_submissions"] = form_submissions
+    return details_dict

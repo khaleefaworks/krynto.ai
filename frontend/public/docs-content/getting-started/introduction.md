@@ -12,7 +12,7 @@ AI ChatAssist is packed with features to help your team succeed:
 - **Real-Time Engagement** — Chat instantly with visitors. No delays, no page refreshes.
 - **Multi-Site Management** — Monitor and manage conversations across all your websites from a single, unified dashboard.
 - **Team Orchestration** — Organize agents into specialized teams and assign them to specific websites or departments.
-- **Smart Automations** — Set up automatic greetings and triggers based on visitor behavior to provide instant support.
+- **Smart Automations** — Build automated flows on a visual node-graph canvas. Greet visitors proactively, route inquiries to the right team via button menus, send waiting messages, and more.
 - **Conversation Continuity** — Allow returning visitors to see their previous chat history for a personalized experience.
 - **Never Miss a Beat** — Stay informed with desktop push notifications, even when the dashboard is in the background.
 - **Performance Insights** — Track response times, satisfaction ratings, and conversation volumes to optimize your service.
