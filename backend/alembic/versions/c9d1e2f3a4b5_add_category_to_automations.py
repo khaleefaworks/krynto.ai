@@ -30,16 +30,22 @@ def upgrade() -> None:
         ),
     )
 
-    # Backfill: rows that contain a bot_prompt_buttons action belong to chatbot_flow.
-    # Matching on trigger = 'conversation_created' with bot_prompt_buttons in actions
-    # is a reliable heuristic for all existing data.
-    op.execute(
-        text(
-            "UPDATE automations SET category = 'chatbot_flow' "
-            "WHERE trigger = 'conversation_created' "
-            "AND actions::text LIKE '%bot_prompt_buttons%'"
+    # Backfill: only runs if the old `actions` column still exists (it may have
+    # already been dropped by the migrate_automations_to_node_graph migration
+    # when both branches are applied in parallel).
+    bind = op.get_bind()
+    cols = [r[0] for r in bind.execute(text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name='automations' AND column_name='actions'"
+    ))]
+    if cols:
+        op.execute(
+            text(
+                "UPDATE automations SET category = 'chatbot_flow' "
+                "WHERE trigger = 'conversation_created' "
+                "AND actions::text LIKE '%bot_prompt_buttons%'"
+            )
         )
-    )
 
 
 def downgrade() -> None:
