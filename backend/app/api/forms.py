@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.api.deps import require_admin
 from app.models.user import User
 from app.repos import forms as forms_repo
+from app.repos import conversations as conversations_repo
 from app.models.website import Website
 from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
@@ -275,12 +276,21 @@ def submit_form(
     form = forms_repo.get_form_by_id(db, form_id)
     if not form or form.website_id != website_id or not form.enabled:
         raise HTTPException(status_code=404, detail="Form not found")
+
+    conversation_id = body.conversation_id
+    if conversation_id is not None:
+        conversation = conversations_repo.get_conversation_by_id(db, conversation_id)
+        if not conversation or int(conversation.website_id) != int(website_id):
+            raise HTTPException(status_code=422, detail="Invalid conversation_id for this website")
+        if body.session_id and str(conversation.session_id) != str(body.session_id):
+            raise HTTPException(status_code=422, detail="session_id does not match conversation_id")
+
     validated_data = _validate_submission_data(body.data, form_fields=form.fields)
     sub = forms_repo.create_submission(
         db,
         form_id=form_id,
         data=validated_data,
-        conversation_id=body.conversation_id,
+        conversation_id=conversation_id,
         session_id=body.session_id,
     )
     return _submission_to_dict(sub, form_name=form.name)

@@ -93,7 +93,14 @@ export interface FormSubmission {
     id: number
     form_id: number
     form_name: string | null
-    form_fields: Array<{ name: string; label: string; type: string; required?: boolean }>
+    form_fields: Array<{
+        name?: string
+        field_name?: string
+        label?: string
+        type?: string
+        field_type?: string
+        required?: boolean
+    }>
     data: Record<string, string>
     conversation_id: number | null
     created_at: string | null

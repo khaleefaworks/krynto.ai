@@ -55,7 +55,7 @@ Click **Download Report** to export a summary of all conversations as an Excel `
 
 | Column | Description |
 | :--- | :--- |
-| Conversation ID | Internal numeric ID |
+| Conversation Short ID | Exported short identifier (e.g., `A1B2C3`) |
 | Status | `open` / `resolved` / `closed` |
 | Website | Website name |
 | Team | Assigned team name (if any) |
@@ -81,7 +81,7 @@ Click **Download Transcripts** to export the full message-by-message log as a si
 
 | Column | Description |
 | :--- | :--- |
-| Conversation ID | |
+| Conversation Short ID | |
 | Status | `open` / `resolved` / `closed` |
 | Website | |
 | Team | |

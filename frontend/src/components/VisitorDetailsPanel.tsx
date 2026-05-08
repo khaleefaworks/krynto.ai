@@ -74,7 +74,13 @@ interface VisitorDetailsPanelProps {
     id: number
     form_id: number
     form_name: string | null
-    form_fields: Array<{ name: string; label: string; type: string }>
+    form_fields: Array<{
+      name?: string
+      field_name?: string
+      label?: string
+      type?: string
+      field_type?: string
+    }>
     data: Record<string, string>
     created_at: string | null
   }>

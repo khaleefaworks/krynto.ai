@@ -199,11 +199,19 @@ export default function NotificationSettings() {
     }, [])
 
     const handleSinkChange = async (newSinkId: string) => {
+        if (newSinkId === '__missing__') return
         setSinkId(newSinkId)
         setSinkMissing(false)
         await setNotificationAudioSink(newSinkId)
         playMessageNotificationSound()
     }
+
+    useEffect(() => {
+        if (!sinkMissing) return
+        setSinkId('default')
+        setSinkMissing(false)
+        setNotificationAudioSink('default').catch(() => { })
+    }, [sinkMissing])
 
     const requestHardwarePermission = async () => {
         setPermissionLoading(true)
@@ -354,7 +362,7 @@ export default function NotificationSettings() {
                                     Force notification sounds to specific speakers.
                                 </p>
                                 <select
-                                    value={sinkMissing ? 'missing' : sinkId}
+                                    value={sinkMissing ? '__missing__' : sinkId}
                                     onChange={(e) => handleSinkChange(e.target.value)}
                                     className={`w-full rounded-lg border bg-white dark:bg-gray-800 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${sinkMissing
                                         ? 'border-amber-300 dark:border-amber-600 text-amber-900 dark:text-amber-100'
@@ -362,7 +370,7 @@ export default function NotificationSettings() {
                                         }`}
                                 >
                                     <option value="default">Default System Output</option>
-                                    {sinkMissing && <option value="missing">(Device unplugged)</option>}
+                                    {sinkMissing && <option value="__missing__" disabled>(Device unplugged)</option>}
                                     {devices.map((d) => (
                                         <option key={d.deviceId} value={d.deviceId}>
                                             {d.label || `Unknown Device (${d.deviceId.slice(0, 5)}...)`}

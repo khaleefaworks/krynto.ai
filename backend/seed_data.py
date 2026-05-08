@@ -181,9 +181,15 @@ def seed_automation_library(db=None) -> None:
 def seed_database():
     db = SessionLocal()
     admin_email = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com").strip().lower()
-    admin_password = os.getenv("SEED_ADMIN_PASSWORD") or secrets.token_urlsafe(16)
+    admin_password = os.getenv("SEED_ADMIN_PASSWORD")
+    generated_admin_password = admin_password is None
+    if generated_admin_password:
+        admin_password = secrets.token_urlsafe(16)
     agent_email = os.getenv("SEED_AGENT_EMAIL", "agent@example.com").strip().lower()
-    agent_password = os.getenv("SEED_AGENT_PASSWORD") or secrets.token_urlsafe(16)
+    agent_password = os.getenv("SEED_AGENT_PASSWORD")
+    generated_agent_password = agent_password is None
+    if generated_agent_password:
+        agent_password = secrets.token_urlsafe(16)
     
     try:
         # Check if system manager already exists
@@ -221,6 +227,11 @@ def seed_database():
         else:
             agent = existing_agent
             print(f"ℹ️  Agent already exists: {existing_agent.email} (ID: {existing_agent.id})")
+
+        if generated_admin_password:
+            print(f"🔐 Generated admin password for {admin_email}: {admin_password}")
+        if generated_agent_password:
+            print(f"🔐 Generated agent password for {agent_email}: {agent_password}")
         
         # Check if website exists
         existing_website = db.query(Website).filter_by(domain="example.com").first()
