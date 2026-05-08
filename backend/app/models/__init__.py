@@ -24,6 +24,7 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.email_otp import EmailOTP
 from app.models.website_form import WebsiteForm
 from app.models.website_form_submission import WebsiteFormSubmission
+from app.models.verification_token import VerificationToken
 
 __all__ = [
     "Website",
@@ -54,4 +55,5 @@ __all__ = [
     "WebsiteForm",
     "WebsiteFormSubmission",
     "AutomationTemplate",
+    "VerificationToken",
 ]

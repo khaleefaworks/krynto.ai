@@ -174,6 +174,7 @@ def get_active_chats(
         website_id=website_id,
         website_ids=None if (website_id is not None or scope.website_ids is None) else scope.website_ids,
         team_ids=scope.team_ids,
+        organization_id=scope.organization_id,
     )
 
     conversation_ids: list[int] = [int(conv.id) for conv, *_rest in rows]
@@ -342,6 +343,7 @@ def get_resolved_conversations(
         website_id=website_id,
         website_ids=None if (website_id is not None or scope.website_ids is None) else scope.website_ids,
         team_ids=scope.team_ids,
+        organization_id=scope.organization_id,
         agent_id=agent_id,
         limit=limit,
     )

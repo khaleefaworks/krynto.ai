@@ -51,9 +51,9 @@ export default function LoginPage() {
         throw new Error(result.detail || 'Login failed')
       }
 
-      // Email not yet verified — send to OTP step on the signup page
+      // Email not yet verified — backend has sent a fresh verification link to the inbox
       if (result.needs_verification) {
-        navigate('/signup', { state: { step: 'verify', email: result.email }, replace: true })
+        setError(result.message || "Your email isn't verified. We've sent a new verification link to your inbox.")
         return
       }
 

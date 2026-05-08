@@ -60,6 +60,7 @@ def active_conversations_with_counts_and_last_message(
     website_id: int | None = None,
     website_ids: list[int] | None = None,
     team_ids: list[int] | None = None,
+    organization_id: int | None = None,
 ):
     """Return rows of (Conversation, website_name, message_count, last_message, last_message_at)."""
 
@@ -119,6 +120,9 @@ def active_conversations_with_counts_and_last_message(
         )
     )
 
+    if organization_id is not None:
+        rows_query = rows_query.filter(Website.organization_id == organization_id)
+
     if website_id:
         rows_query = rows_query.filter(Conversation.website_id == website_id)
 
@@ -157,6 +161,7 @@ def resolved_conversations_with_counts_and_last_message(
     website_id: int | None = None,
     website_ids: list[int] | None = None,
     team_ids: list[int] | None = None,
+    organization_id: int | None = None,
     agent_id: int | None = None,
     limit: int = 50,
 ):
@@ -205,6 +210,9 @@ def resolved_conversations_with_counts_and_last_message(
         .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
         .filter(Conversation.status == ConversationStatus.RESOLVED)
     )
+
+    if organization_id is not None:
+        rows_query = rows_query.filter(Website.organization_id == organization_id)
 
     if website_id:
         rows_query = rows_query.filter(Conversation.website_id == website_id)

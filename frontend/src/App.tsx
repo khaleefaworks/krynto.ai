@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import SignupPage from './pages/SignupPage'
+import VerifyEmailPage from './pages/VerifyEmailPage'
 import DashboardLayout from './pages/DashboardLayout'
 import ConversationsView from './pages/ConversationsView'
 import WebsiteManagement from './pages/WebsiteManagement'
@@ -430,6 +431,10 @@ function App() {
             <Route
               path="/reset-password"
               element={token ? <Navigate to={authedHome} replace /> : <ResetPasswordPage />}
+            />
+            <Route
+              path="/verify-email"
+              element={token ? <Navigate to={authedHome} replace /> : <VerifyEmailPage />}
             />
 
             {/* Public docs portal — no auth required */}
