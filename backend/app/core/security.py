@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
@@ -38,15 +38,17 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
+    now = datetime.now(timezone.utc)  # timezone-aware; .timestamp() is unambiguously UTC
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    
-    now = datetime.utcnow()
+        expire = now + timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+
     to_encode.update({
         "exp": expire,
-        # Used for reset invalidation checks.
+        # Used for password-change invalidation checks in deps.py.
+        # Must use timezone-aware datetime so .timestamp() returns correct UTC epoch
+        # regardless of server local timezone (e.g. IST UTC+5:30).
         "iat": int(now.timestamp()),
     })
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)

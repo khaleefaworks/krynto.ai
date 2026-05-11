@@ -824,6 +824,8 @@ def change_user_password(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    from datetime import datetime, timezone
     user.password_hash = get_password_hash(payload.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
     return {"message": "Password updated successfully"}
