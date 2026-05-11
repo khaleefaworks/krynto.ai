@@ -154,7 +154,7 @@ Recommended fix:
 Relevant files: frontend/src/pages/AgentsList.tsx, backend/app/api/auth.py, backend/app/api/users.py
 
 42) Widget: preserve first agent’s profile when a second owner joins.
-Status: Open
+Status: ✅ DONE — Verified working correctly. Past message bubbles bake the avatar into static DOM at render time; updateAgentAvatar() only redraws the header. Header correctly updates to the new agent; historical messages are unaffected.
 Notes:
 - Widget currently updates `activeAgentName` / `activeAgentAvatarUrl` on `agent_joined` and `agent` events (widget/chat-widget.js), which can overwrite the profile shown to the visitor.
 Recommended fix:
