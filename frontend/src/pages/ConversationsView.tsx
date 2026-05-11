@@ -29,7 +29,7 @@ import Logo from '@/components/Logo'
 import DocsLink from '@/components/DocsLink'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { isAdmin, isAgent } from '@/lib/roles'
+import { isAdmin, isAgent, canAssignTeam } from '@/lib/roles'
 import {
     Check,
     MessageCircle,
@@ -368,6 +368,7 @@ export default function ConversationsView() {
     const [chatLoading, setChatLoading] = useState(false)
     const [resolving, setResolving] = useState(false)
     const joinedRef = useRef(false)
+    const prevSelectedChatRef = useRef<number | null>(selectedChat)
     const loadMessagesTokenRef = useRef(0)
     const hasLoadedChatsRef = useRef(false)
     const loadDetailsTokenRef = useRef(0)
@@ -717,11 +718,20 @@ export default function ConversationsView() {
     // selected chat so the empty-state screen renders (instead of persisting the thread view).
     // Always reset the filter to 'all' so the sidebar Chats link brings you to open conversations.
     useEffect(() => {
-        if (!isChatsListRoute) return
-        // selectedChat just became non-null while on the list route: the user clicked a chat
-        // and navigation to /dashboard/chats/:id is pending inside useEffect([selectedChat]).
-        // Don't reset the filter here or the list will flash to 'all' and scroll to the top.
-        if (selectedChat !== null) return
+        if (!isChatsListRoute) {
+            // Track the last known selectedChat value so we can detect transitions below.
+            prevSelectedChatRef.current = selectedChat
+            return
+        }
+        // Scenario A: user clicked a chat while already on the list route.
+        // selectedChat just transitioned null → non-null; navigation to /dashboard/chats/:id
+        // is pending in the sibling effect. Skip cleanup so the list doesn't flash to 'all'.
+        const justSelected = prevSelectedChatRef.current === null && selectedChat !== null
+        prevSelectedChatRef.current = selectedChat
+        if (justSelected) return
+
+        // Scenario B: user navigated TO /dashboard/chats from a conversation URL.
+        // selectedChat is still non-null from the previous route — clear everything.
         setActiveFilter('all')
         if (selectedChat === null) return
         setSelectedChat(null)
@@ -2454,7 +2464,7 @@ export default function ConversationsView() {
                             <div className="flex items-center gap-3 min-w-0">
                                 <button
                                     className="md:hidden flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
-                                    onClick={() => navigate('/dashboard/chats')}
+                                    onClick={() => navigate(-1)}
                                     aria-label="Back to conversations"
                                 >
                                     <ChevronLeft className="h-5 w-5" />
@@ -2645,14 +2655,14 @@ export default function ConversationsView() {
                             <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
                                 {selectedTeam ? (
                                     <div
-                                        className={`inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300${isAdmin(user) ? ' cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors' : ''}`}
-                                        onClick={isAdmin(user) ? () => setTeamPickerOpen(true) : undefined}
-                                        title={isAdmin(user) ? 'Click to change team' : String((selectedTeam as any)?.name || '')}
+                                        className={`inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300${canAssignTeam(user) ? ' cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors' : ''}`}
+                                        onClick={canAssignTeam(user) ? () => setTeamPickerOpen(true) : undefined}
+                                        title={canAssignTeam(user) ? 'Click to change team' : String((selectedTeam as any)?.name || '')}
                                     >
                                         <Users className="h-3.5 w-3.5 flex-shrink-0" />
                                         <span className="text-blue-500 dark:text-blue-400">Team:</span>
                                         <span className="truncate max-w-32 font-semibold">{String((selectedTeam as any)?.name || '')}</span>
-                                        {isAdmin(user) && (
+                                        {canAssignTeam(user) && (
                                             <button
                                                 type="button"
                                                 className="ml-0.5 rounded-full p-0.5 opacity-60 hover:opacity-100 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
@@ -2666,7 +2676,7 @@ export default function ConversationsView() {
                                     </div>
                                 ) : null}
 
-                                {isAdmin(user) && (
+                                {canAssignTeam(user) && (
                                     <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
                                         {!selectedTeam ? (
                                             <PopoverTrigger asChild>

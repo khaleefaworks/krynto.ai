@@ -9,7 +9,7 @@ Handles:
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import require_authenticated_user, require_admin
+from app.api.deps import require_authenticated_user, require_admin, require_agent
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.website_team import WebsiteTeam
@@ -186,13 +186,13 @@ def untag_conversation(
 async def set_conversation_team(
     conversation_id: int,
     payload: SetTeamRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_agent),
     db: Session = Depends(get_db),
 ):
     """Assign (or clear) a single website team for a conversation.
 
-    Restricted to managers and system managers only.
-    Agents cannot assign or remove teams.
+    Agents and admins can assign teams to conversations they can access.
+    Team CRUD (create/edit/delete) remains admin-only via website_teams endpoints.
     """
     conv = _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
 

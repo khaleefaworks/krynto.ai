@@ -67,3 +67,11 @@ export const canAccessAdminFeatures = (user?: User | null): boolean => {
 export const canHandleChats = (user?: User | null): boolean => {
   return isAdmin(user) || isAgent(user)
 }
+
+/**
+ * Check if user can assign teams to conversations.
+ * Both admins and agents can assign; team CRUD (create/edit/delete) remains admin-only.
+ */
+export const canAssignTeam = (user?: User | null): boolean => {
+  return isAdmin(user) || isAgent(user)
+}
