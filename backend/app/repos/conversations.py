@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
+from app.models.conversation_tag import ConversationTag
 from app.models.message import Message
 from app.models.website import Website
 
@@ -164,6 +165,12 @@ def resolved_conversations_with_counts_and_last_message(
     organization_id: int | None = None,
     agent_id: int | None = None,
     limit: int = 50,
+    offset: int = 0,
+    search: str | None = None,
+    filter_team_id: int | None = None,
+    filter_tag_ids: list[int] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ):
     """Return rows of (Conversation, website_name, message_count, last_message, last_message_at)."""
 
@@ -209,6 +216,14 @@ def resolved_conversations_with_counts_and_last_message(
         .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
         .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
         .filter(Conversation.status == ConversationStatus.RESOLVED)
+        # Exclude bot/welcome-only conversations (same rule as the active list).
+        .filter(
+            sa.or_(
+                Conversation.last_visitor_message_at.isnot(None),
+                Conversation.last_agent_message_at.isnot(None),
+                Conversation.assigned_agent_id.isnot(None),
+            )
+        )
     )
 
     if organization_id is not None:
@@ -233,9 +248,115 @@ def resolved_conversations_with_counts_and_last_message(
     if agent_id:
         rows_query = rows_query.filter(Conversation.assigned_agent_id == agent_id)
 
+    if search:
+        q = f"%{search.lower()}%"
+        rows_query = rows_query.filter(
+            sa.or_(
+                sa.func.lower(Conversation.visitor_name).like(q),
+                sa.func.lower(Conversation.visitor_email).like(q),
+                sa.func.lower(Conversation.short_id).like(q),
+            )
+        )
+
+    if filter_team_id is not None:
+        rows_query = rows_query.filter(Conversation.team_id == filter_team_id)
+
+    if filter_tag_ids:
+        for tag_id in filter_tag_ids:
+            rows_query = rows_query.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tag_id)
+                )
+            )
+
+    if date_from:
+        rows_query = rows_query.filter(Conversation.created_at >= date_from)
+
+    if date_to:
+        rows_query = rows_query.filter(Conversation.created_at <= date_to)
+
     try:
         rows_query = rows_query.order_by(Conversation.updated_at.desc())
     except Exception:
         rows_query = rows_query.order_by(Conversation.created_at.desc())
 
-    return rows_query.limit(limit).all()
+    return rows_query.offset(offset).limit(limit).all()
+
+
+def resolved_conversations_count(
+    db: Session,
+    *,
+    website_id: int | None = None,
+    website_ids: list[int] | None = None,
+    team_ids: list[int] | None = None,
+    organization_id: int | None = None,
+    agent_id: int | None = None,
+    search: str | None = None,
+    filter_team_id: int | None = None,
+    filter_tag_ids: list[int] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> int:
+    """Return the total count of resolved conversations matching the given filters."""
+    q = (
+        db.query(sa.func.count(Conversation.id))
+        .outerjoin(Website, Website.id == Conversation.website_id)
+        .filter(Conversation.status == ConversationStatus.RESOLVED)
+        .filter(
+            sa.or_(
+                Conversation.last_visitor_message_at.isnot(None),
+                Conversation.last_agent_message_at.isnot(None),
+                Conversation.assigned_agent_id.isnot(None),
+            )
+        )
+    )
+
+    if organization_id is not None:
+        q = q.filter(Website.organization_id == organization_id)
+
+    if website_id:
+        q = q.filter(Conversation.website_id == website_id)
+
+    if website_ids is not None:
+        website_ids_norm = [int(w) for w in website_ids]
+        if not website_ids_norm:
+            return 0
+        q = q.filter(Conversation.website_id.in_(website_ids_norm))
+
+    if team_ids is not None:
+        team_ids_norm = [int(t) for t in team_ids]
+        if not team_ids_norm:
+            return 0
+        q = q.filter(Conversation.team_id.in_(team_ids_norm))
+
+    if agent_id:
+        q = q.filter(Conversation.assigned_agent_id == agent_id)
+
+    if search:
+        s = f"%{search.lower()}%"
+        q = q.filter(
+            sa.or_(
+                sa.func.lower(Conversation.visitor_name).like(s),
+                sa.func.lower(Conversation.visitor_email).like(s),
+                sa.func.lower(Conversation.short_id).like(s),
+            )
+        )
+
+    if filter_team_id is not None:
+        q = q.filter(Conversation.team_id == filter_team_id)
+
+    if filter_tag_ids:
+        for tag_id in filter_tag_ids:
+            q = q.filter(
+                Conversation.id.in_(
+                    db.query(ConversationTag.conversation_id).filter(ConversationTag.tag_id == tag_id)
+                )
+            )
+
+    if date_from:
+        q = q.filter(Conversation.created_at >= date_from)
+
+    if date_to:
+        q = q.filter(Conversation.created_at <= date_to)
+
+    return q.scalar() or 0

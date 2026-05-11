@@ -331,6 +331,10 @@ export default function ConversationsView() {
 
     const [resolvedChats, setResolvedChats] = useState<any[]>([])
     const [resolvedLoading, setResolvedLoading] = useState(false)
+    const [resolvedOffset, setResolvedOffset] = useState(0)
+    const [resolvedHasMore, setResolvedHasMore] = useState(false)
+    const [resolvedLoadingMore, setResolvedLoadingMore] = useState(false)
+    const [resolvedTotal, setResolvedTotal] = useState<number | null>(null)
     const [visitorTyping, setVisitorTyping] = useState(false)
     const [spectatorAgentTyping, setSpectatorAgentTyping] = useState<string | null>(null)
 
@@ -453,6 +457,20 @@ export default function ConversationsView() {
     // Load chats list (show spinner only on first load)
     useEffect(() => {
         fetchActiveChats({ showSpinner: true })
+    }, [])
+
+    // Eagerly fetch resolved count so the sidebar badge is populated on page load
+    // without requiring the user to click the Resolved tab first.
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                const { fetchResolvedCount } = await import('@/services/chats')
+                const total = await fetchResolvedCount()
+                if (!cancelled) setResolvedTotal(total)
+            } catch { /* best-effort */ }
+        })()
+        return () => { cancelled = true }
     }, [])
 
     // Load personal shortcuts (best-effort)
@@ -700,6 +718,10 @@ export default function ConversationsView() {
     // Always reset the filter to 'all' so the sidebar Chats link brings you to open conversations.
     useEffect(() => {
         if (!isChatsListRoute) return
+        // selectedChat just became non-null while on the list route: the user clicked a chat
+        // and navigation to /dashboard/chats/:id is pending inside useEffect([selectedChat]).
+        // Don't reset the filter here or the list will flash to 'all' and scroll to the top.
+        if (selectedChat !== null) return
         setActiveFilter('all')
         if (selectedChat === null) return
         setSelectedChat(null)
@@ -737,13 +759,15 @@ export default function ConversationsView() {
         if (preferredId) {
             if (preferredId !== selectedChat) {
                 openChat(preferredId)
-                // Auto-switch the filter tab so the conversation is visible in the list.
+                // Auto-switch the filter tab so the conversation is visible in the list,
+                // but only when the filter actually needs to change to avoid spurious renders.
                 const inResolved = resolvedChats.some((c: any) => c.id === preferredId)
-                setActiveFilter(inResolved ? 'resolved' : 'all')
+                const targetFilter: FilterCategory = inResolved ? 'resolved' : 'all'
+                if (activeFilter !== targetFilter) setActiveFilter(targetFilter)
             }
             return
         }
-    }, [getPreferredConversationId, selectedChat, openChat, resolvedChats])
+    }, [getPreferredConversationId, selectedChat, openChat, resolvedChats, activeFilter])
 
     // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
     // fetch the conversation from the API and inject it so it can be selected.
@@ -1662,8 +1686,14 @@ export default function ConversationsView() {
             if (activeFilter === 'resolved') {
                 try {
                     const { fetchClosedConversations } = await import('@/services/chats')
-                    const data = await fetchClosedConversations(undefined, undefined, 100)
+                    const data = await fetchClosedConversations(
+                        filterWebsiteId ?? undefined,
+                        filterAgentId ?? undefined,
+                        50, 0, resolvedServerFilters,
+                    )
                     setResolvedChats(data as any)
+                    setResolvedOffset(0)
+                    setResolvedHasMore((data as any[]).length === 50)
                 } catch (e) {
                     console.error('Failed to refresh resolved conversations:', e)
                 }
@@ -1701,50 +1731,62 @@ export default function ConversationsView() {
         ? (Array.isArray(resolvedChats) ? resolvedChats : [])
         : activeChats
 
-    const filteredChats = chatsForList.filter(chat => {
-        // Search: name, email, short_id, session_id, last_message
-        if (searchQuery) {
-            const q = searchQuery.toLowerCase().trim()
-            const fields = [
-                String((chat as any).visitor_name || ''),
-                String((chat as any).visitor_email || ''),
-                String((chat as any).short_id || ''),
-                String(chat.session_id || ''),
-                String((chat as any).last_message || ''),
-            ]
-            if (!fields.some(f => f.toLowerCase().includes(q))) return false
-        }
-
-        // Advanced filters
-        if (filterWebsiteId && (chat as any).website_id !== filterWebsiteId) return false
-        if (filterAgentId && (chat as any).assigned_agent_id !== filterAgentId) return false
-        if (filterTeamId && (chat as any).team_id !== filterTeamId) return false
-        if (filterTagIds.length > 0) {
-            const chatTagIds = ((chat as any).tags || []).map((t: any) => Number(t?.id))
-            if (!filterTagIds.every(id => chatTagIds.includes(id))) return false
-        }
-        if (filterDateFrom || filterDateTo) {
-            const ts = new Date((chat as any).created_at || '').getTime()
-            if (Number.isFinite(ts)) {
-                if (filterDateFrom && ts < new Date(filterDateFrom).getTime()) return false
-                if (filterDateTo && ts > new Date(filterDateTo).getTime()) return false
+    const _filteredChatsRaw = activeFilter === 'resolved'
+        // Resolved: filtering is server-side, results are already correct
+        ? chatsForList
+        : chatsForList.filter(chat => {
+            // Search: name, email, short_id, session_id, last_message
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase().trim()
+                const fields = [
+                    String((chat as any).visitor_name || ''),
+                    String((chat as any).visitor_email || ''),
+                    String((chat as any).short_id || ''),
+                    String(chat.session_id || ''),
+                    String((chat as any).last_message || ''),
+                ]
+                if (!fields.some(f => f.toLowerCase().includes(q))) return false
             }
-        }
 
-        // Category filter
-        switch (activeFilter) {
-            case 'all':
-                return chat.status === 'open'
-            case 'mine':
-                return chat.status === 'open' && (chat as any).assigned_agent_id === user?.id
-            case 'unassigned':
-                return chat.status === 'open' && (chat as any).assigned_agent_id == null
-            case 'resolved':
-                return chat.status === 'resolved'
-            default:
-                return chat.status === 'open'
-        }
-    })
+            // Advanced filters
+            if (filterWebsiteId && (chat as any).website_id !== filterWebsiteId) return false
+            if (filterAgentId && (chat as any).assigned_agent_id !== filterAgentId) return false
+            if (filterTeamId && (chat as any).team_id !== filterTeamId) return false
+            if (filterTagIds.length > 0) {
+                const chatTagIds = ((chat as any).tags || []).map((t: any) => Number(t?.id))
+                if (!filterTagIds.every(id => chatTagIds.includes(id))) return false
+            }
+            if (filterDateFrom || filterDateTo) {
+                const ts = new Date((chat as any).created_at || '').getTime()
+                if (Number.isFinite(ts)) {
+                    if (filterDateFrom && ts < new Date(filterDateFrom).getTime()) return false
+                    if (filterDateTo && ts > new Date(filterDateTo).getTime()) return false
+                }
+            }
+
+            // Category filter
+            switch (activeFilter) {
+                case 'all':
+                    return chat.status === 'open'
+                case 'mine':
+                    return chat.status === 'open' && (chat as any).assigned_agent_id === user?.id
+                case 'unassigned':
+                    return chat.status === 'open' && (chat as any).assigned_agent_id == null
+                default:
+                    return chat.status === 'open'
+            }
+        })
+
+    // Deduplicate by id to guard against any state bleed or Load More overlap
+    const filteredChats = (() => {
+        const seen = new Set<number>()
+        return _filteredChatsRaw.filter((chat: any) => {
+            const id = Number(chat.id)
+            if (seen.has(id)) return false
+            seen.add(id)
+            return true
+        })
+    })()
 
     const hasAdvancedFilters = !!(filterWebsiteId || filterAgentId || filterTeamId || filterTagIds.length > 0 || filterDateFrom || filterDateTo)
 
@@ -1774,14 +1816,61 @@ export default function ConversationsView() {
         return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name))
     }, [activeChats, resolvedChats, availableTags])
 
+    // Server-side filters for resolved list — rebuilt any time a filter/search changes
+    const resolvedServerFilters = activeFilter === 'resolved' ? {
+        search: searchQuery || undefined,
+        teamId: filterTeamId ?? undefined,
+        tagIds: filterTagIds.length ? filterTagIds : undefined,
+        dateFrom: filterDateFrom || undefined,
+        dateTo: filterDateTo || undefined,
+    } : undefined
+
+    // Stable key representing the current resolved filter state.
+    // Used to detect genuine filter changes vs transient activeFilter bounces
+    // (e.g. 'resolved' → 'all' → 'resolved' that happens when clicking a chat).
+    const resolvedFetchKeyRef = useRef<string>('')
+    const resolvedChatsLoadedRef = useRef(false)
+
     useEffect(() => {
+        if (activeFilter !== 'resolved') return
+
+        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo].join('|')
+
+        // Same filter params and we already have data — activeFilter bounced back, skip reset
+        if (resolvedFetchKeyRef.current === newKey && resolvedChatsLoadedRef.current) return
+
+        resolvedFetchKeyRef.current = newKey
+        resolvedChatsLoadedRef.current = false
+
         let cancelled = false
         const load = async () => {
             try {
-                if (activeFilter === 'resolved') setResolvedLoading(true)
-                const { fetchClosedConversations } = await import('@/services/chats')
-                const data = await fetchClosedConversations(undefined, undefined, 100)
-                if (!cancelled) setResolvedChats(Array.isArray(data) ? (data as any) : [])
+                setResolvedLoading(true)
+                const { fetchClosedConversations, fetchResolvedCount } = await import('@/services/chats')
+                const [data, total] = await Promise.all([
+                    fetchClosedConversations(
+                        filterWebsiteId ?? undefined,
+                        filterAgentId ?? undefined,
+                        50, 0,
+                        resolvedServerFilters,
+                    ),
+                    fetchResolvedCount({
+                        websiteId: filterWebsiteId ?? undefined,
+                        agentId: filterAgentId ?? undefined,
+                        search: searchQuery || undefined,
+                        teamId: filterTeamId ?? undefined,
+                        tagIds: filterTagIds.length ? filterTagIds : undefined,
+                        dateFrom: filterDateFrom || undefined,
+                        dateTo: filterDateTo || undefined,
+                    }),
+                ])
+                if (!cancelled) {
+                    setResolvedChats(Array.isArray(data) ? (data as any) : [])
+                    setResolvedOffset(0)
+                    setResolvedHasMore((data as any[]).length === 50)
+                    setResolvedTotal(total)
+                    resolvedChatsLoadedRef.current = true
+                }
             } catch (e) {
                 console.error('Failed to load resolved conversations:', e)
                 if (!cancelled) setResolvedChats([])
@@ -1790,11 +1879,8 @@ export default function ConversationsView() {
             }
         }
         load()
-
-        return () => {
-            cancelled = true
-        }
-    }, [activeFilter])
+        return () => { cancelled = true }
+    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo])
 
     const getFilterHeaderText = () => {
         switch (activeFilter) {
@@ -1989,7 +2075,9 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Check className="h-4 w-4 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{resolvedChats.length}</span>
+                                                <span className="text-xs font-semibold">
+                                                    {resolvedTotal === null ? '…' : resolvedTotal >= 100 ? '100+' : resolvedTotal}
+                                                </span>
                                             </>
                                         ) : (
                                             <>
@@ -1998,7 +2086,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left text-sm">Resolved</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {resolvedChats.length}
+                                                    {resolvedTotal === null ? '…' : resolvedTotal >= 100 ? '100+' : resolvedTotal}
                                                 </Badge>
                                             </>
                                         )}
@@ -2189,7 +2277,7 @@ export default function ConversationsView() {
                             { key: 'all' as FilterCategory, label: 'All', count: activeChats.filter(c => c.status === 'open').length },
                             { key: 'mine' as FilterCategory, label: 'Mine', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length },
                             { key: 'unassigned' as FilterCategory, label: 'Unassigned', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length },
-                            { key: 'resolved' as FilterCategory, label: 'Resolved', count: resolvedChats.length },
+                            { key: 'resolved' as FilterCategory, label: 'Resolved', count: resolvedTotal === null ? 0 : resolvedTotal >= 100 ? -1 : resolvedTotal },
                         ]).map(tab => (
                             <button
                                 key={tab.key}
@@ -2201,13 +2289,15 @@ export default function ConversationsView() {
                             >
                                 {tab.label}
                                 <span className={`inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-semibold px-1 ${activeFilter === tab.key ? 'bg-white/25 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                                    }`}>{tab.count}</span>
+                                    }`}>{tab.count === -1 ? '100+' : tab.count}</span>
                             </button>
                         ))}
                     </div>
 
                     <p className="text-sm text-gray-500 dark:text-gray-400 px-4 py-2">
-                        {filteredChats.length} conversation{filteredChats.length !== 1 ? 's' : ''}
+                        {activeFilter === 'resolved' && resolvedTotal !== null
+                            ? `${resolvedChats.length} of ${resolvedTotal} conversation${resolvedTotal !== 1 ? 's' : ''}`
+                            : `${filteredChats.length} conversation${filteredChats.length !== 1 ? 's' : ''}`}
                     </p>
                 </div>
 
@@ -2316,6 +2406,40 @@ export default function ConversationsView() {
                                     </div>
                                 </button>
                             ))}
+                        </div>
+                    )}
+                    {activeFilter === 'resolved' && resolvedHasMore && (
+                        <div className="p-3 text-center border-t border-gray-200 dark:border-gray-700">
+                            <button
+                                onClick={async () => {
+                                    const nextOffset = resolvedOffset + 50
+                                    setResolvedLoadingMore(true)
+                                    try {
+                                        const { fetchClosedConversations } = await import('@/services/chats')
+                                        const data = await fetchClosedConversations(
+                                            filterWebsiteId ?? undefined,
+                                            filterAgentId ?? undefined,
+                                            50, nextOffset,
+                                            resolvedServerFilters,
+                                        )
+                                        setResolvedChats(prev => {
+                                            const existingIds = new Set(prev.map((c: any) => c.id))
+                                            const fresh = (data as any[]).filter((c: any) => !existingIds.has(c.id))
+                                            return [...prev, ...fresh]
+                                        })
+                                        setResolvedOffset(nextOffset)
+                                        setResolvedHasMore((data as any[]).length === 50)
+                                    } catch (e) {
+                                        console.error('Failed to load more resolved conversations:', e)
+                                    } finally {
+                                        setResolvedLoadingMore(false)
+                                    }
+                                }}
+                                disabled={resolvedLoadingMore}
+                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                            >
+                                {resolvedLoadingMore ? 'Loading…' : 'Load more'}
+                            </button>
                         </div>
                     )}
                 </div>
