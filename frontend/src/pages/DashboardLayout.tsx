@@ -154,7 +154,8 @@ export default function DashboardLayout() {
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
       {/* Mobile Header */}
-      <header className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-50">
+      {/* On iOS PWA with viewport-fit=cover, pt-[var(--sat)] pushes content below the notch */}
+      <header className="md:hidden fixed top-0 left-0 right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-50 pt-[var(--sat)] min-h-[calc(4rem+var(--sat))]">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsMobileMenuOpen(true)}
@@ -486,7 +487,7 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 pt-16 md:pt-0 overflow-hidden min-h-0">
+      <main className="flex-1 pt-[calc(4rem+var(--sat))] md:pt-0 overflow-hidden min-h-0">
         <Outlet />
       </main>
 

@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS safe area inset exposed as a CSS variable so Tailwind arbitrary values can reference it */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
