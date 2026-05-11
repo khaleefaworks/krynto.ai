@@ -2,12 +2,12 @@ This document is for me to track the identifying bugs. I will only decide when t
 
 1) Some tasks pending in SAAS_REFACTOR_PLAN.md ✅ DONE
 
-Phase 5 Audit — 3 items still pending:
+Phase 5 Audit — ✅ ALL DONE
 
 #	Task	Status
-3	Multi-conversation widget flow tests — rating guard and unread aggregate subtests missing (active/history separation test exists)	Partial
-6	Agent resolve shows rating popup without requiring closing automation — no test	Missing
-8	JWT organization_id tampering test — no test	Missing
+3	Multi-conversation widget flow tests — rating guard and unread aggregate subtests missing (active/history separation test exists)	✅ DONE
+6	Agent resolve shows rating popup without requiring closing automation — no test	✅ DONE
+8	JWT organization_id tampering test — no test	✅ DONE
 
 2) Assign team dropdown in chat page not having create team button same like Tag Conversation dropdown. ✅ FIXED — Added "Manage teams" link in team picker popover (visible to admins)
 
@@ -26,7 +26,7 @@ Phase 5 Audit — 3 items still pending:
 
 6) Widget CSS & JS need to be optimized. ✅ DONE
 
-7) Setup Guide in Dashboard needs to be redesigned.
+7) Setup Guide in Dashboard needs to be redesigned. ✅ DONE — Replaced complex multi-step wizard with a minimal checklist modal: toggle-done icon per row (strikethrough when done), thin progress bar, click row to navigate to the relevant settings page, "Don't show again" dismiss, green completion footer. localStorage-scoped per org+user.
 
 8) demo page - dark/light mode should be store in local storage and apply on reload. ✅ FIXED — localStorage persistence added to demo.html
 
