@@ -67,6 +67,10 @@ class User(Base):
     temp_lockout_until = Column(DateTime(timezone=True), nullable=True)
     is_locked_out = Column(Boolean, default=False, nullable=False)
 
+    # Send push notifications even when the agent is offline (is_available=False).
+    # Enabled by default so agents are notified about new chats and can come online.
+    push_when_offline = Column(Boolean, default=True, nullable=False, server_default="true")
+
     # Per-user notification sound preferences stored as JSON.
     # Keys: new_chat_sound, message_sound, new_visitor_website_sound (filename strings)
     notification_preferences = Column(JSON, nullable=True, default=None)

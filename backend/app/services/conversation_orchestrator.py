@@ -65,12 +65,22 @@ def _get_eligible_agent_ids_for_push(
     org_id = website.organization_id
     eligible: set[int] = set()
 
-    # SYSTEM_MANAGER — active + available system managers (cross-org)
+    import sqlalchemy as sa
+
+    # An agent is push-eligible if they are online (is_available=True) OR
+    # they have opted in to offline push notifications (push_when_offline=True).
+    def _push_reachable():
+        return sa.or_(
+            User.is_available == True,   # noqa: E712
+            User.push_when_offline == True,  # noqa: E712
+        )
+
+    # SYSTEM_MANAGER — active, push-reachable system managers (cross-org)
     sys_mgrs = (
         db.query(User)
         .filter(
             User.is_active == True,   # noqa: E712
-            User.is_available == True,  # noqa: E712
+            _push_reachable(),
             User.role == UserRole.SYSTEM_MANAGER,
         )
         .all()
@@ -83,7 +93,7 @@ def _get_eligible_agent_ids_for_push(
             db.query(User)
             .filter(
                 User.is_active == True,   # noqa: E712
-                User.is_available == True,  # noqa: E712
+                _push_reachable(),
                 User.organization_id == org_id,
                 User.role.in_([UserRole.OWNER, UserRole.MANAGER]),
             )
@@ -124,7 +134,7 @@ def _get_eligible_agent_ids_for_push(
                 .filter(
                     User.id.in_(agent_candidates),
                     User.is_active == True,   # noqa: E712
-                    User.is_available == True,  # noqa: E712
+                    _push_reachable(),
                 )
                 .all()
             )

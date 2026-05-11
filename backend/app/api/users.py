@@ -705,6 +705,7 @@ class NotificationPreferences(BaseModel):
     new_chat_sound: str = 'new-notification.mp3'
     message_sound: str = 'notification.mp3'
     new_visitor_website_sound: str = ''
+    push_when_offline: bool = True
 
 
 _ALLOWED_SOUNDS = {
@@ -723,6 +724,7 @@ def get_notification_preferences(
         new_chat_sound=prefs.get('new_chat_sound', 'new-notification.mp3'),
         message_sound=prefs.get('message_sound', 'notification.mp3'),
         new_visitor_website_sound=prefs.get('new_visitor_website_sound', ''),
+        push_when_offline=bool(getattr(current_user, 'push_when_offline', True)),
     )
 
 
@@ -741,9 +743,13 @@ def update_notification_preferences(
         'message_sound': payload.message_sound,
         'new_visitor_website_sound': payload.new_visitor_website_sound,
     }
+    current_user.push_when_offline = payload.push_when_offline
     db.add(current_user)
     db.commit()
-    return NotificationPreferences(**current_user.notification_preferences)
+    return NotificationPreferences(
+        **current_user.notification_preferences,
+        push_when_offline=bool(current_user.push_when_offline),
+    )
 
 
 class VerifyPasswordRequest(BaseModel):

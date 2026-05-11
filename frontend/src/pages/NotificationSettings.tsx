@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bell, BellOff, Volume2, Play, HelpCircle, RefreshCcw, AlertTriangle, Lock, Unlock, CheckCircle2 } from 'lucide-react'
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from '@/services/push'
 import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound, setNotificationAudioSink, ensureHardwareLabelsUnlocked } from '@/lib/notificationSound'
-import { saveNotificationPreferences, syncPrefsToLocalStorage } from '@/services/notificationPrefs'
+import { saveNotificationPreferences, fetchNotificationPreferences, syncPrefsToLocalStorage } from '@/services/notificationPrefs'
 
 const SOUND_VERSION = '2024.04.29.v1' // Force update version
 
@@ -80,6 +80,8 @@ export default function NotificationSettings() {
     )
     const [vapidPublicKeyPresent, setVapidPublicKeyPresent] = useState<boolean | null>(null)
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+    const [pushWhenOffline, setPushWhenOffline] = useState(true)
+    const [pushWhenOfflineSaving, setPushWhenOfflineSaving] = useState(false)
 
     // Sound preferences
     const [newChatSound, setNewChatSound] = useState(() => getSaved(SOUND_PREF_KEYS.newChat, 'alarm.mp3'))
@@ -110,11 +112,13 @@ export default function NotificationSettings() {
             setMessageSound('blackberry2.mp3')
             setVisitorSound('simplesms.mp3')
             
-            // Also force-sync to API
+            // Also force-sync to API (preserve push_when_offline from localStorage)
+            const _pwo = (() => { try { const v = localStorage.getItem('notif_push_when_offline'); return v !== null ? v !== 'false' : true } catch { return true } })()
             const prefs = {
                 new_chat_sound: 'alarm.mp3',
                 message_sound: 'blackberry2.mp3',
                 new_visitor_website_sound: 'simplesms.mp3',
+                push_when_offline: _pwo,
             }
             syncPrefsToLocalStorage(prefs)
             saveNotificationPreferences(prefs).catch(() => {})
@@ -188,10 +192,12 @@ export default function NotificationSettings() {
         try { localStorage.setItem(SOUND_PREF_KEYS[key], value) } catch { }
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
+            const pwo = (() => { try { const v = localStorage.getItem('notif_push_when_offline'); return v !== null ? v !== 'false' : true } catch { return true } })()
             const prefs = {
                 new_chat_sound: key === 'newChat' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newChat) ?? 'alarm.mp3'),
                 message_sound: key === 'message' ? value : (localStorage.getItem(SOUND_PREF_KEYS.message) ?? 'blackberry2.mp3'),
                 new_visitor_website_sound: key === 'newVisitorWebsite' ? value : (localStorage.getItem(SOUND_PREF_KEYS.newVisitorWebsite) ?? 'simplesms.mp3'),
+                push_when_offline: pwo,
             }
             syncPrefsToLocalStorage(prefs)
             saveNotificationPreferences(prefs).catch(() => { })
@@ -239,6 +245,40 @@ export default function NotificationSettings() {
             })()
         return () => { cancelled = true }
     }, [])
+
+    // Load push_when_offline preference from server on mount
+    useEffect(() => {
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const prefs = await fetchNotificationPreferences()
+                    if (!cancelled) setPushWhenOffline(prefs.push_when_offline)
+                } catch {
+                    // keep default true
+                }
+            })()
+        return () => { cancelled = true }
+    }, [])
+
+    const handlePushWhenOfflineToggle = async (value: boolean) => {
+        setPushWhenOffline(value)
+        setPushWhenOfflineSaving(true)
+        try {
+            const current = {
+                new_chat_sound: localStorage.getItem(SOUND_PREF_KEYS.newChat) ?? 'alarm.mp3',
+                message_sound: localStorage.getItem(SOUND_PREF_KEYS.message) ?? 'blackberry2.mp3',
+                new_visitor_website_sound: localStorage.getItem(SOUND_PREF_KEYS.newVisitorWebsite) ?? '',
+                push_when_offline: value,
+            }
+            await saveNotificationPreferences(current)
+            try { localStorage.setItem('notif_push_when_offline', String(value)) } catch { }
+        } catch {
+            setPushWhenOffline(!value) // revert on failure
+            setMessage({ type: 'error', text: 'Failed to save preference.' })
+        } finally {
+            setPushWhenOfflineSaving(false)
+        }
+    }
 
     const pushGranted = pushPermission === 'granted'
     const pushReady = isPushSupported() && vapidPublicKeyPresent !== false
@@ -329,6 +369,31 @@ export default function NotificationSettings() {
                         )}
                         {pushPermission === 'denied' && (
                             <p className="mt-2 text-xs text-red-600 dark:text-red-400">Blocked in browser settings. Update site permissions to allow.</p>
+                        )}
+
+                        {/* Notify when offline toggle — shown only when push is granted */}
+                        {pushGranted && (
+                            <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50">
+                                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <Bell className="h-4 w-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-gray-900 dark:text-white">Notify when offline</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Receive push notifications even when your status is set to offline</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={pushWhenOffline}
+                                        disabled={pushWhenOfflineSaving}
+                                        onClick={() => handlePushWhenOfflineToggle(!pushWhenOffline)}
+                                        className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 ${pushWhenOffline ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
+                                    >
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${pushWhenOffline ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </button>
+                                </div>
+                            </div>
                         )}
                     </div>
 

@@ -5,6 +5,7 @@ export interface NotificationPreferences {
     new_chat_sound: string
     message_sound: string
     new_visitor_website_sound: string
+    push_when_offline: boolean
 }
 
 export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
@@ -35,9 +36,13 @@ export function readPrefsFromLocalStorage(): NotificationPreferences {
     const get = (key: string, fallback: string) => {
         try { const v = localStorage.getItem(key); return v !== null ? v : fallback } catch { return fallback }
     }
+    const getBool = (key: string, fallback: boolean) => {
+        try { const v = localStorage.getItem(key); return v !== null ? v === 'true' : fallback } catch { return fallback }
+    }
     return {
         new_chat_sound: get(SOUND_PREF_KEYS.newChat, 'new-notification.mp3'),
         message_sound: get(SOUND_PREF_KEYS.message, 'notification.mp3'),
         new_visitor_website_sound: get(SOUND_PREF_KEYS.newVisitorWebsite, ''),
+        push_when_offline: getBool('notif_push_when_offline', true),
     }
 }
