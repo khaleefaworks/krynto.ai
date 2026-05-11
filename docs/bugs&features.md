@@ -205,7 +205,7 @@ Recommended fix:
 Relevant files: widget/chat-widget.js, backend/app/api/conversations.py, frontend/src/pages/ConversationsView.tsx
 
 48) Agent role getting 403 on GET /users in chat page.
-Status: Open
+Status: ✅ DONE
 Notes:
 - Browser console shows: `GET http://localhost:8000/users 403 (Forbidden)` when an agent logs in and views the chat page.
 - The `/users` endpoint is likely restricted to admin roles only, but the chat page (or a component it loads) is calling it regardless of role.

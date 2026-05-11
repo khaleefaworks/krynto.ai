@@ -21,6 +21,7 @@ export type ActiveChat = {
   status: string
   is_handoff: boolean
   assigned_agent_id: number | null
+  assigned_agent?: { id: number; name: string | null; avatar_url: string | null } | null
   current_agent_id?: number | null  // Alias for assigned_agent_id
   message_count: number
   unread_count?: number

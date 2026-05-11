@@ -47,6 +47,23 @@ def _utc_iso(dt) -> str | None:
     return s
 
 
+def _fetch_agents_by_ids(db: Session, agent_ids: set[int]) -> dict[int, dict]:
+    """Batch-fetch minimal agent info for a set of user IDs.
+    Returns a dict keyed by user id with {id, name, avatar_url} values.
+    """
+    if not agent_ids:
+        return {}
+    users = db.query(User.id, User.name, User.avatar_url).filter(User.id.in_(agent_ids)).all()
+    return {
+        int(u.id): {
+            "id": int(u.id),
+            "name": str(u.name) if u.name else None,
+            "avatar_url": str(u.avatar_url) if u.avatar_url else None,
+        }
+        for u in users
+    }
+
+
 def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> None:
     scope = compute_visibility_scope(db, user=current_user)
 
@@ -206,6 +223,11 @@ def get_active_chats(
             .all()
         }
 
+    # Batch-fetch agent info for all assigned conversations (avoids N+1 and
+    # eliminates the need for a separate GET /users call on the frontend).
+    assigned_ids = {int(conv.assigned_agent_id) for conv, *_ in rows if conv.assigned_agent_id is not None}
+    agents_map = _fetch_agents_by_ids(db, assigned_ids)
+
     result = []
     for conv, website_name, message_count, last_message, last_message_at in rows:
         website_name_val = website_name or f"Website {conv.website_id}"
@@ -230,6 +252,7 @@ def get_active_chats(
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "is_handoff": conv.is_handoff if conv.is_handoff is not None else False,
                 "assigned_agent_id": conv.assigned_agent_id,
+                "assigned_agent": agents_map.get(int(conv.assigned_agent_id)) if conv.assigned_agent_id else None,
                 "closed_by": getattr(conv, "closed_by", None),
                 "visitor_ended": int(conv.id) in visitor_ended_ids,
                 "message_count": int(message_count or 0),
@@ -271,6 +294,9 @@ def get_chat_summary(
     website = db.query(Website).filter_by(id=conv.website_id).first()
     website_name = (website.name if website else None) or f"Website {conv.website_id}"
 
+    agent_id = getattr(conv, "assigned_agent_id", None)
+    agents_map = _fetch_agents_by_ids(db, {int(agent_id)} if agent_id else set())
+
     return {
         "id": int(conv.id),
         "short_id": conv.short_id,
@@ -291,7 +317,8 @@ def get_chat_summary(
         "is_online": int(conv.id) in ChatService.active_visitors,
         "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
-        "assigned_agent_id": getattr(conv, "assigned_agent_id", None),
+        "assigned_agent_id": agent_id,
+        "assigned_agent": agents_map.get(int(agent_id)) if agent_id else None,
         "closed_by": getattr(conv, "closed_by", None),
         "visitor_ended": bool(getattr(conv, "visitor_ended", False)),
         "title": getattr(conv, "title", None),
@@ -409,6 +436,9 @@ def get_resolved_conversations(
         date_to=_parse_date(date_to),
     )
 
+    assigned_ids = {int(conv.assigned_agent_id) for conv, *_ in rows if conv.assigned_agent_id is not None}
+    agents_map = _fetch_agents_by_ids(db, assigned_ids)
+
     result = []
     for conv, website_name, message_count, last_message, last_message_at in rows:
         website_name_val = website_name or f"Website {conv.website_id}"
@@ -432,6 +462,7 @@ def get_resolved_conversations(
                 "last_seen_at": _utc_iso(getattr(conv, "last_seen_at", None)),
                 "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
+                "assigned_agent": agents_map.get(int(conv.assigned_agent_id)) if conv.assigned_agent_id else None,
                 "closed_by": getattr(conv, "closed_by", None),
                 "title": getattr(conv, "title", None),
                 "message_count": int(message_count or 0),

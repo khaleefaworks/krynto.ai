@@ -490,15 +490,18 @@ export default function ConversationsView() {
         }
     }, [])
 
-    // Load agents list for advanced filters
+    // Load agents list for advanced filters (admin-only — GET /users is restricted to admins).
+    // Agents don't see the agent-filter dropdown so they never need this list.
     useEffect(() => {
         let cancelled = false
             ; (async () => {
-                try {
-                    const data = await apiRequest<any[]>('/users')
-                    if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email, avatar_url: u.avatar_url ?? null })) : [])
-                } catch {
-                    if (!cancelled) setAgentsList([])
+                if (isAdmin(user)) {
+                    try {
+                        const data = await apiRequest<any[]>('/users')
+                        if (!cancelled) setAgentsList(Array.isArray(data) ? data.map((u: any) => ({ id: u.id, name: u.name || u.email, email: u.email, avatar_url: u.avatar_url ?? null })) : [])
+                    } catch {
+                        if (!cancelled) setAgentsList([])
+                    }
                 }
                 try {
                     const data = await apiRequest<any[]>('/teams/overview')
@@ -2341,20 +2344,21 @@ export default function ConversationsView() {
                                                 title={conversationDisplayName(chat as any)}
                                             />
                                             {(chat as any).assigned_agent_id && (() => {
-                                                const agent = agentsList.find((a) => a.id === (chat as any).assigned_agent_id)
-                                                const agentAvatarUrl = agent?.avatar_url
-                                                    ? (String(agent.avatar_url).startsWith('http') ? agent.avatar_url : `${API_BASE}${agent.avatar_url}`)
+                                                const agent = (chat as any).assigned_agent as { id: number; name: string | null; avatar_url: string | null } | null | undefined
+                                                const rawUrl = agent?.avatar_url ?? null
+                                                const agentAvatarUrl = rawUrl
+                                                    ? (String(rawUrl).startsWith('http') ? rawUrl : `${API_BASE}${rawUrl}`)
                                                     : null
                                                 return (
                                                     <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
                                                         title={agent?.name || `Agent #${(chat as any).assigned_agent_id}`}
                                                     >
                                                         <UserAvatar
-                                                            seed={agent?.email || String((chat as any).assigned_agent_id)}
+                                                            seed={String((chat as any).assigned_agent_id)}
                                                             imageUrl={agentAvatarUrl}
                                                             className="w-4 h-4"
                                                             iconClassName="w-4 h-4"
-                                                            title={agent?.name}
+                                                            title={agent?.name ?? undefined}
                                                         />
                                                     </div>
                                                 )
