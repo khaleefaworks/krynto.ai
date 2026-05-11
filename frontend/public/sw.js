@@ -80,7 +80,9 @@ self.addEventListener('fetch', (event) => {
                 if (cached) return cached
                 try {
                     const res = await fetch(event.request)
-                    if (res.ok) cache.put(event.request, res.clone())
+                    // Cache API rejects partial responses (HTTP 206 from range requests
+                    // used by audio/video). Only cache full 200 responses.
+                    if (res.ok && res.status !== 206) cache.put(event.request, res.clone())
                     return res
                 } catch {
                     return cached || Response.error()
