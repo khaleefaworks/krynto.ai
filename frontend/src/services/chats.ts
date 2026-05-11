@@ -106,13 +106,37 @@ export async function closeConversation(chatId: number): Promise<{ success: bool
   })
 }
 
-export async function fetchClosedConversations(websiteId?: number, agentId?: number, limit: number = 50): Promise<ActiveChat[]> {
+export interface ClosedConversationFilters {
+  websiteId?: number
+  agentId?: number
+  limit?: number
+  offset?: number
+  search?: string
+  teamId?: number
+  tagIds?: number[]
+  dateFrom?: string
+  dateTo?: string
+}
+
+export async function fetchClosedConversations(
+  websiteId?: number,
+  agentId?: number,
+  limit: number = 50,
+  offset: number = 0,
+  filters?: Omit<ClosedConversationFilters, 'websiteId' | 'agentId' | 'limit' | 'offset'>
+): Promise<ActiveChat[]> {
   const token = useAppStore.getState().token
 
   const params = new URLSearchParams()
   if (websiteId) params.append('website_id', websiteId.toString())
   if (agentId) params.append('agent_id', agentId.toString())
   if (limit) params.append('limit', limit.toString())
+  if (offset) params.append('offset', offset.toString())
+  if (filters?.search) params.append('search', filters.search)
+  if (filters?.teamId) params.append('team_id', filters.teamId.toString())
+  if (filters?.tagIds?.length) params.append('tag_ids', filters.tagIds.join(','))
+  if (filters?.dateFrom) params.append('date_from', filters.dateFrom)
+  if (filters?.dateTo) params.append('date_to', filters.dateTo)
 
   const query = params.toString() ? `?${params.toString()}` : ''
 
@@ -121,6 +145,29 @@ export async function fetchClosedConversations(websiteId?: number, agentId?: num
       Authorization: `Bearer ${token}`,
     },
   })
+}
+
+export async function fetchResolvedCount(
+  filters?: Omit<ClosedConversationFilters, 'limit' | 'offset'>
+): Promise<number> {
+  const token = useAppStore.getState().token
+
+  const params = new URLSearchParams()
+  if (filters?.websiteId) params.append('website_id', filters.websiteId.toString())
+  if (filters?.agentId) params.append('agent_id', filters.agentId.toString())
+  if (filters?.search) params.append('search', filters.search)
+  if (filters?.teamId) params.append('team_id', filters.teamId.toString())
+  if (filters?.tagIds?.length) params.append('tag_ids', filters.tagIds.join(','))
+  if (filters?.dateFrom) params.append('date_from', filters.dateFrom)
+  if (filters?.dateTo) params.append('date_to', filters.dateTo)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  const result = await apiRequest<{ total: number }>(`/chats/resolved/count${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  return result.total
 }
 
 export async function fetchChatSummary(chatId: number): Promise<ActiveChat> {

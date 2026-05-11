@@ -20,7 +20,7 @@ export default function ConversationHistory() {
     try {
       setLoading(true)
       setError(null)
-      const data = await fetchClosedConversations(undefined, undefined, 100)
+      const data = await fetchClosedConversations(undefined, undefined, 50, 0)
       setClosedChats(data)
     } catch (err: any) {
       setError(err.message || 'Failed to fetch conversation history')

@@ -10,6 +10,16 @@ from app.api.deps import require_authenticated_user
 from app.models.user import User
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime, timezone
+
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 from app.core.message_presenter import serialize_message
 from app.repos import conversations as conversations_repo
@@ -320,11 +330,56 @@ def get_chat_messages(
     return result
 
 
+@router.get("/resolved/count")
+def count_resolved_conversations(
+    website_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    search: Optional[str] = None,
+    team_id: Optional[int] = None,
+    tag_ids: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Return total count of resolved conversations matching visibility scope and filters."""
+    scope = compute_visibility_scope(db, user=current_user)
+
+    if scope.website_ids is not None and not scope.website_ids:
+        return {"total": 0}
+
+    if website_id is not None and scope.website_ids is not None:
+        if int(website_id) not in set(scope.website_ids):
+            return {"total": 0}
+
+    total = conversations_repo.resolved_conversations_count(
+        db,
+        website_id=website_id,
+        website_ids=None if (website_id is not None or scope.website_ids is None) else scope.website_ids,
+        team_ids=scope.team_ids,
+        organization_id=scope.organization_id,
+        agent_id=agent_id,
+        search=search.strip() if search else None,
+        filter_team_id=team_id,
+        filter_tag_ids=[int(t) for t in tag_ids.split(",") if t.strip()] if tag_ids else None,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
+    )
+
+    return {"total": total}
+
+
 @router.get("/resolved/history")
 def get_resolved_conversations(
     website_id: Optional[int] = None,
     agent_id: Optional[int] = None,
     limit: int = 50,
+    offset: int = 0,
+    search: Optional[str] = None,
+    team_id: Optional[int] = None,
+    tag_ids: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
@@ -346,6 +401,12 @@ def get_resolved_conversations(
         organization_id=scope.organization_id,
         agent_id=agent_id,
         limit=limit,
+        offset=offset,
+        search=search.strip() if search else None,
+        filter_team_id=team_id,
+        filter_tag_ids=[int(t) for t in tag_ids.split(",") if t.strip()] if tag_ids else None,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
     )
 
     result = []
