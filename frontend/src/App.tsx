@@ -38,7 +38,7 @@ import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
 import NotificationPermissionPrompt from './components/NotificationPermissionPrompt'
-import { installNotificationSoundArm, playMessageNotificationSound, playNewVisitorNotificationSound } from './lib/notificationSound'
+import { installNotificationSoundArm, playMessageNotificationSound, playNewVisitorNotificationSound, resumeAudioContextIfSuspended } from './lib/notificationSound'
 import { fetchNotificationPreferences, syncPrefsToLocalStorage } from './services/notificationPrefs'
 import { API_BASE } from './config/endpoints'
 
@@ -108,7 +108,7 @@ function App() {
     const sw = navigator.serviceWorker
     if (!sw) return
 
-    const handler = (event: MessageEvent) => {
+    const handler = async (event: MessageEvent) => {
       try {
         const data: any = event?.data || {}
         if (data?.type !== 'push') return
@@ -117,6 +117,10 @@ function App() {
         // WS event handler. In hidden tabs, WS event audio is blocked by autoplay
         // policy, so the SW postMessage is the reliable trigger for sound.
         if (!document.hidden) return
+
+        // AudioContext can be suspended after prolonged background inactivity.
+        // Resume it before attempting playback so the synthesized-tone fallback works.
+        await resumeAudioContextIfSuspended()
 
         const title = String(data?.title || '')
         try {

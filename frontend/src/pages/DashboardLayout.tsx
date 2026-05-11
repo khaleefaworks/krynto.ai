@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { updateAvailability } from '@/services/auth'
 import Logo from '@/components/Logo'
 import OnboardingWizard, { dismissOnboarding } from '@/components/OnboardingWizard'
+import InstallPromptBanner from '@/components/InstallPromptBanner'
 
 import { API_BASE } from '@/config/endpoints'
 
@@ -498,6 +499,7 @@ export default function DashboardLayout() {
           setWizardOpen(false)
         }}
       />
+      <InstallPromptBanner />
     </div>
   )
 }

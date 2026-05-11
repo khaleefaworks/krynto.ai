@@ -1,8 +1,6 @@
 let audioContext: AudioContext | null = null
 let isArmed = false
 
-const _audioBaseCache = new Map<string, HTMLAudioElement>()
-
 // localStorage keys for user-configurable notification sounds
 export const SOUND_PREF_KEYS = {
   newChat: 'notif_sound_new_chat',
@@ -69,45 +67,16 @@ function _getEffectiveSinkId(): string {
   }
 }
 
-function _getOrCreateBaseAudio(url: string): HTMLAudioElement | null {
-  if (typeof window === 'undefined') return null
-  if (!url) return null
-  try {
-    const existing = _audioBaseCache.get(url)
-    if (existing) return existing
-
-    const a = new Audio(url)
-    a.preload = 'auto'
-    _audioBaseCache.set(url, a)
-    
-    // Apply sinkId if configured
-    const sinkId = _getEffectiveSinkId()
-    if (typeof (a as any).setSinkId === 'function') {
-      (a as any).setSinkId(sinkId).catch(() => {})
-    }
-    
-    return a
-  } catch {
-    return null
-  }
-}
 
 /**
- * Updates the output device for all cached and future notification sounds.
+ * Updates the output device for future notification sounds.
  * @param sinkId The device ID from navigator.mediaDevices.enumerateDevices()
  */
 export async function setNotificationAudioSink(sinkId: string): Promise<void> {
   try {
     localStorage.setItem(SOUND_PREF_KEYS.sinkId, sinkId)
     const effectiveSinkId = sinkId === 'default' ? '' : sinkId
-    
-    // Update cached audio elements
-    for (const audio of _audioBaseCache.values()) {
-      if (typeof (audio as any).setSinkId === 'function') {
-        try { await (audio as any).setSinkId(effectiveSinkId) } catch { }
-      }
-    }
-    
+
     // Update AudioContext
     const ctx = getAudioContext()
     if (ctx && typeof (ctx as any).setSinkId === 'function') {
@@ -118,16 +87,32 @@ export async function setNotificationAudioSink(sinkId: string): Promise<void> {
   }
 }
 
+/**
+ * Resumes a suspended AudioContext if needed.
+ * AudioContext can be suspended by the browser in background tabs after inactivity.
+ * Call this before playing a sound when the tab may have been idle for a while.
+ */
+export async function resumeAudioContextIfSuspended(): Promise<void> {
+  const ctx = getAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume() } catch { }
+  }
+}
+
 function _preloadKnownSounds(): void {
   try {
-    // Preload all configured sounds at arm time
     const urls = [
       _getSoundUrl('newChat'),
       _getSoundUrl('message'),
       _getSoundUrl('newVisitorWebsite'),
     ].filter(Boolean)
     for (const url of urls) {
-      try { _getOrCreateBaseAudio(url)?.load() } catch { }
+      try {
+        const a = new Audio(url)
+        a.preload = 'auto'
+        a.load()
+      } catch { }
     }
   } catch {
     // ignore
@@ -135,23 +120,20 @@ function _preloadKnownSounds(): void {
 }
 
 function _playFile(url: string): void {
-  const base = _getOrCreateBaseAudio(url)
-  if (!base) return
+  if (typeof window === 'undefined' || !url) return
   try {
-    // Clone so rapid/overlapping beeps still play.
-    const a = base.cloneNode(true) as HTMLAudioElement
-    a.preload = 'auto'
-    a.currentTime = 0
-    // Keep volume at 1.0 for now (OS / browser volume control is still respected).
+    // Create a fresh Audio each time — cloneNode(true) does not reliably copy
+    // the decoded audio source across browsers, especially in background tabs.
+    const a = new Audio(url)
     a.volume = 1.0
-    
-    // Apply sinkId if configured
+
     const sinkId = _getEffectiveSinkId()
     if (typeof (a as any).setSinkId === 'function') {
-      (a as any).setSinkId(sinkId).catch(() => {})
+      ;(a as any).setSinkId(sinkId).catch(() => {})
     }
-    
-    void a.play()
+
+    // Properly handle autoplay rejection (browser policy in inactive tabs).
+    a.play().catch(() => {})
   } catch {
     // ignore
   }

@@ -1,21 +1,45 @@
 {
     "name": "AI ChatAssist",
     "short_name": "ChatAssist",
-    "start_url": "/",
+    "description": "Live chat support dashboard — manage conversations and support visitors in real time.",
+    "lang": "en",
+    "start_url": "/dashboard/chats",
     "scope": "/",
     "display": "standalone",
+    "display_override": ["window-controls-overlay", "standalone"],
+    "orientation": "portrait-primary",
     "background_color": "#ffffff",
-    "theme_color": "#ffffff",
+    "theme_color": "#3b82f6",
+    "prefer_related_applications": false,
+    "categories": ["business", "productivity"],
     "icons": [
         {
             "src": "/android-chrome-192x192.png",
             "sizes": "192x192",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "/android-chrome-512x512.png",
             "sizes": "512x512",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Active Chats",
+            "short_name": "Chats",
+            "description": "View and respond to active conversations",
+            "url": "/dashboard/chats",
+            "icons": [{ "src": "/android-chrome-192x192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Visitors",
+            "short_name": "Visitors",
+            "description": "See who is browsing your websites right now",
+            "url": "/dashboard/customers/visitors",
+            "icons": [{ "src": "/android-chrome-192x192.png", "sizes": "192x192" }]
         }
     ]
 }
