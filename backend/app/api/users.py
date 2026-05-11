@@ -784,7 +784,9 @@ def change_my_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect",
         )
+    from datetime import datetime, timezone
     current_user.password_hash = get_password_hash(payload.new_password)
+    current_user.password_changed_at = datetime.now(timezone.utc)
     db.add(current_user)
     db.commit()
     return {"message": "Password changed successfully"}

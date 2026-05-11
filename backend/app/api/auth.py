@@ -798,6 +798,7 @@ async def register(
             existing_user.is_email_verified = False
             existing_user.name = register_request.name
             existing_user.password_hash = get_password_hash(register_request.password)
+            existing_user.password_changed_at = datetime.now(timezone.utc)
             existing_user.role = register_request.role
 
             # Fresh VerificationToken for re-invited user (48-hour TTL)
