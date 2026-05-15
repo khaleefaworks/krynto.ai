@@ -125,3 +125,46 @@ This file summarizes the tasks we planned in the long chat thread and their curr
 ## Recent commits (reference)
 - `ceaaffd` Fix unread UX and widget welcome automation
 - `a64defa` Fix WebSocket auth timezone mismatch
+- `4944a98` fix(visitors): move session presence to Redis for multi-worker consistency — I2 ✅
+- `b601fd9` fix(frontend): prevent infinite chat spinner on direct URL navigation — I1 ✅
+
+## Bug / improvement fixes (May 2026)
+
+### I2 — Visitors page split-brain (✅ FIXED — `4944a98`)
+- Root cause: per-worker in-memory `_session_presence` dict lost events across Gunicorn workers
+- Fix: presence keys stored in Redis with TTL + heartbeat renewal
+
+### I1 — Direct URL infinite spinner (✅ FIXED — `b601fd9`)
+- Root cause: `loadChatData(showSpinner=false)` incremented `loadMessagesTokenRef`, causing
+  the `showSpinner=true` finally-block token check to fail and leave `chatLoading` stuck
+- Fix: separate `chatLoadingTokenRef` that only gets set when `showSpinner=true`
+
+### A1+A2 — Analytics conversation miscounts (✅ FIXED)
+Root causes:
+1. `CONVERSATION_RESUME_CUTOFF_HOURS = 24` in `get_or_create_conversation` created a new row
+   for every returning visitor after 24 h idle → row explosion (2103 rows in 7 days, most empty)
+2. `auto_close_scheduler` bulk-closed conversations as `'inactivity'` / `'system_auto'` →
+   inflated `total_resolved` and `resolved_conversations_chart` analytics
+
+Fixes applied:
+- **Removed 24 h cutoff** from `repos/conversations.py::get_open_conversation_by_session`
+  and `services/conversation_service.py::get_or_create_conversation`
+  → OPEN conversations now stay resumable until explicitly resolved
+- **Disabled inactivity scheduler jobs** in `services/auto_close_scheduler.py`
+  (`_run_auto_close` hourly + `_run_auto_resolve_visitor_ended` 30-min jobs removed from scheduler)
+- **Analytics A1**: `total_new` + `new_conversations_chart` now filter
+  `last_visitor_message_at IS NOT NULL` — excludes bounce / bot-only sessions
+- **Analytics A2**: `total_resolved` + `resolved_conversations_chart` now exclude
+  `closed_by IN ('inactivity', 'system_auto')` — historical scheduler closures no longer inflate count
+- **Race condition guard**: `IntegrityError` handling added around the INSERT in
+  `get_or_create_conversation`; partial unique index
+  `conversations_open_session_unique ON conversations(website_id, session_id) WHERE status='open'`
+  ensures at most one OPEN row per session
+- **Dead column cleanup**: `conversations.mode` (orphan, not in model) and `conversations.title`
+  (always NULL, auto-generation removed) dropped via migration `c7d8e9f0a1b2`
+
+### DB schema audit tool (✅ NEW — `backend/db_audit.py`)
+- `bench trim-tables`-style CLI for this project
+- Detects orphaned columns (DB-only), always-null columns, ghost tables
+- Supports `--null-threshold`, `--generate-sql`, `--execute`
+- See `backend/README.md § Database schema audit` for full usage

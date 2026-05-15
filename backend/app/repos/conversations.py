@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.conversation_tag import ConversationTag
 from app.models.message import Message
 from app.models.website import Website
-
-# After this many hours of inactivity the visitor gets a fresh conversation instead
-# of resuming the old thread.
-CONVERSATION_RESUME_CUTOFF_HOURS = 24
 
 
 def get_conversation_by_id(db: Session, conversation_id: int) -> Conversation | None:
@@ -23,7 +18,13 @@ def get_conversation_by_short_id(db: Session, short_id: str) -> Conversation | N
 
 
 def get_open_conversation_by_session(db: Session, *, website_id: int, session_id: str) -> Conversation | None:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
+    """Return the most-recent OPEN non-visitor-ended conversation for this session.
+
+    There is no inactivity cutoff: once a conversation is OPEN it stays resumable
+    until an agent or visitor explicitly resolves / ends it.  The partial unique
+    index on (website_id, session_id) WHERE status='open' guarantees at most one
+    row matches, making the ORDER BY / LIMIT 1 a safety net only.
+    """
     return (
         db.query(Conversation)
         .filter(
@@ -31,7 +32,6 @@ def get_open_conversation_by_session(db: Session, *, website_id: int, session_id
             Conversation.website_id == website_id,
             Conversation.status == ConversationStatus.OPEN,
             Conversation.visitor_ended == False,  # noqa: E712
-            Conversation.updated_at > cutoff,
         )
         .order_by(Conversation.id.desc())
         .first()

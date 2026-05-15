@@ -67,9 +67,6 @@ class Conversation(Base, TimestampMixin):
     # agents to follow up, but the visitor gets a fresh conversation on next connect.
     visitor_ended = Column(Boolean, nullable=False, default=False, server_default='false')
 
-    # Auto-generated title from the first visitor message (up to 60 chars)
-    title = Column(String(120), nullable=True)
-
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)

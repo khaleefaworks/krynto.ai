@@ -142,10 +142,14 @@ def conversation_summary(
             }
         base = base.filter(Conversation.website_id.in_(allowed_ids))
 
-    total_new = base.count()
+    total_new = base.filter(
+        Conversation.last_visitor_message_at.isnot(None),
+    ).count()
 
     total_resolved = base.filter(
         Conversation.status == ConversationStatus.RESOLVED,
+        Conversation.last_visitor_message_at.isnot(None),
+        Conversation.closed_by.notin_(['inactivity', 'system_auto']),
     ).count()
 
     # Replied = conversations that have at least one agent message
@@ -228,6 +232,7 @@ def new_conversations_chart(
         .filter(
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
         )
         .group_by(func.date(Conversation.created_at))
     )
@@ -265,6 +270,8 @@ def resolved_conversations_chart(
         )
         .filter(
             Conversation.status == ConversationStatus.RESOLVED,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.closed_by.notin_(['inactivity', 'system_auto']),
             Conversation.updated_at >= start_dt,
             Conversation.updated_at <= end_dt,
         )
