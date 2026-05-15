@@ -22,8 +22,8 @@
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| I1 | **Notification "Cold Start" Buffering** | When the app is launched directly from a Web Push notification (agent was offline/closed), the chat window gets stuck in an infinite loading loop. Fix: buffer the deep-link target and resolve it after the WebSocket finishes handshake + initial data load. | High |
-| I2 | **Visitors Page – Unstable Counts (Split Brain)** | Online visitor count fluctuates wildly on refresh because each Gunicorn worker keeps presence in local memory. Workers disagree on who is online. Fix: move the online-visitor registry from per-worker in-memory dicts into Redis (similar to how the RealtimeBus already uses Redis for agent events). | High |
+| I1 | **Notification "Cold Start" Buffering** ✅ FIXED | Direct-URL navigation (`/dashboard/chats/:id`) caused an infinite chat-panel spinner. Root cause: `loadChatData(showSpinner=true)` set `chatLoading=true` with token T; a racing `loadChatData(showSpinner=false)` (from WS `connected` or other events) bumped `loadMessagesTokenRef` to T+1; the original call's `finally` checked `loadMessagesTokenRef.current === T` → false → `setChatLoading(false)` never called. Fix: added `chatLoadingTokenRef` (only updated when `showSpinner=true`); `finally` now checks `chatLoadingTokenRef.current === token` so silent reloads cannot orphan the spinner. | High |
+| I2 | **Visitors Page – Unstable Counts (Split Brain)** ✅ FIXED | Moved session presence from per-worker in-memory dict to Redis. `register_session` writes `ai:visitor:online:{wid}:{sid}` (90s TTL), `unregister_session_socket` writes `ai:visitor:offline:{wid}:{sid}` (600s TTL). `session_presence_snapshot` and `is_session_online` read from Redis when available, fall back to in-memory. WS heartbeat task renews TTL every 60s. | High |
 
 ---
 

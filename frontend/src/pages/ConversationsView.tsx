@@ -370,6 +370,7 @@ export default function ConversationsView() {
     const joinedRef = useRef(false)
     const prevSelectedChatRef = useRef<number | null>(selectedChat)
     const loadMessagesTokenRef = useRef(0)
+    const chatLoadingTokenRef = useRef(0)
     const hasLoadedChatsRef = useRef(false)
     const loadDetailsTokenRef = useRef(0)
     const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -1255,6 +1256,7 @@ export default function ConversationsView() {
     ) => {
         const token = ++loadMessagesTokenRef.current
         if (showSpinner) {
+            chatLoadingTokenRef.current = token
             setChatLoading(true)
         }
         if (!preserveMessages) {
@@ -1322,7 +1324,7 @@ export default function ConversationsView() {
         } catch (error) {
             console.error("Failed to load chat:", error)
         } finally {
-            if (showSpinner && loadMessagesTokenRef.current === token) {
+            if (showSpinner && chatLoadingTokenRef.current === token) {
                 setChatLoading(false)
             }
         }
