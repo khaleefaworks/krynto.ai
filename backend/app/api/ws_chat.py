@@ -44,7 +44,20 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
 
 
 VISITOR_LEFT_DELAY_SECONDS = 15
+_PRESENCE_HEARTBEAT_INTERVAL = 60  # seconds between Redis TTL renewals
 _visitor_left_scheduled: set[int] = set()
+
+
+async def _presence_heartbeat(*, website_id: int, session_id: str) -> None:
+    """Periodically renew the Redis TTL for an online session so it doesn't auto-expire."""
+    try:
+        while True:
+            await asyncio.sleep(_PRESENCE_HEARTBEAT_INTERVAL)
+            ChatService.refresh_session_online_ttl(int(website_id), str(session_id))
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
 
 
 async def _send_delayed_session_presence_event(
@@ -285,8 +298,12 @@ async def chat_ws(
             return
 
         # Track session-level presence (used by Customers -> Visitors).
+        _heartbeat_task_1 = None
         try:
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+            _heartbeat_task_1 = asyncio.create_task(
+                _presence_heartbeat(website_id=int(website_id), session_id=str(session_id))
+            )
         except Exception:
             pass
 
@@ -988,6 +1005,12 @@ async def chat_ws(
             pass
 
         try:
+            if _heartbeat_task_1 is not None:
+                _heartbeat_task_1.cancel()
+        except Exception:
+            pass
+
+        try:
             ChatService.unregister_session_socket(websocket)
         except Exception:
             pass
@@ -1094,8 +1117,12 @@ async def chat_ws_with_conversation(
         # Always register session-level presence so resolved-conv visitors appear in the Visitors page.
         is_open = conv.status not in (ConversationStatus.RESOLVED,)
         _was_active_cid = False
+        _heartbeat_task_2 = None
         try:
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+            _heartbeat_task_2 = asyncio.create_task(
+                _presence_heartbeat(website_id=int(website_id), session_id=str(session_id))
+            )
         except Exception:
             pass
         if is_open and str(conv.session_id) == str(session_id):
@@ -1389,6 +1416,11 @@ async def chat_ws_with_conversation(
             pass
         try:
             ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+        try:
+            if _heartbeat_task_2 is not None:
+                _heartbeat_task_2.cancel()
         except Exception:
             pass
         try:
