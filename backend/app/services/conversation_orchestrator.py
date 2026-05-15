@@ -605,11 +605,12 @@ class ConversationOrchestrator:
         ).order_by(Message.created_at.desc()).first()
         last_message = last_msg.content if last_msg else "New conversation"
         
-        # Broadcast ONLY to global notification sockets (website_id = 0).
-        # This prevents duplicate notifications to agents connected to both sockets.
+        # Broadcast to agents assigned to this website (global sockets in production).
+        # website_id is passed so the visible_website_ids gate filters out agents from
+        # other organisations — previously None bypassed all website-level scoping.
         _new_chat_team_id = getattr(conversation, "team_id", None)
         await self.agent_service.broadcast_to_active_agents(
-            website_id=None,
+            website_id=conversation.website_id,
             message_data={
                 "type": "new_chat",
                 "conversation_id": conversation.id,
@@ -782,6 +783,7 @@ class ConversationOrchestrator:
                         "message_obj": serialize_message(self.db, visitor_selection_msg),
                     },
                     include_global=True,
+                    conversation_team_id=getattr(conversation, "team_id", None),
                 )
 
         # Assign team if configured
