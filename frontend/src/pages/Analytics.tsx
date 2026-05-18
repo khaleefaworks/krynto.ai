@@ -54,6 +54,15 @@ interface TagStat {
   usage_count: number
 }
 
+interface TeamStat {
+  id: number
+  name: string
+  website_name: string
+  conversations: number
+  resolved: number
+  avg_response_seconds: number | null
+}
+
 interface RatingSummary {
   total: number
   good: number
@@ -221,7 +230,7 @@ export default function Analytics() {
   const [websites, setWebsites] = useState<Website[]>([])
   const [selectedWebsite, setSelectedWebsite] = useState<number | ''>('')
   const [dateRange, setDateRange] = useState(30)
-  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings'>('conversations')
+  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings' | 'teams'>('conversations')
 
   // Data
   const [overview, setOverview] = useState<OverviewData | null>(null)
@@ -232,6 +241,7 @@ export default function Analytics() {
   const [agents, setAgents] = useState<AgentStat[]>([])
   const [tags, setTags] = useState<TagStat[]>([])
   const [ratings, setRatings] = useState<RatingSummary | null>(null)
+  const [teams, setTeams] = useState<TeamStat[]>([])
   const [loading, setLoading] = useState(true)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [modalExportType, setModalExportType] = useState<'report' | 'transcripts'>('report')
@@ -244,10 +254,13 @@ export default function Analytics() {
   const [modalRating, setModalRating] = useState<string>('')
   const [downloading, setDownloading] = useState(false)
 
+  // Team filter (per-website scope)
+  const [selectedTeam, setSelectedTeam] = useState<number | ''>('')
+
   // Filter metadata for download modal
   const [allAgents, setAllAgents] = useState<AgentStat[]>([])
   const [allTags, setAllTags] = useState<TagStat[]>([])
-  const [allTeams, setAllTeams] = useState<{ id: number; name: string }[]>([])
+  const [allTeams, setAllTeams] = useState<{ id: number; name: string; website_id: number }[]>([])
 
   const startDate = dateNDaysAgo(dateRange - 1)
   const endDate = todayStr()
@@ -260,7 +273,7 @@ export default function Analytics() {
     apiRequest<{ tags: TagStat[] }>('/analytics/tags/summary?start=2000-01-01&end=2099-12-31')
       .then(d => setAllTags(Array.isArray(d?.tags) ? d.tags : [])).catch(() => { })
     apiRequest<any[]>('/teams/overview')
-      .then(d => setAllTeams(Array.isArray(d) ? d.flatMap((w: any) => w.teams || []).map((t: any) => ({ id: t.id, name: t.name })) : [])).catch(() => { })
+      .then(d => setAllTeams(Array.isArray(d) ? d.flatMap((w: any) => w.teams || []).map((t: any) => ({ id: t.id, name: t.name, website_id: t.website_id })) : [])).catch(() => { })
   }, [])
 
   // Build query string
@@ -269,8 +282,9 @@ export default function Analytics() {
     params.set('start', startDate)
     params.set('end', endDate)
     if (selectedWebsite) params.set('website_id', String(selectedWebsite))
+    if (selectedTeam) params.set('team_id', String(selectedTeam))
     return params.toString()
-  }, [startDate, endDate, selectedWebsite])
+  }, [startDate, endDate, selectedWebsite, selectedTeam])
 
   // Load data on filter change
   useEffect(() => {
@@ -286,8 +300,9 @@ export default function Analytics() {
       apiRequest<{ agents: AgentStat[] }>(`/analytics/agents/summary?${q}`),
       apiRequest<{ tags: TagStat[] }>(`/analytics/tags/summary?${q}`),
       apiRequest<RatingSummary>(`/analytics/ratings/summary?${q}`),
+      apiRequest<{ teams: TeamStat[] }>(`/analytics/teams/summary?${q}`),
     ])
-      .then(([ov, nc, rc, rpc, rt, ag, tg, rs]) => {
+      .then(([ov, nc, rc, rpc, rt, ag, tg, rs, tm]) => {
         setOverview(ov)
         setNewChart(nc.series)
         setResolvedChart(rc.series)
@@ -296,6 +311,7 @@ export default function Analytics() {
         setAgents(ag.agents)
         setTags(tg.tags)
         setRatings(rs)
+        setTeams(Array.isArray(tm?.teams) ? tm.teams : [])
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -321,7 +337,10 @@ export default function Analytics() {
               {/* Website filter */}
               <select
                 value={selectedWebsite}
-                onChange={e => setSelectedWebsite(e.target.value ? Number(e.target.value) : '')}
+                onChange={e => {
+                  setSelectedWebsite(e.target.value ? Number(e.target.value) : '')
+                  setSelectedTeam('')
+                }}
                 className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">All Websites</option>
@@ -329,6 +348,21 @@ export default function Analytics() {
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
+              {/* Team filter — only show when a website is selected */}
+              {selectedWebsite !== '' && (
+                <select
+                  value={selectedTeam}
+                  onChange={e => setSelectedTeam(e.target.value ? Number(e.target.value) : '')}
+                  className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Teams</option>
+                  {allTeams
+                    .filter(t => t.website_id === selectedWebsite)
+                    .map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                </select>
+              )}
               {/* Date range */}
               <select
                 value={dateRange}
@@ -410,7 +444,7 @@ export default function Analytics() {
 
             {/* Tabs */}
             <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit">
-              {(['conversations', 'agents', 'tags', 'ratings'] as const).map(tab => (
+              {(['conversations', 'agents', 'tags', 'ratings', 'teams'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -569,6 +603,45 @@ export default function Analytics() {
                     </ResponsiveContainer>
                   )}
                 </ChartCard>
+              </div>
+            )}
+
+            {/* Teams Tab */}
+            {activeTab === 'teams' && (
+              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Team Performance</h3>
+                </div>
+                {teams.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-gray-400 dark:text-gray-500">
+                    No team data available for this period.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-5 py-3">Team</th>
+                          <th className="px-5 py-3">Website</th>
+                          <th className="px-5 py-3 text-right">Conversations</th>
+                          <th className="px-5 py-3 text-right">Resolved</th>
+                          <th className="px-5 py-3 text-right">Avg. Response</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {teams.map(team => (
+                          <tr key={team.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td className="px-5 py-3 text-sm font-medium text-gray-900 dark:text-white">{team.name}</td>
+                            <td className="px-5 py-3 text-sm text-gray-500 dark:text-gray-400">{team.website_name}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white font-medium">{team.conversations}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">{team.resolved}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">{formatDuration(team.avg_response_seconds)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 

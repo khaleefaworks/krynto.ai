@@ -31,7 +31,7 @@ from app.models.conversation_rating import ConversationRating
 from app.models.tag import Tag
 from app.models.user import User, UserRole
 from app.models.website import Website
-from app.models.website_team import WebsiteTeam
+from app.models.website_team import WebsiteTeam, WebsiteTeamMember
 from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.services.visibility import compute_visibility_scope
@@ -72,6 +72,21 @@ def _allowed_website_ids(
     # No specific website requested → use org scope.
     if scope.organization_id is None:
         return None  # SYSTEM_MANAGER: unrestricted
+
+    # AGENT: restrict to websites where the agent is a team member.
+    # If the agent has no team memberships yet, fall back to full org scope
+    # (same as MANAGER/OWNER) — unassigned agents can still receive chats.
+    if current_user.role == UserRole.AGENT:
+        rows = (
+            db.query(WebsiteTeam.website_id)
+            .join(WebsiteTeamMember, WebsiteTeamMember.team_id == WebsiteTeam.id)
+            .filter(WebsiteTeamMember.user_id == current_user.id)
+            .distinct()
+            .all()
+        )
+        if rows:
+            return [r[0] for r in rows]
+        # No team memberships → fall through to org-wide scope below
 
     rows = db.query(Website.id).filter_by(organization_id=scope.organization_id).all()
     return [r[0] for r in rows]
@@ -121,6 +136,7 @@ def conversation_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -141,6 +157,8 @@ def conversation_summary(
                 "avg_first_response_seconds": None,
             }
         base = base.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        base = base.filter(Conversation.team_id == team_id)
 
     total_new = base.filter(
         Conversation.last_visitor_message_at.isnot(None),
@@ -213,6 +231,7 @@ def new_conversations_chart(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -238,6 +257,8 @@ def new_conversations_chart(
     )
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        q = q.filter(Conversation.team_id == team_id)
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -248,6 +269,7 @@ def resolved_conversations_chart(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -279,6 +301,8 @@ def resolved_conversations_chart(
     )
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        q = q.filter(Conversation.team_id == team_id)
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -289,6 +313,7 @@ def replied_conversations_chart(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -327,6 +352,8 @@ def replied_conversations_chart(
     )
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        q = q.filter(Conversation.team_id == team_id)
 
     data = {str(row.day): row.cnt for row in q.all()}
     return {"series": _fill_series(data, series)}
@@ -337,6 +364,7 @@ def response_time_chart(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -377,6 +405,8 @@ def response_time_chart(
     )
     if allowed_ids is not None:
         rows = rows.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        rows = rows.filter(Conversation.team_id == team_id)
 
     all_rows = rows.all()
 
@@ -406,6 +436,7 @@ def agents_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     website_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
@@ -441,6 +472,8 @@ def agents_summary(
     )
     if allowed_ids is not None:
         assigned_q = assigned_q.filter(Conversation.website_id.in_(allowed_ids))
+    if team_id is not None:
+        assigned_q = assigned_q.filter(Conversation.team_id == team_id)
     assigned_q = assigned_q.group_by(Conversation.assigned_agent_id)
     assigned_map = {row[0]: row[1] for row in assigned_q.all()}
 
@@ -512,8 +545,114 @@ def agents_summary(
 
 
 # ---------------------------------------------------------------------------
-# 3. Tag Statistics
+# 2b. Team Statistics
 # ---------------------------------------------------------------------------
+
+@router.get("/teams/summary")
+def teams_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    website_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+):
+    """Per-team breakdown: conversations, resolved, avg first-response time."""
+    start_dt, end_dt = _date_range(start, end)
+
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {"teams": []}
+
+    # Fetch teams the user can see
+    from app.services.visibility import compute_visibility_scope
+    scope = compute_visibility_scope(db, user=current_user)
+    teams_q = db.query(WebsiteTeam, Website.name.label("website_name")).join(
+        Website, Website.id == WebsiteTeam.website_id
+    )
+    if allowed_ids is not None:
+        teams_q = teams_q.filter(WebsiteTeam.website_id.in_(allowed_ids))
+    teams = teams_q.all()
+
+    if not teams:
+        return {"teams": []}
+
+    team_ids = [t.WebsiteTeam.id for t in teams]
+
+    # Conversations per team
+    conv_q = (
+        db.query(
+            Conversation.team_id,
+            func.count(Conversation.id).label("total"),
+        )
+        .filter(
+            Conversation.team_id.in_(team_ids),
+            Conversation.created_at >= start_dt,
+            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+        )
+        .group_by(Conversation.team_id)
+    )
+    conv_map = {row[0]: row[1] for row in conv_q.all()}
+
+    # Resolved per team
+    resolved_q = (
+        db.query(
+            Conversation.team_id,
+            func.count(Conversation.id).label("total"),
+        )
+        .filter(
+            Conversation.team_id.in_(team_ids),
+            Conversation.status == ConversationStatus.RESOLVED,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.closed_by.notin_(['inactivity', 'system_auto']),
+            Conversation.updated_at >= start_dt,
+            Conversation.updated_at <= end_dt,
+        )
+        .group_by(Conversation.team_id)
+    )
+    resolved_map = {row[0]: row[1] for row in resolved_q.all()}
+
+    # Avg first-response per team
+    first_agent_msg = (
+        db.query(
+            Message.conversation_id,
+            func.min(Message.created_at).label("first_agent_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    resp_q = (
+        db.query(
+            Conversation.team_id,
+            func.avg(
+                func.extract("epoch", first_agent_msg.c.first_agent_at)
+                - func.extract("epoch", Conversation.created_at)
+            ).label("avg_seconds"),
+        )
+        .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+        .filter(
+            Conversation.team_id.in_(team_ids),
+            Conversation.created_at >= start_dt,
+            Conversation.created_at <= end_dt,
+        )
+        .group_by(Conversation.team_id)
+    )
+    resp_map = {row[0]: round(row[1], 1) if row[1] else None for row in resp_q.all()}
+
+    result = [
+        {
+            "id": t.WebsiteTeam.id,
+            "name": t.WebsiteTeam.name,
+            "website_name": t.website_name,
+            "conversations": conv_map.get(t.WebsiteTeam.id, 0),
+            "resolved": resolved_map.get(t.WebsiteTeam.id, 0),
+            "avg_response_seconds": resp_map.get(t.WebsiteTeam.id),
+        }
+        for t in teams
+    ]
+    result.sort(key=lambda t: t["conversations"], reverse=True)
+    return {"teams": result}
 
 @router.get("/tags/summary")
 def tags_summary(
@@ -581,6 +720,12 @@ def analytics_overview(
 
     # Enforce visibility scope for overview queries
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    # Compute comparison period before any early return so it's always available
+    prev_end_dt = start_dt - timedelta(seconds=1)
+    prev_start_dt = prev_end_dt - timedelta(days=period_days - 1)
+    prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=timezone.utc)
+
     if allowed_ids is not None and not allowed_ids:
         # No accessible websites for this user → return empty KPIs
         return {
@@ -590,10 +735,6 @@ def analytics_overview(
             "resolved_conversations": {"value": 0, "previous": 0, "change_pct": None},
             "avg_first_response_seconds": {"value": None, "previous": None, "change_pct": None},
         }
-
-    prev_end_dt = start_dt - timedelta(seconds=1)
-    prev_start_dt = prev_end_dt - timedelta(days=period_days - 1)
-    prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=timezone.utc)
 
     def _count_conversations(s: datetime, e: datetime) -> int:
         q = db.query(func.count(Conversation.id)).filter(

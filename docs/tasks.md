@@ -12,9 +12,19 @@
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| A1 | **Analytics – New Conversation Miscount** | "New Conversations" count is inflated. A `Conversation` row is created the moment a visitor lands (to send the welcome automation), so every tab-open is counted. Fix: only count conversations where at least one visitor message exists. | High |
-| A2 | **Resolved Chats – Wrong Count** | Analytics shows hundreds of resolved chats vs the real inbox number. The Auto-Close Scheduler marks inactive chats as Resolved after 24 h — those DB cleanups are counted as genuine resolutions. Fix: distinguish scheduler-resolved from agent/visitor-resolved in the analytics query (e.g. `closed_by = 'scheduler'` filter). | High |
-| A3 | **Analytics – Team Filter Missing** | No `team_id` filter on the Analytics API. Add team_id as an optional query param to all analytics endpoints and wire it up in the frontend filter bar. | Medium |
+| A1 | **Analytics – New Conversation Miscount** ✅ FIXED | Added `last_visitor_message_at IS NOT NULL` filter to all new-conversation counts. | High |
+| A2 | **Resolved Chats – Wrong Count** ✅ FIXED | Added `closed_by NOT IN ('inactivity','system_auto')` filter; also disabled auto-close/auto-resolve scheduler jobs. | High |
+| A3 | **Analytics – Team Filter Missing** ✅ FIXED | Added `team_id` Query param to all 7 conversation endpoints + `agents/summary`. New `GET /analytics/teams/summary` endpoint. Frontend: teams tab + team dropdown filter (website-scoped). | Medium |
+| A4 | **Analytics – Agent Role Access** ✅ FIXED | Removed `isAdmin()` gate from route and sidebar. AGENT role in `_allowed_website_ids` now scoped to team-member websites only. | Medium |
+
+---
+
+## Deferred Features
+
+| # | Title | Description | Priority |
+|---|-------|-------------|----------|
+| F3 | **Auto-Tag Agent on Assignment** (DEFERRED) | Auto-apply an agent-name tag on claim/takeover/manual-assign. Blocked: disambiguation problem — if two agents share the same first name (e.g. two "Johns"), they'd map to the same tag and make per-agent tag filters inaccurate. Design needed: e.g. "John S." / "John D." initials strategy, or use `agent:{user_id}` as tag key with display name as label. | Medium |
+| F4 | **Auto-Tag Events: visitor_dropped / agent_offline** (DEFERRED) | Extend auto-tagging to fire on `visitor_dropped` and `agent_offline` events. Architecture already supports it via `get_or_create_tag` pattern. Deferred until F3 disambiguation is resolved. | Low |
 
 ---
 

@@ -533,7 +533,7 @@ function App() {
                   <Route path="teams" element={<Teams />} />
 
                   {/* Analytics - Admins & Managers only */}
-                  <Route path="analytics" element={isAdmin(user) ? <Analytics /> : <Navigate to="/dashboard/chats" replace />} />
+                  <Route path="analytics" element={<Analytics />} />
 
                   {/* Legacy routes - kept for backwards compatibility */}
                   <Route path="websites" element={<WebsiteManagement />} />
