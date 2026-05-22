@@ -655,6 +655,10 @@
   flex-direction: column;
   gap: 12px;
   background: #f0f4f8;
+  /* Prevent scroll from bubbling to the parent page when the message list
+     reaches its top or bottom boundary (desktop wheel + mobile overscroll). */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 #chatassist-messages::-webkit-scrollbar {
@@ -1242,6 +1246,22 @@
 .chatassist-end-overlay-cancel {
   flex: 1;
   padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  background: #3b82f6;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.chatassist-end-overlay-cancel:hover {
+  opacity: 0.9;
+}
+
+.chatassist-end-overlay-confirm {
+  flex: 1;
+  padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   background: #fff;
@@ -1251,24 +1271,8 @@
   transition: background 0.15s;
 }
 
-.chatassist-end-overlay-cancel:hover {
-  background: #f9fafb;
-}
-
-.chatassist-end-overlay-confirm {
-  flex: 1;
-  padding: 10px 12px;
-  border: none;
-  border-radius: 12px;
-  background: #ef4444;
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
 .chatassist-end-overlay-confirm:hover {
-  opacity: 0.9;
+  background: #f9fafb;
 }
 
 /* --- Footer --- */
@@ -1948,12 +1952,22 @@
 }
 
 .chatassist-theme-dark .chatassist-end-overlay-cancel {
+  background: #2563eb;
+  border: none;
+  color: #fff;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-cancel:hover {
+  opacity: 0.9;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-confirm {
   background: #0f172a;
   border-color: #334155;
   color: #e2e8f0;
 }
 
-.chatassist-theme-dark .chatassist-end-overlay-cancel:hover {
+.chatassist-theme-dark .chatassist-end-overlay-confirm:hover {
   background: #1e293b;
 }
 

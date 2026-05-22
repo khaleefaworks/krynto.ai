@@ -2716,8 +2716,8 @@
             <div class="chatassist-end-overlay-title">End this chat?</div>
             <div class="chatassist-end-overlay-desc">By ending this conversation you won&rsquo;t be able to continue it later.</div>
             <div class="chatassist-end-overlay-actions">
-              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
               <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
             </div>
           </div>
         </div>
@@ -2756,11 +2756,11 @@
             </div>
           </div>
           <div class="chatassist-header-actions">
-            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat" title="Minimize">
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
             <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat" title="Minimize">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </button>
           </div>
         </div>
@@ -3046,7 +3046,22 @@
     });
 
     const messagesContainer = $id('chatassist-messages');
-    if (messagesContainer) messagesContainer.addEventListener('scroll', handleMessagesScroll);
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', handleMessagesScroll);
+      // Prevent wheel events from reaching the host page when the message list
+      // is already at its scroll boundary (complements overscroll-behavior:contain
+      // for browsers that don't support it).
+      messagesContainer.addEventListener('wheel', function(e) {
+        const el = messagesContainer;
+        const atTop = el.scrollTop === 0;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+        // Only stop propagation when scrolling would otherwise bubble out.
+        if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+          e.preventDefault();
+        }
+        e.stopPropagation();
+      }, { passive: false });
+    }
 
     // Prefill
     try {
