@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useAppStore } from "@/store/appStore"
 import { apiRequest } from "@/services/api"
-import { Camera, Mail, Shield, User as UserIcon, Trash2, Loader2, Lock, Eye, EyeOff } from "lucide-react"
+import { Camera, Mail, Shield, User as UserIcon, Trash2, Loader2, Lock, Eye, EyeOff, Monitor, Smartphone, Globe, X } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { API_BASE } from "@/config/endpoints"
 
@@ -23,11 +23,72 @@ export default function PersonalSettings() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMessage, setPwMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
+  // Active sessions
+  type Session = { jti: string; ip_address: string | null; user_agent: string | null; created_at: string | null; last_used_at: string | null }
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [revokingJti, setRevokingJti] = useState<string | null>(null)
+
+  const currentJti = (() => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      if (!token) return null
+      return JSON.parse(atob(token.split('.')[1]))?.jti ?? null
+    } catch { return null }
+  })()
+
+  function parseUA(ua: string | null): { label: string; isMobile: boolean } {
+    if (!ua) return { label: 'Unknown device', isMobile: false }
+    const mob = /iPhone|iPad|Android/i.test(ua)
+    if (/iPhone|iPad/i.test(ua)) return { label: 'iOS (Safari)', isMobile: true }
+    if (/Android/i.test(ua)) {
+      const b = /Edg\//.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : 'Browser'
+      return { label: `Android (${b})`, isMobile: true }
+    }
+    if (/Windows/i.test(ua)) {
+      const b = /Edg\//.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : 'Browser'
+      return { label: `Windows (${b})`, isMobile: false }
+    }
+    if (/Mac/i.test(ua)) {
+      const b = /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : 'Safari'
+      return { label: `macOS (${b})`, isMobile: false }
+    }
+    if (/Linux/i.test(ua)) {
+      const b = /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : 'Browser'
+      return { label: `Linux (${b})`, isMobile: false }
+    }
+    return { label: ua.slice(0, 48), isMobile: mob }
+  }
+
+  const loadSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      const data = await apiRequest('/auth/sessions')
+      setSessions(Array.isArray(data) ? data : [])
+    } catch { /* ignore */ } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  const handleRevoke = async (jti: string) => {
+    setRevokingJti(jti)
+    try {
+      await apiRequest(`/auth/sessions/${jti}`, { method: 'DELETE' })
+      setSessions(prev => prev.filter(s => s.jti !== jti))
+    } catch {
+      // ignore
+    } finally {
+      setRevokingJti(null)
+    }
+  }
+
   // Check if user is logged in
   useEffect(() => {
     if (!localStorage.getItem('auth_token')) {
       setMessage({ type: 'error', text: 'Session expired. Please log in again.' })
       setTimeout(() => navigate('/login'), 2000)
+    } else {
+      loadSessions()
     }
   }, [])
 
@@ -324,6 +385,79 @@ export default function PersonalSettings() {
                 </button>
               </div>
             </form>
+          </div>
+
+          {/* ─── Active Sessions ─── */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Active Sessions</h3>
+              <button
+                onClick={loadSessions}
+                disabled={sessionsLoading}
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
+              >
+                {sessionsLoading ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 divide-y divide-gray-200 dark:divide-gray-700">
+              {sessionsLoading && sessions.length === 0 ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                </div>
+              ) : sessions.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 px-4 py-4">No active sessions found.</p>
+              ) : (
+                sessions.map(s => {
+                  const { label, isMobile } = parseUA(s.user_agent)
+                  const isCurrent = s.jti === currentJti
+                  const lastUsed = s.last_used_at
+                    ? new Date(s.last_used_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+                    : null
+                  const createdAt = s.created_at
+                    ? new Date(s.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+                    : null
+                  return (
+                    <div key={s.jti} className="flex items-start gap-3 px-4 py-3">
+                      <div className="mt-0.5 flex-shrink-0 text-gray-400 dark:text-gray-500">
+                        {isMobile ? <Smartphone className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{label}</span>
+                          {isCurrent && (
+                            <span className="flex-shrink-0 inline-flex items-center rounded-full bg-green-50 dark:bg-green-900/30 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        {s.ip_address && (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <Globe className="h-3 w-3 text-gray-400" />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{s.ip_address}</span>
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                          {lastUsed ? `Last active: ${lastUsed}` : createdAt ? `Signed in: ${createdAt}` : ''}
+                        </p>
+                      </div>
+                      {!isCurrent && (
+                        <button
+                          onClick={() => handleRevoke(s.jti)}
+                          disabled={revokingJti === s.jti}
+                          title="Revoke this session"
+                          className="flex-shrink-0 mt-0.5 p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                        >
+                          {revokingJti === s.jti ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+            <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+              Revoking a session signs out that device immediately.
+            </p>
           </div>
         </div>
       </div>

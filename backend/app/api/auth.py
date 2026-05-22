@@ -16,14 +16,33 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.email_otp import EmailOTP
 from app.models.verification_token import VerificationToken
 from app.models.system_settings import SystemSettings
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.system import is_system_initialized, mark_system_initialized
 from app.api.deps import get_current_user, require_admin
+from app.repos import login_sessions as login_sessions_repo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
+
+
+def _record_login_session(
+    db: Session, request: Request, token: str, user_id: int
+) -> None:
+    """Extract jti from token and persist a login session row. Best-effort."""
+    try:
+        payload = decode_access_token(token) or {}
+        jti = payload.get("jti")
+        if not jti:
+            return
+        ip = request.client.host if request.client else None
+        ua = request.headers.get("user-agent")
+        login_sessions_repo.create_session(
+            db, jti=jti, user_id=user_id, ip_address=ip, user_agent=ua
+        )
+    except Exception:
+        pass  # never block a login due to session tracking failure
 
 
 def _slugify(text: str) -> str:
@@ -358,7 +377,10 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
             "organization_id": user.organization_id,  # None for SYSTEM_MANAGER
         }
     )
-    
+
+    # Record the login session for server-side revocation.
+    _record_login_session(db, request, access_token, int(user.id))
+
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",
@@ -473,6 +495,7 @@ async def verify_otp(request: Request, body: VerifyOTPRequest, db: Session = Dep
             "role": user.role.value,
             "organization_id": user.organization_id,
         })
+        _record_login_session(db, request, access_token, int(user.id))
         return LoginResponse(access_token=access_token, token_type="bearer", user=UserResponse.from_orm(user))
 
     now = datetime.now(timezone.utc)
@@ -508,6 +531,7 @@ async def verify_otp(request: Request, body: VerifyOTPRequest, db: Session = Dep
         "role": user.role.value,
         "organization_id": user.organization_id,
     })
+    _record_login_session(db, request, access_token, int(user.id))
     return LoginResponse(access_token=access_token, token_type="bearer", user=UserResponse.from_orm(user))
 
 
@@ -945,3 +969,70 @@ async def list_users(
         }
         for user in users
     ]
+
+
+# ---------------------------------------------------------------------------
+# Logout
+# ---------------------------------------------------------------------------
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    credentials: HTTPBearer = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """Revoke the current JWT session.
+
+    Extracts the jti from the bearer token and marks the session as inactive
+    so subsequent requests with the same token receive 401 even before expiry.
+    Clients must still clear the token from localStorage.
+
+    Tokens without a jti claim (issued before this feature) are accepted and
+    silently ignored — they expire naturally via the exp claim.
+    """
+    try:
+        payload = decode_access_token(credentials.credentials) or {}
+        jti = payload.get("jti")
+        if jti:
+            login_sessions_repo.revoke_session(db, jti)
+    except Exception:
+        pass  # best-effort; always return success to avoid leaking token state
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Session Management
+# ---------------------------------------------------------------------------
+
+@router.get("/sessions")
+async def list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all active login sessions for the current user."""
+    sessions = login_sessions_repo.list_active_for_user(db, user_id=int(current_user.id))
+    return [
+        {
+            "jti": s.jti,
+            "ip_address": s.ip_address,
+            "user_agent": s.user_agent,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "last_used_at": s.last_used_at.isoformat() if s.last_used_at else None,
+        }
+        for s in sessions
+    ]
+
+
+@router.delete("/sessions/{jti}")
+async def revoke_session_by_jti(
+    jti: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke a specific session by jti. Only the session owner can revoke it."""
+    session = login_sessions_repo.get_by_jti(db, jti)
+    if not session or session.user_id != int(current_user.id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    login_sessions_repo.revoke_session(db, jti)
+    return {"ok": True}
+

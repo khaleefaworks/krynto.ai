@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import uuid
 from jose import JWTError, jwt
 import bcrypt
 from app.core.config import settings
@@ -50,6 +51,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         # Must use timezone-aware datetime so .timestamp() returns correct UTC epoch
         # regardless of server local timezone (e.g. IST UTC+5:30).
         "iat": int(now.timestamp()),
+        # Unique token ID for server-side revocation (user_login_sessions table).
+        "jti": str(uuid.uuid4()),
     })
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
     return encoded_jwt
