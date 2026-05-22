@@ -431,7 +431,7 @@ class ConversationOrchestrator:
                 
                 subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
                 if subs:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     loop.run_in_executor(
                         None,
                         lambda: send_web_push_to_subscriptions(
@@ -497,7 +497,7 @@ class ConversationOrchestrator:
                 )
                 subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
                 if subs:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     loop.run_in_executor(
                         None,
                         lambda: send_web_push_to_subscriptions(
@@ -656,7 +656,7 @@ class ConversationOrchestrator:
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 loop.run_in_executor(
                     None,
                     lambda: send_web_push_to_subscriptions(
