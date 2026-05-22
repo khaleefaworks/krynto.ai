@@ -132,11 +132,31 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         "category": "chatbot_flow",
         "nodes": [
             {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
-            {"id": "n1", "type": "bot_prompt_buttons", "config": {"message": "Welcome! What are you looking for?", "allow_input": False, "buttons": [
-                {"label": "Office Space", "reply": "", "team_id": None},
-                {"label": "Investments", "reply": "", "team_id": None},
-                {"label": "Job", "reply": "", "team_id": None},
-            ]}, "position": {"x": 0, "y": 150}},
+            {"id": "n1", "type": "bot_prompt_buttons", "config": {
+                "message": "Welcome! What are you looking for?",
+                "allow_input": False,
+                "suppress_waiting_message": True,
+                "buttons": [
+                    {"label": "Sales", "reply": "", "team_id": None, "sub_prompt": None},
+                    {"label": "Support", "reply": "", "team_id": None, "sub_prompt": None},
+                    {
+                        "label": "Careers",
+                        "reply": "",
+                        "team_id": None,  # set to Careers team id to assign on branch click
+                        # Multi-step branch: clicking "Careers" routes the team immediately
+                        # and then shows sub-buttons for the specific inquiry type.
+                        "sub_prompt": {
+                            "message": "Please tell us more about your career inquiry:",
+                            "allow_input": False,
+                            "suppress_waiting_message": True,
+                            "buttons": [
+                                {"label": "New Application", "reply": "Kindly visit our Careers page to apply.", "team_id": None},
+                                {"label": "Check Application Status", "reply": "Kindly visit the Job Application Portal to check your status.", "team_id": None},
+                            ],
+                        },
+                    },
+                ],
+            }, "position": {"x": 0, "y": 150}},
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },

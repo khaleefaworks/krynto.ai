@@ -121,20 +121,26 @@ class ConversationService:
             # (website_id, session_id) WHERE status='open' rejected ours.
             # Roll back and resume the row that won the race.
             self.db.rollback()
-            conversation = (
-                self.db.query(Conversation)
-                .filter(
-                    Conversation.session_id == session_id,
-                    Conversation.website_id == website_id,
-                    Conversation.status == ConversationStatus.OPEN,
-                    Conversation.visitor_ended == False,  # noqa: E712
+            # Retry up to 3 times with a short sleep — the winning transaction
+            # may not yet be visible if commit() and our SELECT overlap tightly.
+            import time as _time
+            conversation = None
+            for _attempt in range(3):
+                conversation = (
+                    self.db.query(Conversation)
+                    .filter(
+                        Conversation.session_id == session_id,
+                        Conversation.website_id == website_id,
+                        Conversation.status == ConversationStatus.OPEN,
+                        Conversation.visitor_ended == False,  # noqa: E712
+                    )
+                    .order_by(Conversation.id.desc())
+                    .first()
                 )
-                .order_by(Conversation.id.desc())
-                .first()
-            )
+                if conversation is not None:
+                    break
+                _time.sleep(0.05)  # 50 ms — gives the winner time to commit
             if conversation is None:
-                # Very unlikely: the winning INSERT was immediately resolved.
-                # Raise so the caller can retry at the websocket layer.
                 raise RuntimeError(
                     f"Race condition on conversation creation for session {session_id!r} "
                     "could not be resolved."

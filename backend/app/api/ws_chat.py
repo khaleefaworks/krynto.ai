@@ -46,6 +46,9 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
 VISITOR_LEFT_DELAY_SECONDS = 15
 _PRESENCE_HEARTBEAT_INTERVAL = 60  # seconds between Redis TTL renewals
 _visitor_left_scheduled: set[int] = set()
+# Keyed by "website_id:session_id" — prevents duplicate welcome tasks for the
+# same session (e.g. rapid reconnect / double-connect within the delay window).
+_welcome_pending: set[str] = set()
 
 
 async def _presence_heartbeat(*, website_id: int, session_id: str) -> None:
@@ -145,6 +148,8 @@ async def _send_delayed_welcome(
     welcome — visitor hasn't sent a message yet). The graph executor handles
     cooldown, message content, and delivery.
     """
+    _key = f"{website_id}:{session_id}"
+    _welcome_pending.add(_key)
     try:
         await asyncio.sleep(delay_seconds)
 
@@ -206,6 +211,8 @@ async def _send_delayed_welcome(
             session_id=session_id,
             error=str(e),
         )
+    finally:
+        _welcome_pending.discard(_key)
 
 
 def _ws_close_reason(reason: str | None) -> str:
@@ -451,15 +458,17 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) + 1
                 db.commit()
 
-            # Always schedule the welcome — _send_delayed_welcome will create
+            # Schedule the welcome — _send_delayed_welcome will create
             # the conversation if the visitor hasn't sent a message yet.
-            asyncio.create_task(
-                _send_delayed_welcome(
-                    website_id=website_id,
-                    session_id=session_id,
-                    delay_seconds=3.0,
+            # Skip if a task is already pending for this session (rapid reconnect guard).
+            if f"{website_id}:{session_id}" not in _welcome_pending:
+                asyncio.create_task(
+                    _send_delayed_welcome(
+                        website_id=website_id,
+                        session_id=session_id,
+                        delay_seconds=3.0,
+                    )
                 )
-            )
         except Exception as e:
             try:
                 db.rollback()
@@ -655,10 +664,17 @@ async def chat_ws(
             # Bot button click: visitor tapped a button from a bot_prompt_buttons message.
             if message_type == "bot_button_click":
                 btn_automation_id = payload.get("automation_id")
-                btn_button_index = payload.get("button_index")
+                btn_button_path = payload.get("button_path")  # preferred: list[int]
+                btn_button_index = payload.get("button_index")  # legacy scalar
 
-                if btn_automation_id is None or btn_button_index is None:
+                if btn_automation_id is None:
                     continue
+                # Require at least one of path or index
+                if btn_button_path is None and btn_button_index is None:
+                    continue
+                # Normalise to a list
+                if btn_button_path is None:
+                    btn_button_path = [int(btn_button_index)]
 
                 # Resolve conversation
                 btn_conversation_id: int | None = registered_conversation_id
@@ -681,7 +697,7 @@ async def chat_ws(
                     await orchestrator.handle_bot_button_click(
                         conversation_id=btn_conversation_id,
                         automation_id=int(btn_automation_id),
-                        button_index=int(btn_button_index),
+                        button_path=[int(x) for x in btn_button_path],
                         visitor_ws=websocket,
                     )
                 except Exception as e:
@@ -797,13 +813,14 @@ async def chat_ws(
                                 db, _wo_conversation.id, "bot_prompt_buttons"
                             )
                         if not last_welcome:
-                            asyncio.create_task(
-                                _send_delayed_welcome(
-                                    website_id=website_id,
-                                    session_id=session_id,
-                                    delay_seconds=0.5,
+                            if f"{website_id}:{session_id}" not in _welcome_pending:
+                                asyncio.create_task(
+                                    _send_delayed_welcome(
+                                        website_id=website_id,
+                                        session_id=session_id,
+                                        delay_seconds=0.5,
+                                    )
                                 )
-                            )
                 except Exception as _e:
                     logger.warning("widget_opened_handler_failed", error=str(_e))
                 continue
@@ -1273,13 +1290,16 @@ async def chat_ws_with_conversation(
 
                 if message_type == "bot_button_click":
                     btn_automation_id = payload.get("automation_id")
-                    btn_button_index = payload.get("button_index")
-                    if btn_automation_id is not None and btn_button_index is not None:
+                    btn_button_path = payload.get("button_path")  # preferred: list[int]
+                    btn_button_index = payload.get("button_index")  # legacy scalar
+                    if btn_automation_id is not None and (btn_button_path is not None or btn_button_index is not None):
+                        if btn_button_path is None:
+                            btn_button_path = [int(btn_button_index)]
                         try:
                             await orchestrator.handle_bot_button_click(
                                 conversation_id=int(conv.id),
                                 automation_id=int(btn_automation_id),
-                                button_index=int(btn_button_index),
+                                button_path=[int(x) for x in btn_button_path],
                                 visitor_ws=websocket,
                             )
                         except Exception as e:

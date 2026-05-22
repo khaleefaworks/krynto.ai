@@ -1211,8 +1211,17 @@
         // input so the visitor can type, which triggers the contact overlay on send.
         clearTimeout(_inputRevealTimer);
         // Don't auto-reveal input for read-only (ended/resolved) threads.
+        // Also skip for conversations that completed a button-only (allow_input:false) automation.
         if (!isReadOnlyThread) {
-          _inputRevealTimer = setTimeout(showInputContainer, 2500);
+          const _noInputKey = CONFIG.conversationId
+            ? 'chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId
+            : null;
+          const _noInput = _noInputKey
+            ? (() => { try { return localStorage.getItem(_noInputKey); } catch (e) { return null; } })()
+            : null;
+          if (!_noInput) {
+            _inputRevealTimer = setTimeout(showInputContainer, 2500);
+          }
         }
       };
       ws.onmessage = (event) => {
@@ -1366,9 +1375,18 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
-        // Reveal input unless a bot_prompt is pending, or this is a read-only (ended/resolved) thread.
+        // Reveal input unless a bot_prompt is pending, read-only, or a button-only automation.
         if (!hasPendingBotPrompt && !isReadOnlyThread) {
-          showInputContainer();
+          // Don't reveal input if this conversation completed a button-only (allow_input:false) automation.
+          const _noInputFlag = CONFIG.conversationId
+            ? (() => { try { return localStorage.getItem('chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId); } catch (e) { return null; } })()
+            : null;
+          if (!_noInputFlag) {
+            showInputContainer();
+          } else {
+            clearTimeout(_inputRevealTimer);
+            _inputRevealTimer = null;
+          }
         } else {
           // Cancel the connect-time reveal timer so it doesn't override the
           // hidden input state after a page reload with a pending button prompt.
@@ -1548,10 +1566,11 @@
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
       const allowInput = data.allow_input === true;
+      const buttonPathPrefix = Array.isArray(data.button_path_prefix) ? data.button_path_prefix : [];
       // Cancel any pending input-reveal timer — buttons control input visibility.
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput);
+      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput, buttonPathPrefix);
       notifyNewMessage(null, null, data.message);
       if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
@@ -1632,11 +1651,19 @@
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
     } else if (data.type === 'automation_complete') {
-      // IVR flow is done — reveal the free-form input and clear any fallback timer.
+      // IVR flow is done. Clear any fallback timer.
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      showInputContainer();
-      try { $id('chatassist-input')?.focus(); } catch (e) { }
+      if (data.allow_input === false) {
+        // Button-only flow: keep input hidden permanently.
+        // Persist so page reload also suppresses the input reveal timer.
+        if (CONFIG.conversationId) {
+          try { localStorage.setItem('chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId, '1'); } catch (e) {}
+        }
+      } else {
+        showInputContainer();
+        try { $id('chatassist-input')?.focus(); } catch (e) { }
+      }
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -2262,7 +2289,9 @@
     } catch (e) { }
   }
 
-  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput) {
+  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput, buttonPathPrefix) {
+    // buttonPathPrefix is the path that leads to this sub-prompt ([] for top-level).
+    if (!Array.isArray(buttonPathPrefix)) buttonPathPrefix = [];
     const container = $id('chatassist-messages');
     if (!container) return;
 
@@ -2336,23 +2365,25 @@
 
           // If offline and contact not yet on file, collect it before firing.
           if (!presenceOnline && !_checkAndSendContactSilently()) {
-            pendingBotButtonClick = { automationId: automationId, idx: idx, label: btn.label || 'Option ' + (idx + 1) };
+            pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1) };
             showContactOverlay();
             return;
           }
 
           // Input reveal is deferred: the server sends automation_complete
           // after processing (so the reply appears before the input opens).
-          // A 5-second fallback fires if the event never arrives.
+          // Only arm the 5-second fallback if free-text input is allowed.
           clearTimeout(_inputRevealTimer);
-          _inputRevealTimer = setTimeout(showInputContainer, 5000);
+          if (allowInput) {
+            _inputRevealTimer = setTimeout(showInputContainer, 5000);
+          }
 
           // Optimistically append the visitor's selection as a visitor message
           appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
           isAtBottom = true;
           smartScroll();
 
-          sendBotButtonClick(automationId, idx);
+          sendBotButtonClick(automationId, [...buttonPathPrefix, idx]);
         });
         buttonsWrap.appendChild(btnEl);
       });
@@ -2378,7 +2409,7 @@
     }
   }
 
-  function sendBotButtonClick(automationId, buttonIndex) {
+  function sendBotButtonClick(automationId, buttonPath) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       showToast('Not connected. Please wait...');
       return;
@@ -2386,7 +2417,7 @@
     ws.send(JSON.stringify({
       type: 'bot_button_click',
       automation_id: automationId,
-      button_index: buttonIndex,
+      button_path: buttonPath,
     }));
     // Button click counts as a visitor action — re-enable the end button
     // in case it was hidden after a previous "End chat".
@@ -2653,7 +2684,7 @@
       appendMessage('visitor', pbc.label, new Date().toISOString(), null, null);
       isAtBottom = true;
       smartScroll();
-      sendBotButtonClick(pbc.automationId, pbc.idx);
+      sendBotButtonClick(pbc.automationId, pbc.buttonPath);
     }
   }
 

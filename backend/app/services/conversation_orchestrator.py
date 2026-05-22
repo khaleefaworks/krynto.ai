@@ -209,6 +209,38 @@ def _should_skip_due_to_repeat(
         return True
 
 
+def _resolve_button_at_path(
+    top_buttons: list, path: list[int]
+) -> tuple[dict | None, dict | None]:
+    """Walk *path* through nested sub_prompt.buttons to find the target button.
+
+    Returns ``(button_dict, parent_sub_prompt_dict_or_None)``.
+    *parent_sub_prompt_dict* is the sub_prompt config that owns the target button;
+    it is ``None`` for top-level buttons.
+    """
+    if not path:
+        return None, None
+    current_list: list = top_buttons
+    parent_sub: dict | None = None
+    btn: dict | None = None
+    for depth, step in enumerate(path):
+        if not isinstance(current_list, list) or step < 0 or step >= len(current_list):
+            return None, None
+        item = current_list[step]
+        if not isinstance(item, dict):
+            return None, None
+        btn = item
+        if depth < len(path) - 1:
+            # Descend into sub_prompt for the next step
+            sub = btn.get("sub_prompt")
+            if not sub or not isinstance(sub, dict):
+                return None, None
+            parent_sub = sub
+            current_list = sub.get("buttons") or []
+        # For the last step `parent_sub` stays from the previous iteration
+    return btn, parent_sub
+
+
 async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
     """After delay_seconds, if still unassigned, run the no_agent_assigned_for automation flow."""
     try:
@@ -703,15 +735,25 @@ class ConversationOrchestrator:
         *,
         conversation_id: int,
         automation_id: int,
-        button_index: int,
+        button_index: int = 0,
+        button_path: list[int] | None = None,
         visitor_ws: Any | None = None,
     ) -> dict | None:
         """Handle a visitor clicking on a bot prompt button.
 
-        Looks up the automation, finds the button at the given index, assigns the
-        team (if configured), and sends a confirmation reply to the visitor.
+        ``button_path`` is the authoritative navigation key — a list of indices
+        that walks through nested sub_prompt.buttons trees.  ``button_index`` is
+        the legacy scalar equivalent; when ``button_path`` is absent it is
+        converted to ``[button_index]``.
 
-        Returns a dict with result info, or None on error.
+        Behaviour depends on whether the resolved button is a *branch* (has a
+        ``sub_prompt`` config) or a *leaf* (no sub_prompt):
+
+        * **Branch**: persists the visitor's selection, broadcasts it to agents,
+          sends a new ``bot_prompt`` WS event so the widget renders the next
+          level of buttons.  Does NOT assign a team or fire automation_complete.
+        * **Leaf**: full existing behaviour — team assign, reply, automation_complete,
+          waiting-message timer — plus optional ``suppress_waiting_message``.
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
@@ -735,12 +777,19 @@ class ConversationOrchestrator:
             return None
 
         buttons = prompt_node_cfg.get("buttons") or []
-        if not isinstance(buttons, list) or button_index < 0 or button_index >= len(buttons):
-            logger.warning("bot_button_click_invalid_index", automation_id=automation_id, button_index=button_index)
+        if not isinstance(buttons, list) or not buttons:
+            logger.warning("bot_button_click_no_buttons", automation_id=automation_id)
             return None
 
-        button = buttons[button_index]
-        if not isinstance(button, dict):
+        # Resolve path (prefer button_path; fall back to [button_index])
+        path: list[int] = button_path if button_path is not None else [button_index]
+        button, parent_sub_prompt = _resolve_button_at_path(buttons, path)
+        if button is None:
+            logger.warning(
+                "bot_button_click_invalid_path",
+                automation_id=automation_id,
+                button_path=path,
+            )
             return None
 
         label = button.get("label", "")
@@ -803,6 +852,93 @@ class ConversationOrchestrator:
                     include_global=True,
                     conversation_team_id=getattr(conversation, "team_id", None),
                 )
+
+        # ── Branch button: has a sub_prompt → show next level of buttons ────────
+        sub_prompt_cfg = button.get("sub_prompt")
+        if sub_prompt_cfg and isinstance(sub_prompt_cfg, dict):
+            # Assign team immediately on branch click (so agents see the routing
+            # before the visitor picks a sub-option).
+            branch_team_id = button.get("team_id")
+            if branch_team_id is not None:
+                try:
+                    from app.models.website_team import WebsiteTeam as _WsTeam
+
+                    _t = self.db.query(_WsTeam).filter_by(id=int(branch_team_id)).first()
+                    if _t and int(_t.website_id) == int(conversation.website_id):
+                        conversation.team_id = _t.id
+                        self.db.commit()
+                        result["team_id"] = _t.id
+                        result["team_name"] = _t.name
+                        await self.agent_service.broadcast_to_active_agents(
+                            website_id=int(conversation.website_id),
+                            message_data={
+                                "type": "conversation_team_changed",
+                                "conversation_id": conversation.id,
+                                "website_id": int(conversation.website_id),
+                                "team_id": _t.id,
+                            },
+                            include_global=True,
+                        )
+                        logger.info(
+                            "bot_branch_team_assigned",
+                            conversation_id=conversation.id,
+                            team_id=_t.id,
+                            button_label=label,
+                        )
+                except Exception as _e:
+                    logger.error("bot_branch_team_assign_failed", error=str(_e))
+
+            sub_message = str(sub_prompt_cfg.get("message") or "").strip()
+            sub_buttons_raw: list = sub_prompt_cfg.get("buttons") or []
+            sub_allow_input: bool = bool(sub_prompt_cfg.get("allow_input", False))
+            if sub_message and sub_buttons_raw:
+                sub_validated = [
+                    {"label": b["label"].strip(), "team_id": b.get("team_id"), "reply": b.get("reply", "")}
+                    for b in sub_buttons_raw
+                    if isinstance(b, dict) and (b.get("label") or "").strip()
+                ]
+                # Persist the sub-prompt as a bot message so agents can see it
+                sub_enriched = json.dumps({
+                    "message": sub_message,
+                    "automation_id": automation_id,
+                    "buttons": sub_validated,
+                })
+                sub_saved = self.conversation_service.add_bot_message(
+                    conversation.id, sub_enriched, event_type="bot_prompt_buttons"
+                )
+                sub_ws_payload = {
+                    "type": "bot_prompt",
+                    "message": sub_message,
+                    "conversation_id": conversation.id,
+                    "automation_id": automation_id,
+                    "buttons": sub_validated,
+                    "allow_input": sub_allow_input,
+                    "button_path_prefix": path,
+                    "message_obj": serialize_message(self.db, sub_saved),
+                }
+                if visitor_ws is not None:
+                    try:
+                        await visitor_ws.send_json(sub_ws_payload)
+                    except Exception:
+                        pass
+                else:
+                    await ChatService.send_to_visitor(conversation.id, sub_ws_payload)
+                logger.info(
+                    "bot_sub_prompt_sent",
+                    conversation_id=conversation.id,
+                    parent_path=path,
+                    sub_buttons=len(sub_validated),
+                )
+                return {"label": label, "team_id": None, "team_name": None, "sub_prompt": True}
+
+        # ── Leaf button: team assign + reply + automation_complete ────────────
+
+        # Determine if waiting message should be suppressed for this leaf click.
+        # Priority: button-level flag → parent sub_prompt flag → default False.
+        suppress_waiting = bool(
+            button.get("suppress_waiting_message")
+            or (parent_sub_prompt and parent_sub_prompt.get("suppress_waiting_message"))
+        )
 
         # Assign team if configured
         if team_id is not None:
@@ -868,10 +1004,18 @@ class ConversationOrchestrator:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
         # IVR complete: tell the widget it can now reveal the free-form input.
+        # allow_input=False means a button-only flow; widget keeps input hidden.
+        _allow_input = bool(prompt_node_cfg.get("allow_input", False))
+        if parent_sub_prompt is not None:
+            _allow_input = bool(parent_sub_prompt.get("allow_input", _allow_input))
         try:
             await ChatService.send_to_visitor(
                 conversation.id,
-                {"type": "automation_complete", "conversation_id": conversation.id},
+                {
+                    "type": "automation_complete",
+                    "conversation_id": conversation.id,
+                    "allow_input": _allow_input,
+                },
             )
         except Exception:
             pass
@@ -891,7 +1035,11 @@ class ConversationOrchestrator:
                     "email": conversation.visitor_email or "",
                 },
             )
-        elif not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
+        elif (
+            not suppress_waiting
+            and not conversation.assigned_agent_id
+            and conversation.id not in _waiting_bot_message_scheduled
+        ):
             # Schedule the waiting bot message if this is the visitor's first action
             # and no agent is assigned yet. Regular messages schedule it in
             # handle_visitor_message; button clicks are a separate code path so we
@@ -1705,7 +1853,10 @@ class ConversationOrchestrator:
                     ws_payload = {
                         "type": "bot_prompt", "message": message_text,
                         "conversation_id": conversation_id, "automation_id": automation_id,
-                        "buttons": validated_buttons, "message_obj": serialize_message(self.db, saved),
+                        "buttons": validated_buttons,
+                        "allow_input": bool(cfg.get("allow_input", False)),
+                        "button_path_prefix": [],
+                        "message_obj": serialize_message(self.db, saved),
                     }
                     if send_to_visitor:
                         await ChatService.send_to_visitor(conversation_id, ws_payload)
