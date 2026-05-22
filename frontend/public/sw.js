@@ -122,8 +122,18 @@ self.addEventListener('push', (event) => {
     const title = String(data.title || 'New chat')
     const body = String(data.body || '')
     const url = String(data.url || '/')
-    // Collapse rapid duplicate pushes for the same conversation.
-    const tag = `aica:${title.slice(0, 30)}:${url.slice(0, 60)}`
+    const pushType = String(data.push_type || 'new_message')   // "new_chat" | "new_message"
+
+    // Use different tags per type so Android stacks them in separate notification groups.
+    // Collapse rapid duplicates within the same type+url.
+    const tag = pushType === 'new_chat'
+        ? `aica:new_chat:${url.slice(0, 60)}`
+        : `aica:new_message:${url.slice(0, 60)}`
+
+    // Different vibration patterns help users feel the difference without unlocking.
+    // new_chat: two short pulses (attention-grabbing)
+    // new_message: one short pulse (subtle follow-up)
+    const vibrate = pushType === 'new_chat' ? [120, 80, 120] : [80]
 
     event.waitUntil(
         (async () => {
@@ -136,13 +146,14 @@ self.addEventListener('push', (event) => {
                     badge: '/favicon-32x32.png',
                     tag,
                     renotify: true,
-                    data: { url },
+                    vibrate,
+                    data: { url, push_type: pushType },
                 })
 
                 // Forward to open tabs so they can play an in-app sound.
                 // (Audio cannot be played directly from a service worker.)
                 for (const client of allClients) {
-                    client.postMessage({ type: 'push', title, body, url })
+                    client.postMessage({ type: 'push', title, body, url, push_type: pushType })
                 }
             } catch {
                 // ignore

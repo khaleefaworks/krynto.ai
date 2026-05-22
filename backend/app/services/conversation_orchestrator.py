@@ -112,14 +112,29 @@ def _get_eligible_agent_ids_for_push(
     if assigned_agent_ids:
         if conversation_team_id is not None:
             # Conversation is assigned to a specific team.
-            # Only members of that exact team get push — no-team agents are spectators.
+            # Eligible: (a) members of that exact team, AND (b) agents not in any team
+            # on this website (they have no team restriction so they see all convos).
+            # Agents assigned to a *different* team are excluded — they don't own this chat.
             specific_team_member_rows = (
                 db.query(WebsiteTeamMember.user_id)
                 .filter(WebsiteTeamMember.team_id == conversation_team_id)
                 .all()
             )
             specific_team_member_ids = {int(r[0]) for r in specific_team_member_rows}
-            agent_candidates = assigned_agent_ids & specific_team_member_ids
+
+            # All agents who belong to *any* team on this website.
+            all_team_member_rows = (
+                db.query(WebsiteTeamMember.user_id)
+                .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+                .filter(WebsiteTeam.website_id == website_id)
+                .all()
+            )
+            all_team_member_ids = {int(r[0]) for r in all_team_member_rows}
+
+            # No-team agents: assigned to the website but not in any team.
+            no_team_agent_ids = assigned_agent_ids - all_team_member_ids
+
+            agent_candidates = (assigned_agent_ids & specific_team_member_ids) | no_team_agent_ids
         else:
             # No conversation team (unassigned conversation) → all assigned agents are
             # candidates, regardless of team membership. Agents not in any team are
@@ -424,6 +439,7 @@ class ConversationOrchestrator:
                             title=f"New message in conversation #{conversation.short_id}",
                             body=(message or "New message")[:120],
                             url=f"/dashboard/chats/{conversation.short_id}",
+                            push_type="new_message",
                         ),
                     )
             except Exception as e:
@@ -489,6 +505,7 @@ class ConversationOrchestrator:
                             title="New message",
                             body=(message or "New message")[:120],
                             url=f"/dashboard/chats/{conversation.short_id}",
+                            push_type="new_message",
                         ),
                     )
             except Exception:
@@ -647,6 +664,7 @@ class ConversationOrchestrator:
                         title="New chat",
                         body=(last_message or "New conversation")[:120],
                         url="/dashboard/chats",
+                        push_type="new_chat",
                     ),
                 )
         except Exception:

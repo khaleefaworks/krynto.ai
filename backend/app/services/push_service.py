@@ -20,6 +20,7 @@ def send_web_push_to_subscriptions(
     title: str,
     body: str | None = None,
     url: str | None = None,
+    push_type: str | None = None,   # "new_chat" | "new_message" | None
 ) -> int:
     """Send Web Push notifications.
 
@@ -40,6 +41,7 @@ def send_web_push_to_subscriptions(
         "title": str(title),
         "body": str(body) if body else "",
         "url": str(url) if url else "",
+        "push_type": str(push_type) if push_type else "new_message",
     }
 
     count = 0

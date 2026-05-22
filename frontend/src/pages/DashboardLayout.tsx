@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { clearToken } from '@/services/api'
+import { clearToken, apiRequest } from '@/services/api'
 import { isAdmin } from '@/lib/roles'
 import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket, HelpCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
+import { unsubscribeFromPush } from '@/services/push'
 import Logo from '@/components/Logo'
 import OnboardingWizard, { dismissOnboarding } from '@/components/OnboardingWizard'
 import InstallPromptBanner from '@/components/InstallPromptBanner'
@@ -53,7 +54,10 @@ export default function DashboardLayout() {
     setIsMobileMenuOpen(false)
   }, [location.pathname])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Unsubscribe push & revoke server session before clearing the local token.
+    await unsubscribeFromPush()
+    await apiRequest('/auth/logout', { method: 'POST' }).catch(() => {})
     clearToken()
     setUser(null)
     setToken(null)
