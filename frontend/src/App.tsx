@@ -113,10 +113,13 @@ function App() {
         const data: any = event?.data || {}
         if (data?.type !== 'push') return
 
-        // Only play sound when the tab is hidden. Visible tabs handle sound via the
-        // WS event handler. In hidden tabs, WS event audio is blocked by autoplay
-        // policy, so the SW postMessage is the reliable trigger for sound.
-        if (!document.hidden) return
+        // Play sound for push notifications forwarded by the service worker.
+        // This covers two cases:
+        //  • Tab visible but WS dropped (PWA re-opened, slow reconnect) — ensures
+        //    the push always produces a sound even without an active WS event.
+        //  • Tab hidden — WS autoplay is blocked; SW postMessage is the only path.
+        // The 1500 ms cross-tab gate in _shouldPlaySound() prevents double-play
+        // when both the WS event AND the SW postMessage fire for the same notification.
 
         // AudioContext can be suspended after prolonged background inactivity.
         // Resume it before attempting playback so the synthesized-tone fallback works.
@@ -281,7 +284,10 @@ function App() {
           }
 
           if (_shouldPlaySound()) {
-            try { playNewVisitorNotificationSound() } catch { }
+            try {
+              await resumeAudioContextIfSuspended()
+              playNewVisitorNotificationSound()
+            } catch { }
           }
           const websiteName = String((data as any)?.website_name || '').trim()
           const lastMessage = String((data as any)?.last_message || '').trim()
@@ -319,17 +325,23 @@ function App() {
             if (conversationId) {
               const existing = _pendingMsgSoundTimers.get(conversationId)
               if (existing !== undefined) clearTimeout(existing)
-              const timer = setTimeout(() => {
+              const timer = setTimeout(async () => {
                 _pendingMsgSoundTimers.delete(conversationId)
                 if (_shouldPlaySound()) {
-                  try { playMessageNotificationSound() } catch { }
+                  try {
+                    await resumeAudioContextIfSuspended()
+                    playMessageNotificationSound()
+                  } catch { }
                 }
               }, 200)
               _pendingMsgSoundTimers.set(conversationId, timer)
             } else {
               // No conversation id — play immediately (fallback, should be rare).
               if (_shouldPlaySound()) {
-                try { playMessageNotificationSound() } catch { }
+                try {
+                  await resumeAudioContextIfSuspended()
+                  playMessageNotificationSound()
+                } catch { }
               }
             }
           }
