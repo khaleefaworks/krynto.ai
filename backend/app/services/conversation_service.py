@@ -9,6 +9,7 @@ Responsibilities:
 - Enforce conversation state rules
 """
 
+from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models.conversation import Conversation, ConversationStatus
