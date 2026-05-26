@@ -950,6 +950,24 @@ export default function ConversationsView() {
                         setActiveChats(sortChatsByActivity(next))
                     }
                 }
+            } else if (data.type === 'agent_message' && dataConversationId) {
+                // Update list preview when the assigned agent sends a message (spectator path).
+                // The chat-specific handler only fires for the selected conversation, so this
+                // global handler ensures the list stays current even when another chat is open.
+                const dto = (data as any)?.message_obj
+                const content = dto && typeof dto === 'object' ? String((dto as any)?.content ?? '').trim() : ''
+                const ts = (dto && typeof dto === 'object'
+                    ? ((dto as any)?.timestamp || (dto as any)?.created_at)
+                    : null) || new Date().toISOString()
+                if (content) {
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                        setActiveChats(sortChatsByActivity(next))
+                    }
+                }
             } else if (data.type === 'conversation_unread' && dataConversationId) {
                 const unreadCountRaw = (data as any)?.unread_count
                 const deltaRaw = (data as any)?.delta
