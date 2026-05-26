@@ -655,6 +655,7 @@ async def chat_ws(
                                 website_id=website_id,
                                 message_data=event,
                                 include_global=False,
+                                conversation_team_id=getattr(conversation, "team_id", None),
                             )
                     except Exception:
                         pass
@@ -778,16 +779,17 @@ async def chat_ws(
                             # Broadcast to agents so the right panel updates immediately.
                             try:
                                 _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                _rating_conv = conversations_repo.get_conversation_by_id(db, conv_id)
                                 await agent_service.broadcast_to_active_agents(
                                     website_id=website_id,
-                                    conversation_id=conv_id,
-                                    message={
+                                    message_data={
                                         "type": "visitor_rated",
                                         "conversation_id": conv_id,
                                         "rating": rating_val,
                                         "rating_label": _rating_labels.get(rating_val, str(rating_val)),
                                         "website_id": website_id,
                                     },
+                                    conversation_team_id=getattr(_rating_conv, "team_id", None),
                                 )
                             except Exception:
                                 pass
@@ -859,20 +861,22 @@ async def chat_ws(
                     "is_typing": is_typing,
                 }
 
+                _typing_team_id = getattr(conversation, "team_id", None)
                 if conversation and conversation.assigned_agent_id:
                     await agent_service.send_to_agent(conversation.assigned_agent_id, event)
-                    # Also broadcast to spectating agents (exclude assigned to avoid double-delivery).
                     await agent_service.broadcast_to_active_agents(
                         website_id=website_id,
                         message_data=event,
                         include_global=True,
                         exclude_agent_id=conversation.assigned_agent_id,
+                        conversation_team_id=_typing_team_id,
                     )
                 else:
                     await agent_service.broadcast_to_active_agents(
                         website_id=website_id,
                         message_data=event,
                         include_global=True,
+                        conversation_team_id=_typing_team_id,
                     )
 
                 continue
@@ -1243,18 +1247,22 @@ async def chat_ws_with_conversation(
                         "session_id": session_id,
                         "is_typing": is_typing,
                     }
+                    _conv_team_id = getattr(conv, "team_id", None)
                     if conv.assigned_agent_id:
                         await agent_service.send_to_agent(conv.assigned_agent_id, event)
-                        # Also broadcast to spectating agents.
                         await agent_service.broadcast_to_active_agents(
                             website_id=website_id,
                             message_data=event,
                             include_global=True,
                             exclude_agent_id=conv.assigned_agent_id,
+                            conversation_team_id=_conv_team_id,
                         )
                     else:
                         await agent_service.broadcast_to_active_agents(
-                            website_id=website_id, message_data=event, include_global=True
+                            website_id=website_id,
+                            message_data=event,
+                            include_global=True,
+                            conversation_team_id=_conv_team_id,
                         )
                     continue
 
@@ -1368,14 +1376,14 @@ async def chat_ws_with_conversation(
                                 _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
                                 await agent_service.broadcast_to_active_agents(
                                     website_id=website_id,
-                                    conversation_id=conv.id,
-                                    message={
+                                    message_data={
                                         "type": "visitor_rated",
                                         "conversation_id": conv.id,
                                         "rating": rating_val,
                                         "rating_label": _rating_labels.get(rating_val, str(rating_val)),
                                         "website_id": website_id,
                                     },
+                                    conversation_team_id=getattr(conv, "team_id", None),
                                 )
                             except Exception:
                                 pass

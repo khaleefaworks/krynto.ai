@@ -896,6 +896,7 @@ class ConversationOrchestrator:
                                 "team_id": _t.id,
                             },
                             include_global=True,
+                            conversation_team_id=None,
                         )
                         logger.info(
                             "bot_branch_team_assigned",
@@ -985,7 +986,7 @@ class ConversationOrchestrator:
                     result["team_id"] = team.id
                     result["team_name"] = team.name
 
-                    # Broadcast team change to agents
+                    # Broadcast team change to agents (no team filter — all agents need to know).
                     await self.agent_service.broadcast_to_active_agents(
                         website_id=int(conversation.website_id),
                         message_data={
@@ -995,6 +996,7 @@ class ConversationOrchestrator:
                             "team_id": team.id,
                         },
                         include_global=True,
+                        conversation_team_id=None,
                     )
 
                     logger.info(
@@ -1156,6 +1158,8 @@ class ConversationOrchestrator:
             }
         )
 
+        _join_team_id = getattr(conversation, "team_id", None)
+
         # Push the system message to all agents' open threads in real-time.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -1166,6 +1170,7 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, saved),
             },
             include_global=True,
+            conversation_team_id=_join_team_id,
         )
 
         # Notify dashboards so lists refresh and unread can clear.
@@ -1178,6 +1183,7 @@ class ConversationOrchestrator:
                 "assigned_agent_id": agent_id,
             },
             include_global=True,
+            conversation_team_id=_join_team_id,
         )
 
         # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
@@ -1243,6 +1249,8 @@ class ConversationOrchestrator:
             },
         )
 
+        _takeover_team_id = getattr(conversation, "team_id", None)
+
         # Push the system message to all agents' open threads in real-time.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -1253,6 +1261,7 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, saved),
             },
             include_global=True,
+            conversation_team_id=_takeover_team_id,
         )
 
         await self.agent_service.broadcast_to_active_agents(
@@ -1265,6 +1274,7 @@ class ConversationOrchestrator:
                 "previous_agent_id": previous_agent_id,
             },
             include_global=True,
+            conversation_team_id=_takeover_team_id,
         )
 
         # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
@@ -1354,6 +1364,7 @@ class ConversationOrchestrator:
             },
             include_global=True,
             exclude_agent_id=agent_id,
+            conversation_team_id=getattr(conversation, "team_id", None),
         )
 
         return {
@@ -1404,6 +1415,7 @@ class ConversationOrchestrator:
                 "closed_by": getattr(conversation, "closed_by", None),
             },
             include_global=True,
+            conversation_team_id=getattr(conversation, "team_id", None),
         )
 
         return {"success": True, "closed_by": getattr(conversation, "closed_by", None)}
@@ -1461,6 +1473,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
 
         return {"success": True}
@@ -1527,6 +1540,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1579,6 +1593,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1617,6 +1632,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1679,13 +1695,12 @@ class ConversationOrchestrator:
         if not nodes_list:
             return
 
-        # Enrich ctx with conversation contact fields so any automation node
-        # can reference {phone}, {email}, {visitor_name}, {contact_info} in template strings.
-        # visitor_name falls back to "there" so "Hi {visitor_name}" → "Hi there" gracefully.
-        # {contact_info} is built dynamically: shows whichever contact fields are filled.
+        # Fetch conversation once for ctx enrichment and team_id scoping.
+        _conv_team_id: int | None = None
         try:
             _enrich_conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
             if _enrich_conv:
+                _conv_team_id = getattr(_enrich_conv, "team_id", None)
                 ctx = dict(ctx)
                 ctx.setdefault("phone", _enrich_conv.visitor_phone or "")
                 ctx.setdefault("email", _enrich_conv.visitor_email or "")
@@ -1799,6 +1814,7 @@ class ConversationOrchestrator:
                             "message_obj": serialize_message(self.db, saved),
                         },
                         include_global=True,
+                        conversation_team_id=_conv_team_id,
                     )
 
             elif node_type == "emit_system_event":
@@ -1841,6 +1857,7 @@ class ConversationOrchestrator:
                         message_data={"type": "system_message", "conversation_id": conversation_id,
                                       "website_id": website_id, "message_obj": msg_obj},
                         include_global=True,
+                        conversation_team_id=_conv_team_id,
                     )
 
             elif node_type == "wait":

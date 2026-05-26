@@ -16,6 +16,12 @@ from app.models.website_team import WebsiteTeam, WebsiteTeamMember
 
 logger = get_logger(__name__)
 
+# Sentinel: caller did not pass conversation_team_id → treat as "unrouted conversation"
+# (team-scoped users will not receive the event).  Distinct from None which means
+# "broadcast to all regardless of team" (used by conversation_team_changed events).
+_UNROUTED = object()
+
+
 class AgentService:
     """Manages agent presence and message routing"""
     
@@ -241,7 +247,7 @@ class AgentService:
         message_data: dict,
         include_global: bool = True,
         exclude_agent_id: Optional[int] = None,
-        conversation_team_id: Optional[int] = None,
+        conversation_team_id=_UNROUTED,
     ) -> int:
         """Broadcast a message to active agent sockets.
 
@@ -255,6 +261,7 @@ class AgentService:
         # If Redis is enabled, publish once and let every worker deliver
         # to its locally connected sockets (prevents cross-worker misses).
         if realtime_bus.enabled:
+            _is_unrouted = conversation_team_id is _UNROUTED
             await realtime_bus.publish(
                 BusEvent(
                     event_type="agent_broadcast",
@@ -262,7 +269,8 @@ class AgentService:
                     include_global=bool(include_global),
                     payload=message_data,
                     exclude_agent_id=exclude_agent_id,
-                    conversation_team_id=conversation_team_id,
+                    conversation_team_id=None if _is_unrouted else conversation_team_id,
+                    conversation_unrouted=_is_unrouted,
                 )
             )
             return 0
@@ -288,14 +296,16 @@ class AgentService:
                         continue
 
             # Team-scope filtering.
-            # - conversation_team_id set: only matching team members receive events.
-            #   No-team AGENTs (visible_team_ids=None, is_agent_role=True) are spectators:
-            #   they get visitor_message (live update) but NOT conversation_unread/new_chat.
-            #   OWNER (visible_team_ids=None, is_agent_role=False) → unrestricted.
-            # - conversation_team_id None (unrouted): team-scoped users skip entirely;
-            #   only unrestricted users (OWNER, no-team agents) receive these events.
+            # - _UNROUTED sentinel (default): caller didn't pass team_id — block team-scoped users.
+            # - conversation_team_id=None: explicit "broadcast to all" (e.g. conversation_team_changed).
+            # - conversation_team_id=<int>: only that team's members receive events;
+            #   no-team AGENTs are spectators (get visitor_message but not unread/sound).
             team_ids = agent_info.get("visible_team_ids")
-            if conversation_team_id is not None:
+            if conversation_team_id is _UNROUTED:
+                # Unrouted conversation: team-scoped users don't receive any events.
+                if team_ids is not None:
+                    continue
+            elif conversation_team_id is not None:
                 if team_ids is not None:
                     if int(conversation_team_id) not in {int(t) for t in team_ids}:
                         continue
@@ -303,10 +313,7 @@ class AgentService:
                     # No-team AGENT — spectator for unread/sound events.
                     if message_data.get("type") == "conversation_unread":
                         continue
-            else:
-                # Unrouted conversation: team-scoped users don't receive any events.
-                if team_ids is not None:
-                    continue
+            # else: conversation_team_id is None → broadcast to all (no team filter)
 
             # A socket connected to website_id=0 is treated as a global agent socket.
             # In production we prefer a single global socket per agent, which must
@@ -384,7 +391,12 @@ class AgentService:
                 # Team-scope filtering (mirrors direct broadcast path).
                 try:
                     team_ids = agent_info.get("visible_team_ids")
-                    if bus_conversation_team_id is not None:
+                    _bus_unrouted = bool(event.get("conversation_unrouted"))
+                    if _bus_unrouted:
+                        # Unrouted conversation: team-scoped users skip all events.
+                        if team_ids is not None:
+                            continue
+                    elif bus_conversation_team_id is not None:
                         if team_ids is not None:
                             if int(bus_conversation_team_id) not in {int(t) for t in team_ids}:
                                 continue
@@ -392,10 +404,7 @@ class AgentService:
                             # No-team AGENT — spectator: skip unread, allow visitor_message.
                             if payload.get("type") == "conversation_unread":
                                 continue
-                    else:
-                        # Unrouted conversation: team-scoped users skip all events.
-                        if team_ids is not None:
-                            continue
+                    # else: bus_conversation_team_id is None and not unrouted → broadcast to all
                 except Exception:
                     pass
 
