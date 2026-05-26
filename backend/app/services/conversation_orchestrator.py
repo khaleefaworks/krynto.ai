@@ -26,7 +26,7 @@ from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.automation import Automation
 from app.core.logging import get_logger
-from app.services.website_resolver import is_website_online
+from app.services.website_resolver import is_team_online, is_website_online
 
 from app.core.message_presenter import serialize_message
 
@@ -259,7 +259,16 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             # website_offline_first_message automation already told the visitor
             # we'll contact them, so "An agent will be with you shortly" would
             # be misleading.
-            if not is_website_online(website_id):
+            # Also honour team-level offline: if the conversation was routed to
+            # a specific team and that team has no available agents, the same
+            # offline path applies even if the website is globally online.
+            _team_id = getattr(conversation, "team_id", None)
+            _effective_online = (
+                is_team_online(int(_team_id))
+                if _team_id is not None
+                else is_website_online(website_id)
+            )
+            if not _effective_online:
                 return
 
             orchestrator = ConversationOrchestrator(db)
@@ -569,7 +578,16 @@ class ConversationOrchestrator:
         # of whether this is the first message — covers the mid-conversation
         # case where the website goes offline after a chat has started.
         # The automation's repeat=once policy prevents duplicate sends.
-        if not is_website_online(website_id) and not conversation.assigned_agent_id:
+        # Team-aware offline check: if the conversation is routed to a specific
+        # team, check whether that team has any available agent.  Fall back to
+        # the website-level check for unrouted conversations.
+        _team_id_vm = getattr(conversation, "team_id", None)
+        _is_offline_vm = (
+            not is_team_online(int(_team_id_vm))
+            if _team_id_vm is not None
+            else not is_website_online(website_id)
+        )
+        if _is_offline_vm and not conversation.assigned_agent_id:
             await self._run_automation_flows(
                 conversation_id=conversation.id,
                 website_id=website_id,
@@ -891,12 +909,26 @@ class ConversationOrchestrator:
             sub_message = str(sub_prompt_cfg.get("message") or "").strip()
             sub_buttons_raw: list = sub_prompt_cfg.get("buttons") or []
             sub_allow_input: bool = bool(sub_prompt_cfg.get("allow_input", False))
+            # collect_contact: False on a sub_prompt means its leaf buttons never
+            # show the offline contact form (e.g. informational / Jobs path).
+            sub_collect_contact: bool = bool(sub_prompt_cfg.get("collect_contact", True))
             if sub_message and sub_buttons_raw:
-                sub_validated = [
-                    {"label": b["label"].strip(), "team_id": b.get("team_id"), "reply": b.get("reply", "")}
-                    for b in sub_buttons_raw
-                    if isinstance(b, dict) and (b.get("label") or "").strip()
-                ]
+                sub_validated = []
+                for b in sub_buttons_raw:
+                    if not (isinstance(b, dict) and (b.get("label") or "").strip()):
+                        continue
+                    _stid = b.get("team_id")
+                    _s_is_leaf = not b.get("sub_prompt")
+                    # Per-button flag overrides the sub_prompt-level default.
+                    _s_collect = bool(b.get("collect_contact", sub_collect_contact))
+                    sub_validated.append({
+                        "label": b["label"].strip(),
+                        "team_id": _stid,
+                        "reply": b.get("reply", ""),
+                        "team_online": is_team_online(int(_stid)) if (_stid and _s_is_leaf and _s_collect) else None,
+                        "collect_contact": _s_collect,
+                        "is_branch": not _s_is_leaf,
+                    })
                 # Persist the sub-prompt as a bot message so agents can see it
                 sub_enriched = json.dumps({
                     "message": sub_message,
@@ -1003,27 +1035,40 @@ class ConversationOrchestrator:
             else:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
-        # IVR complete: tell the widget it can now reveal the free-form input.
-        # allow_input=False means a button-only flow; widget keeps input hidden.
-        _allow_input = bool(prompt_node_cfg.get("allow_input", False))
-        if parent_sub_prompt is not None:
-            _allow_input = bool(parent_sub_prompt.get("allow_input", _allow_input))
+        # IVR complete: the visitor has made their selection and the conversation
+        # continues normally, so always open the text input.
+        # NOTE: allow_input on the bot_prompt node governs typing *during*
+        # button display (concurrent free text).  It must not gate the input
+        # *after* the leaf is clicked — that would permanently lock the visitor
+        # out of the chat.
         try:
             await ChatService.send_to_visitor(
                 conversation.id,
                 {
                     "type": "automation_complete",
                     "conversation_id": conversation.id,
-                    "allow_input": _allow_input,
+                    # suppress_waiting_message=True signals an informational path
+                    # (e.g. Jobs) where no agent handoff is expected; keep input
+                    # locked so the visitor knows there's nothing to reply to.
+                    "allow_input": not suppress_waiting,
                 },
             )
         except Exception:
             pass
 
-        # If website is offline and no agent assigned, fire the offline prompt
-        # immediately (the repeat=once policy prevents duplicates).  Skip the
-        # waiting-message timer since it would contradict the offline message.
-        if not conversation.assigned_agent_id and not is_website_online(int(conversation.website_id)):
+        # If the website (or the routed team) is offline and no agent is
+        # assigned, fire the offline prompt immediately.  The repeat=once
+        # policy prevents duplicates.  Skip the waiting-message timer since
+        # it would contradict the offline message.
+        # Team-aware: a button that routes to a specific team uses that team's
+        # availability rather than the global website availability.
+        _team_id_btn = getattr(conversation, "team_id", None)
+        _is_offline_btn = (
+            not is_team_online(int(_team_id_btn))
+            if _team_id_btn is not None
+            else not is_website_online(int(conversation.website_id))
+        )
+        if not suppress_waiting and not conversation.assigned_agent_id and _is_offline_btn:
             await self._run_automation_flows(
                 conversation_id=conversation.id,
                 website_id=int(conversation.website_id),
@@ -1841,11 +1886,26 @@ class ConversationOrchestrator:
                 buttons = cfg.get("buttons") or []
                 automation_id = automation.id
                 if message_text:
-                    validated_buttons = [
-                        {"label": b["label"].strip(), "team_id": b.get("team_id"), "reply": b.get("reply", "")}
-                        for b in buttons
-                        if isinstance(b, dict) and (b.get("label") or "").strip()
-                    ]
+                    validated_buttons = []
+                    for b in buttons:
+                        if not (isinstance(b, dict) and (b.get("label") or "").strip()):
+                            continue
+                        _tid = b.get("team_id")
+                        # Only stamp team_online on leaf buttons (no sub_prompt).
+                        # Branch buttons must never be intercepted — the visitor
+                        # needs to navigate deeper before a team is actually assigned.
+                        _is_leaf = not b.get("sub_prompt")
+                        # collect_contact=False on a button disables the offline
+                        # contact form for that specific button/path.
+                        _collect_contact = bool(b.get("collect_contact", True))
+                        validated_buttons.append({
+                            "label": b["label"].strip(),
+                            "team_id": _tid,
+                            "reply": b.get("reply", ""),
+                            "team_online": is_team_online(int(_tid)) if (_tid and _is_leaf and _collect_contact) else None,
+                            "collect_contact": _collect_contact,
+                            "is_branch": not _is_leaf,
+                        })
                     enriched = json.dumps({"message": message_text, "automation_id": automation_id, "buttons": validated_buttons})
                     saved = self.conversation_service.add_bot_message(
                         conversation_id, enriched, event_type="bot_prompt_buttons"

@@ -179,7 +179,7 @@ class AutomationService:
             {
                 "name": "Offline prompt",
                 "trigger": "website_offline_first_message",
-                "enabled": False,
+                "enabled": True,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
                     {"id": "n_wait", "type": "wait", "config": {"seconds": 2}, "position": {"x": 0, "y": 150}},
