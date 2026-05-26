@@ -124,26 +124,35 @@ class AgentService:
         except Exception:
             visible_website_ids = []
 
-        # Compute team visibility for AGENT role.
-        # None  → unrestricted (SYSTEM_MANAGER, OWNER/MANAGER, or agent with no team memberships).
-        # list  → agent is a member of specific teams; only receive events for those teams.
+        # Compute team visibility for AGENT and MANAGER roles.
+        # None  → unrestricted (SYSTEM_MANAGER, OWNER, or user with no team memberships).
+        # list  → user is in specific teams; only receive events for those teams.
         visible_team_ids: list[int] | None = None
         try:
-            if (
-                user is not None
-                and user.role == UserRole.AGENT
-                and visible_website_ids is not None
-                and visible_website_ids
-            ):
-                team_rows = (
-                    self.db.query(WebsiteTeamMember.team_id)
-                    .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
-                    .filter(WebsiteTeamMember.user_id == int(agent_id))
-                    .filter(WebsiteTeam.website_id.in_(visible_website_ids))
-                    .all()
-                )
+            if user is not None and user.role in (UserRole.AGENT, UserRole.MANAGER):
+                if user.role == UserRole.MANAGER and user.organization_id is not None:
+                    # Manager's teams span all org websites
+                    team_rows = (
+                        self.db.query(WebsiteTeamMember.team_id)
+                        .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+                        .join(Website, Website.id == WebsiteTeam.website_id)
+                        .filter(WebsiteTeamMember.user_id == int(agent_id))
+                        .filter(Website.organization_id == user.organization_id)
+                        .all()
+                    )
+                elif visible_website_ids:
+                    # Agent's teams are limited to their assigned websites
+                    team_rows = (
+                        self.db.query(WebsiteTeamMember.team_id)
+                        .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+                        .filter(WebsiteTeamMember.user_id == int(agent_id))
+                        .filter(WebsiteTeam.website_id.in_(visible_website_ids))
+                        .all()
+                    )
+                else:
+                    team_rows = []
                 team_ids_list = sorted({int(r[0]) for r in team_rows})
-                # Empty list → agent not in any team → stays None (unrestricted)
+                # Empty list → not in any team → stays None (unrestricted)
                 visible_team_ids = team_ids_list if team_ids_list else None
         except Exception:
             visible_team_ids = None
@@ -155,9 +164,8 @@ class AgentService:
             "websocket": websocket,
             "visible_website_ids": visible_website_ids,
             "visible_team_ids": visible_team_ids,
-            # True only for AGENT role — used to distinguish no-team agents (spectators)
-            # from OWNER/MANAGER who also have visible_team_ids=None but should always
-            # receive unread counts.
+            # True for AGENT role only — distinguishes no-team agents (spectators)
+            # from OWNER who also has visible_team_ids=None but gets all events.
             "is_agent_role": user is not None and user.role == UserRole.AGENT,
         }
         
@@ -279,21 +287,26 @@ class AgentService:
                     except Exception:
                         continue
 
-            # Team-scope filtering: when the conversation has a team assigned:
-            # - Agents restricted to different teams → skip entirely.
-            # - No-team AGENTs (visible_team_ids=None, is_agent_role=True) → spectators:
-            #   they receive visitor_message (live update) but NOT conversation_unread.
-            # - OWNER/MANAGER (visible_team_ids=None, is_agent_role=False) → unrestricted.
+            # Team-scope filtering.
+            # - conversation_team_id set: only matching team members receive events.
+            #   No-team AGENTs (visible_team_ids=None, is_agent_role=True) are spectators:
+            #   they get visitor_message (live update) but NOT conversation_unread/new_chat.
+            #   OWNER (visible_team_ids=None, is_agent_role=False) → unrestricted.
+            # - conversation_team_id None (unrouted): team-scoped users skip entirely;
+            #   only unrestricted users (OWNER, no-team agents) receive these events.
+            team_ids = agent_info.get("visible_team_ids")
             if conversation_team_id is not None:
-                team_ids = agent_info.get("visible_team_ids")
                 if team_ids is not None:
-                    # Agent is restricted to specific teams — skip if not matching.
                     if int(conversation_team_id) not in {int(t) for t in team_ids}:
                         continue
                 elif agent_info.get("is_agent_role"):
-                    # No-team AGENT — spectator: skip unread events, allow visitor_message.
+                    # No-team AGENT — spectator for unread/sound events.
                     if message_data.get("type") == "conversation_unread":
                         continue
+            else:
+                # Unrouted conversation: team-scoped users don't receive any events.
+                if team_ids is not None:
+                    continue
 
             # A socket connected to website_id=0 is treated as a global agent socket.
             # In production we prefer a single global socket per agent, which must
@@ -369,9 +382,9 @@ class AgentService:
                             continue
 
                 # Team-scope filtering (mirrors direct broadcast path).
-                if bus_conversation_team_id is not None:
-                    try:
-                        team_ids = agent_info.get("visible_team_ids")
+                try:
+                    team_ids = agent_info.get("visible_team_ids")
+                    if bus_conversation_team_id is not None:
                         if team_ids is not None:
                             if int(bus_conversation_team_id) not in {int(t) for t in team_ids}:
                                 continue
@@ -379,8 +392,12 @@ class AgentService:
                             # No-team AGENT — spectator: skip unread, allow visitor_message.
                             if payload.get("type") == "conversation_unread":
                                 continue
-                    except Exception:
-                        pass
+                    else:
+                        # Unrouted conversation: team-scoped users skip all events.
+                        if team_ids is not None:
+                            continue
+                except Exception:
+                    pass
 
                 if ws_website_id == 0 and (include_global or website_id is not None):
                     should_send = True
