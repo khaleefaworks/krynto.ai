@@ -80,6 +80,10 @@ function _shouldToast(key: string, minIntervalMs: number): boolean {
 // The existing 1500 ms gate handles the reverse order (new_chat first).
 const _pendingMsgSoundTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
+// Push events received while the tab was hidden (throttled/frozen).
+// Drained by the visibilitychange handler when the agent returns to the tab.
+const _pendingPushQueue: Array<{ push_type: string }> = []
+
 function App() {
   const {
     token,
@@ -102,48 +106,94 @@ function App() {
   }, [])
 
   // If a push arrives while the dashboard is already open, the service worker
-  // forwards it via postMessage so we can play an in-app sound.
+  // forwards it via postMessage and BroadcastChannel so we can play an in-app sound.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const sw = navigator.serviceWorker
-    if (!sw) return
 
-    const handler = async (event: MessageEvent) => {
+    const playFromPushData = async (data: any) => {
+      try {
+        const pushType = String(data?.push_type || 'new_message')
+        const title = String(data?.title || '')
+
+        // Tab is hidden — queue for catch-up playback when the agent returns.
+        // Browsers freeze JS in background tabs after ~5 min; AudioContext.play()
+        // will fail silently. The visibilitychange handler below drains this queue.
+        if (document.hidden) {
+          _pendingPushQueue.push({ push_type: pushType })
+          return
+        }
+
+        await resumeAudioContextIfSuspended()
+        if (!_shouldPlaySound()) return
+
+        const isNewChat = pushType === 'new_chat' || title.toLowerCase().startsWith('new chat')
+        if (isNewChat) {
+          playNewVisitorNotificationSound()
+        } else {
+          playMessageNotificationSound()
+        }
+      } catch { }
+    }
+
+    const swHandler = async (event: MessageEvent) => {
       try {
         const data: any = event?.data || {}
+        if (data?.type === 'navigate') {
+          // SW notificationclick couldn't use client.navigate() — fall back to
+          // location assignment (causes a reload, acceptable for a notification click).
+          const path = String(data?.url || '/')
+          window.location.href = path
+          return
+        }
         if (data?.type !== 'push') return
-
-        // Play sound for push notifications forwarded by the service worker.
-        // This covers two cases:
-        //  • Tab visible but WS dropped (PWA re-opened, slow reconnect) — ensures
-        //    the push always produces a sound even without an active WS event.
-        //  • Tab hidden — WS autoplay is blocked; SW postMessage is the only path.
-        // The 1500 ms cross-tab gate in _shouldPlaySound() prevents double-play
-        // when both the WS event AND the SW postMessage fire for the same notification.
-
-        // AudioContext can be suspended after prolonged background inactivity.
-        // Resume it before attempting playback so the synthesized-tone fallback works.
-        await resumeAudioContextIfSuspended()
-
-        const title = String(data?.title || '')
-        try {
-          if (!_shouldPlaySound()) return
-          // Match the sound to the push type: new-chat vs regular message.
-          if (title.toLowerCase().startsWith('new chat')) {
-            playNewVisitorNotificationSound()
-          } else {
-            playMessageNotificationSound()
-          }
-        } catch { }
-      } catch {
-        // ignore
-      }
+        await playFromPushData(data)
+      } catch { }
     }
 
-    sw.addEventListener('message', handler)
+    // SW postMessage path (all browsers).
+    const sw = navigator.serviceWorker
+    if (sw) sw.addEventListener('message', swHandler)
+
+    // BroadcastChannel path — throttled-but-not-frozen tabs receive this more
+    // reliably than postMessage because the channel has its own delivery queue.
+    let bc: BroadcastChannel | null = null
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('aica_sw')
+        bc.onmessage = (event: MessageEvent) => { swHandler(event).catch(() => { }) }
+      } catch { }
+    }
+
     return () => {
-      try { sw.removeEventListener('message', handler) } catch { }
+      if (sw) try { sw.removeEventListener('message', swHandler) } catch { }
+      try { bc?.close() } catch { }
     }
+  }, [])
+
+  // Catch-up: play a sound when the agent switches back to the tab after being away.
+  // Covers the case where pushes arrived while the tab was frozen/throttled and the
+  // message handler above could not play audio (AudioContext blocked while hidden).
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.hidden) return
+      const pending = _pendingPushQueue.splice(0)
+      if (!pending.length) return
+      try {
+        await resumeAudioContextIfSuspended()
+        if (!_shouldPlaySound()) return
+        // Play one sound for the highest-priority pending notification
+        // (new_chat takes precedence; avoid spamming multiple sounds).
+        const hasNewChat = pending.some(p => p.push_type === 'new_chat')
+        if (hasNewChat) {
+          playNewVisitorNotificationSound()
+        } else {
+          playMessageNotificationSound()
+        }
+      } catch { }
+    }
+
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
   // Single initialization effect: check setup status, then restore session.

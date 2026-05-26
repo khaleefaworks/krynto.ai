@@ -150,10 +150,22 @@ self.addEventListener('push', (event) => {
                     data: { url, push_type: pushType },
                 })
 
-                // Forward to open tabs so they can play an in-app sound.
-                // (Audio cannot be played directly from a service worker.)
+                const msg = { type: 'push', title, body, url, push_type: pushType }
+
+                // BroadcastChannel reaches throttled-but-not-frozen tabs more reliably
+                // than postMessage (dedicated queue, less likely to be dropped by the browser).
+                if (typeof BroadcastChannel !== 'undefined') {
+                    try {
+                        const bc = new BroadcastChannel('aica_sw')
+                        bc.postMessage(msg)
+                        bc.close()
+                    } catch { }
+                }
+
+                // postMessage as well — covers browsers without BroadcastChannel and
+                // serves as a delivery fallback.
                 for (const client of allClients) {
-                    client.postMessage({ type: 'push', title, body, url, push_type: pushType })
+                    try { client.postMessage(msg) } catch { }
                 }
             } catch {
                 // ignore
@@ -167,26 +179,37 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close()
 
-    const url = (event.notification && event.notification.data && event.notification.data.url) || '/'
+    const notifUrl = (event.notification?.data?.url) || '/'
+    // Build an absolute URL — client.navigate() requires absolute URLs and silently
+    // fails with relative paths in Firefox and Safari.
+    const targetUrl = new URL(notifUrl, self.registration.scope).href
 
     event.waitUntil(
         (async () => {
             const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-            // Focus an existing tab at the target URL if one exists.
-            for (const client of allClients) {
-                if ('focus' in client) {
-                    await client.focus()
-                    if ('navigate' in client) {
-                        try { await client.navigate(url) } catch { }
+            // Prefer a client that is already running this app (URL within the SW scope).
+            // Avoids accidentally focusing an unrelated same-origin window.
+            const appClient = allClients.find(c => c.url.startsWith(self.registration.scope))
+
+            if (appClient) {
+                try { await appClient.focus() } catch { }
+                if ('navigate' in appClient) {
+                    try {
+                        await appClient.navigate(targetUrl)
+                    } catch {
+                        // navigate() blocked — tell the app to route itself.
+                        try { appClient.postMessage({ type: 'navigate', url: notifUrl }) } catch { }
                     }
-                    return
+                } else {
+                    try { appClient.postMessage({ type: 'navigate', url: notifUrl }) } catch { }
                 }
+                return
             }
 
-            // No open tab — open a new window.
+            // No open app tab — open a new window at the exact target URL.
             if (self.clients.openWindow) {
-                await self.clients.openWindow(url)
+                try { await self.clients.openWindow(targetUrl) } catch { }
             }
         })()
     )
