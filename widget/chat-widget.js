@@ -101,8 +101,38 @@
   let pendingOfflineAttachments = [];
   // Deferred bot button click (when offline form intercepts a button press).
   let pendingBotButtonClick = null;
+  // True when the contact overlay was triggered by a team-level offline event
+  // while the website is globally online.  Prevents applyPresence() from
+  // dismissing the overlay on the next presence ping.
+  let _forceContactOverlay = false;
+  // Set true once a leaf bot button click has been committed (automation_complete
+  // received).  Used to skip the contact overlay when bot_offline arrives after
+  // the visitor has already passed the IVR and input is open.
+  let _leafButtonCommitted = false;
   // Set true once contact info is sent for this conversation; clears on enterStartView().
   let _contactVerifiedThisConversation = false;
+
+  // ── Input-lock persistence ──────────────────────────────────────────────────
+  // When automation_complete fires with allow_input=false (terminal informational
+  // paths like "Check Application Status"), we persist a flag to localStorage so
+  // the input stays hidden after a page reload.  Cleared when an agent joins.
+  function _inputLockKey() {
+    if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
+    return 'chatassist_input_locked_' + CONFIG.websiteId + '_' + CONFIG.conversationId;
+  }
+  function _setInputLocked() {
+    var k = _inputLockKey();
+    if (k) try { localStorage.setItem(k, '1'); } catch (e) {}
+  }
+  function _clearInputLocked() {
+    var k = _inputLockKey();
+    if (k) try { localStorage.removeItem(k); } catch (e) {}
+  }
+  function _isInputLocked() {
+    var k = _inputLockKey();
+    if (!k) return false;
+    try { return localStorage.getItem(k) === '1'; } catch (e) { return false; }
+  }
 
   let uploadingAttachmentsCount = 0;
   let draftAttachments = [];
@@ -973,6 +1003,7 @@
     ratingConversationId = null;
     CONFIG.conversationId = 0;
     _contactVerifiedThisConversation = false;
+    _leafButtonCommitted = false;
     pendingBotButtonClick = null;
     // Clear the welcome-popup dismissed key so the popup can appear fresh for
     // the new conversation (it was suppressed for the just-closed conversation).
@@ -1211,17 +1242,8 @@
         // input so the visitor can type, which triggers the contact overlay on send.
         clearTimeout(_inputRevealTimer);
         // Don't auto-reveal input for read-only (ended/resolved) threads.
-        // Also skip for conversations that completed a button-only (allow_input:false) automation.
         if (!isReadOnlyThread) {
-          const _noInputKey = CONFIG.conversationId
-            ? 'chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId
-            : null;
-          const _noInput = _noInputKey
-            ? (() => { try { return localStorage.getItem(_noInputKey); } catch (e) { return null; } })()
-            : null;
-          if (!_noInput) {
-            _inputRevealTimer = setTimeout(showInputContainer, 2500);
-          }
+          _inputRevealTimer = setTimeout(showInputContainer, 2500);
         }
       };
       ws.onmessage = (event) => {
@@ -1356,8 +1378,10 @@
         } else if (actor === 'bot' || (actor === 'system' && kind === 'chat') || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))) {
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
-          if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
-          else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
+          if (eventType === 'agent_join') {
+            showJoinMessage(m.content, m.created_at);
+            _clearInputLocked(); // Agent joined after suppress_waiting — unlock input
+          } else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
           else if (eventType === 'visitor_ended') showSystemMessage('You ended the chat.');
           else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
@@ -1375,15 +1399,13 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
-        // Reveal input unless a bot_prompt is pending, read-only, or a button-only automation.
+        // Reveal input unless a bot_prompt is still pending, the thread is
+        // read-only, or the input was locked by automation_complete(allow_input=false).
         if (!hasPendingBotPrompt && !isReadOnlyThread) {
-          // Don't reveal input if this conversation completed a button-only (allow_input:false) automation.
-          const _noInputFlag = CONFIG.conversationId
-            ? (() => { try { return localStorage.getItem('chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId); } catch (e) { return null; } })()
-            : null;
-          if (!_noInputFlag) {
+          if (!_isInputLocked()) {
             showInputContainer();
           } else {
+            // Locked by suppress_waiting path — cancel reveal timer too.
             clearTimeout(_inputRevealTimer);
             _inputRevealTimer = null;
           }
@@ -1589,11 +1611,19 @@
       // overlay so the visitor can provide their details.
       try {
         if (data.message_obj && data.message_obj.event_type === 'bot_offline') {
-          // Immediately check if contact info can be satisfied silently.
-          // Show the form right away (before visitor tries to send) if not.
           if (_checkAndSendContactSilently()) {
+            // Contact already on file — send silently and reveal input.
+            showInputContainer();
+          } else if (_leafButtonCommitted) {
+            // Visitor already completed the IVR (automation_complete received).
+            // Input is already open (or intentionally hidden for suppress_waiting
+            // paths). Show the offline message as a chat bubble only — no overlay.
             showInputContainer();
           } else {
+            // Visitor hasn't clicked a button yet (e.g. typed directly while
+            // offline).  Collect contact details before proceeding.
+            // If globally online but bot_offline fired, this is team-level offline.
+            if (presenceOnline) _forceContactOverlay = true;
             showContactOverlay();
           }
         }
@@ -1626,10 +1656,12 @@
       smartScroll();
     } else if (data.type === 'agent_joined') {
       setAgentTyping(false);
+      _clearInputLocked(); // Agent taking over always unlocks input
       const createdAt = (data.message_obj && data.message_obj.created_at) || null;
       showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, createdAt);
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
+      showInputContainer();
       smartScroll();
     } else if (data.type === 'agent_typing') {
       const isTyping = Boolean(data.is_typing);
@@ -1654,16 +1686,19 @@
       // IVR flow is done. Clear any fallback timer.
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      if (data.allow_input === false) {
-        // Button-only flow: keep input hidden permanently.
-        // Persist so page reload also suppresses the input reveal timer.
-        if (CONFIG.conversationId) {
-          try { localStorage.setItem('chatassist_no_input_' + CONFIG.websiteId + '_' + CONFIG.conversationId, '1'); } catch (e) {}
-        }
-      } else {
+      // allow_input=false → suppress_waiting path (e.g. Careers informational reply).
+      // Persist the lock so input stays hidden after a page reload.
+      // allow_input=true (or absent) → normal routing path: clear any stale lock and open input.
+      if (data.allow_input !== false) {
+        _clearInputLocked();
         showInputContainer();
         try { $id('chatassist-input')?.focus(); } catch (e) { }
+      } else {
+        _setInputLocked();
       }
+      // Mark that the visitor completed the IVR so bot_offline won't re-open
+      // the contact overlay on top of an already-open input.
+      _leafButtonCommitted = true;
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -2354,7 +2389,25 @@
         btnEl.textContent = btn.label || 'Option ' + (idx + 1);
         btnEl.type = 'button';
         btnEl.addEventListener('click', function () {
-          // Disable all buttons after click
+          // Offline interception: only for leaf buttons where collect_contact is
+          // enabled.  Branch buttons (is_branch=true) navigate to a sub-menu and
+          // must never be blocked — the team hasn't been picked yet.  Buttons with
+          // collect_contact=false are informational paths (e.g. Careers replies)
+          // that should never show the contact overlay.
+          if (!btn.is_branch && btn.collect_contact !== false) {
+            if (!presenceOnline && !_checkAndSendContactSilently()) {
+              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              showContactOverlay();
+              return;
+            }
+            if (btn.team_online === false && !_checkAndSendContactSilently()) {
+              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              showContactOverlay();
+              return;
+            }
+          }
+
+          // Past all offline checks — commit the click: disable buttons now.
           const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
           allBtns.forEach(function (b) {
             b.disabled = true;
@@ -2362,13 +2415,6 @@
           });
           // Highlight selected
           btnEl.classList.add('chatassist-prompt-btn-selected');
-
-          // If offline and contact not yet on file, collect it before firing.
-          if (!presenceOnline && !_checkAndSendContactSilently()) {
-            pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1) };
-            showContactOverlay();
-            return;
-          }
 
           // Input reveal is deferred: the server sends automation_complete
           // after processing (so the reply appears before the input opens).
@@ -2579,6 +2625,10 @@
     el.style.display = 'none';
     if (!wasVisible) return;
     if (restore) {
+      // User explicitly dismissed the overlay — discard any deferred button click
+      // so it doesn't fire unexpectedly on the next offline form submission.
+      pendingBotButtonClick = null;
+      _forceContactOverlay = false;
       const input = $id('chatassist-input');
       if (input && pendingOfflineMessage != null) input.value = pendingOfflineMessage;
       if (pendingOfflineAttachments && pendingOfflineAttachments.length) {
@@ -2641,6 +2691,7 @@
     const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
     pendingOfflineAttachments = [];
+    _forceContactOverlay = false;
     hideContactOverlay(false);
     try {
       if (visitorName) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitorName);
@@ -2673,12 +2724,23 @@
           visitor_email: visitorEmail || undefined,
         }));
       }
+      // The offline automation message told the visitor they can leave additional
+      // details — open the input now so they actually can.
+      showInputContainer();
     }
 
     // If a bot button click was deferred waiting for contact, fire it now.
     if (pendingBotButtonClick) {
       const pbc = pendingBotButtonClick;
       pendingBotButtonClick = null;
+      // Disable and highlight the deferred button now that the click is committed.
+      if (pbc._allBtns) {
+        pbc._allBtns.forEach(function (b) {
+          b.disabled = true;
+          b.classList.add('chatassist-prompt-btn-disabled');
+        });
+      }
+      if (pbc._btnEl) pbc._btnEl.classList.add('chatassist-prompt-btn-selected');
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = setTimeout(showInputContainer, 5000);
       appendMessage('visitor', pbc.label, new Date().toISOString(), null, null);
@@ -3214,7 +3276,10 @@
 
     const count = presence.available_agents_count ?? (presence.agents?.length || 0);
     presenceOnline = count > 0;
-    if (presenceOnline) hideContactOverlay(false);
+    // Only dismiss the contact overlay when the website is online AND the overlay
+    // was not forced open by a team-level offline event (which can happen while
+    // the website is globally online because agents on other teams are present).
+    if (presenceOnline && !_forceContactOverlay) hideContactOverlay(false);
 
     // Update bubble online dot
     const bubbleDot = $id('chatassist-bubble-online-dot');
