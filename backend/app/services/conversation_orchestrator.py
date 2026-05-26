@@ -43,15 +43,19 @@ def _get_eligible_agent_ids_for_push(
 
     Scoping rules (org-aware, multi-tenant):
     - SYSTEM_MANAGER: always eligible (cross-org administrator).
-    - OWNER/MANAGER of the website's org: always eligible.
+    - OWNER: always eligible within their org (fully unrestricted).
+    - MANAGER: team-scoped (same as AGENT per visibility rules).
+      - No team memberships → unrestricted (eligible for all conversations).
+      - Has team memberships → eligible only for their teams' conversations, or
+        for unrouted conversations (team_id=None) which anyone can claim/route.
     - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
       - If conversation_team_id is set:
-        * Only members of that specific team → eligible.
-        * Agents in a different team or in no team → excluded.
-        * No-team agents are spectators for team-assigned chats (no push, no unread).
-      - If conversation_team_id is None (unassigned conversation):
-        * All assigned agents on the website → eligible (any can claim it).
-    - All candidates must be is_active=True AND is_available=True.
+        * Members of that specific team → eligible.
+        * No-team agents → eligible (unrestricted, see all conversations).
+        * Agents in a different team → excluded.
+      - If conversation_team_id is None (unrouted conversation):
+        * All assigned agents → eligible (any can claim/route it).
+    - All candidates must be is_active=True AND (is_available=True OR push_when_offline=True).
     """
     from app.models.user import UserRole
     from app.models.website import Website
@@ -88,18 +92,55 @@ def _get_eligible_agent_ids_for_push(
     eligible.update(int(u.id) for u in sys_mgrs)
 
     if org_id is not None:
-        # OWNER/MANAGER in same org
-        org_admins = (
+        # OWNER: fully unrestricted within their org.
+        owners = (
             db.query(User)
             .filter(
                 User.is_active == True,   # noqa: E712
                 _push_reachable(),
                 User.organization_id == org_id,
-                User.role.in_([UserRole.OWNER, UserRole.MANAGER]),
+                User.role == UserRole.OWNER,
             )
             .all()
         )
-        eligible.update(int(u.id) for u in org_admins)
+        eligible.update(int(u.id) for u in owners)
+
+        # MANAGER: team-scoped (mirrors compute_visibility_scope / WS delivery logic).
+        # Fetch all managers first, then filter by team membership in one batch query.
+        managers = (
+            db.query(User)
+            .filter(
+                User.is_active == True,   # noqa: E712
+                _push_reachable(),
+                User.organization_id == org_id,
+                User.role == UserRole.MANAGER,
+            )
+            .all()
+        )
+        if managers:
+            mgr_ids = {int(m.id) for m in managers}
+            mgr_team_rows = (
+                db.query(WebsiteTeamMember.user_id, WebsiteTeamMember.team_id)
+                .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+                .join(Website, Website.id == WebsiteTeam.website_id)
+                .filter(WebsiteTeamMember.user_id.in_(mgr_ids))
+                .filter(Website.organization_id == org_id)
+                .all()
+            )
+            mgr_to_teams: dict[int, set[int]] = {mid: set() for mid in mgr_ids}
+            for row_user_id, row_team_id in mgr_team_rows:
+                mgr_to_teams[int(row_user_id)].add(int(row_team_id))
+
+            for mgr in managers:
+                mgr_teams = mgr_to_teams[int(mgr.id)]
+                if not mgr_teams:
+                    # No team membership → unrestricted, eligible for all conversations.
+                    eligible.add(int(mgr.id))
+                elif conversation_team_id is None:
+                    # Unrouted conversation → notify all managers (anyone can route it).
+                    eligible.add(int(mgr.id))
+                elif int(conversation_team_id) in mgr_teams:
+                    eligible.add(int(mgr.id))
 
     # AGENT: must be directly assigned to this website
     assigned_rows = (

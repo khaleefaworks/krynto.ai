@@ -126,7 +126,7 @@ function App() {
         await resumeAudioContextIfSuspended()
         if (!_shouldPlaySound()) return
 
-        const isNewChat = pushType === 'new_chat' || title.toLowerCase().startsWith('new chat')
+        const isNewChat = pushType === 'new_chat'
         if (isNewChat) {
           playNewVisitorNotificationSound()
         } else {
