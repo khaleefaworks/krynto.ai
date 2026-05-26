@@ -40,6 +40,8 @@ export interface BotPromptSubPrompt {
   allow_input?: boolean
   /** When true, suppress the "agent will be with you" waiting message after a leaf click. */
   suppress_waiting_message?: boolean
+  /** When false, leaf sub-buttons never show the offline contact form (e.g. informational/Jobs path). Default true. */
+  collect_contact?: boolean
   buttons: BotPromptButton[]
 }
 
