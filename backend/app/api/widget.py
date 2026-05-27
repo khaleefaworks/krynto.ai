@@ -16,7 +16,7 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.core.widget_origin import enforce_widget_domain_or_403
 from app.models.website import Website
-from app.services.website_resolver import is_website_online
+from app.services.website_resolver import is_website_online, is_team_online
 from app.api.deps import require_authenticated_user
 
 
@@ -591,6 +591,27 @@ def get_widget_status(
     online = is_website_online(website_id)
     
     return WidgetStatusResponse(online=online)
+
+
+@router.get("/team-online")
+def check_team_online(
+    request: Request,
+    website_id: int = Query(...),
+    team_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Real-time team availability check called by the widget at button-click time.
+
+    The team_online flag baked into bot_prompt_buttons at conversation-creation
+    time can be stale (agents may have come online since). This endpoint lets
+    the widget verify the current state before deciding to block with the
+    contact overlay.
+    """
+    website = db.query(Website).filter(Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
+    return {"online": is_team_online(team_id)}
 
 
 # ---------------------------------------------------------------------------

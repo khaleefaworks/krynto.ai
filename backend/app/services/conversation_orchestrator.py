@@ -890,12 +890,12 @@ class ConversationOrchestrator:
             content=str(label),
         )
 
-        # If this is the visitor's first message, send new_chat notification
-        # (sound + push) to agents instead of — or in addition to — visitor_message.
-        # Pass _button_team_id so the broadcast is scoped to the correct team even
-        # though conversation.team_id has not been written to the DB yet.
-        if prior_visitor_msg_count == 0:
-            await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
+        # new_chat broadcast is deferred to the LEAF section below.
+        # Branch clicks (sub-prompt navigation) must not trigger it — the visitor
+        # hasn't made their actual selection yet, and sub-prompts often route to
+        # teams with no members at that stage.  The leaf path uses a path-depth
+        # formula to fire on the first real leaf action regardless of how many
+        # branch-navigation messages were saved before it.
 
         # Broadcast the visitor's button click to agents
         if visitor_selection_msg:
@@ -1066,6 +1066,14 @@ class ConversationOrchestrator:
                     )
             except Exception as e:
                 logger.error("bot_button_team_assign_failed", error=str(e))
+
+        # Fire new_chat broadcast on the first LEAF action.
+        # For single-level buttons path=[idx] → depth 1 → 0 branch messages before.
+        # For sub-buttons path=[branch, idx] → depth 2 → 1 branch message before.
+        # prior_visitor_msg_count <= len(path) - 1 is True only for the first leaf
+        # click regardless of how many branch navigations preceded it.
+        if prior_visitor_msg_count <= len(path) - 1:
+            await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
 
         # Send reply message to visitor
         if reply and isinstance(reply, str) and reply.strip():

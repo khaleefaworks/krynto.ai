@@ -111,6 +111,10 @@
   let _leafButtonCommitted = false;
   // Set true once contact info is sent for this conversation; clears on enterStartView().
   let _contactVerifiedThisConversation = false;
+  // Set true the moment the visitor touches any field in the contact overlay.
+  // Prevents applyPresence() from auto-dismissing the form mid-fill when
+  // agents come online. Reset each time the overlay opens.
+  let _contactFormTouched = false;
 
   // ── Input-lock persistence ──────────────────────────────────────────────────
   // When automation_complete fires with allow_input=false (terminal informational
@@ -2394,42 +2398,62 @@
           // must never be blocked — the team hasn't been picked yet.  Buttons with
           // collect_contact=false are informational paths (e.g. Careers replies)
           // that should never show the contact overlay.
+
+          // All paths that decide to proceed converge here.
+          function commitClick() {
+            const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
+            allBtns.forEach(function (b) {
+              b.disabled = true;
+              b.classList.add('chatassist-prompt-btn-disabled');
+            });
+            btnEl.classList.add('chatassist-prompt-btn-selected');
+            // Input reveal is deferred: the server sends automation_complete
+            // after processing (so the reply appears before the input opens).
+            // Only arm the 5-second fallback if free-text input is allowed.
+            clearTimeout(_inputRevealTimer);
+            if (allowInput) {
+              _inputRevealTimer = setTimeout(showInputContainer, 5000);
+            }
+            // Optimistically append the visitor's selection as a visitor message.
+            appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
+            isAtBottom = true;
+            smartScroll();
+            sendBotButtonClick(automationId, [...buttonPathPrefix, idx]);
+          }
+
           if (!btn.is_branch && btn.collect_contact !== false) {
             if (!presenceOnline && !_checkAndSendContactSilently()) {
+              // Website definitively offline (real-time WS presence) — block immediately.
               pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
               showContactOverlay();
               return;
             }
-            if (btn.team_online === false && !_checkAndSendContactSilently()) {
-              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
-              showContactOverlay();
+            if (presenceOnline && btn.team_id && !_checkAndSendContactSilently()) {
+              // btn.team_online is a one-time snapshot baked at conversation-creation
+              // time — it is stale in both directions (team may have gone offline OR
+              // come online since). Always verify the specific team in real time.
+              var _pendingClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              btnEl.disabled = true;
+              fetch(
+                CONFIG.apiUrl + '/widget/team-online?website_id=' + encodeURIComponent(CONFIG.websiteId) +
+                '&team_id=' + encodeURIComponent(btn.team_id)
+              )
+                .then(function (r) { return r.ok ? r.json() : { online: false }; })
+                .catch(function () { return { online: false }; })
+                .then(function (data) {
+                  btnEl.disabled = false;
+                  if (data.online) {
+                    commitClick();
+                  } else {
+                    pendingBotButtonClick = _pendingClick;
+                    showContactOverlay();
+                  }
+                });
               return;
             }
           }
 
-          // Past all offline checks — commit the click: disable buttons now.
-          const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
-          allBtns.forEach(function (b) {
-            b.disabled = true;
-            b.classList.add('chatassist-prompt-btn-disabled');
-          });
-          // Highlight selected
-          btnEl.classList.add('chatassist-prompt-btn-selected');
-
-          // Input reveal is deferred: the server sends automation_complete
-          // after processing (so the reply appears before the input opens).
-          // Only arm the 5-second fallback if free-text input is allowed.
-          clearTimeout(_inputRevealTimer);
-          if (allowInput) {
-            _inputRevealTimer = setTimeout(showInputContainer, 5000);
-          }
-
-          // Optimistically append the visitor's selection as a visitor message
-          appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
-          isAtBottom = true;
-          smartScroll();
-
-          sendBotButtonClick(automationId, [...buttonPathPrefix, idx]);
+          commitClick();
         });
         buttonsWrap.appendChild(btnEl);
       });
@@ -2573,11 +2597,16 @@
     // Show pending message preview so visitor knows their message is safe.
     const preview = $id('chatassist-contact-msg-preview');
     if (preview) {
+      var _previewText = null;
       if (pendingOfflineMessage) {
-        const truncated = pendingOfflineMessage.length > 120
+        _previewText = pendingOfflineMessage.length > 120
           ? pendingOfflineMessage.slice(0, 120) + '…'
           : pendingOfflineMessage;
-        preview.textContent = '"' + truncated + '"';
+      } else if (pendingBotButtonClick && pendingBotButtonClick.label) {
+        _previewText = pendingBotButtonClick.label;
+      }
+      if (_previewText) {
+        preview.textContent = '“' + _previewText + '”';
         preview.style.display = 'block';
       } else {
         preview.style.display = 'none';
@@ -2610,6 +2639,13 @@
 
     el.style.display = 'flex';
     el.classList.add('chatassist-contact-overlay-visible');
+    // Reset touched state each time the form opens so applyPresence() can
+    // auto-dismiss if agents come online before the visitor starts typing.
+    _contactFormTouched = false;
+    if (!el._touchHandlerAttached) {
+      el.addEventListener('input', function () { _contactFormTouched = true; });
+      el._touchHandlerAttached = true;
+    }
     // Focus first input (name field)
     const firstField = $id('chatassist-contact-name');
     try { firstField && firstField.focus(); } catch (e) { }
@@ -3276,10 +3312,14 @@
 
     const count = presence.available_agents_count ?? (presence.agents?.length || 0);
     presenceOnline = count > 0;
-    // Only dismiss the contact overlay when the website is online AND the overlay
-    // was not forced open by a team-level offline event (which can happen while
-    // the website is globally online because agents on other teams are present).
-    if (presenceOnline && !_forceContactOverlay) hideContactOverlay(false);
+    // Dismiss the contact overlay when the website comes back online, unless
+    // the visitor has already started filling the form (closing mid-input
+    // would discard their work). _forceContactOverlay is also cleared here:
+    // if agents are online again, the team-level offline reason is gone.
+    if (presenceOnline && !_contactFormTouched) {
+      _forceContactOverlay = false;
+      hideContactOverlay(false);
+    }
 
     // Update bubble online dot
     const bubbleDot = $id('chatassist-bubble-online-dot');
