@@ -173,6 +173,10 @@ class AgentService:
             # True for AGENT role only — distinguishes no-team agents (spectators)
             # from OWNER who also has visible_team_ids=None but gets all events.
             "is_agent_role": user is not None and user.role == UserRole.AGENT,
+            # True for roles that are team-scoped (AGENT + MANAGER).
+            # Used to suppress notification events for no-team users on team-routed
+            # conversations — OWNER/SYSTEM_MANAGER remain unrestricted.
+            "is_team_scoped_role": user is not None and user.role in (UserRole.AGENT, UserRole.MANAGER),
         }
         
         # Create session record
@@ -309,9 +313,13 @@ class AgentService:
                 if team_ids is not None:
                     if int(conversation_team_id) not in {int(t) for t in team_ids}:
                         continue
-                elif agent_info.get("is_agent_role"):
-                    # No-team AGENT — spectator for unread/sound events.
-                    if message_data.get("type") == "conversation_unread":
+                elif agent_info.get("is_team_scoped_role"):
+                    # No-team AGENT/MANAGER on a team-routed conversation.
+                    # Block notification-type events so they don't hear sounds or
+                    # get unread badges for another team's chat. Follow-up events
+                    # (visitor_message, agent_typing, etc.) still pass through so
+                    # spectating stays functional if they open the conversation.
+                    if message_data.get("type") in {"new_chat", "conversation_unread"}:
                         continue
             # else: conversation_team_id is None → broadcast to all (no team filter)
 
@@ -400,9 +408,10 @@ class AgentService:
                         if team_ids is not None:
                             if int(bus_conversation_team_id) not in {int(t) for t in team_ids}:
                                 continue
-                        elif agent_info.get("is_agent_role"):
-                            # No-team AGENT — spectator: skip unread, allow visitor_message.
-                            if payload.get("type") == "conversation_unread":
+                        elif agent_info.get("is_team_scoped_role"):
+                            # No-team AGENT/MANAGER on a team-routed conversation.
+                            # Mirrors the direct-path rule above.
+                            if payload.get("type") in {"new_chat", "conversation_unread"}:
                                 continue
                     # else: bus_conversation_team_id is None and not unrouted → broadcast to all
                 except Exception:

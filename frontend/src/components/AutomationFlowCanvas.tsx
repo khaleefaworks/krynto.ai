@@ -253,6 +253,24 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
             </div>
           )}
 
+          {/* Team assignment — applies to both leaf and branch buttons.
+              For branch buttons the team is assigned immediately on click so agents
+              see the routing before the visitor picks a sub-option. */}
+          {websiteTeams.length > 0 && (
+            <select
+              value={btn.team_id ?? ''}
+              onChange={(e) =>
+                updateBtn(i, { team_id: e.target.value === '' ? null : Number(e.target.value) })
+              }
+              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+            >
+              <option value="">— No team assigned —</option>
+              {websiteTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+
           {/* ── Leaf button config ── */}
           {!btn.sub_prompt && (
             <>
@@ -262,20 +280,6 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                 placeholder="Bot reply after click (optional)"
                 className="h-7 text-xs"
               />
-              {websiteTeams.length > 0 && (
-                <select
-                  value={btn.team_id ?? ''}
-                  onChange={(e) =>
-                    updateBtn(i, { team_id: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                  className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
-                >
-                  <option value="">— No team assigned —</option>
-                  {websiteTeams.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              )}
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-gray-500 dark:text-gray-400">
                   Collect contact if offline

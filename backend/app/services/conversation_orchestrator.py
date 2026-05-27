@@ -35,6 +35,10 @@ logger = get_logger(__name__)
 # Prevent scheduling duplicate delayed "waiting" bot messages
 _waiting_bot_message_scheduled: set[int] = set()
 
+# Sentinel for _broadcast_new_chat_to_agents: distinguishes "no hint supplied
+# (read from conversation.team_id)" from an explicit None (unrouted).
+_TEAM_HINT_UNSET = object()
+
 
 def _get_eligible_agent_ids_for_push(
     db: Session, *, website_id: int, conversation_team_id: int | None = None
@@ -51,8 +55,7 @@ def _get_eligible_agent_ids_for_push(
     - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
       - If conversation_team_id is set:
         * Members of that specific team → eligible.
-        * No-team agents → eligible (unrestricted, see all conversations).
-        * Agents in a different team → excluded.
+        * Agents in a different team or no team → excluded (not their chat).
       - If conversation_team_id is None (unrouted conversation):
         * All assigned agents → eligible (any can claim/route it).
     - All candidates must be is_active=True AND (is_available=True OR push_when_offline=True).
@@ -134,8 +137,11 @@ def _get_eligible_agent_ids_for_push(
             for mgr in managers:
                 mgr_teams = mgr_to_teams[int(mgr.id)]
                 if not mgr_teams:
-                    # No team membership → unrestricted, eligible for all conversations.
-                    eligible.add(int(mgr.id))
+                    # No team membership: eligible only for unrouted conversations.
+                    # Team-routed conversations skip no-team managers — they have no
+                    # ownership of another team's chat (mirrors AGENT no-team rule).
+                    if conversation_team_id is None:
+                        eligible.add(int(mgr.id))
                 elif conversation_team_id is None:
                     # Unrouted conversation → notify all managers (anyone can route it).
                     eligible.add(int(mgr.id))
@@ -152,30 +158,16 @@ def _get_eligible_agent_ids_for_push(
 
     if assigned_agent_ids:
         if conversation_team_id is not None:
-            # Conversation is assigned to a specific team.
-            # Eligible: (a) members of that exact team, AND (b) agents not in any team
-            # on this website (they have no team restriction so they see all convos).
-            # Agents assigned to a *different* team are excluded — they don't own this chat.
+            # Conversation is routed to a specific team.
+            # Only members of that exact team are eligible — no-team agents are
+            # excluded because this conversation is not in their area of responsibility.
             specific_team_member_rows = (
                 db.query(WebsiteTeamMember.user_id)
                 .filter(WebsiteTeamMember.team_id == conversation_team_id)
                 .all()
             )
             specific_team_member_ids = {int(r[0]) for r in specific_team_member_rows}
-
-            # All agents who belong to *any* team on this website.
-            all_team_member_rows = (
-                db.query(WebsiteTeamMember.user_id)
-                .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
-                .filter(WebsiteTeam.website_id == website_id)
-                .all()
-            )
-            all_team_member_ids = {int(r[0]) for r in all_team_member_rows}
-
-            # No-team agents: assigned to the website but not in any team.
-            no_team_agent_ids = assigned_agent_ids - all_team_member_ids
-
-            agent_candidates = (assigned_agent_ids & specific_team_member_ids) | no_team_agent_ids
+            agent_candidates = assigned_agent_ids & specific_team_member_ids
         else:
             # No conversation team (unassigned conversation) → all assigned agents are
             # candidates, regardless of team membership. Agents not in any team are
@@ -696,27 +688,34 @@ class ConversationOrchestrator:
 
         return None
     
-    async def _broadcast_new_chat_to_agents(self, conversation: Conversation):
-        """Notify all connected agents about new unassigned chat via global notification socket"""
+    async def _broadcast_new_chat_to_agents(self, conversation: Conversation, _team_id_hint=_TEAM_HINT_UNSET):
+        """Notify all connected agents about new unassigned chat via global notification socket.
+
+        _team_id_hint: when provided, overrides conversation.team_id for push/WS scoping.
+        Used by handle_bot_button_click which knows the intended team before the DB write.
+        """
         # Only broadcast if conversation is still open and unassigned
         if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
             return
-        
+
         # Get website info
         from app.models.website import Website
         website = self.db.query(Website).filter_by(id=conversation.website_id).first()
         website_name = website.name if website else f"Website {conversation.website_id}"
-        
+
         # Get last message
         last_msg = self.db.query(Message).filter_by(
             conversation_id=conversation.id
         ).order_by(Message.created_at.desc()).first()
         last_message = last_msg.content if last_msg else "New conversation"
-        
-        # Broadcast to agents assigned to this website (global sockets in production).
-        # website_id is passed so the visible_website_ids gate filters out agents from
-        # other organisations — previously None bypassed all website-level scoping.
-        _new_chat_team_id = getattr(conversation, "team_id", None)
+
+        # Use the caller-supplied hint when available (button click path knows the
+        # intended team before the DB write; conversation.team_id is still None then).
+        _new_chat_team_id = (
+            getattr(conversation, "team_id", None)
+            if _team_id_hint is _TEAM_HINT_UNSET
+            else _team_id_hint
+        )
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
             message_data={
@@ -861,6 +860,18 @@ class ConversationOrchestrator:
             "team_name": None,
         }
 
+        # Resolve the team this button will assign from config, before any DB write.
+        # Both new_chat broadcast and visitor_message broadcast need the correct team
+        # for scoping — but the actual conversation.team_id write happens later in the
+        # branch/leaf paths below. Without this hint both broadcasts see team_id=None
+        # and send push + sound to every agent on the website.
+        _button_team_id: int | None = None
+        if team_id is not None:
+            try:
+                _button_team_id = int(team_id)
+            except (TypeError, ValueError):
+                pass
+
         # Count prior visitor messages BEFORE persisting so we can detect whether
         # this button click is the visitor's first message (e.g., buttons were shown
         # on connect before the visitor typed anything).
@@ -881,10 +892,10 @@ class ConversationOrchestrator:
 
         # If this is the visitor's first message, send new_chat notification
         # (sound + push) to agents instead of — or in addition to — visitor_message.
-        # This covers the common flow where chatbot buttons are shown on connect
-        # and the button click is the visitor's opening action.
+        # Pass _button_team_id so the broadcast is scoped to the correct team even
+        # though conversation.team_id has not been written to the DB yet.
         if prior_visitor_msg_count == 0:
-            await self._broadcast_new_chat_to_agents(conversation)
+            await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
 
         # Broadcast the visitor's button click to agents
         if visitor_selection_msg:
@@ -909,7 +920,7 @@ class ConversationOrchestrator:
                         "message_obj": serialize_message(self.db, visitor_selection_msg),
                     },
                     include_global=True,
-                    conversation_team_id=getattr(conversation, "team_id", None),
+                    conversation_team_id=_button_team_id,
                 )
 
         # ── Branch button: has a sub_prompt → show next level of buttons ────────
