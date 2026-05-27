@@ -183,10 +183,17 @@ async def join_chat(
 @router.get("/active")
 def get_active_chats(
     website_id: Optional[int] = None,
+    bot_only: Optional[bool] = None,
+    exclude_bot_only: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
-    """Get list of active chats available for agent pickup"""
+    """Get list of active chats available for agent pickup.
+
+    bot_only=true  → return ONLY bot-only conversations (Bot filter tab).
+    exclude_bot_only=true  → exclude bot-only (default for all/mine/unassigned tabs).
+    Neither param → return all (backwards compat).
+    """
     scope = compute_visibility_scope(db, user=current_user)
 
     if scope.website_ids is not None and not scope.website_ids:
@@ -202,6 +209,8 @@ def get_active_chats(
         website_ids=None if (website_id is not None or scope.website_ids is None) else scope.website_ids,
         team_ids=scope.team_ids,
         organization_id=scope.organization_id,
+        bot_only=bot_only,
+        exclude_bot_only=exclude_bot_only,
     )
 
     conversation_ids: list[int] = [int(conv.id) for conv, *_rest in rows]
@@ -256,18 +265,23 @@ def get_active_chats(
                 "closed_by": getattr(conv, "closed_by", None),
                 "visitor_ended": int(conv.id) in visitor_ended_ids,
                 "message_count": int(message_count or 0),
-                # Only surface unread count for the assigned agent (or when
-                # unassigned — i.e. open for pickup). Spectating agents should
-                # not accumulate badge noise for conversations they don't own.
-                "unread_count": int(unread_counts.get(int(conv.id), 0))
-                if (
-                    conv.assigned_agent_id is None
-                    or int(conv.assigned_agent_id) == int(current_user.id)
-                )
-                else 0,
+                # Bot-only conversations are never handled by agents — always 0 unread.
+                # For human conversations: only surface unread count for the assigned
+                # agent (or when unassigned). Spectating agents get no badge noise.
+                "unread_count": 0
+                if getattr(conv, "bot_only", False)
+                else (
+                    int(unread_counts.get(int(conv.id), 0))
+                    if (
+                        conv.assigned_agent_id is None
+                        or int(conv.assigned_agent_id) == int(current_user.id)
+                    )
+                    else 0
+                ),
                 "last_message": last_message_val,
                 "last_message_at": _utc_iso(last_message_at),
                 "created_at": _utc_iso(conv.created_at),
+                "bot_only": bool(getattr(conv, "bot_only", False)),
                 "tags": _safe_serialize_conversation_tags(conv),
             }
         )
@@ -328,6 +342,7 @@ def get_chat_summary(
         "last_message_at": None,
         "created_at": _utc_iso(conv.created_at),
         "closed_at": _utc_iso(getattr(conv, "updated_at", None)),
+        "bot_only": bool(getattr(conv, "bot_only", False)),
         "tags": _safe_serialize_conversation_tags(conv),
     }
 

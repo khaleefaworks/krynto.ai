@@ -96,6 +96,35 @@ async def lifespan(app: FastAPI):
     from app.services.auto_close_scheduler import start_scheduler, stop_scheduler
     start_scheduler()
 
+    # Reconcile any bot_only conversations that were left open due to a
+    # process restart (lost asyncio tasks). Resolve them immediately.
+    try:
+        import asyncio as _asyncio
+        from datetime import datetime as _datetime, timezone as _tz
+        from app.core.database import SessionLocal as _SL
+        from app.models.conversation import Conversation as _Conv, ConversationStatus as _CS
+        from app.services.conversation_orchestrator import _close_bot_conversation_after_delay
+
+        def _reconcile_bot_conversations() -> None:
+            with _SL() as _db:
+                stale = (
+                    _db.query(_Conv)
+                    .filter(_Conv.bot_only == True, _Conv.status == _CS.OPEN)  # noqa: E712
+                    .all()
+                )
+                for conv in stale:
+                    _asyncio.get_event_loop().create_task(
+                        _close_bot_conversation_after_delay(
+                            conversation_id=conv.id,
+                            website_id=int(conv.website_id),
+                            delay_seconds=1,
+                        )
+                    )
+
+        _reconcile_bot_conversations()
+    except Exception:
+        pass
+
     # Seed automation library templates if the table is empty (idempotent).
     try:
         from seed_data import seed_automation_library

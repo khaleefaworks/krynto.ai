@@ -29,12 +29,18 @@ export type ActiveChat = {
   closed_at?: string
   closed_by?: string | null
   visitor_ended?: boolean
+  bot_only?: boolean
 }
 
-export async function fetchActiveChats(): Promise<ActiveChat[]> {
+export async function fetchActiveChats(opts?: { botOnly?: boolean; excludeBotOnly?: boolean }): Promise<ActiveChat[]> {
   const token = useAppStore.getState().token
 
-  const chats = await apiRequest<ActiveChat[]>("/chats/active", {
+  const params = new URLSearchParams()
+  if (opts?.botOnly) params.append('bot_only', 'true')
+  if (opts?.excludeBotOnly) params.append('exclude_bot_only', 'true')
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  const chats = await apiRequest<ActiveChat[]>(`/chats/active${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

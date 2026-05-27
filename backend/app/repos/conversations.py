@@ -62,6 +62,8 @@ def active_conversations_with_counts_and_last_message(
     website_ids: list[int] | None = None,
     team_ids: list[int] | None = None,
     organization_id: int | None = None,
+    bot_only: bool | None = None,
+    exclude_bot_only: bool | None = None,
 ):
     """Return rows of (Conversation, website_name, message_count, last_message, last_message_at)."""
 
@@ -142,6 +144,13 @@ def active_conversations_with_counts_and_last_message(
             # Unrouted conversations (team_id IS NULL) are NOT shown — they become
             # visible once the routing bot assigns a team (visitor clicks a button).
             rows_query = rows_query.filter(Conversation.team_id.in_(team_ids_norm))
+
+    if bot_only is True:
+        rows_query = rows_query.filter(Conversation.bot_only == True)  # noqa: E712
+    elif exclude_bot_only is True:
+        rows_query = rows_query.filter(
+            sa.or_(Conversation.bot_only == False, Conversation.bot_only.is_(None))  # noqa: E712
+        )
 
     try:
         rows_query = rows_query.order_by(Conversation.updated_at.desc())

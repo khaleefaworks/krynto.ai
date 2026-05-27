@@ -25,6 +25,14 @@
 
 ---
 
+## Analytics Improvements
+
+| # | Title | Description | Priority |
+|---|-------|-------------|----------|
+| AN1 | **Analytics — Bot filter + Excel report column descriptions** | Analytics page currently has no way to separate bot-handled (Careers, etc.) conversations from human/agent conversations. Needed: (1) Add a "Bot" filter option across all Analytics charts and summary cards so bot-only conversations (closed_by='bot') can be isolated or excluded. (2) Add per-filter breakdowns in the existing date/team/agent filter panels. (3) For the Excel/CSV export: add a header row describing each column (e.g. "Conversation ID", "Visitor Name", "Closed By", "Duration (minutes)", etc.) so the downloaded file is self-explanatory without needing a data dictionary. | Medium |
+
+---
+
 ## Audit Trail
 
 | # | Title | Description | Priority |

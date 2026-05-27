@@ -281,14 +281,40 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                 className="h-7 text-xs"
               />
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Collect contact if offline
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                  Bot-only (auto-resolve, no agent)
                 </span>
                 <Switch
-                  checked={btn.collect_contact !== false}
-                  onCheckedChange={(v) => updateBtn(i, { collect_contact: v })}
+                  checked={!!btn.bot_only}
+                  onCheckedChange={(v) => updateBtn(i, { bot_only: v, collect_contact: v ? false : btn.collect_contact })}
                 />
               </div>
+              {btn.bot_only && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-1">
+                    Auto-resolve delay (seconds)
+                  </span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={btn.resolve_delay_seconds ?? 3}
+                    onChange={(e) => updateBtn(i, { resolve_delay_seconds: Math.max(1, Math.min(30, Number(e.target.value) || 3)) })}
+                    className="h-7 text-xs w-16 text-center"
+                  />
+                </div>
+              )}
+              {!btn.bot_only && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Collect contact if offline
+                  </span>
+                  <Switch
+                    checked={btn.collect_contact !== false}
+                    onCheckedChange={(v) => updateBtn(i, { collect_contact: v })}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -303,32 +329,49 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                 className="text-xs"
               />
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Allow free-text input
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                  Bot-only branch (no agent, auto-resolve)
                 </span>
                 <Switch
-                  checked={!!btn.sub_prompt.allow_input}
-                  onCheckedChange={(v) => updateSubPrompt(i, { allow_input: v })}
+                  checked={!!btn.sub_prompt.bot_only}
+                  onCheckedChange={(v) => updateSubPrompt(i, {
+                    bot_only: v,
+                    collect_contact: v ? false : btn.sub_prompt.collect_contact,
+                    suppress_waiting_message: v ? true : btn.sub_prompt.suppress_waiting_message,
+                  })}
                 />
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Suppress waiting message
-                </span>
-                <Switch
-                  checked={!!btn.sub_prompt.suppress_waiting_message}
-                  onCheckedChange={(v) => updateSubPrompt(i, { suppress_waiting_message: v })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Collect contact if offline
-                </span>
-                <Switch
-                  checked={btn.sub_prompt.collect_contact !== false}
-                  onCheckedChange={(v) => updateSubPrompt(i, { collect_contact: v })}
-                />
-              </div>
+              {!btn.sub_prompt.bot_only && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Allow free-text input
+                    </span>
+                    <Switch
+                      checked={!!btn.sub_prompt.allow_input}
+                      onCheckedChange={(v) => updateSubPrompt(i, { allow_input: v })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Suppress waiting message
+                    </span>
+                    <Switch
+                      checked={!!btn.sub_prompt.suppress_waiting_message}
+                      onCheckedChange={(v) => updateSubPrompt(i, { suppress_waiting_message: v })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Collect contact if offline
+                    </span>
+                    <Switch
+                      checked={btn.sub_prompt.collect_contact !== false}
+                      onCheckedChange={(v) => updateSubPrompt(i, { collect_contact: v })}
+                    />
+                  </div>
+                </>
+              )}
               {/* Recursive sub-buttons */}
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">

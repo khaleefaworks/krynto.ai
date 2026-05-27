@@ -67,6 +67,11 @@ class Conversation(Base, TimestampMixin):
     # agents to follow up, but the visitor gets a fresh conversation on next connect.
     visitor_ended = Column(Boolean, nullable=False, default=False, server_default='false')
 
+    # True for bot-only conversations (e.g. informational automation paths like Careers).
+    # These conversations are never routed to a human agent: no push, no unread, no inbox
+    # entry. They are auto-resolved after a configurable delay once the bot reply is sent.
+    bot_only = Column(Boolean, nullable=False, default=False, server_default='false')
+
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)

@@ -1562,6 +1562,14 @@
       return;
     }
 
+    // Bot-only conversation completed: resolve silently with no rating popup or
+    // "support resolved" system message. Widget clears its state and navigates
+    // to the conversation list / start view exactly like afterConversationClose().
+    if (data.type === 'bot_conversation_complete') {
+      afterConversationClose();
+      return;
+    }
+
     // Automation-driven rating popup (decoupled from conversation_resolved/visitor_ended system event).
     if (data.type === 'show_rating_popup') {
       const convId = data.conversation_id || ratingConversationId;

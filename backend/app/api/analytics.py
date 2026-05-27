@@ -167,7 +167,7 @@ def conversation_summary(
     total_resolved = base.filter(
         Conversation.status == ConversationStatus.RESOLVED,
         Conversation.last_visitor_message_at.isnot(None),
-        Conversation.closed_by.notin_(['inactivity', 'system_auto']),
+        Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
     ).count()
 
     # Replied = conversations that have at least one agent message
@@ -293,7 +293,7 @@ def resolved_conversations_chart(
         .filter(
             Conversation.status == ConversationStatus.RESOLVED,
             Conversation.last_visitor_message_at.isnot(None),
-            Conversation.closed_by.notin_(['inactivity', 'system_auto']),
+            Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
             Conversation.updated_at >= start_dt,
             Conversation.updated_at <= end_dt,
         )
@@ -604,7 +604,7 @@ def teams_summary(
             Conversation.team_id.in_(team_ids),
             Conversation.status == ConversationStatus.RESOLVED,
             Conversation.last_visitor_message_at.isnot(None),
-            Conversation.closed_by.notin_(['inactivity', 'system_auto']),
+            Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
             Conversation.updated_at >= start_dt,
             Conversation.updated_at <= end_dt,
         )

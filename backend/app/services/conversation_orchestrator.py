@@ -326,6 +326,74 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
         _waiting_bot_message_scheduled.discard(conversation_id)
 
 
+async def _close_bot_conversation_after_delay(
+    *,
+    conversation_id: int,
+    website_id: int,
+    delay_seconds: int,
+) -> None:
+    """Wait delay_seconds then silently resolve a bot-only conversation.
+
+    Sends bot_conversation_complete to the visitor (no rating popup, no system
+    message) and conversation_closed to agents so the dashboard list updates.
+    If the process restarts before this fires the startup reconciliation job
+    handles the cleanup.
+    """
+    try:
+        from app.core.database import SessionLocal
+        from app.models.conversation import Conversation, ConversationStatus
+        from app.services.chat_service import ChatService
+
+        await asyncio.sleep(max(1, int(delay_seconds or 3)))
+
+        db = SessionLocal()
+        try:
+            conversation = db.query(Conversation).filter_by(id=conversation_id).first()
+            if not conversation or conversation.status == ConversationStatus.RESOLVED:
+                return
+
+            conversation.status = ConversationStatus.RESOLVED
+            conversation.closed_by = "bot"
+            db.commit()
+
+            # Notify visitor so widget can clear its state silently.
+            try:
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {"type": "bot_conversation_complete", "conversation_id": conversation_id},
+                )
+            except Exception:
+                pass
+
+            # Notify agents so the conversation disappears from the Bot filter.
+            orchestrator = ConversationOrchestrator(db)
+            await orchestrator.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "conversation_closed",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                    "closed_by": "bot",
+                },
+                include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
+            )
+            logger.info(
+                "bot_conversation_auto_resolved",
+                conversation_id=conversation_id,
+                delay_seconds=delay_seconds,
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(
+            "bot_conversation_auto_resolve_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+            exc_info=True,
+        )
+
+
 class ConversationOrchestrator:
     """Coordinates visitor/agent events and enforces chat invariants."""
 
@@ -468,6 +536,10 @@ class ConversationOrchestrator:
                 )
             except Exception:
                 pass
+
+        # bot-only conversations generate no agent notifications — skip all paths.
+        if getattr(conversation, "bot_only", False):
+            return None
 
         # If an agent owns the conversation, forward to that agent
         if conversation.assigned_agent_id:
@@ -860,6 +932,20 @@ class ConversationOrchestrator:
             "team_name": None,
         }
 
+        # Compute bot_only early so all broadcast guards use it before any DB write.
+        # Checks (in priority order):
+        #  1. conversation already flagged (e.g. branch click already marked it)
+        #  2. button itself has bot_only (leaf OR branch button)
+        #  3. parent sub_prompt has bot_only (leaf inherits from parent branch)
+        #  4. this button IS a branch and its sub_prompt has bot_only (marks entire branch)
+        _sub_prompt_cfg_early = button.get("sub_prompt") if isinstance(button.get("sub_prompt"), dict) else None
+        _is_bot_only = bool(
+            getattr(conversation, "bot_only", False)
+            or button.get("bot_only")
+            or (parent_sub_prompt and parent_sub_prompt.get("bot_only"))
+            or (_sub_prompt_cfg_early and _sub_prompt_cfg_early.get("bot_only"))
+        )
+
         # Resolve the team this button will assign from config, before any DB write.
         # Both new_chat broadcast and visitor_message broadcast need the correct team
         # for scoping — but the actual conversation.team_id write happens later in the
@@ -897,8 +983,8 @@ class ConversationOrchestrator:
         # formula to fire on the first real leaf action regardless of how many
         # branch-navigation messages were saved before it.
 
-        # Broadcast the visitor's button click to agents
-        if visitor_selection_msg:
+        # Broadcast the visitor's button click to agents (skipped for bot-only paths).
+        if visitor_selection_msg and not _is_bot_only:
             if conversation.assigned_agent_id:
                 await self.agent_service.send_to_agent(
                     conversation.assigned_agent_id,
@@ -1014,14 +1100,34 @@ class ConversationOrchestrator:
                     parent_path=path,
                     sub_buttons=len(sub_validated),
                 )
+                # Mark conversation as bot_only immediately on branch click so it
+                # never appears in All/Mine/Unassigned, even before the leaf fires.
+                if _is_bot_only and not getattr(conversation, "bot_only", False):
+                    try:
+                        conversation.bot_only = True
+                        self.db.commit()
+                    except Exception as _e:
+                        logger.error("bot_only_flag_set_branch_failed", error=str(_e))
+                        try:
+                            self.db.rollback()
+                        except Exception:
+                            pass
                 return {"label": label, "team_id": None, "team_name": None, "sub_prompt": True}
 
         # ── Leaf button: team assign + reply + automation_complete ────────────
 
+        # _is_bot_only was computed early (above) so all broadcast guards saw it.
+        _resolve_delay = int(
+            button.get("resolve_delay_seconds")
+            or (parent_sub_prompt and parent_sub_prompt.get("resolve_delay_seconds"))
+            or 3
+        )
+
         # Determine if waiting message should be suppressed for this leaf click.
-        # Priority: button-level flag → parent sub_prompt flag → default False.
+        # Priority: bot_only (always suppresses) → button-level flag → parent sub_prompt flag.
         suppress_waiting = bool(
-            button.get("suppress_waiting_message")
+            _is_bot_only
+            or button.get("suppress_waiting_message")
             or (parent_sub_prompt and parent_sub_prompt.get("suppress_waiting_message"))
         )
 
@@ -1067,12 +1173,22 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.error("bot_button_team_assign_failed", error=str(e))
 
+        # Mark conversation as bot-only before any broadcast so all checks see the flag.
+        if _is_bot_only and not getattr(conversation, "bot_only", False):
+            try:
+                conversation.bot_only = True
+                self.db.commit()
+            except Exception as _e:
+                logger.error("bot_only_flag_set_failed", error=str(_e))
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+
         # Fire new_chat broadcast on the first LEAF action.
-        # For single-level buttons path=[idx] → depth 1 → 0 branch messages before.
-        # For sub-buttons path=[branch, idx] → depth 2 → 1 branch message before.
-        # prior_visitor_msg_count <= len(path) - 1 is True only for the first leaf
-        # click regardless of how many branch navigations preceded it.
-        if prior_visitor_msg_count <= len(path) - 1:
+        # Skipped entirely for bot-only conversations — no agent is ever notified.
+        # For regular paths: depth formula fires exactly once on the first leaf click.
+        if not _is_bot_only and prior_visitor_msg_count <= len(path) - 1:
             await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
 
         # Send reply message to visitor
@@ -1118,6 +1234,18 @@ class ConversationOrchestrator:
         except Exception:
             pass
 
+        # bot-only path: skip all offline/waiting logic and schedule silent auto-resolve.
+        if _is_bot_only:
+            _waiting_bot_message_scheduled.discard(conversation.id)
+            asyncio.create_task(
+                _close_bot_conversation_after_delay(
+                    conversation_id=conversation.id,
+                    website_id=int(conversation.website_id),
+                    delay_seconds=_resolve_delay,
+                )
+            )
+            return result
+
         # If the website (or the routed team) is offline and no agent is
         # assigned, fire the offline prompt immediately.  The repeat=once
         # policy prevents duplicates.  Skip the waiting-message timer since
@@ -1147,10 +1275,6 @@ class ConversationOrchestrator:
             and not conversation.assigned_agent_id
             and conversation.id not in _waiting_bot_message_scheduled
         ):
-            # Schedule the waiting bot message if this is the visitor's first action
-            # and no agent is assigned yet. Regular messages schedule it in
-            # handle_visitor_message; button clicks are a separate code path so we
-            # must handle it here too.
             _waiting_bot_message_scheduled.add(conversation.id)
             automation_service = AutomationService(self.db)
             delay_seconds = automation_service.get_delay_seconds(
