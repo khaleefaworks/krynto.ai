@@ -1663,11 +1663,15 @@ class ConversationOrchestrator:
 
         return {"success": True}
 
-    async def visitor_rated(self, *, conversation_id: int, rating_val: int) -> dict:
+    async def visitor_rated(
+        self, *, conversation_id: int, rating_val: int, feedback: str | None = None
+    ) -> dict:
         """Visitor submitted a conversation rating — fires visitor_rated_conversation automation.
 
         Passes {rating_label} into the automation context so Bot message nodes can
         reference it, e.g. "Visitor rated this conversation: {rating_label}".
+        If the visitor also left a text comment, a second bot message is added and
+        broadcast to agents so it appears immediately in the conversation thread.
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
@@ -1686,6 +1690,32 @@ class ConversationOrchestrator:
             send_to_visitor=False,
             context={"rating_label": rating_label},
         )
+
+        # If the visitor left a text comment, add it as an agent-only bot message
+        # (same visibility as the rating message — agents see it, visitor does not).
+        feedback_text = (feedback or "").strip()
+        if feedback_text:
+            saved = self.conversation_service.add_system_message(
+                conversation_id,
+                f'Visitor comment: "{feedback_text}"',
+                event_type="rating_feedback",
+                sender="bot",
+                is_agent_only=True,
+            )
+            try:
+                await self.agent_service.broadcast_to_active_agents(
+                    website_id=website_id,
+                    message_data={
+                        "type": "system_message",
+                        "conversation_id": conversation_id,
+                        "website_id": website_id,
+                        "message_obj": serialize_message(self.db, saved),
+                    },
+                    include_global=True,
+                    conversation_team_id=getattr(conversation, "team_id", None),
+                )
+            except Exception:
+                pass
 
         return {"success": True}
 

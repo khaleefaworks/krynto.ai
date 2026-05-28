@@ -335,6 +335,9 @@ export default function ConversationsView() {
     const [resolvedHasMore, setResolvedHasMore] = useState(false)
     const [resolvedLoadingMore, setResolvedLoadingMore] = useState(false)
     const [resolvedTotal, setResolvedTotal] = useState<number | null>(null)
+    // Incremented when a conversation_closed WS event arrives so the resolved
+    // list refetches even if the filter key (search/team/etc.) hasn't changed.
+    const [resolvedRefreshCounter, setResolvedRefreshCounter] = useState(0)
     const [visitorTyping, setVisitorTyping] = useState(false)
     const [spectatorAgentTyping, setSpectatorAgentTyping] = useState<string | null>(null)
 
@@ -910,6 +913,7 @@ export default function ConversationsView() {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'conversation_closed') {
                 fetchActiveChats({ showSpinner: false })
+                setResolvedRefreshCounter(prev => prev + 1)
             } else if (data.type === 'new_conversation') {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'connected') {
@@ -1869,7 +1873,7 @@ export default function ConversationsView() {
     useEffect(() => {
         if (activeFilter !== 'resolved') return
 
-        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo].join('|')
+        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo, resolvedRefreshCounter].join('|')
 
         // Same filter params and we already have data — activeFilter bounced back, skip reset
         if (resolvedFetchKeyRef.current === newKey && resolvedChatsLoadedRef.current) return
@@ -1915,7 +1919,7 @@ export default function ConversationsView() {
         }
         load()
         return () => { cancelled = true }
-    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo])
+    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo, resolvedRefreshCounter])
 
     const getFilterHeaderText = () => {
         switch (activeFilter) {

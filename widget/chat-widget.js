@@ -644,8 +644,10 @@
 
     const feedbackText = (feedback || '').trim() || null;
 
-    // Submit via WebSocket if connected
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    // WS rejects submit_rating for RESOLVED conversations (server returns error, never saves).
+    // Use WS only for live OPEN conversations; always use HTTP for read-only threads.
+    const canUseWs = ws && ws.readyState === WebSocket.OPEN && !isReadOnlyThread;
+    if (canUseWs) {
       try {
         ws.send(JSON.stringify({
           type: 'submit_rating',
@@ -655,10 +657,8 @@
         }));
       } catch (e) { }
     } else {
-      // Fallback: HTTP POST
       try {
-        const apiBase = CONFIG.serverUrl.replace(/\/widget\/.*$/, '').replace(/\/ws\/.*$/, '');
-        fetch(apiBase + '/ratings/submit', {
+        fetch((CONFIG.apiUrl || '') + '/ratings/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -984,7 +984,12 @@
       item.appendChild(titleEl);
       item.appendChild(metaEl);
 
-      const openFn = function () { enterThreadView(conv.id, true); };
+      const openFn = function () {
+        enterThreadView(conv.id, true);
+        if (_shouldShowRatingPrompt(conv)) {
+          setTimeout(function () { showRatingOverlay(conv.id); }, 800);
+        }
+      };
       item.addEventListener('click', openFn);
       item.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFn(); }
@@ -1147,8 +1152,25 @@
     enterStartView();
   }
 
+  // Returns true if the rating popup should be shown for a resolved conversation object
+  // from the conversation list API (contains id, status, closed_by, is_rated).
+  function _shouldShowRatingPrompt(conv) {
+    if (!conv) return false;
+    if (conv.status !== 'resolved') return false;   // OPEN or visitor_ended-OPEN: no prompt
+    if (conv.closed_by === 'bot') return false;      // bot-only flow: no agent to rate
+    if (conv.is_rated) return false;                 // already rated in DB
+    return true;
+  }
+
   function openHistoryThread(convId) {
     enterThreadView(convId, true);
+    // Show rating prompt if this past conversation hasn't been rated yet.
+    // convListHistory holds the resolved history objects returned by the last
+    // fetchConversationList call — each contains is_rated and closed_by.
+    var conv = convListHistory && convListHistory.find(function (c) { return c.id === convId; });
+    if (_shouldShowRatingPrompt(conv)) {
+      setTimeout(function () { showRatingOverlay(conv.id); }, 800);
+    }
   }
 
   function _appendClosedBanner() {
@@ -3108,14 +3130,8 @@
 
     // Rating overlay buttons
     $id('chatassist-rating-close').addEventListener('click', () => {
-      if (pendingRatingValue !== null) {
-        // Emoji selected but not yet submitted — submit with no feedback text
-        const v = pendingRatingValue;
-        pendingRatingValue = null;
-        submitRating(v, '');
-      } else {
-        hideRatingOverlay();
-      }
+      pendingRatingValue = null;
+      hideRatingOverlay();
     });
     $qsAll('.chatassist-rating-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3573,6 +3589,13 @@
             : listData.active.id;
           if (!widgetShowHistory) {
             await enterThreadView(showId, true);
+            // Prompt for rating on the conversation being shown (if unrated and agent-handled).
+            // visitor_ended active is OPEN so _shouldShowRatingPrompt returns false for it;
+            // newestHistory (resolved) is the only case where the prompt fires.
+            const shownConv = (newestHistory && newestHistory.id === showId) ? newestHistory : listData.active;
+            if (_shouldShowRatingPrompt(shownConv)) {
+              setTimeout(function () { showRatingOverlay(shownConv.id); }, 800);
+            }
           } else {
             enterListView(listData);
           }
@@ -3587,6 +3610,10 @@
           const histConv = listData && listData.history && listData.history[0];
           if (histConv) {
             await enterThreadView(histConv.id, true);
+            // Prompt for rating if visitor never rated this conversation.
+            if (_shouldShowRatingPrompt(histConv)) {
+              setTimeout(function () { showRatingOverlay(histConv.id); }, 800);
+            }
           } else if (_loadClosedState()) {
             await enterThreadView(_loadClosedState(), true);
           } else {

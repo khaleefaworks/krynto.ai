@@ -777,6 +777,7 @@ async def chat_ws(
                                 await orchestrator.visitor_rated(
                                     conversation_id=conv_id,
                                     rating_val=rating_val,
+                                    feedback=feedback_val,
                                 )
                             except Exception:
                                 pass
@@ -1376,6 +1377,7 @@ async def chat_ws_with_conversation(
                                 await orchestrator.visitor_rated(
                                     conversation_id=conv.id,
                                     rating_val=rating_val,
+                                    feedback=feedback_val,
                                 )
                             except Exception:
                                 pass
