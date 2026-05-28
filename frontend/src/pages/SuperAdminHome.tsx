@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { clearToken } from '@/services/api'
+import { clearToken, apiRequest } from '@/services/api'
+import { unsubscribeFromPush } from '@/services/push'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -8,7 +9,9 @@ export default function SuperAdminHome() {
     const navigate = useNavigate()
     const { user, setUser, setToken } = useAppStore()
 
-    const onLogout = () => {
+    const onLogout = async () => {
+        await unsubscribeFromPush()
+        await apiRequest('/auth/logout', { method: 'POST' }).catch(() => {})
         clearToken()
         setUser(null)
         setToken(null)

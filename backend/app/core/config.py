@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_CHAT_MESSAGE: int = 10  # Max messages per minute per session
 
     # Auth / JWT
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    # 30-day lifetime — sessions are revoked server-side via user_login_sessions (jti).
+    # Explicit logout revokes the jti immediately; the exp is just a safety backstop.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days
     
     # Agent inactivity timeout (seconds)
     AGENT_INACTIVITY_TIMEOUT_SECONDS: int = 15 * 60  # 15 minutes

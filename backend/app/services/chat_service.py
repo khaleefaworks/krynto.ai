@@ -25,9 +25,164 @@ class ChatService:
     # Value: {"sockets": set[object], "connected_at": datetime, "last_disconnected_at": datetime | None}
     _session_presence: Dict[Tuple[int, str], dict] = {}
 
+    # Redis presence (multi-worker consistent).  Lazily initialised.
+    _sync_redis: object = None
+    _ONLINE_TTL: int = 90   # seconds; renewed by ws_chat.py heartbeat every ~60 s
+    _OFFLINE_TTL: int = 600  # seconds; "recently left" window for the Visitors page
+
     @staticmethod
     def _utcnow() -> datetime:
         return datetime.now(timezone.utc)
+
+    # ------------------------------------------------------------------
+    # Redis presence helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _get_sync_redis(cls) -> object:
+        """Return a lazily-created sync Redis client, or None if Redis is not configured."""
+        if cls._sync_redis is not None:
+            return cls._sync_redis
+        try:
+            from app.core.config import settings  # noqa: PLC0415
+            url = (getattr(settings, "REDIS_URL", "") or "").strip()
+            if not url:
+                return None
+            import redis as _redis_sync  # noqa: PLC0415
+            client = _redis_sync.from_url(url, decode_responses=True, socket_timeout=1.0)
+            cls._sync_redis = client
+            return client
+        except Exception:
+            return None
+
+    @staticmethod
+    def _redis_online_key(website_id: int, session_id: str) -> str:
+        return f"ai:visitor:online:{website_id}:{session_id}"
+
+    @staticmethod
+    def _redis_offline_key(website_id: int, session_id: str) -> str:
+        return f"ai:visitor:offline:{website_id}:{session_id}"
+
+    @classmethod
+    def _redis_set_online(cls, website_id: int, session_id: str, connected_at: datetime) -> None:
+        r = cls._get_sync_redis()
+        if not r:
+            return
+        try:
+            r.setex(cls._redis_online_key(website_id, session_id), cls._ONLINE_TTL, connected_at.isoformat())
+            r.delete(cls._redis_offline_key(website_id, session_id))
+        except Exception:
+            pass
+
+    @classmethod
+    def _redis_set_offline(cls, website_id: int, session_id: str, disconnected_at: datetime) -> None:
+        r = cls._get_sync_redis()
+        if not r:
+            return
+        try:
+            r.delete(cls._redis_online_key(website_id, session_id))
+            r.setex(cls._redis_offline_key(website_id, session_id), cls._OFFLINE_TTL, disconnected_at.isoformat())
+        except Exception:
+            pass
+
+    @classmethod
+    def refresh_session_online_ttl(cls, website_id: int, session_id: str) -> None:
+        """Renew the Redis TTL for an online session.  Called by the WS heartbeat task."""
+        r = cls._get_sync_redis()
+        if not r:
+            return
+        try:
+            r.expire(cls._redis_online_key(website_id, session_id), cls._ONLINE_TTL)
+        except Exception:
+            pass
+
+    @classmethod
+    def _redis_session_presence_snapshot(
+        cls,
+        r: object,
+        *,
+        website_id: int | None,
+        recently_left_within_seconds: int,
+    ) -> List[dict]:
+        """Read session presence from Redis (shared across all workers)."""
+        out: List[dict] = []
+        online_pattern = (
+            f"ai:visitor:online:{website_id}:*" if website_id is not None else "ai:visitor:online:*"
+        )
+        try:
+            cursor: int = 0
+            while True:
+                cursor, keys = r.scan(cursor, match=online_pattern, count=100)
+                for key in keys:
+                    try:
+                        parts = key.split(":", 4)  # ["ai", "visitor", "online", wid, sid]
+                        wid = int(parts[3])
+                        sid = parts[4]
+                        val = r.get(key)
+                        connected_at = None
+                        if val:
+                            try:
+                                connected_at = datetime.fromisoformat(val)
+                            except Exception:
+                                pass
+                        out.append({
+                            "website_id": wid,
+                            "session_id": sid,
+                            "is_online": True,
+                            "connected_at": connected_at,
+                            "last_disconnected_at": None,
+                        })
+                    except Exception:
+                        pass
+                if cursor == 0:
+                    break
+        except Exception:
+            pass
+
+        if recently_left_within_seconds > 0:
+            offline_pattern = (
+                f"ai:visitor:offline:{website_id}:*" if website_id is not None else "ai:visitor:offline:*"
+            )
+            online_keys: set = {(e["website_id"], e["session_id"]) for e in out}
+            try:
+                cursor = 0
+                while True:
+                    cursor, keys = r.scan(cursor, match=offline_pattern, count=100)
+                    for key in keys:
+                        try:
+                            parts = key.split(":", 4)
+                            wid = int(parts[3])
+                            sid = parts[4]
+                            if (wid, sid) in online_keys:
+                                continue
+                            val = r.get(key)
+                            disconnected_at = None
+                            if val:
+                                try:
+                                    disconnected_at = datetime.fromisoformat(val)
+                                except Exception:
+                                    pass
+                            out.append({
+                                "website_id": wid,
+                                "session_id": sid,
+                                "is_online": False,
+                                "connected_at": None,
+                                "last_disconnected_at": disconnected_at,
+                            })
+                        except Exception:
+                            pass
+                    if cursor == 0:
+                        break
+            except Exception:
+                pass
+
+        def _sort_key(rec: dict) -> tuple:
+            online = 1 if rec.get("is_online") else 0
+            ts = rec.get("connected_at") if rec.get("is_online") else rec.get("last_disconnected_at")
+            return (-online, -(ts.timestamp() if isinstance(ts, datetime) else 0.0))
+
+        out.sort(key=_sort_key)
+        return out
 
     @classmethod
     def register_session(cls, website_id: int, session_id: str, websocket: object) -> None:
@@ -41,13 +196,15 @@ class ChatService:
                 "connected_at": now,
                 "last_disconnected_at": None,
             }
-            return
+        else:
+            sockets: Set[object] = entry.get("sockets") or set()
+            sockets.add(websocket)
+            entry["sockets"] = sockets
+            # If the visitor reconnects, treat them as online again.
+            entry["last_disconnected_at"] = None
 
-        sockets: Set[object] = entry.get("sockets") or set()
-        sockets.add(websocket)
-        entry["sockets"] = sockets
-        # If the visitor reconnects, treat them as online again.
-        entry["last_disconnected_at"] = None
+        # Redis presence: shared across all workers.
+        cls._redis_set_online(int(website_id), str(session_id), now)
 
     @classmethod
     def unregister_session_socket(cls, websocket: object) -> None:
@@ -69,6 +226,10 @@ class ChatService:
             entry["sockets"] = set()
             entry["last_disconnected_at"] = now
 
+            # Redis presence: mark session offline across all workers.
+            wid, sid = key
+            cls._redis_set_offline(int(wid), str(sid), now)
+
     @classmethod
     def session_presence_snapshot(
         cls,
@@ -77,9 +238,19 @@ class ChatService:
         recently_left_within_seconds: int = 600,
     ) -> List[dict]:
         """Return session presence records for currently connected and recently disconnected visitors."""
-        now = cls._utcnow()
         recently_left_within_seconds = max(0, int(recently_left_within_seconds))
 
+        # Prefer Redis when available: consistent view across all Gunicorn workers.
+        r = cls._get_sync_redis()
+        if r:
+            return cls._redis_session_presence_snapshot(
+                r,
+                website_id=website_id,
+                recently_left_within_seconds=recently_left_within_seconds,
+            )
+
+        # Fallback: in-memory dict (single-worker dev/test environments).
+        now = cls._utcnow()
         out: List[dict] = []
         for (wid, sid), entry in list(cls._session_presence.items()):
             if website_id is not None and int(wid) != int(website_id):
@@ -127,6 +298,14 @@ class ChatService:
 
     @classmethod
     def is_session_online(cls, *, website_id: int, session_id: str) -> bool:
+        # Prefer Redis when available.
+        r = cls._get_sync_redis()
+        if r:
+            try:
+                return bool(r.exists(cls._redis_online_key(int(website_id), str(session_id))))
+            except Exception:
+                pass
+        # Fallback: in-memory.
         key = (int(website_id), str(session_id))
         entry = cls._session_presence.get(key)
         if not entry:

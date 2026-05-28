@@ -63,12 +63,18 @@ class Conversation(Base, TimestampMixin):
     # How the conversation was closed: 'agent' | 'visitor' | 'inactivity' | NULL (still open)
     closed_by = Column(String(20), nullable=True)
 
+    # Exact timestamp when conversation transitioned to RESOLVED. More reliable
+    # than updated_at (which changes on any mutation) for analytics date filtering.
+    resolved_at = Column(DateTime, nullable=True, index=True)
+
     # True when the visitor clicked "End chat". The conversation stays OPEN for
     # agents to follow up, but the visitor gets a fresh conversation on next connect.
     visitor_ended = Column(Boolean, nullable=False, default=False, server_default='false')
 
-    # Auto-generated title from the first visitor message (up to 60 chars)
-    title = Column(String(120), nullable=True)
+    # True for bot-only conversations (e.g. informational automation paths like Careers).
+    # These conversations are never routed to a human agent: no push, no unread, no inbox
+    # entry. They are auto-resolved after a configurable delay once the bot reply is sent.
+    bot_only = Column(Boolean, nullable=False, default=False, server_default='false')
 
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")

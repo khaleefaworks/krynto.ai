@@ -24,12 +24,17 @@ interface KpiMetric {
   change_pct: number | null
 }
 
+interface SplitMetric {
+  agent: KpiMetric
+  bot?: KpiMetric
+}
+
 interface OverviewData {
   period: { start: string; end: string }
   previous_period: { start: string; end: string }
-  new_conversations: KpiMetric
-  resolved_conversations: KpiMetric
-  avg_first_response_seconds: KpiMetric
+  new_conversations: SplitMetric
+  resolved_conversations: SplitMetric
+  avg_first_response_seconds: SplitMetric
 }
 
 interface ChartPoint {
@@ -52,6 +57,15 @@ interface TagStat {
   name: string
   color: string
   usage_count: number
+}
+
+interface TeamStat {
+  id: number
+  name: string
+  website_name: string
+  conversations: number
+  resolved: number
+  avg_response_seconds: number | null
 }
 
 interface RatingSummary {
@@ -108,32 +122,64 @@ const TAG_COLORS = [
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function KpiCard({ title, value, previous, changePct, format = 'number' }: {
-  title: string
-  value: number | null
-  previous: number | null
-  changePct: number | null
+function KpiRow({ label, metric, format = 'number', labelColor }: {
+  label: string
+  metric: KpiMetric
   format?: 'number' | 'duration'
+  labelColor: string
 }) {
-  const display = format === 'duration' ? formatDuration(value) : (value ?? 0).toLocaleString()
-  const prevDisplay = format === 'duration' ? formatDuration(previous) : (previous ?? 0).toLocaleString()
+  const display = format === 'duration' ? formatDuration(metric.value) : (metric.value ?? 0).toLocaleString()
+  const prevDisplay = format === 'duration' ? formatDuration(metric.previous) : (metric.previous ?? 0).toLocaleString()
+  const pct = metric.change_pct
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-      <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">{title}</p>
-      <p className="text-2xl font-bold text-gray-900 dark:text-white">{display}</p>
-      <div className="flex items-center gap-2 mt-2">
-        {changePct !== null && (
-          <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${changePct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-            : changePct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-            }`}>
-            {changePct > 0 ? '↑' : changePct < 0 ? '↓' : '→'} {Math.abs(changePct)}%
+    <div className="flex items-center justify-between gap-2 py-2">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${labelColor}`} />
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 truncate">{label}</span>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="text-base font-bold text-gray-900 dark:text-white tabular-nums">{display}</span>
+        {pct !== null && (
+          <span className={`inline-flex items-center text-xs font-semibold px-1.5 py-0.5 rounded ${
+            pct > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            : pct < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+          }`}>
+            {pct > 0 ? '↑' : pct < 0 ? '↓' : '→'}{Math.abs(pct)}%
           </span>
         )}
-        <span className="text-xs text-gray-400 dark:text-gray-500">
-          vs prev: {prevDisplay}
+        <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">
+          vs {prevDisplay}
         </span>
+      </div>
+    </div>
+  )
+}
+
+function SplitKpiCard({ title, agentMetric, botMetric, format = 'number' }: {
+  title: string
+  agentMetric: KpiMetric
+  botMetric?: KpiMetric
+  format?: 'number' | 'duration'
+}) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">{title}</p>
+      <div className="divide-y divide-gray-100 dark:divide-gray-700">
+        <KpiRow label="Agents" metric={agentMetric} format={format} labelColor="bg-blue-500" />
+        {botMetric
+          ? <KpiRow label="Bot" metric={botMetric} format={format} labelColor="bg-purple-500" />
+          : (
+            <div className="flex items-center justify-between gap-2 py-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Bot</span>
+              </div>
+              <span className="text-xs text-gray-400 dark:text-gray-500 italic">automated — n/a</span>
+            </div>
+          )
+        }
       </div>
     </div>
   )
@@ -221,7 +267,7 @@ export default function Analytics() {
   const [websites, setWebsites] = useState<Website[]>([])
   const [selectedWebsite, setSelectedWebsite] = useState<number | ''>('')
   const [dateRange, setDateRange] = useState(30)
-  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings'>('conversations')
+  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings' | 'teams' | 'bot'>('conversations')
 
   // Data
   const [overview, setOverview] = useState<OverviewData | null>(null)
@@ -232,6 +278,7 @@ export default function Analytics() {
   const [agents, setAgents] = useState<AgentStat[]>([])
   const [tags, setTags] = useState<TagStat[]>([])
   const [ratings, setRatings] = useState<RatingSummary | null>(null)
+  const [teams, setTeams] = useState<TeamStat[]>([])
   const [loading, setLoading] = useState(true)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [modalExportType, setModalExportType] = useState<'report' | 'transcripts'>('report')
@@ -244,10 +291,15 @@ export default function Analytics() {
   const [modalRating, setModalRating] = useState<string>('')
   const [downloading, setDownloading] = useState(false)
 
+  // Team filter (per-website scope)
+  const [selectedTeam, setSelectedTeam] = useState<number | ''>('')
+  const [botNewChart, setBotNewChart] = useState<ChartPoint[]>([])
+  const [botResolvedChart, setBotResolvedChart] = useState<ChartPoint[]>([])
+
   // Filter metadata for download modal
   const [allAgents, setAllAgents] = useState<AgentStat[]>([])
   const [allTags, setAllTags] = useState<TagStat[]>([])
-  const [allTeams, setAllTeams] = useState<{ id: number; name: string }[]>([])
+  const [allTeams, setAllTeams] = useState<{ id: number; name: string; website_id: number }[]>([])
 
   const startDate = dateNDaysAgo(dateRange - 1)
   const endDate = todayStr()
@@ -260,7 +312,7 @@ export default function Analytics() {
     apiRequest<{ tags: TagStat[] }>('/analytics/tags/summary?start=2000-01-01&end=2099-12-31')
       .then(d => setAllTags(Array.isArray(d?.tags) ? d.tags : [])).catch(() => { })
     apiRequest<any[]>('/teams/overview')
-      .then(d => setAllTeams(Array.isArray(d) ? d.flatMap((w: any) => w.teams || []).map((t: any) => ({ id: t.id, name: t.name })) : [])).catch(() => { })
+      .then(d => setAllTeams(Array.isArray(d) ? d.flatMap((w: any) => w.teams || []).map((t: any) => ({ id: t.id, name: t.name, website_id: t.website_id })) : [])).catch(() => { })
   }, [])
 
   // Build query string
@@ -269,14 +321,16 @@ export default function Analytics() {
     params.set('start', startDate)
     params.set('end', endDate)
     if (selectedWebsite) params.set('website_id', String(selectedWebsite))
+    if (selectedTeam) params.set('team_id', String(selectedTeam))
     return params.toString()
-  }, [startDate, endDate, selectedWebsite])
+  }, [startDate, endDate, selectedWebsite, selectedTeam])
 
   // Load data on filter change
   useEffect(() => {
     setLoading(true)
     const q = qs()
 
+    const botQ = q + (q ? '&' : '') + 'bot_only=true'
     Promise.all([
       apiRequest<OverviewData>(`/analytics/overview?${q}`),
       apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/new?${q}`),
@@ -286,8 +340,11 @@ export default function Analytics() {
       apiRequest<{ agents: AgentStat[] }>(`/analytics/agents/summary?${q}`),
       apiRequest<{ tags: TagStat[] }>(`/analytics/tags/summary?${q}`),
       apiRequest<RatingSummary>(`/analytics/ratings/summary?${q}`),
+      apiRequest<{ teams: TeamStat[] }>(`/analytics/teams/summary?${q}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/new?${botQ}`),
+      apiRequest<{ series: ChartPoint[] }>(`/analytics/conversations/resolved?${botQ}`),
     ])
-      .then(([ov, nc, rc, rpc, rt, ag, tg, rs]) => {
+      .then(([ov, nc, rc, rpc, rt, ag, tg, rs, tm, bnc, brc]) => {
         setOverview(ov)
         setNewChart(nc.series)
         setResolvedChart(rc.series)
@@ -296,6 +353,9 @@ export default function Analytics() {
         setAgents(ag.agents)
         setTags(tg.tags)
         setRatings(rs)
+        setTeams(Array.isArray(tm?.teams) ? tm.teams : [])
+        setBotNewChart(bnc.series)
+        setBotResolvedChart(brc.series)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -321,7 +381,10 @@ export default function Analytics() {
               {/* Website filter */}
               <select
                 value={selectedWebsite}
-                onChange={e => setSelectedWebsite(e.target.value ? Number(e.target.value) : '')}
+                onChange={e => {
+                  setSelectedWebsite(e.target.value ? Number(e.target.value) : '')
+                  setSelectedTeam('')
+                }}
                 className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">All Websites</option>
@@ -329,6 +392,21 @@ export default function Analytics() {
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
+              {/* Team filter — only show when a website is selected */}
+              {selectedWebsite !== '' && (
+                <select
+                  value={selectedTeam}
+                  onChange={e => setSelectedTeam(e.target.value ? Number(e.target.value) : '')}
+                  className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Teams</option>
+                  {allTeams
+                    .filter(t => t.website_id === selectedWebsite)
+                    .map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                </select>
+              )}
               {/* Date range */}
               <select
                 value={dateRange}
@@ -383,43 +461,39 @@ export default function Analytics() {
           </div>
         ) : (
           <>
-            {/* KPI Cards */}
+            {/* KPI Cards — each shows agent vs bot split */}
             {overview && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <KpiCard
+                <SplitKpiCard
                   title="New Conversations"
-                  value={overview.new_conversations.value}
-                  previous={overview.new_conversations.previous}
-                  changePct={overview.new_conversations.change_pct}
+                  agentMetric={overview.new_conversations.agent}
+                  botMetric={overview.new_conversations.bot}
                 />
-                <KpiCard
+                <SplitKpiCard
                   title="Resolved Conversations"
-                  value={overview.resolved_conversations.value}
-                  previous={overview.resolved_conversations.previous}
-                  changePct={overview.resolved_conversations.change_pct}
+                  agentMetric={overview.resolved_conversations.agent}
+                  botMetric={overview.resolved_conversations.bot}
                 />
-                <KpiCard
+                <SplitKpiCard
                   title="Avg. First Response"
-                  value={overview.avg_first_response_seconds.value}
-                  previous={overview.avg_first_response_seconds.previous}
-                  changePct={overview.avg_first_response_seconds.change_pct}
+                  agentMetric={overview.avg_first_response_seconds.agent}
                   format="duration"
                 />
               </div>
             )}
 
             {/* Tabs */}
-            <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit">
-              {(['conversations', 'agents', 'tags', 'ratings'] as const).map(tab => (
+            <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit flex-wrap">
+              {(['conversations', 'agents', 'tags', 'ratings', 'teams', 'bot'] as const).map(tab => (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => setActiveTab(tab as typeof activeTab)}
                   className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === tab
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                     }`}
                 >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab === 'bot' ? 'Bot' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
@@ -572,6 +646,45 @@ export default function Analytics() {
               </div>
             )}
 
+            {/* Teams Tab */}
+            {activeTab === 'teams' && (
+              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Team Performance</h3>
+                </div>
+                {teams.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-gray-400 dark:text-gray-500">
+                    No team data available for this period.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-5 py-3">Team</th>
+                          <th className="px-5 py-3">Website</th>
+                          <th className="px-5 py-3 text-right">Conversations</th>
+                          <th className="px-5 py-3 text-right">Resolved</th>
+                          <th className="px-5 py-3 text-right">Avg. Response</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {teams.map(team => (
+                          <tr key={team.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td className="px-5 py-3 text-sm font-medium text-gray-900 dark:text-white">{team.name}</td>
+                            <td className="px-5 py-3 text-sm text-gray-500 dark:text-gray-400">{team.website_name}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white font-medium">{team.conversations}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">{team.resolved}</td>
+                            <td className="px-5 py-3 text-right text-sm text-gray-900 dark:text-white">{formatDuration(team.avg_response_seconds)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Ratings Tab */}
             {activeTab === 'ratings' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -640,6 +753,49 @@ export default function Analytics() {
                     No ratings received for this period.
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Bot Tab */}
+            {activeTab === 'bot' && (
+              <div className="space-y-4">
+                {/* Bot summary row */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Bot Conversations</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {(overview?.new_conversations.bot?.value ?? 0).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">visitor-initiated bot flows</p>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Auto-Resolved</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {(overview?.resolved_conversations.bot?.value ?? 0).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">closed automatically by bot</p>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Auto-Resolve Rate</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {(() => {
+                        const total = overview?.new_conversations.bot?.value ?? 0
+                        const resolved = overview?.resolved_conversations.bot?.value ?? 0
+                        return total > 0 ? `${Math.round((resolved / total) * 100)}%` : '—'
+                      })()}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">of bot flows completed</p>
+                  </div>
+                </div>
+                {/* Bot conversation charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <ChartCard title="Bot Conversations (Daily)">
+                    <ConversationChart data={botNewChart} color="#8b5cf6" label="Bot" />
+                  </ChartCard>
+                  <ChartCard title="Bot Auto-Resolved (Daily)">
+                    <ConversationChart data={botResolvedChart} color="#a78bfa" label="Bot Resolved" />
+                  </ChartCard>
+                </div>
               </div>
             )}
           </>

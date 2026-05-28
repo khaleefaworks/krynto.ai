@@ -24,6 +24,7 @@ class BusEvent:
     include_global: bool | None = None
     exclude_agent_id: int | None = None
     conversation_team_id: int | None = None
+    conversation_unrouted: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -36,6 +37,7 @@ class BusEvent:
             "include_global": self.include_global,
             "exclude_agent_id": self.exclude_agent_id,
             "conversation_team_id": self.conversation_team_id,
+            "conversation_unrouted": self.conversation_unrouted,
         }
 
 

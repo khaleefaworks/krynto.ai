@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { clearToken } from '@/services/api'
+import { clearToken, apiRequest } from '@/services/api'
+import { unsubscribeFromPush } from '@/services/push'
 import Logo from '@/components/Logo'
 import { Building2, BarChart3, LogOut } from 'lucide-react'
 import NotificationToasts from '@/components/NotificationToasts'
@@ -9,7 +10,9 @@ export default function SuperAdminLayout() {
     const { user, setUser, setToken } = useAppStore()
     const navigate = useNavigate()
 
-    const onLogout = () => {
+    const onLogout = async () => {
+        await unsubscribeFromPush()
+        await apiRequest('/auth/logout', { method: 'POST' }).catch(() => {})
         clearToken()
         setUser(null)
         setToken(null)
