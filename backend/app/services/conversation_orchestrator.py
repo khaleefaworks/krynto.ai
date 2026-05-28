@@ -354,6 +354,7 @@ async def _close_bot_conversation_after_delay(
 
             conversation.status = ConversationStatus.RESOLVED
             conversation.closed_by = "bot"
+            conversation.resolved_at = datetime.utcnow()
             db.commit()
 
             # Notify visitor so widget can clear its state silently.

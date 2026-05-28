@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, List, Optional
+from urllib.parse import urlparse, parse_qs
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, case, and_, distinct
@@ -127,6 +128,17 @@ def _fill_series(data: dict[str, int | float], series: list[str], default: int |
     return [{"date": d, "value": data.get(d, default)} for d in series]
 
 
+def _bot_filter(bot_only: bool | None):
+    """Return the SQLAlchemy bot_only column filter clause.
+
+    bot_only=True  → show ONLY automated conversations
+    bot_only=None/False → exclude automated conversations (default)
+    """
+    if bot_only is True:
+        return Conversation.bot_only == True   # noqa: E712
+    return Conversation.bot_only == False      # noqa: E712
+
+
 # ---------------------------------------------------------------------------
 # 1. Conversation Statistics
 # ---------------------------------------------------------------------------
@@ -139,38 +151,52 @@ def conversation_summary(
     team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    bot_only: Optional[bool] = Query(None),
 ):
     """High-level conversation KPIs for the selected period."""
     start_dt, end_dt = _date_range(start, end)
 
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
 
-    base = db.query(Conversation).filter(
-        Conversation.created_at >= start_dt,
-        Conversation.created_at <= end_dt,
-    )
+    if allowed_ids is not None and not allowed_ids:
+        return {
+            "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+            "total_new": 0, "total_replied": 0, "total_resolved": 0,
+            "avg_first_response_seconds": None,
+        }
+
+    # Shared scope filters (website + team) — each metric adds its own date field.
+    base = db.query(Conversation)
     if allowed_ids is not None:
-        if not allowed_ids:
-            return {
-                "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
-                "total_new": 0, "total_replied": 0, "total_resolved": 0,
-                "avg_first_response_seconds": None,
-            }
         base = base.filter(Conversation.website_id.in_(allowed_ids))
     if team_id is not None:
         base = base.filter(Conversation.team_id == team_id)
 
+    # New: counted on the day the visitor first interacted (last_visitor_message_at).
     total_new = base.filter(
         Conversation.last_visitor_message_at.isnot(None),
+        Conversation.last_visitor_message_at >= start_dt,
+        Conversation.last_visitor_message_at <= end_dt,
+        _bot_filter(bot_only),
     ).count()
 
+    # Resolved: counted on the day the conversation was closed (resolved_at).
+    _resolved_closed_by = (
+        Conversation.closed_by == 'bot'
+        if bot_only is True
+        else Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot'])
+    )
     total_resolved = base.filter(
         Conversation.status == ConversationStatus.RESOLVED,
         Conversation.last_visitor_message_at.isnot(None),
-        Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
+        _resolved_closed_by,
+        _bot_filter(bot_only),
+        Conversation.resolved_at.isnot(None),
+        Conversation.resolved_at >= start_dt,
+        Conversation.resolved_at <= end_dt,
     ).count()
 
-    # Replied = conversations that have at least one agent message
+    # Replied = conversations (created in period) with at least one agent message.
     replied_subq = (
         db.query(Message.conversation_id)
         .filter(Message.sender_type == MessageSenderType.AGENT)
@@ -178,6 +204,8 @@ def conversation_summary(
         .subquery()
     )
     total_replied = base.filter(
+        Conversation.created_at >= start_dt,
+        Conversation.created_at <= end_dt,
         Conversation.id.in_(db.query(replied_subq.c.conversation_id))
     ).count()
 
@@ -234,6 +262,7 @@ def new_conversations_chart(
     team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    bot_only: Optional[bool] = Query(None),
 ):
     """Daily new conversation counts."""
     start_dt, end_dt = _date_range(start, end)
@@ -243,17 +272,19 @@ def new_conversations_chart(
     if allowed_ids is not None and not allowed_ids:
         return {"series": _fill_series({}, series)}
 
+    # Group by visitor's first-interaction date (last_visitor_message_at).
     q = (
         db.query(
-            func.date(Conversation.created_at).label("day"),
+            func.date(Conversation.last_visitor_message_at).label("day"),
             func.count(Conversation.id).label("cnt"),
         )
         .filter(
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
             Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
+            _bot_filter(bot_only),
         )
-        .group_by(func.date(Conversation.created_at))
+        .group_by(func.date(Conversation.last_visitor_message_at))
     )
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
@@ -272,12 +303,9 @@ def resolved_conversations_chart(
     team_id: Optional[int] = Query(None),
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    bot_only: Optional[bool] = Query(None),
 ):
-    """Daily resolved conversation counts.
-
-    Uses ``updated_at`` as the resolution timestamp since there's no
-    dedicated ``resolved_at`` column.
-    """
+    """Daily resolved conversation counts, grouped by resolved_at."""
     start_dt, end_dt = _date_range(start, end)
     series = _date_series(start_dt, end_dt)
 
@@ -285,19 +313,26 @@ def resolved_conversations_chart(
     if allowed_ids is not None and not allowed_ids:
         return {"series": _fill_series({}, series)}
 
+    _closed_by_filter = (
+        Conversation.closed_by == 'bot'
+        if bot_only is True
+        else Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot'])
+    )
     q = (
         db.query(
-            func.date(Conversation.updated_at).label("day"),
+            func.date(Conversation.resolved_at).label("day"),
             func.count(Conversation.id).label("cnt"),
         )
         .filter(
             Conversation.status == ConversationStatus.RESOLVED,
             Conversation.last_visitor_message_at.isnot(None),
-            Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
-            Conversation.updated_at >= start_dt,
-            Conversation.updated_at <= end_dt,
+            _closed_by_filter,
+            _bot_filter(bot_only),
+            Conversation.resolved_at.isnot(None),
+            Conversation.resolved_at >= start_dt,
+            Conversation.resolved_at <= end_dt,
         )
-        .group_by(func.date(Conversation.updated_at))
+        .group_by(func.date(Conversation.resolved_at))
     )
     if allowed_ids is not None:
         q = q.filter(Conversation.website_id.in_(allowed_ids))
@@ -458,7 +493,7 @@ def agents_summary(
     if allowed_ids is not None and not allowed_ids:
         return {"agents": []}
 
-    # Conversations assigned per agent in period
+    # Conversations assigned per agent in period — exclude bot-only (no agent handled those).
     assigned_q = (
         db.query(
             Conversation.assigned_agent_id,
@@ -468,6 +503,7 @@ def agents_summary(
             Conversation.assigned_agent_id.isnot(None),
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            Conversation.bot_only == False,  # noqa: E712
         )
     )
     if allowed_ids is not None:
@@ -578,7 +614,7 @@ def teams_summary(
 
     team_ids = [t.WebsiteTeam.id for t in teams]
 
-    # Conversations per team
+    # Conversations per team — counted on first-interaction date, exclude bot-only.
     conv_q = (
         db.query(
             Conversation.team_id,
@@ -586,15 +622,16 @@ def teams_summary(
         )
         .filter(
             Conversation.team_id.in_(team_ids),
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
             Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
+            Conversation.bot_only == False,  # noqa: E712
         )
         .group_by(Conversation.team_id)
     )
     conv_map = {row[0]: row[1] for row in conv_q.all()}
 
-    # Resolved per team
+    # Resolved per team — counted on resolved_at date.
     resolved_q = (
         db.query(
             Conversation.team_id,
@@ -605,8 +642,10 @@ def teams_summary(
             Conversation.status == ConversationStatus.RESOLVED,
             Conversation.last_visitor_message_at.isnot(None),
             Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot']),
-            Conversation.updated_at >= start_dt,
-            Conversation.updated_at <= end_dt,
+            Conversation.bot_only == False,  # noqa: E712
+            Conversation.resolved_at.isnot(None),
+            Conversation.resolved_at >= start_dt,
+            Conversation.resolved_at <= end_dt,
         )
         .group_by(Conversation.team_id)
     )
@@ -670,6 +709,8 @@ def tags_summary(
     if allowed_ids is not None and not allowed_ids:
         return {"tags": []}
 
+    # Filter by conversation creation date so tags applied retroactively
+    # to old conversations don't shift into the current reporting period.
     q = (
         db.query(
             Tag.id,
@@ -680,8 +721,8 @@ def tags_summary(
         .join(ConversationTag, ConversationTag.tag_id == Tag.id)
         .join(Conversation, Conversation.id == ConversationTag.conversation_id)
         .filter(
-            ConversationTag.created_at >= start_dt,
-            ConversationTag.created_at <= end_dt,
+            Conversation.created_at >= start_dt,
+            Conversation.created_at <= end_dt,
         )
     )
     if allowed_ids is not None:
@@ -714,48 +755,59 @@ def analytics_overview(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
 ):
-    """Combined overview with KPIs + comparison to previous period."""
+    """Combined overview KPIs — always returns agent and bot splits side by side."""
     start_dt, end_dt = _date_range(start, end)
     period_days = (end_dt.date() - start_dt.date()).days + 1
 
-    # Enforce visibility scope for overview queries
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
 
-    # Compute comparison period before any early return so it's always available
     prev_end_dt = start_dt - timedelta(seconds=1)
     prev_start_dt = prev_end_dt - timedelta(days=period_days - 1)
     prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=timezone.utc)
 
+    _empty_metric = {"value": 0, "previous": 0, "change_pct": None}
+
     if allowed_ids is not None and not allowed_ids:
-        # No accessible websites for this user → return empty KPIs
         return {
             "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
             "previous_period": {"start": prev_start_dt.date().isoformat(), "end": prev_end_dt.date().isoformat()},
-            "new_conversations": {"value": 0, "previous": 0, "change_pct": None},
-            "resolved_conversations": {"value": 0, "previous": 0, "change_pct": None},
-            "avg_first_response_seconds": {"value": None, "previous": None, "change_pct": None},
+            "new_conversations": {"agent": _empty_metric, "bot": _empty_metric},
+            "resolved_conversations": {"agent": _empty_metric, "bot": _empty_metric},
+            "avg_first_response_seconds": {"agent": {"value": None, "previous": None, "change_pct": None}},
         }
 
-    def _count_conversations(s: datetime, e: datetime) -> int:
+    def _count_new(s: datetime, e: datetime, for_bot: bool) -> int:
         q = db.query(func.count(Conversation.id)).filter(
-            Conversation.created_at >= s,
-            Conversation.created_at <= e,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= s,
+            Conversation.last_visitor_message_at <= e,
+            Conversation.bot_only == for_bot,  # noqa: E712
         )
         if allowed_ids is not None:
             q = q.filter(Conversation.website_id.in_(allowed_ids))
         return q.scalar() or 0
 
-    def _count_resolved(s: datetime, e: datetime) -> int:
+    def _count_resolved(s: datetime, e: datetime, for_bot: bool) -> int:
+        closed_by_filter = (
+            Conversation.closed_by == 'bot'
+            if for_bot
+            else Conversation.closed_by.notin_(['inactivity', 'system_auto', 'bot'])
+        )
         q = db.query(func.count(Conversation.id)).filter(
             Conversation.status == ConversationStatus.RESOLVED,
-            Conversation.updated_at >= s,
-            Conversation.updated_at <= e,
+            Conversation.last_visitor_message_at.isnot(None),
+            closed_by_filter,
+            Conversation.bot_only == for_bot,  # noqa: E712
+            Conversation.resolved_at.isnot(None),
+            Conversation.resolved_at >= s,
+            Conversation.resolved_at <= e,
         )
         if allowed_ids is not None:
             q = q.filter(Conversation.website_id.in_(allowed_ids))
         return q.scalar() or 0
 
     def _avg_response(s: datetime, e: datetime) -> float | None:
+        """Agent-only first-response time (bots have no agent replies)."""
         first_agent_msg = (
             db.query(
                 Message.conversation_id,
@@ -774,6 +826,7 @@ def analytics_overview(
             )
             .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
             .filter(
+                Conversation.bot_only == False,  # noqa: E712
                 Conversation.created_at >= s,
                 Conversation.created_at <= e,
             )
@@ -783,39 +836,41 @@ def analytics_overview(
         val = q.scalar()
         return round(val, 1) if val else None
 
-    current_new = _count_conversations(start_dt, end_dt)
-    prev_new = _count_conversations(prev_start_dt, prev_end_dt)
-
-    current_resolved = _count_resolved(start_dt, end_dt)
-    prev_resolved = _count_resolved(prev_start_dt, prev_end_dt)
-
-    current_response = _avg_response(start_dt, end_dt)
-    prev_response = _avg_response(prev_start_dt, prev_end_dt)
-
     def _pct_change(current: int | float | None, previous: int | float | None) -> float | None:
-        if previous is None or previous == 0:
-            return None
-        if current is None:
+        if previous is None or previous == 0 or current is None:
             return None
         return round(((current - previous) / previous) * 100, 1)
+
+    def _metric(cur, prev):
+        return {"value": cur, "previous": prev, "change_pct": _pct_change(cur, prev)}
+
+    # Compute all values (agent + bot, current + previous periods)
+    cur_agent_new = _count_new(start_dt, end_dt, for_bot=False)
+    prev_agent_new = _count_new(prev_start_dt, prev_end_dt, for_bot=False)
+    cur_bot_new = _count_new(start_dt, end_dt, for_bot=True)
+    prev_bot_new = _count_new(prev_start_dt, prev_end_dt, for_bot=True)
+
+    cur_agent_res = _count_resolved(start_dt, end_dt, for_bot=False)
+    prev_agent_res = _count_resolved(prev_start_dt, prev_end_dt, for_bot=False)
+    cur_bot_res = _count_resolved(start_dt, end_dt, for_bot=True)
+    prev_bot_res = _count_resolved(prev_start_dt, prev_end_dt, for_bot=True)
+
+    cur_response = _avg_response(start_dt, end_dt)
+    prev_response = _avg_response(prev_start_dt, prev_end_dt)
 
     return {
         "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
         "previous_period": {"start": prev_start_dt.date().isoformat(), "end": prev_end_dt.date().isoformat()},
         "new_conversations": {
-            "value": current_new,
-            "previous": prev_new,
-            "change_pct": _pct_change(current_new, prev_new),
+            "agent": _metric(cur_agent_new, prev_agent_new),
+            "bot": _metric(cur_bot_new, prev_bot_new),
         },
         "resolved_conversations": {
-            "value": current_resolved,
-            "previous": prev_resolved,
-            "change_pct": _pct_change(current_resolved, prev_resolved),
+            "agent": _metric(cur_agent_res, prev_agent_res),
+            "bot": _metric(cur_bot_res, prev_bot_res),
         },
         "avg_first_response_seconds": {
-            "value": current_response,
-            "previous": prev_response,
-            "change_pct": _pct_change(current_response, prev_response),
+            "agent": _metric(cur_response, prev_response),
         },
     }
 
@@ -892,10 +947,30 @@ def export_xlsx(
 
     _REPORT_HEADERS = [
         "Conversation ID", "Status", "Website", "Team",
-        "Visitor Name", "Visitor Email", "Visitor Phone", "Session ID", "Visitor IP",
-        "Device", "Browser",
-        "Agent Name", "Started At", "Total Duration (s)", "First Response Time (s)",
-        "Rating", "Closed By", "Tags", "Page URL",
+        "Visitor Name", "Visitor Email", "Visitor Phone", "Contact Filled",
+        "Session ID", "Visitor IP", "Device", "Browser",
+        "Agents",
+        "Started At", "Resolved At", "Chat Duration (mins)", "First Response Time (s)",
+        "Visitor Messages", "Agent Messages",
+        "Rating", "Rating Feedback", "Closed By", "Tags",
+        "Lead Source", "Referrer", "Page URL",
+    ]
+    _REPORT_DESCRIPTIONS = [
+        "Short unique conversation ID", "OPEN or RESOLVED", "Website name", "Routed team name",
+        "Visitor's name (if provided)", "Visitor's email (if provided)", "Visitor's phone (if provided)",
+        "Yes if any contact field was filled by visitor",
+        "Browser session identifier", "Visitor IP address", "Device type", "Browser name/version",
+        "Assigned agent + all agents who sent a message (comma-separated, deduplicated)",
+        "Timestamp of first visitor interaction", "Timestamp conversation was resolved",
+        "Minutes from first interaction to resolution (blank if unresolved)",
+        "Seconds from first interaction to first agent reply",
+        "Number of messages sent by visitor", "Number of messages sent by agents",
+        "Visitor rating: Good / Neutral / Bad", "Free-text feedback from visitor rating",
+        "How conversation ended (agent/visitor/inactivity/bot)",
+        "Comma-separated tags applied to conversation",
+        "utm_source from page URL if present, otherwise 'direct'",
+        "HTTP referrer URL of visitor's first page view",
+        "URL of the visitor's first page view",
     ]
 
     # Empty workbook if user has no accessible websites
@@ -938,17 +1013,6 @@ def export_xlsx(
         ))
         .subquery()
     )
-
-    # Pageview aggregates: per-session first/last (for total_time) and
-    # first pageview per conversation and per session (for page_url/date fallback).
-    pv_q = db.query(
-        ConversationPageView.session_id.label("session_id"),
-        func.min(ConversationPageView.created_at).label("first_pv"),
-        func.max(ConversationPageView.created_at).label("last_pv"),
-    )
-    if allowed_ids is not None:
-        pv_q = pv_q.filter(ConversationPageView.website_id.in_(allowed_ids))
-    pv_range = pv_q.group_by(ConversationPageView.session_id).subquery()
 
     # First pageview timestamp/url for conversations that have conversation_id set
     first_pv_at = (
@@ -1005,12 +1069,57 @@ def export_xlsx(
         .subquery()
     )
 
+    # All agent names who sent at least one message per conversation (joined agents)
+    agents_involved_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.string_agg(distinct(func.coalesce(User.name, Message.sender)), ", ").label("agents_involved"),
+        )
+        .outerjoin(User, User.email == Message.sender)
+        .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # Message counts per conversation split by sender type
+    visitor_msg_count_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.count(Message.id).label("visitor_msg_count"),
+        )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    agent_msg_count_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.count(Message.id).label("agent_msg_count"),
+        )
+        .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # First page-view referrer per conversation (traffic source / lead source)
+    first_pv_referrer_subq = (
+        db.query(
+            ConversationPageView.conversation_id.label("conversation_id"),
+            ConversationPageView.referrer.label("referrer"),
+            ConversationPageView.created_at.label("pv_created_at"),
+        )
+        .filter(ConversationPageView.conversation_id.isnot(None))
+        .distinct(ConversationPageView.conversation_id)
+        .order_by(ConversationPageView.conversation_id, ConversationPageView.created_at)
+        .subquery()
+    )
+
     # Aliased joins for new columns
     website_alias = aliased(Website)
     team_alias = aliased(WebsiteTeam)
     rating_alias = aliased(ConversationRating)
 
-    # Main query selecting required columns
+    # Main query selecting all export columns
     q = (
         db.query(
             Conversation.short_id.label("short_id"),
@@ -1025,16 +1134,21 @@ def export_xlsx(
             Conversation.device_info.label("device_info"),
             Conversation.browser_info.label("browser_info"),
             func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
+            agents_involved_subq.c.agents_involved.label("agents_involved"),
             func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at).label("date_with_time"),
-            func.coalesce(
-                func.nullif((func.extract("epoch", pv_range.c.last_pv) - func.extract("epoch", pv_range.c.first_pv)), 0),
-                (func.extract("epoch", Conversation.last_seen_at) - func.extract("epoch", Conversation.created_at)),
-                0,
-            ).label("total_time_seconds"),
+            Conversation.resolved_at.label("resolved_at"),
+            func.extract(
+                "epoch",
+                Conversation.resolved_at - func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at)
+            ).label("chat_duration_seconds"),
             (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", Conversation.created_at)).label("response_time_seconds"),
+            func.coalesce(visitor_msg_count_subq.c.visitor_msg_count, 0).label("visitor_msg_count"),
+            func.coalesce(agent_msg_count_subq.c.agent_msg_count, 0).label("agent_msg_count"),
             rating_alias.rating.label("rating"),
+            rating_alias.feedback.label("rating_feedback"),
             Conversation.closed_by.label("closed_by"),
             func.coalesce(tags_subq.c.tags, "").label("tags"),
+            func.coalesce(first_pv_referrer_subq.c.referrer, "").label("referrer"),
             func.coalesce(first_pv.c.url, first_pv_session.c.session_url).label("page_url"),
         )
         .outerjoin(website_alias, website_alias.id == Conversation.website_id)
@@ -1044,11 +1158,18 @@ def export_xlsx(
         .outerjoin(first_agent_at, first_agent_at.c.conversation_id == Conversation.id)
         .outerjoin(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
         .outerjoin(msg_user, msg_user.email == first_agent_msg.c.agent_sender)
-        .outerjoin(pv_range, pv_range.c.session_id == Conversation.session_id)
         .outerjoin(tags_subq, tags_subq.c.conversation_id == Conversation.id)
+        .outerjoin(agents_involved_subq, agents_involved_subq.c.conversation_id == Conversation.id)
+        .outerjoin(visitor_msg_count_subq, visitor_msg_count_subq.c.conversation_id == Conversation.id)
+        .outerjoin(agent_msg_count_subq, agent_msg_count_subq.c.conversation_id == Conversation.id)
         .outerjoin(first_pv, first_pv.c.conversation_id == Conversation.id)
         .outerjoin(first_pv_session, first_pv_session.c.session_id == Conversation.session_id)
-        .filter(Conversation.created_at >= start_dt, Conversation.created_at <= end_dt)
+        .outerjoin(first_pv_referrer_subq, first_pv_referrer_subq.c.conversation_id == Conversation.id)
+        .filter(
+            Conversation.created_at >= start_dt,
+            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+        )
     )
 
     if allowed_ids is not None:
@@ -1093,10 +1214,39 @@ def export_xlsx(
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title="Analytics")
     ws.append(_REPORT_HEADERS)
+    ws.append(_REPORT_DESCRIPTIONS)
 
     for row in q.yield_per(200):
         status_val = row.status.value if hasattr(row.status, "value") else str(row.status or "")
         rating_val = _RATING_LABEL.get(row.rating, "") if row.rating is not None else ""
+
+        # Contact Filled: Yes if any of name/email/phone is present
+        contact_filled = "Yes" if any([row.visitor_name, row.visitor_email, row.visitor_phone]) else "No"
+
+        # Agents: merge assigned agent + all who sent a message, deduplicated, ordered
+        _agents_seen: list[str] = []
+        _agents_set: set[str] = set()
+        for _n in [row.agent_name] + (row.agents_involved.split(", ") if row.agents_involved else []):
+            _n = (_n or "").strip()
+            if _n and _n not in _agents_set:
+                _agents_set.add(_n)
+                _agents_seen.append(_n)
+        agents_col = ", ".join(_agents_seen)
+
+        # Chat duration in minutes — computed in SQL via epoch extraction
+        chat_duration_mins = round(float(row.chat_duration_seconds) / 60, 2) if row.chat_duration_seconds is not None else ""
+
+        # Lead source: utm_source from page URL query string, else "direct"
+        lead_source = "direct"
+        if row.page_url:
+            try:
+                _qs = parse_qs(urlparse(row.page_url).query)
+                _utm = _qs.get("utm_source", [None])[0]
+                if _utm:
+                    lead_source = _utm
+            except Exception:
+                pass
+
         ws.append([
             row.short_id or "",
             status_val,
@@ -1105,17 +1255,24 @@ def export_xlsx(
             row.visitor_name or "",
             row.visitor_email or "",
             row.visitor_phone or "",
+            contact_filled,
             row.session_id or "",
             row.visitor_ip or "",
             row.device_info or "",
             row.browser_info or "",
-            row.agent_name or "",
+            agents_col,
             _fmt_dt(row.date_with_time),
-            float(row.total_time_seconds) if row.total_time_seconds is not None else 0,
-            float(row.response_time_seconds) if row.response_time_seconds is not None else None,
+            _fmt_dt(row.resolved_at),
+            chat_duration_mins,
+            float(row.response_time_seconds) if row.response_time_seconds is not None else "",
+            int(row.visitor_msg_count) if row.visitor_msg_count is not None else 0,
+            int(row.agent_msg_count) if row.agent_msg_count is not None else 0,
             rating_val,
+            row.rating_feedback or "",
             row.closed_by or "",
             row.tags or "",
+            lead_source,
+            row.referrer or "",
             row.page_url or "",
         ])
 

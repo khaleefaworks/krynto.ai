@@ -272,6 +272,7 @@ class ConversationService:
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
         conversation.closed_by = str(closed_by).strip() if closed_by else None
+        conversation.resolved_at = datetime.utcnow()
         self.db.commit()
         try:
             self.db.refresh(conversation)

@@ -735,6 +735,7 @@ async def chat_ws(
             if message_type == "submit_rating":
                 rating_val = payload.get("rating")
                 conv_id = payload.get("conversation_id")
+                feedback_val = payload.get("feedback") or None
                 if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
                     try:
                         from app.models.conversation_rating import ConversationRating
@@ -755,11 +756,14 @@ async def chat_ws(
                             )
                             if existing:
                                 existing.rating = rating_val
+                                if feedback_val is not None:
+                                    existing.feedback = feedback_val
                                 db.commit()
                             else:
                                 new_rating = ConversationRating(
                                     conversation_id=conv_id,
                                     rating=rating_val,
+                                    feedback=feedback_val,
                                     session_id=session_id,
                                 )
                                 db.add(new_rating)
@@ -1344,6 +1348,7 @@ async def chat_ws_with_conversation(
 
                 if message_type == "submit_rating":
                     rating_val = payload.get("rating")
+                    feedback_val = payload.get("feedback") or None
                     if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
                         try:
                             from app.models.conversation_rating import ConversationRating
@@ -1355,11 +1360,14 @@ async def chat_ws_with_conversation(
                             )
                             if existing:
                                 existing.rating = rating_val
+                                if feedback_val is not None:
+                                    existing.feedback = feedback_val
                                 db.commit()
                             else:
                                 new_rating = ConversationRating(
                                     conversation_id=conv.id,
                                     rating=rating_val,
+                                    feedback=feedback_val,
                                     session_id=session_id,
                                 )
                                 db.add(new_rating)

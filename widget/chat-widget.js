@@ -578,6 +578,7 @@
 
   let ratingConversationId = null;
   let hasRatedSession = false;
+  let pendingRatingValue = null;
 
   function _ratedStorageKey() {
     if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
@@ -599,12 +600,17 @@
       return;
     }
     ratingConversationId = conversationId || ratingConversationId || null;
+    pendingRatingValue = null;
     // Reset state
     const thanks = $id('chatassist-rating-thanks');
     if (thanks) thanks.style.display = 'none';
     const emojis = el.querySelector('.chatassist-rating-emojis');
     if (emojis) emojis.style.display = 'flex';
     el.querySelectorAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
+    const fbSection = $id('chatassist-rating-feedback-section');
+    if (fbSection) fbSection.style.display = 'none';
+    const fbInput = $id('chatassist-rating-feedback');
+    if (fbInput) fbInput.value = '';
     el.style.display = 'flex';
     el.classList.add('chatassist-rating-overlay-visible');
   }
@@ -629,12 +635,14 @@
     }
   }
 
-  function submitRating(ratingValue) {
+  function submitRating(ratingValue, feedback) {
     hasRatedSession = true;
     try {
       const key = _ratedStorageKey();
       if (key) localStorage.setItem(key, '1');
     } catch (e) { }
+
+    const feedbackText = (feedback || '').trim() || null;
 
     // Submit via WebSocket if connected
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -642,6 +650,7 @@
         ws.send(JSON.stringify({
           type: 'submit_rating',
           rating: ratingValue,
+          feedback: feedbackText,
           conversation_id: ratingConversationId,
         }));
       } catch (e) { }
@@ -655,6 +664,7 @@
           body: JSON.stringify({
             conversation_id: ratingConversationId,
             rating: ratingValue,
+            feedback: feedbackText,
             session_id: CONFIG.sessionId,
           }),
         }).catch(() => { });
@@ -664,8 +674,10 @@
     // Show thank you & auto-close
     const thanks = $id('chatassist-rating-thanks');
     const emojis = $qs('.chatassist-rating-emojis');
+    const fbSection = $id('chatassist-rating-feedback-section');
     if (thanks) thanks.style.display = 'block';
     if (emojis) emojis.style.display = 'none';
+    if (fbSection) fbSection.style.display = 'none';
     setTimeout(() => hideRatingOverlay(), 1500);
   }
 
@@ -2885,6 +2897,10 @@
                 <span class="chatassist-rating-emoji">&#x1F61E;</span>
               </button>
             </div>
+            <div id="chatassist-rating-feedback-section" style="display:none;">
+              <textarea id="chatassist-rating-feedback" class="chatassist-rating-feedback" placeholder="Tell us more (optional)..." rows="3"></textarea>
+              <button id="chatassist-rating-submit" class="chatassist-rating-submit">Submit</button>
+            </div>
             <div id="chatassist-rating-thanks" class="chatassist-rating-thanks" style="display:none;">
               Thank you for your feedback!
             </div>
@@ -3092,15 +3108,33 @@
 
     // Rating overlay buttons
     $id('chatassist-rating-close').addEventListener('click', () => {
-      hideRatingOverlay();
+      if (pendingRatingValue !== null) {
+        // Emoji selected but not yet submitted — submit with no feedback text
+        const v = pendingRatingValue;
+        pendingRatingValue = null;
+        submitRating(v, '');
+      } else {
+        hideRatingOverlay();
+      }
     });
     $qsAll('.chatassist-rating-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         $qsAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
-        const val = parseInt(btn.getAttribute('data-rating'), 10);
-        submitRating(val);
+        pendingRatingValue = parseInt(btn.getAttribute('data-rating'), 10);
+        // Show feedback textarea
+        const fbSection = $id('chatassist-rating-feedback-section');
+        if (fbSection) fbSection.style.display = 'block';
+        const fbInput = $id('chatassist-rating-feedback');
+        if (fbInput) { fbInput.value = ''; setTimeout(function(){ fbInput.focus(); }, 50); }
       });
+    });
+    $id('chatassist-rating-submit').addEventListener('click', () => {
+      if (pendingRatingValue === null) return;
+      const feedback = ($id('chatassist-rating-feedback').value || '').trim();
+      const v = pendingRatingValue;
+      pendingRatingValue = null;
+      submitRating(v, feedback);
     });
 
     $id('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
