@@ -70,6 +70,28 @@
 
 ---
 
+## Completed (May 2026 — session batch 2)
+
+### Bot-Only Conversations
+
+| # | Title | Description |
+|---|-------|-------------|
+| BOT1 | **Bot-Only Conversations — Silent Auto-Resolve (Careers Path)** ✅ DONE | Full implementation of bot-only conversation handling. (1) `bot_only` boolean column on `conversations` table (Alembic migration). (2) Orchestrator: `_is_bot_only` computed early (before any broadcast) from button config + `sub_prompt.bot_only`; branch-click immediately sets `conversation.bot_only=True` in DB. (3) `_close_bot_conversation_after_delay` async task silently resolves after configurable delay (`resolve_delay_seconds`, default 3 s, range 1–30 s). (4) Visitor_message WS broadcast suppressed for bot_only conversations. (5) `unread_count` forced to 0 server-side for bot_only conversations in `/chats/active`. (6) Frontend: `Bot` sidebar filter in `ConversationsView` (type `FilterCategory = 'bot'`); All/Mine/Unassigned views exclude bot_only. Mobile tabs include Bot count. (7) `ButtonEditor` in `AutomationFlowCanvas`: leaf button `bot_only` toggle + `resolve_delay_seconds` input; branch sub_prompt `bot_only` toggle (hides allow_input/suppress_waiting/collect_contact). (8) Analytics: `closed_by='bot'` excluded from all 3 resolved-conversation counts alongside `'inactivity'` / `'system_auto'`. (9) Startup reconciliation in `lifespan`: stale OPEN+bot_only conversations are auto-resolved on server restart. |
+
+### Widget UX & Reliability Bugfixes
+
+| # | Title | Description |
+|---|-------|-------------|
+| BUG1 | **Widget Textarea Height = 0 After Input Reveal** ✅ FIXED | `showInputContainer()` hid the container with `display:none` during bot flows; when re-revealed, `autoResizeInput()` had already run and measured `scrollHeight=0`. Fixed by adding `setTimeout(() => autoResizeInput(), 0)` inside `showInputContainer()` so the resize runs after the browser has laid out the visible element. |
+| BUG2 | **`closeWidget` ReferenceError in `hideRatingOverlay`** ✅ FIXED | `closeWidget` is a closure nested inside `createWidget()` and is not accessible from outer-scope functions. `hideRatingOverlay` called `setTimeout(() => closeWidget(false), 200)` — the `try/catch` wrapping `setTimeout()` does not catch the callback's deferred error. Fixed via module-level `let _closeWidgetFn = null` assigned inside `createWidget()`; all outer-scope call sites use `if (_closeWidgetFn) setTimeout(() => _closeWidgetFn(false), 200)`. |
+| BUG3 | **Widget Reload Returns Wrong Conversation (Missing ORDER BY)** ✅ FIXED | `GET /widget/conversations` queried OPEN conversations with `.first()` and no `ORDER BY`, causing PostgreSQL to return the oldest row (lowest ID = visitor_ended=True stale conv) instead of the newest active one. Fixed with a two-phase query: (1) prefer `visitor_ended=False ORDER BY id DESC`; (2) fall back to any OPEN `ORDER BY id DESC`. Same `ORDER BY id DESC` added to `POST /conversations/new` existing-open check. |
+| BUG4 | **Widget Init Shows Wrong Thread on Reload** ✅ FIXED | When a stale OPEN+visitor_ended conv had a lower ID than a newer resolved conv in history, `init()` always showed the older ended thread. Fixed: when `active.visitor_ended=True`, compare `history[0].id` vs `active.id` and enter thread for whichever is higher (most recent). |
+| BUG5 | **Widget History Disabled Uses Stale localStorage** ✅ FIXED | When `active=null` and history disabled, `init()` fell back to a conv ID from localStorage which could be arbitrarily old. Fixed: prefer `listData.history[0]` (always fresh from API); localStorage is now last resort only if the API also returns no history. |
+| BUG6 | **Widget History Enabled + No Active Shows Start View** ✅ FIXED | When `show_conversation_history=true`, `active=null`, but resolved conversations exist in history, `init()` called `enterStartView()` instead of `enterListView()`. Fixed: if `widgetShowHistory && listData.history.length > 0` → `enterListView(listData)`. |
+| BUG7 | **Conversation List Wrong Ordering (Ended Active Above Newer Resolved)** ✅ FIXED | `renderConvList` always pinned the `active` conversation (even when `visitor_ended=True`) above history items, causing an older ended conv to appear above a newer resolved one. Fixed: when `active.visitor_ended=True`, merge it into a unified `pastConvs` array with history items, sort by `id DESC`, render in correct recency order. Only a real non-ended active conv is now pinned at top with "Active" badge. |
+
+---
+
 ## Earlier Completed Work (pre-May 2026)
 
 Last updated: 2026-01-12
