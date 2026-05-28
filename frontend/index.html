@@ -34,6 +34,14 @@
 
 <body>
   <div id="root"></div>
+  <!-- Capture beforeinstallprompt before React mounts — the event fires early and is missed by useEffect -->
+  <script>
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      window.__pwaInstallPrompt = e;
+      window.dispatchEvent(new Event('pwainstallready'));
+    });
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 
