@@ -6,7 +6,8 @@ from typing import Iterable, Optional
 from sqlalchemy.orm import Session
 
 from app.models.agent_website_assignment import AgentWebsiteAssignment
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.models.website import Website
 from app.models.website_team import WebsiteTeam, WebsiteTeamMember
 
 
@@ -38,9 +39,27 @@ def compute_visibility_scope(db: Session, *, user: User) -> VisibilityScope:
 
     org_id: Optional[int] = user.organization_id
 
-    # OWNER and MANAGER can see all websites within their org.
-    if user.is_admin():  # includes OWNER and MANAGER
+    # OWNER: full oversight — all websites, all teams within their org.
+    if user.role == UserRole.OWNER:
         return VisibilityScope(organization_id=org_id, website_ids=None, team_ids=None)
+
+    # MANAGER: accesses all websites in the org for management features, but
+    # chat visibility is team-scoped (same rule as AGENT).
+    if user.role == UserRole.MANAGER:
+        team_rows = (
+            db.query(WebsiteTeamMember.team_id)
+            .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+            .join(Website, Website.id == WebsiteTeam.website_id)
+            .filter(WebsiteTeamMember.user_id == int(user.id))
+            .filter(Website.organization_id == org_id)
+            .all()
+        )
+        team_ids = _unique_sorted_ints([int(r[0]) for r in team_rows])
+        return VisibilityScope(
+            organization_id=org_id,
+            website_ids=None,
+            team_ids=team_ids if team_ids else None,
+        )
 
     # AGENT: scoped to assigned websites + optional team membership.
     website_rows = (

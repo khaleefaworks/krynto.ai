@@ -1,17 +1,19 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { clearToken } from '@/services/api'
+import { clearToken, apiRequest } from '@/services/api'
 import { isAdmin } from '@/lib/roles'
-import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket, HelpCircle } from 'lucide-react'
+import { LogOut, MessageCircle, Settings, BarChart3, Moon, Sun, Menu, X, Users, UserCheck, Rocket, HelpCircle, Download } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { updateAvailability } from '@/services/auth'
+import { unsubscribeFromPush } from '@/services/push'
 import Logo from '@/components/Logo'
 import OnboardingWizard, { dismissOnboarding } from '@/components/OnboardingWizard'
 import InstallPromptBanner from '@/components/InstallPromptBanner'
+import { usePwaInstall } from '@/hooks/usePwaInstall'
 
 import { API_BASE } from '@/config/endpoints'
 
@@ -31,6 +33,7 @@ export default function DashboardLayout() {
     return saved ? JSON.parse(saved) : false
   })
   const [wizardOpen, setWizardOpen] = useState(false)
+  const { isInstallable, install } = usePwaInstall()
 
   const onboardingScope = {
     orgId: organization?.id ?? user?.organization_id ?? null,
@@ -53,7 +56,10 @@ export default function DashboardLayout() {
     setIsMobileMenuOpen(false)
   }, [location.pathname])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Unsubscribe push & revoke server session before clearing the local token.
+    await unsubscribeFromPush()
+    await apiRequest('/auth/logout', { method: 'POST' }).catch(() => {})
     clearToken()
     setUser(null)
     setToken(null)
@@ -135,18 +141,16 @@ export default function DashboardLayout() {
         <span className="md:hidden lg:block">Settings</span>
       </Link>
 
-      {isAdmin(user) && (
-        <Link
-          to="/dashboard/analytics"
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-        >
-          <BarChart3 className="h-5 w-5" />
-          <span className="md:hidden lg:block">Analytics</span>
-        </Link>
-      )}
+      <Link
+        to="/dashboard/analytics"
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+      >
+        <BarChart3 className="h-5 w-5" />
+        <span className="md:hidden lg:block">Analytics</span>
+      </Link>
 
     </>
   )
@@ -270,6 +274,15 @@ export default function DashboardLayout() {
               <span>Setup Guide</span>
             </button>
           )}
+          {isInstallable && (
+            <button
+              onClick={() => { setIsMobileMenuOpen(false); install() }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all"
+            >
+              <Download className="h-5 w-5" />
+              <span>Install App</span>
+            </button>
+          )}
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
@@ -346,24 +359,22 @@ export default function DashboardLayout() {
               </TooltipContent>
             </Tooltip>
 
-            {isAdmin(user) && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link
-                    to="/dashboard/analytics"
-                    className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                      }`}
-                  >
-                    <BarChart3 className="h-5 w-5" />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Analytics</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/dashboard/analytics"
+                  className={`flex items-center justify-center py-3 rounded-lg transition-all ${isActive('/dashboard/analytics')
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                >
+                  <BarChart3 className="h-5 w-5" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Analytics</p>
+              </TooltipContent>
+            </Tooltip>
           </nav>
 
           {/* Desktop Bottom Actions */}
@@ -410,6 +421,22 @@ export default function DashboardLayout() {
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   <p>Setup Guide</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            {isInstallable && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={install}
+                    className="w-full flex items-center justify-center py-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                  >
+                    <Download className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Install App</p>
                 </TooltipContent>
               </Tooltip>
             )}

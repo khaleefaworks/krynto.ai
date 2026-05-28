@@ -26,7 +26,7 @@ from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.automation import Automation
 from app.core.logging import get_logger
-from app.services.website_resolver import is_website_online
+from app.services.website_resolver import is_team_online, is_website_online
 
 from app.core.message_presenter import serialize_message
 
@@ -34,6 +34,10 @@ logger = get_logger(__name__)
 
 # Prevent scheduling duplicate delayed "waiting" bot messages
 _waiting_bot_message_scheduled: set[int] = set()
+
+# Sentinel for _broadcast_new_chat_to_agents: distinguishes "no hint supplied
+# (read from conversation.team_id)" from an explicit None (unrouted).
+_TEAM_HINT_UNSET = object()
 
 
 def _get_eligible_agent_ids_for_push(
@@ -43,15 +47,18 @@ def _get_eligible_agent_ids_for_push(
 
     Scoping rules (org-aware, multi-tenant):
     - SYSTEM_MANAGER: always eligible (cross-org administrator).
-    - OWNER/MANAGER of the website's org: always eligible.
+    - OWNER: always eligible within their org (fully unrestricted).
+    - MANAGER: team-scoped (same as AGENT per visibility rules).
+      - No team memberships → unrestricted (eligible for all conversations).
+      - Has team memberships → eligible only for their teams' conversations, or
+        for unrouted conversations (team_id=None) which anyone can claim/route.
     - AGENT: only if directly assigned to this website via AgentWebsiteAssignment.
       - If conversation_team_id is set:
-        * Only members of that specific team → eligible.
-        * Agents in a different team or in no team → excluded.
-        * No-team agents are spectators for team-assigned chats (no push, no unread).
-      - If conversation_team_id is None (unassigned conversation):
-        * All assigned agents on the website → eligible (any can claim it).
-    - All candidates must be is_active=True AND is_available=True.
+        * Members of that specific team → eligible.
+        * Agents in a different team or no team → excluded (not their chat).
+      - If conversation_team_id is None (unrouted conversation):
+        * All assigned agents → eligible (any can claim/route it).
+    - All candidates must be is_active=True AND (is_available=True OR push_when_offline=True).
     """
     from app.models.user import UserRole
     from app.models.website import Website
@@ -88,18 +95,58 @@ def _get_eligible_agent_ids_for_push(
     eligible.update(int(u.id) for u in sys_mgrs)
 
     if org_id is not None:
-        # OWNER/MANAGER in same org
-        org_admins = (
+        # OWNER: fully unrestricted within their org.
+        owners = (
             db.query(User)
             .filter(
                 User.is_active == True,   # noqa: E712
                 _push_reachable(),
                 User.organization_id == org_id,
-                User.role.in_([UserRole.OWNER, UserRole.MANAGER]),
+                User.role == UserRole.OWNER,
             )
             .all()
         )
-        eligible.update(int(u.id) for u in org_admins)
+        eligible.update(int(u.id) for u in owners)
+
+        # MANAGER: team-scoped (mirrors compute_visibility_scope / WS delivery logic).
+        # Fetch all managers first, then filter by team membership in one batch query.
+        managers = (
+            db.query(User)
+            .filter(
+                User.is_active == True,   # noqa: E712
+                _push_reachable(),
+                User.organization_id == org_id,
+                User.role == UserRole.MANAGER,
+            )
+            .all()
+        )
+        if managers:
+            mgr_ids = {int(m.id) for m in managers}
+            mgr_team_rows = (
+                db.query(WebsiteTeamMember.user_id, WebsiteTeamMember.team_id)
+                .join(WebsiteTeam, WebsiteTeam.id == WebsiteTeamMember.team_id)
+                .join(Website, Website.id == WebsiteTeam.website_id)
+                .filter(WebsiteTeamMember.user_id.in_(mgr_ids))
+                .filter(Website.organization_id == org_id)
+                .all()
+            )
+            mgr_to_teams: dict[int, set[int]] = {mid: set() for mid in mgr_ids}
+            for row_user_id, row_team_id in mgr_team_rows:
+                mgr_to_teams[int(row_user_id)].add(int(row_team_id))
+
+            for mgr in managers:
+                mgr_teams = mgr_to_teams[int(mgr.id)]
+                if not mgr_teams:
+                    # No team membership: eligible only for unrouted conversations.
+                    # Team-routed conversations skip no-team managers — they have no
+                    # ownership of another team's chat (mirrors AGENT no-team rule).
+                    if conversation_team_id is None:
+                        eligible.add(int(mgr.id))
+                elif conversation_team_id is None:
+                    # Unrouted conversation → notify all managers (anyone can route it).
+                    eligible.add(int(mgr.id))
+                elif int(conversation_team_id) in mgr_teams:
+                    eligible.add(int(mgr.id))
 
     # AGENT: must be directly assigned to this website
     assigned_rows = (
@@ -111,8 +158,9 @@ def _get_eligible_agent_ids_for_push(
 
     if assigned_agent_ids:
         if conversation_team_id is not None:
-            # Conversation is assigned to a specific team.
-            # Only members of that exact team get push — no-team agents are spectators.
+            # Conversation is routed to a specific team.
+            # Only members of that exact team are eligible — no-team agents are
+            # excluded because this conversation is not in their area of responsibility.
             specific_team_member_rows = (
                 db.query(WebsiteTeamMember.user_id)
                 .filter(WebsiteTeamMember.team_id == conversation_team_id)
@@ -194,6 +242,38 @@ def _should_skip_due_to_repeat(
         return True
 
 
+def _resolve_button_at_path(
+    top_buttons: list, path: list[int]
+) -> tuple[dict | None, dict | None]:
+    """Walk *path* through nested sub_prompt.buttons to find the target button.
+
+    Returns ``(button_dict, parent_sub_prompt_dict_or_None)``.
+    *parent_sub_prompt_dict* is the sub_prompt config that owns the target button;
+    it is ``None`` for top-level buttons.
+    """
+    if not path:
+        return None, None
+    current_list: list = top_buttons
+    parent_sub: dict | None = None
+    btn: dict | None = None
+    for depth, step in enumerate(path):
+        if not isinstance(current_list, list) or step < 0 or step >= len(current_list):
+            return None, None
+        item = current_list[step]
+        if not isinstance(item, dict):
+            return None, None
+        btn = item
+        if depth < len(path) - 1:
+            # Descend into sub_prompt for the next step
+            sub = btn.get("sub_prompt")
+            if not sub or not isinstance(sub, dict):
+                return None, None
+            parent_sub = sub
+            current_list = sub.get("buttons") or []
+        # For the last step `parent_sub` stays from the previous iteration
+    return btn, parent_sub
+
+
 async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
     """After delay_seconds, if still unassigned, run the no_agent_assigned_for automation flow."""
     try:
@@ -212,7 +292,16 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
             # website_offline_first_message automation already told the visitor
             # we'll contact them, so "An agent will be with you shortly" would
             # be misleading.
-            if not is_website_online(website_id):
+            # Also honour team-level offline: if the conversation was routed to
+            # a specific team and that team has no available agents, the same
+            # offline path applies even if the website is globally online.
+            _team_id = getattr(conversation, "team_id", None)
+            _effective_online = (
+                is_team_online(int(_team_id))
+                if _team_id is not None
+                else is_website_online(website_id)
+            )
+            if not _effective_online:
                 return
 
             orchestrator = ConversationOrchestrator(db)
@@ -235,6 +324,75 @@ async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, w
         )
     finally:
         _waiting_bot_message_scheduled.discard(conversation_id)
+
+
+async def _close_bot_conversation_after_delay(
+    *,
+    conversation_id: int,
+    website_id: int,
+    delay_seconds: int,
+) -> None:
+    """Wait delay_seconds then silently resolve a bot-only conversation.
+
+    Sends bot_conversation_complete to the visitor (no rating popup, no system
+    message) and conversation_closed to agents so the dashboard list updates.
+    If the process restarts before this fires the startup reconciliation job
+    handles the cleanup.
+    """
+    try:
+        from app.core.database import SessionLocal
+        from app.models.conversation import Conversation, ConversationStatus
+        from app.services.chat_service import ChatService
+
+        await asyncio.sleep(max(1, int(delay_seconds or 3)))
+
+        db = SessionLocal()
+        try:
+            conversation = db.query(Conversation).filter_by(id=conversation_id).first()
+            if not conversation or conversation.status == ConversationStatus.RESOLVED:
+                return
+
+            conversation.status = ConversationStatus.RESOLVED
+            conversation.closed_by = "bot"
+            conversation.resolved_at = datetime.utcnow()
+            db.commit()
+
+            # Notify visitor so widget can clear its state silently.
+            try:
+                await ChatService.send_to_visitor(
+                    conversation_id,
+                    {"type": "bot_conversation_complete", "conversation_id": conversation_id},
+                )
+            except Exception:
+                pass
+
+            # Notify agents so the conversation disappears from the Bot filter.
+            orchestrator = ConversationOrchestrator(db)
+            await orchestrator.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data={
+                    "type": "conversation_closed",
+                    "conversation_id": conversation_id,
+                    "website_id": website_id,
+                    "closed_by": "bot",
+                },
+                include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
+            )
+            logger.info(
+                "bot_conversation_auto_resolved",
+                conversation_id=conversation_id,
+                delay_seconds=delay_seconds,
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(
+            "bot_conversation_auto_resolve_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+            exc_info=True,
+        )
 
 
 class ConversationOrchestrator:
@@ -380,6 +538,10 @@ class ConversationOrchestrator:
             except Exception:
                 pass
 
+        # bot-only conversations generate no agent notifications — skip all paths.
+        if getattr(conversation, "bot_only", False):
+            return None
+
         # If an agent owns the conversation, forward to that agent
         if conversation.assigned_agent_id:
             logger.info("forwarding_visitor_message", 
@@ -416,7 +578,7 @@ class ConversationOrchestrator:
                 
                 subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids={conversation.assigned_agent_id})
                 if subs:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     loop.run_in_executor(
                         None,
                         lambda: send_web_push_to_subscriptions(
@@ -424,6 +586,7 @@ class ConversationOrchestrator:
                             title=f"New message in conversation #{conversation.short_id}",
                             body=(message or "New message")[:120],
                             url=f"/dashboard/chats/{conversation.short_id}",
+                            push_type="new_message",
                         ),
                     )
             except Exception as e:
@@ -481,7 +644,7 @@ class ConversationOrchestrator:
                 )
                 subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
                 if subs:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     loop.run_in_executor(
                         None,
                         lambda: send_web_push_to_subscriptions(
@@ -489,6 +652,7 @@ class ConversationOrchestrator:
                             title="New message",
                             body=(message or "New message")[:120],
                             url=f"/dashboard/chats/{conversation.short_id}",
+                            push_type="new_message",
                         ),
                     )
             except Exception:
@@ -520,7 +684,16 @@ class ConversationOrchestrator:
         # of whether this is the first message — covers the mid-conversation
         # case where the website goes offline after a chat has started.
         # The automation's repeat=once policy prevents duplicate sends.
-        if not is_website_online(website_id) and not conversation.assigned_agent_id:
+        # Team-aware offline check: if the conversation is routed to a specific
+        # team, check whether that team has any available agent.  Fall back to
+        # the website-level check for unrouted conversations.
+        _team_id_vm = getattr(conversation, "team_id", None)
+        _is_offline_vm = (
+            not is_team_online(int(_team_id_vm))
+            if _team_id_vm is not None
+            else not is_website_online(website_id)
+        )
+        if _is_offline_vm and not conversation.assigned_agent_id:
             await self._run_automation_flows(
                 conversation_id=conversation.id,
                 website_id=website_id,
@@ -588,28 +761,36 @@ class ConversationOrchestrator:
 
         return None
     
-    async def _broadcast_new_chat_to_agents(self, conversation: Conversation):
-        """Notify all connected agents about new unassigned chat via global notification socket"""
+    async def _broadcast_new_chat_to_agents(self, conversation: Conversation, _team_id_hint=_TEAM_HINT_UNSET):
+        """Notify all connected agents about new unassigned chat via global notification socket.
+
+        _team_id_hint: when provided, overrides conversation.team_id for push/WS scoping.
+        Used by handle_bot_button_click which knows the intended team before the DB write.
+        """
         # Only broadcast if conversation is still open and unassigned
         if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
             return
-        
+
         # Get website info
         from app.models.website import Website
         website = self.db.query(Website).filter_by(id=conversation.website_id).first()
         website_name = website.name if website else f"Website {conversation.website_id}"
-        
+
         # Get last message
         last_msg = self.db.query(Message).filter_by(
             conversation_id=conversation.id
         ).order_by(Message.created_at.desc()).first()
         last_message = last_msg.content if last_msg else "New conversation"
-        
-        # Broadcast ONLY to global notification sockets (website_id = 0).
-        # This prevents duplicate notifications to agents connected to both sockets.
-        _new_chat_team_id = getattr(conversation, "team_id", None)
+
+        # Use the caller-supplied hint when available (button click path knows the
+        # intended team before the DB write; conversation.team_id is still None then).
+        _new_chat_team_id = (
+            getattr(conversation, "team_id", None)
+            if _team_id_hint is _TEAM_HINT_UNSET
+            else _team_id_hint
+        )
         await self.agent_service.broadcast_to_active_agents(
-            website_id=None,
+            website_id=conversation.website_id,
             message_data={
                 "type": "new_chat",
                 "conversation_id": conversation.id,
@@ -638,14 +819,15 @@ class ConversationOrchestrator:
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 loop.run_in_executor(
                     None,
                     lambda: send_web_push_to_subscriptions(
                         subscriptions=subs,
                         title="New chat",
                         body=(last_message or "New conversation")[:120],
-                        url="/dashboard/chats",
+                        url=f"/dashboard/chats/{conversation.short_id}" if conversation.short_id else "/dashboard/chats",
+                        push_type="new_chat",
                     ),
                 )
         except Exception:
@@ -684,15 +866,25 @@ class ConversationOrchestrator:
         *,
         conversation_id: int,
         automation_id: int,
-        button_index: int,
+        button_index: int = 0,
+        button_path: list[int] | None = None,
         visitor_ws: Any | None = None,
     ) -> dict | None:
         """Handle a visitor clicking on a bot prompt button.
 
-        Looks up the automation, finds the button at the given index, assigns the
-        team (if configured), and sends a confirmation reply to the visitor.
+        ``button_path`` is the authoritative navigation key — a list of indices
+        that walks through nested sub_prompt.buttons trees.  ``button_index`` is
+        the legacy scalar equivalent; when ``button_path`` is absent it is
+        converted to ``[button_index]``.
 
-        Returns a dict with result info, or None on error.
+        Behaviour depends on whether the resolved button is a *branch* (has a
+        ``sub_prompt`` config) or a *leaf* (no sub_prompt):
+
+        * **Branch**: persists the visitor's selection, broadcasts it to agents,
+          sends a new ``bot_prompt`` WS event so the widget renders the next
+          level of buttons.  Does NOT assign a team or fire automation_complete.
+        * **Leaf**: full existing behaviour — team assign, reply, automation_complete,
+          waiting-message timer — plus optional ``suppress_waiting_message``.
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
@@ -716,12 +908,19 @@ class ConversationOrchestrator:
             return None
 
         buttons = prompt_node_cfg.get("buttons") or []
-        if not isinstance(buttons, list) or button_index < 0 or button_index >= len(buttons):
-            logger.warning("bot_button_click_invalid_index", automation_id=automation_id, button_index=button_index)
+        if not isinstance(buttons, list) or not buttons:
+            logger.warning("bot_button_click_no_buttons", automation_id=automation_id)
             return None
 
-        button = buttons[button_index]
-        if not isinstance(button, dict):
+        # Resolve path (prefer button_path; fall back to [button_index])
+        path: list[int] = button_path if button_path is not None else [button_index]
+        button, parent_sub_prompt = _resolve_button_at_path(buttons, path)
+        if button is None:
+            logger.warning(
+                "bot_button_click_invalid_path",
+                automation_id=automation_id,
+                button_path=path,
+            )
             return None
 
         label = button.get("label", "")
@@ -733,6 +932,32 @@ class ConversationOrchestrator:
             "team_id": None,
             "team_name": None,
         }
+
+        # Compute bot_only early so all broadcast guards use it before any DB write.
+        # Checks (in priority order):
+        #  1. conversation already flagged (e.g. branch click already marked it)
+        #  2. button itself has bot_only (leaf OR branch button)
+        #  3. parent sub_prompt has bot_only (leaf inherits from parent branch)
+        #  4. this button IS a branch and its sub_prompt has bot_only (marks entire branch)
+        _sub_prompt_cfg_early = button.get("sub_prompt") if isinstance(button.get("sub_prompt"), dict) else None
+        _is_bot_only = bool(
+            getattr(conversation, "bot_only", False)
+            or button.get("bot_only")
+            or (parent_sub_prompt and parent_sub_prompt.get("bot_only"))
+            or (_sub_prompt_cfg_early and _sub_prompt_cfg_early.get("bot_only"))
+        )
+
+        # Resolve the team this button will assign from config, before any DB write.
+        # Both new_chat broadcast and visitor_message broadcast need the correct team
+        # for scoping — but the actual conversation.team_id write happens later in the
+        # branch/leaf paths below. Without this hint both broadcasts see team_id=None
+        # and send push + sound to every agent on the website.
+        _button_team_id: int | None = None
+        if team_id is not None:
+            try:
+                _button_team_id = int(team_id)
+            except (TypeError, ValueError):
+                pass
 
         # Count prior visitor messages BEFORE persisting so we can detect whether
         # this button click is the visitor's first message (e.g., buttons were shown
@@ -752,15 +977,15 @@ class ConversationOrchestrator:
             content=str(label),
         )
 
-        # If this is the visitor's first message, send new_chat notification
-        # (sound + push) to agents instead of — or in addition to — visitor_message.
-        # This covers the common flow where chatbot buttons are shown on connect
-        # and the button click is the visitor's opening action.
-        if prior_visitor_msg_count == 0:
-            await self._broadcast_new_chat_to_agents(conversation)
+        # new_chat broadcast is deferred to the LEAF section below.
+        # Branch clicks (sub-prompt navigation) must not trigger it — the visitor
+        # hasn't made their actual selection yet, and sub-prompts often route to
+        # teams with no members at that stage.  The leaf path uses a path-depth
+        # formula to fire on the first real leaf action regardless of how many
+        # branch-navigation messages were saved before it.
 
-        # Broadcast the visitor's button click to agents
-        if visitor_selection_msg:
+        # Broadcast the visitor's button click to agents (skipped for bot-only paths).
+        if visitor_selection_msg and not _is_bot_only:
             if conversation.assigned_agent_id:
                 await self.agent_service.send_to_agent(
                     conversation.assigned_agent_id,
@@ -782,7 +1007,130 @@ class ConversationOrchestrator:
                         "message_obj": serialize_message(self.db, visitor_selection_msg),
                     },
                     include_global=True,
+                    conversation_team_id=_button_team_id,
                 )
+
+        # ── Branch button: has a sub_prompt → show next level of buttons ────────
+        sub_prompt_cfg = button.get("sub_prompt")
+        if sub_prompt_cfg and isinstance(sub_prompt_cfg, dict):
+            # Assign team immediately on branch click (so agents see the routing
+            # before the visitor picks a sub-option).
+            branch_team_id = button.get("team_id")
+            if branch_team_id is not None:
+                try:
+                    from app.models.website_team import WebsiteTeam as _WsTeam
+
+                    _t = self.db.query(_WsTeam).filter_by(id=int(branch_team_id)).first()
+                    if _t and int(_t.website_id) == int(conversation.website_id):
+                        conversation.team_id = _t.id
+                        self.db.commit()
+                        result["team_id"] = _t.id
+                        result["team_name"] = _t.name
+                        await self.agent_service.broadcast_to_active_agents(
+                            website_id=int(conversation.website_id),
+                            message_data={
+                                "type": "conversation_team_changed",
+                                "conversation_id": conversation.id,
+                                "website_id": int(conversation.website_id),
+                                "team_id": _t.id,
+                            },
+                            include_global=True,
+                            conversation_team_id=None,
+                        )
+                        logger.info(
+                            "bot_branch_team_assigned",
+                            conversation_id=conversation.id,
+                            team_id=_t.id,
+                            button_label=label,
+                        )
+                except Exception as _e:
+                    logger.error("bot_branch_team_assign_failed", error=str(_e))
+
+            sub_message = str(sub_prompt_cfg.get("message") or "").strip()
+            sub_buttons_raw: list = sub_prompt_cfg.get("buttons") or []
+            sub_allow_input: bool = bool(sub_prompt_cfg.get("allow_input", False))
+            # collect_contact: False on a sub_prompt means its leaf buttons never
+            # show the offline contact form (e.g. informational / Jobs path).
+            sub_collect_contact: bool = bool(sub_prompt_cfg.get("collect_contact", True))
+            if sub_message and sub_buttons_raw:
+                sub_validated = []
+                for b in sub_buttons_raw:
+                    if not (isinstance(b, dict) and (b.get("label") or "").strip()):
+                        continue
+                    _stid = b.get("team_id")
+                    _s_is_leaf = not b.get("sub_prompt")
+                    # Per-button flag overrides the sub_prompt-level default.
+                    _s_collect = bool(b.get("collect_contact", sub_collect_contact))
+                    sub_validated.append({
+                        "label": b["label"].strip(),
+                        "team_id": _stid,
+                        "reply": b.get("reply", ""),
+                        "team_online": is_team_online(int(_stid)) if (_stid and _s_is_leaf and _s_collect) else None,
+                        "collect_contact": _s_collect,
+                        "is_branch": not _s_is_leaf,
+                    })
+                # Persist the sub-prompt as a bot message so agents can see it
+                sub_enriched = json.dumps({
+                    "message": sub_message,
+                    "automation_id": automation_id,
+                    "buttons": sub_validated,
+                })
+                sub_saved = self.conversation_service.add_bot_message(
+                    conversation.id, sub_enriched, event_type="bot_prompt_buttons"
+                )
+                sub_ws_payload = {
+                    "type": "bot_prompt",
+                    "message": sub_message,
+                    "conversation_id": conversation.id,
+                    "automation_id": automation_id,
+                    "buttons": sub_validated,
+                    "allow_input": sub_allow_input,
+                    "button_path_prefix": path,
+                    "message_obj": serialize_message(self.db, sub_saved),
+                }
+                if visitor_ws is not None:
+                    try:
+                        await visitor_ws.send_json(sub_ws_payload)
+                    except Exception:
+                        pass
+                else:
+                    await ChatService.send_to_visitor(conversation.id, sub_ws_payload)
+                logger.info(
+                    "bot_sub_prompt_sent",
+                    conversation_id=conversation.id,
+                    parent_path=path,
+                    sub_buttons=len(sub_validated),
+                )
+                # Mark conversation as bot_only immediately on branch click so it
+                # never appears in All/Mine/Unassigned, even before the leaf fires.
+                if _is_bot_only and not getattr(conversation, "bot_only", False):
+                    try:
+                        conversation.bot_only = True
+                        self.db.commit()
+                    except Exception as _e:
+                        logger.error("bot_only_flag_set_branch_failed", error=str(_e))
+                        try:
+                            self.db.rollback()
+                        except Exception:
+                            pass
+                return {"label": label, "team_id": None, "team_name": None, "sub_prompt": True}
+
+        # ── Leaf button: team assign + reply + automation_complete ────────────
+
+        # _is_bot_only was computed early (above) so all broadcast guards saw it.
+        _resolve_delay = int(
+            button.get("resolve_delay_seconds")
+            or (parent_sub_prompt and parent_sub_prompt.get("resolve_delay_seconds"))
+            or 3
+        )
+
+        # Determine if waiting message should be suppressed for this leaf click.
+        # Priority: bot_only (always suppresses) → button-level flag → parent sub_prompt flag.
+        suppress_waiting = bool(
+            _is_bot_only
+            or button.get("suppress_waiting_message")
+            or (parent_sub_prompt and parent_sub_prompt.get("suppress_waiting_message"))
+        )
 
         # Assign team if configured
         if team_id is not None:
@@ -797,7 +1145,7 @@ class ConversationOrchestrator:
                     result["team_id"] = team.id
                     result["team_name"] = team.name
 
-                    # Broadcast team change to agents
+                    # Broadcast team change to agents (no team filter — all agents need to know).
                     await self.agent_service.broadcast_to_active_agents(
                         website_id=int(conversation.website_id),
                         message_data={
@@ -807,6 +1155,7 @@ class ConversationOrchestrator:
                             "team_id": team.id,
                         },
                         include_global=True,
+                        conversation_team_id=None,
                     )
 
                     logger.info(
@@ -824,6 +1173,24 @@ class ConversationOrchestrator:
                     )
             except Exception as e:
                 logger.error("bot_button_team_assign_failed", error=str(e))
+
+        # Mark conversation as bot-only before any broadcast so all checks see the flag.
+        if _is_bot_only and not getattr(conversation, "bot_only", False):
+            try:
+                conversation.bot_only = True
+                self.db.commit()
+            except Exception as _e:
+                logger.error("bot_only_flag_set_failed", error=str(_e))
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+
+        # Fire new_chat broadcast on the first LEAF action.
+        # Skipped entirely for bot-only conversations — no agent is ever notified.
+        # For regular paths: depth formula fires exactly once on the first leaf click.
+        if not _is_bot_only and prior_visitor_msg_count <= len(path) - 1:
+            await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
 
         # Send reply message to visitor
         if reply and isinstance(reply, str) and reply.strip():
@@ -847,19 +1214,52 @@ class ConversationOrchestrator:
             else:
                 await ChatService.send_to_visitor(conversation.id, reply_payload)
 
-        # IVR complete: tell the widget it can now reveal the free-form input.
+        # IVR complete: the visitor has made their selection and the conversation
+        # continues normally, so always open the text input.
+        # NOTE: allow_input on the bot_prompt node governs typing *during*
+        # button display (concurrent free text).  It must not gate the input
+        # *after* the leaf is clicked — that would permanently lock the visitor
+        # out of the chat.
         try:
             await ChatService.send_to_visitor(
                 conversation.id,
-                {"type": "automation_complete", "conversation_id": conversation.id},
+                {
+                    "type": "automation_complete",
+                    "conversation_id": conversation.id,
+                    # suppress_waiting_message=True signals an informational path
+                    # (e.g. Jobs) where no agent handoff is expected; keep input
+                    # locked so the visitor knows there's nothing to reply to.
+                    "allow_input": not suppress_waiting,
+                },
             )
         except Exception:
             pass
 
-        # If website is offline and no agent assigned, fire the offline prompt
-        # immediately (the repeat=once policy prevents duplicates).  Skip the
-        # waiting-message timer since it would contradict the offline message.
-        if not conversation.assigned_agent_id and not is_website_online(int(conversation.website_id)):
+        # bot-only path: skip all offline/waiting logic and schedule silent auto-resolve.
+        if _is_bot_only:
+            _waiting_bot_message_scheduled.discard(conversation.id)
+            asyncio.create_task(
+                _close_bot_conversation_after_delay(
+                    conversation_id=conversation.id,
+                    website_id=int(conversation.website_id),
+                    delay_seconds=_resolve_delay,
+                )
+            )
+            return result
+
+        # If the website (or the routed team) is offline and no agent is
+        # assigned, fire the offline prompt immediately.  The repeat=once
+        # policy prevents duplicates.  Skip the waiting-message timer since
+        # it would contradict the offline message.
+        # Team-aware: a button that routes to a specific team uses that team's
+        # availability rather than the global website availability.
+        _team_id_btn = getattr(conversation, "team_id", None)
+        _is_offline_btn = (
+            not is_team_online(int(_team_id_btn))
+            if _team_id_btn is not None
+            else not is_website_online(int(conversation.website_id))
+        )
+        if not suppress_waiting and not conversation.assigned_agent_id and _is_offline_btn:
             await self._run_automation_flows(
                 conversation_id=conversation.id,
                 website_id=int(conversation.website_id),
@@ -871,11 +1271,11 @@ class ConversationOrchestrator:
                     "email": conversation.visitor_email or "",
                 },
             )
-        elif not conversation.assigned_agent_id and conversation.id not in _waiting_bot_message_scheduled:
-            # Schedule the waiting bot message if this is the visitor's first action
-            # and no agent is assigned yet. Regular messages schedule it in
-            # handle_visitor_message; button clicks are a separate code path so we
-            # must handle it here too.
+        elif (
+            not suppress_waiting
+            and not conversation.assigned_agent_id
+            and conversation.id not in _waiting_bot_message_scheduled
+        ):
             _waiting_bot_message_scheduled.add(conversation.id)
             automation_service = AutomationService(self.db)
             delay_seconds = automation_service.get_delay_seconds(
@@ -943,6 +1343,8 @@ class ConversationOrchestrator:
             }
         )
 
+        _join_team_id = getattr(conversation, "team_id", None)
+
         # Push the system message to all agents' open threads in real-time.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -953,6 +1355,7 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, saved),
             },
             include_global=True,
+            conversation_team_id=_join_team_id,
         )
 
         # Notify dashboards so lists refresh and unread can clear.
@@ -965,6 +1368,7 @@ class ConversationOrchestrator:
                 "assigned_agent_id": agent_id,
             },
             include_global=True,
+            conversation_team_id=_join_team_id,
         )
 
         # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
@@ -1030,6 +1434,8 @@ class ConversationOrchestrator:
             },
         )
 
+        _takeover_team_id = getattr(conversation, "team_id", None)
+
         # Push the system message to all agents' open threads in real-time.
         await self.agent_service.broadcast_to_active_agents(
             website_id=conversation.website_id,
@@ -1040,6 +1446,7 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, saved),
             },
             include_global=True,
+            conversation_team_id=_takeover_team_id,
         )
 
         await self.agent_service.broadcast_to_active_agents(
@@ -1052,6 +1459,7 @@ class ConversationOrchestrator:
                 "previous_agent_id": previous_agent_id,
             },
             include_global=True,
+            conversation_team_id=_takeover_team_id,
         )
 
         # Fire agent_joined automation trigger (e.g. tag_with_agent_name).
@@ -1141,6 +1549,7 @@ class ConversationOrchestrator:
             },
             include_global=True,
             exclude_agent_id=agent_id,
+            conversation_team_id=getattr(conversation, "team_id", None),
         )
 
         return {
@@ -1191,6 +1600,7 @@ class ConversationOrchestrator:
                 "closed_by": getattr(conversation, "closed_by", None),
             },
             include_global=True,
+            conversation_team_id=getattr(conversation, "team_id", None),
         )
 
         return {"success": True, "closed_by": getattr(conversation, "closed_by", None)}
@@ -1248,15 +1658,20 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
 
         return {"success": True}
 
-    async def visitor_rated(self, *, conversation_id: int, rating_val: int) -> dict:
+    async def visitor_rated(
+        self, *, conversation_id: int, rating_val: int, feedback: str | None = None
+    ) -> dict:
         """Visitor submitted a conversation rating — fires visitor_rated_conversation automation.
 
         Passes {rating_label} into the automation context so Bot message nodes can
         reference it, e.g. "Visitor rated this conversation: {rating_label}".
+        If the visitor also left a text comment, a second bot message is added and
+        broadcast to agents so it appears immediately in the conversation thread.
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
         if not conversation:
@@ -1275,6 +1690,32 @@ class ConversationOrchestrator:
             send_to_visitor=False,
             context={"rating_label": rating_label},
         )
+
+        # If the visitor left a text comment, add it as an agent-only bot message
+        # (same visibility as the rating message — agents see it, visitor does not).
+        feedback_text = (feedback or "").strip()
+        if feedback_text:
+            saved = self.conversation_service.add_system_message(
+                conversation_id,
+                f'Visitor comment: "{feedback_text}"',
+                event_type="rating_feedback",
+                sender="bot",
+                is_agent_only=True,
+            )
+            try:
+                await self.agent_service.broadcast_to_active_agents(
+                    website_id=website_id,
+                    message_data={
+                        "type": "system_message",
+                        "conversation_id": conversation_id,
+                        "website_id": website_id,
+                        "message_obj": serialize_message(self.db, saved),
+                    },
+                    include_global=True,
+                    conversation_team_id=getattr(conversation, "team_id", None),
+                )
+            except Exception:
+                pass
 
         return {"success": True}
 
@@ -1314,6 +1755,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1366,6 +1808,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1404,6 +1847,7 @@ class ConversationOrchestrator:
                     "website_id": website_id,
                 },
                 include_global=True,
+                conversation_team_id=getattr(conversation, "team_id", None),
             )
         except Exception:
             pass
@@ -1466,13 +1910,12 @@ class ConversationOrchestrator:
         if not nodes_list:
             return
 
-        # Enrich ctx with conversation contact fields so any automation node
-        # can reference {phone}, {email}, {visitor_name}, {contact_info} in template strings.
-        # visitor_name falls back to "there" so "Hi {visitor_name}" → "Hi there" gracefully.
-        # {contact_info} is built dynamically: shows whichever contact fields are filled.
+        # Fetch conversation once for ctx enrichment and team_id scoping.
+        _conv_team_id: int | None = None
         try:
             _enrich_conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
             if _enrich_conv:
+                _conv_team_id = getattr(_enrich_conv, "team_id", None)
                 ctx = dict(ctx)
                 ctx.setdefault("phone", _enrich_conv.visitor_phone or "")
                 ctx.setdefault("email", _enrich_conv.visitor_email or "")
@@ -1586,6 +2029,7 @@ class ConversationOrchestrator:
                             "message_obj": serialize_message(self.db, saved),
                         },
                         include_global=True,
+                        conversation_team_id=_conv_team_id,
                     )
 
             elif node_type == "emit_system_event":
@@ -1628,6 +2072,7 @@ class ConversationOrchestrator:
                         message_data={"type": "system_message", "conversation_id": conversation_id,
                                       "website_id": website_id, "message_obj": msg_obj},
                         include_global=True,
+                        conversation_team_id=_conv_team_id,
                     )
 
             elif node_type == "wait":
@@ -1673,11 +2118,26 @@ class ConversationOrchestrator:
                 buttons = cfg.get("buttons") or []
                 automation_id = automation.id
                 if message_text:
-                    validated_buttons = [
-                        {"label": b["label"].strip(), "team_id": b.get("team_id"), "reply": b.get("reply", "")}
-                        for b in buttons
-                        if isinstance(b, dict) and (b.get("label") or "").strip()
-                    ]
+                    validated_buttons = []
+                    for b in buttons:
+                        if not (isinstance(b, dict) and (b.get("label") or "").strip()):
+                            continue
+                        _tid = b.get("team_id")
+                        # Only stamp team_online on leaf buttons (no sub_prompt).
+                        # Branch buttons must never be intercepted — the visitor
+                        # needs to navigate deeper before a team is actually assigned.
+                        _is_leaf = not b.get("sub_prompt")
+                        # collect_contact=False on a button disables the offline
+                        # contact form for that specific button/path.
+                        _collect_contact = bool(b.get("collect_contact", True))
+                        validated_buttons.append({
+                            "label": b["label"].strip(),
+                            "team_id": _tid,
+                            "reply": b.get("reply", ""),
+                            "team_online": is_team_online(int(_tid)) if (_tid and _is_leaf and _collect_contact) else None,
+                            "collect_contact": _collect_contact,
+                            "is_branch": not _is_leaf,
+                        })
                     enriched = json.dumps({"message": message_text, "automation_id": automation_id, "buttons": validated_buttons})
                     saved = self.conversation_service.add_bot_message(
                         conversation_id, enriched, event_type="bot_prompt_buttons"
@@ -1685,7 +2145,10 @@ class ConversationOrchestrator:
                     ws_payload = {
                         "type": "bot_prompt", "message": message_text,
                         "conversation_id": conversation_id, "automation_id": automation_id,
-                        "buttons": validated_buttons, "message_obj": serialize_message(self.db, saved),
+                        "buttons": validated_buttons,
+                        "allow_input": bool(cfg.get("allow_input", False)),
+                        "button_path_prefix": [],
+                        "message_obj": serialize_message(self.db, saved),
                     }
                     if send_to_visitor:
                         await ChatService.send_to_visitor(conversation_id, ws_payload)

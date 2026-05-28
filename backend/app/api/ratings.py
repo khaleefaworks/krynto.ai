@@ -67,15 +67,16 @@ def get_rating(
 
 
 @router.post("/submit")
-def submit_rating_http(
+async def submit_rating_http(
     body: RatingSubmitRequest,
     db: Session = Depends(get_db),
 ):
     """HTTP POST fallback for rating submission (no auth — visitor endpoint).
 
-    The widget primarily submits via WebSocket, but this is a fallback
-    for when the socket has already closed (e.g. agent resolved while
-    visitor had the tab open).
+    Used when the WS is unavailable or connected to a resolved conversation
+    (the resolved-conv WS loop rejects all messages).
+    Mirrors the WS path: saves rating, triggers visitor_rated automation,
+    and broadcasts visitor_rated to agents so the right panel updates live.
     """
     conversation = db.query(Conversation).filter_by(id=body.conversation_id).first()
     if not conversation:
@@ -95,16 +96,40 @@ def submit_rating_http(
         existing.rating = body.rating
         existing.feedback = body.feedback
         db.commit()
-        return {"status": "updated", "id": existing.id}
+        result = {"status": "updated", "id": existing.id}
+    else:
+        rating = ConversationRating(
+            conversation_id=body.conversation_id,
+            rating=body.rating,
+            feedback=body.feedback,
+            session_id=body.session_id,
+        )
+        db.add(rating)
+        db.commit()
+        db.refresh(rating)
+        logger.info("rating_submitted_http", conversation_id=body.conversation_id, rating=body.rating)
+        result = {"status": "created", "id": rating.id}
 
-    rating = ConversationRating(
-        conversation_id=body.conversation_id,
-        rating=body.rating,
-        feedback=body.feedback,
-        session_id=body.session_id,
-    )
-    db.add(rating)
-    db.commit()
-    db.refresh(rating)
-    logger.info("rating_submitted", conversation_id=body.conversation_id, rating=body.rating)
-    return {"status": "created", "id": rating.id}
+    # Trigger visitor_rated automation (adds system message) and broadcast to agents.
+    try:
+        from app.services.conversation_orchestrator import ConversationOrchestrator
+        from app.services.agent_service import AgentService
+        orch = ConversationOrchestrator(db)
+        await orch.visitor_rated(conversation_id=body.conversation_id, rating_val=body.rating, feedback=body.feedback)
+        _labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+        agent_svc = AgentService(db)
+        await agent_svc.broadcast_to_active_agents(
+            website_id=int(conversation.website_id),
+            message_data={
+                "type": "visitor_rated",
+                "conversation_id": body.conversation_id,
+                "rating": body.rating,
+                "rating_label": _labels.get(body.rating, str(body.rating)),
+                "website_id": int(conversation.website_id),
+            },
+            conversation_team_id=getattr(conversation, "team_id", None),
+        )
+    except Exception:
+        pass
+
+    return result

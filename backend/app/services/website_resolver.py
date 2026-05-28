@@ -95,3 +95,103 @@ def is_website_online(website_id: int) -> bool:
         
     finally:
         db.close()
+
+
+def is_team_online(team_id: int) -> bool:
+    """
+    Determine if a specific website team currently has at least one available agent.
+
+    A team is considered online when AT LEAST ONE of the following is true:
+    - A team member is active + available + has a recent heartbeat, OR
+    - A website agent who belongs to NO team on this website is active +
+      available + heartbeat (general agents who handle any conversation).
+
+    Office hours are respected: if the website is outside its configured
+    schedule the function returns False regardless of agent status.
+    """
+    from app.models.website_team import WebsiteTeamMember, WebsiteTeam
+    from app.models.agent_website_assignment import AgentWebsiteAssignment
+    from app.services.agent_resolver import is_agent_eligible
+
+    db = SessionLocal()
+    try:
+        # Resolve team → website (needed for office-hours and no-team agent checks).
+        team = db.query(WebsiteTeam).filter(WebsiteTeam.id == int(team_id)).first()
+        if not team:
+            return False
+
+        website = db.query(Website).filter_by(id=int(team.website_id)).first()
+        if not website:
+            return False
+
+        # Office hours gate — same rule as is_website_online().
+        if not is_within_office_hours(getattr(website, "widget_config", None) or {}):
+            return False
+
+        connected_user_ids = users_repo.recently_heartbeat_user_ids(
+            db,
+            ttl_seconds=AgentService.heartbeat_ttl_seconds,
+        )
+
+        # Check 1: any member of this specific team is eligible.
+        member_rows = (
+            db.query(WebsiteTeamMember.user_id)
+            .filter(WebsiteTeamMember.team_id == int(team_id))
+            .all()
+        )
+        member_ids = [int(r[0]) for r in member_rows]
+
+        if member_ids:
+            members = (
+                db.query(User)
+                .filter(
+                    User.id.in_(member_ids),
+                    User.is_active == True,   # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                )
+                .all()
+            )
+            for member in members:
+                if is_agent_eligible(member, int(member.id) in connected_user_ids):
+                    return True
+
+        # Check 2: any "no-team" agent on this website is eligible.
+        # These are agents assigned to the website but not members of any team
+        # on that website — they act as general agents for all conversations.
+        all_team_member_ids: set[int] = {
+            int(r[0])
+            for r in (
+                db.query(WebsiteTeamMember.user_id)
+                .join(WebsiteTeam, WebsiteTeamMember.team_id == WebsiteTeam.id)
+                .filter(WebsiteTeam.website_id == int(team.website_id))
+                .all()
+            )
+        }
+
+        assignment_rows = (
+            db.query(AgentWebsiteAssignment.agent_id)
+            .filter(AgentWebsiteAssignment.website_id == int(team.website_id))
+            .all()
+        )
+        no_team_ids = [
+            int(r[0]) for r in assignment_rows
+            if int(r[0]) not in all_team_member_ids
+        ]
+
+        if no_team_ids:
+            no_team_agents = (
+                db.query(User)
+                .filter(
+                    User.id.in_(no_team_ids),
+                    User.is_active == True,   # noqa: E712
+                    User.is_available == True,  # noqa: E712
+                )
+                .all()
+            )
+            for agent in no_team_agents:
+                if is_agent_eligible(agent, int(agent.id) in connected_user_ids):
+                    return True
+
+        return False
+    finally:
+        db.close()

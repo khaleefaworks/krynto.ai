@@ -83,6 +83,25 @@ def get_current_user(
                 detail="Token invalidated due to password change",
             )
 
+    # Reject explicitly logged-out sessions (jti revocation).
+    # Tokens without a jti claim were issued before this feature — skip the check
+    # for backward compatibility; they still expire via the exp claim.
+    token_jti = payload.get("jti")
+    if token_jti:
+        from app.repos import login_sessions as login_sessions_repo
+        session_row = login_sessions_repo.get_by_jti(db, token_jti)
+        if session_row is not None and not session_row.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+            )
+        # Touch last_used_at asynchronously — best-effort, non-blocking.
+        if session_row is not None and session_row.is_active:
+            try:
+                login_sessions_repo.touch_last_used(db, token_jti)
+            except Exception:
+                pass
+
     # Reject tokens for users whose organisation has been deactivated.
     if user.organization_id is not None:
         from app.models.organization import Organization

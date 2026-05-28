@@ -67,3 +67,11 @@ Follow these steps to enable push notifications:
 Your notification preferences are securely stored in the cloud and synchronized across all your devices. When you log in on a new browser or machine, your custom sound profiles and alert toggles are automatically applied.
 
 > **Test Your Setup**: Use the "Test Notification" button in the settings panel to ensure your browser and operating system are correctly delivering alerts.
+
+---
+
+## Installing as a PWA
+
+For the best notification experience — especially on mobile — install ChatAssist as a Progressive Web App (PWA). This gives the app its own window and enables push alerts even when no browser tab is open.
+
+See the [Install as PWA](../getting-started/install-pwa) guide for step-by-step instructions for all browsers and platforms.

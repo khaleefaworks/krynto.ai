@@ -170,8 +170,239 @@ function defaultConfig(type: string): Record<string, any> {
   if (type === 'show_rating_popup') return { event_type: 'rating_popup_shown' }
   if (type === 'tag_conversation') return { tag: '' }
   if (type === 'tag_with_agent_name') return {}
-  if (type === 'bot_prompt_buttons') return { message: '', allow_input: false, buttons: [] }
+  if (type === 'bot_prompt_buttons') return { message: '', allow_input: false, suppress_waiting_message: false, buttons: [] }
   return {}
+}
+
+// ─── Recursive button editor ─────────────────────────────────────────────────
+
+const MAX_BTN_DEPTH = 4
+const DEPTH_BORDER: Record<number, string> = {
+  0: 'border-indigo-400',
+  1: 'border-purple-400',
+  2: 'border-blue-400',
+  3: 'border-teal-400',
+}
+
+interface ButtonEditorProps {
+  buttons: any[]
+  onChange: (buttons: any[]) => void
+  websiteTeams: { id: number; name: string }[]
+  depth: number
+}
+
+function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorProps) {
+  const canNest = depth < MAX_BTN_DEPTH
+  const borderCls = DEPTH_BORDER[Math.min(depth, 3)]
+
+  function updateBtn(i: number, patch: Record<string, any>) {
+    const next = [...buttons]
+    next[i] = { ...next[i], ...patch }
+    onChange(next)
+  }
+
+  function updateSubPrompt(i: number, patch: Record<string, any>) {
+    const next = [...buttons]
+    next[i] = { ...next[i], sub_prompt: { ...next[i].sub_prompt, ...patch } }
+    onChange(next)
+  }
+
+  return (
+    <>
+      {buttons.map((btn: any, i: number) => (
+        <div
+          key={i}
+          className={`border rounded p-2 mb-2 space-y-1.5 ${
+            depth === 0
+              ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
+              : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+          }`}
+        >
+          {/* Label + delete */}
+          <div className="flex items-center gap-1">
+            <Input
+              value={btn.label || ''}
+              onChange={(e) => updateBtn(i, { label: e.target.value })}
+              placeholder="Button label"
+              className="h-7 text-xs flex-1"
+            />
+            <button
+              onClick={() => onChange(buttons.filter((_: any, j: number) => j !== i))}
+              className="text-red-400 hover:text-red-600 flex-shrink-0"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Sub-prompt toggle — only available below max depth */}
+          {canNest && (
+            <div className="flex items-center justify-between pt-0.5">
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                Sub-prompt (multi-step)
+              </span>
+              <Switch
+                checked={!!btn.sub_prompt}
+                onCheckedChange={(v) =>
+                  updateBtn(i, {
+                    sub_prompt: v
+                      ? { message: '', allow_input: false, suppress_waiting_message: false, collect_contact: true, buttons: [] }
+                      : null,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          {/* Team assignment — applies to both leaf and branch buttons.
+              For branch buttons the team is assigned immediately on click so agents
+              see the routing before the visitor picks a sub-option. */}
+          {websiteTeams.length > 0 && (
+            <select
+              value={btn.team_id ?? ''}
+              onChange={(e) =>
+                updateBtn(i, { team_id: e.target.value === '' ? null : Number(e.target.value) })
+              }
+              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+            >
+              <option value="">— No team assigned —</option>
+              {websiteTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* ── Leaf button config ── */}
+          {!btn.sub_prompt && (
+            <>
+              <Input
+                value={btn.reply || ''}
+                onChange={(e) => updateBtn(i, { reply: e.target.value })}
+                placeholder="Bot reply after click (optional)"
+                className="h-7 text-xs"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                  Bot-only (auto-resolve, no agent)
+                </span>
+                <Switch
+                  checked={!!btn.bot_only}
+                  onCheckedChange={(v) => updateBtn(i, { bot_only: v, collect_contact: v ? false : btn.collect_contact })}
+                />
+              </div>
+              {btn.bot_only && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-1">
+                    Auto-resolve delay (seconds)
+                  </span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={btn.resolve_delay_seconds ?? 3}
+                    onChange={(e) => updateBtn(i, { resolve_delay_seconds: Math.max(1, Math.min(30, Number(e.target.value) || 3)) })}
+                    className="h-7 text-xs w-16 text-center"
+                  />
+                </div>
+              )}
+              {!btn.bot_only && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Collect contact if offline
+                  </span>
+                  <Switch
+                    checked={btn.collect_contact !== false}
+                    onCheckedChange={(v) => updateBtn(i, { collect_contact: v })}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Branch (sub-prompt) config ── */}
+          {btn.sub_prompt && (
+            <div className={`ml-1 pl-2 border-l-2 ${borderCls} space-y-1.5 pt-1`}>
+              <Textarea
+                value={btn.sub_prompt.message || ''}
+                onChange={(e) => updateSubPrompt(i, { message: e.target.value })}
+                placeholder="Sub-prompt message…"
+                rows={2}
+                className="text-xs"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                  Bot-only branch (no agent, auto-resolve)
+                </span>
+                <Switch
+                  checked={!!btn.sub_prompt.bot_only}
+                  onCheckedChange={(v) => updateSubPrompt(i, {
+                    bot_only: v,
+                    collect_contact: v ? false : btn.sub_prompt.collect_contact,
+                    suppress_waiting_message: v ? true : btn.sub_prompt.suppress_waiting_message,
+                  })}
+                />
+              </div>
+              {!btn.sub_prompt.bot_only && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Allow free-text input
+                    </span>
+                    <Switch
+                      checked={!!btn.sub_prompt.allow_input}
+                      onCheckedChange={(v) => updateSubPrompt(i, { allow_input: v })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Suppress waiting message
+                    </span>
+                    <Switch
+                      checked={!!btn.sub_prompt.suppress_waiting_message}
+                      onCheckedChange={(v) => updateSubPrompt(i, { suppress_waiting_message: v })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Collect contact if offline
+                    </span>
+                    <Switch
+                      checked={btn.sub_prompt.collect_contact !== false}
+                      onCheckedChange={(v) => updateSubPrompt(i, { collect_contact: v })}
+                    />
+                  </div>
+                </>
+              )}
+              {/* Recursive sub-buttons */}
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                  Sub-buttons {depth < MAX_BTN_DEPTH - 1 ? '' : '(max depth)'}
+                </span>
+                <button
+                  onClick={() =>
+                    updateSubPrompt(i, {
+                      buttons: [
+                        ...(btn.sub_prompt.buttons || []),
+                        { label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true },
+                      ],
+                    })
+                  }
+                  className="text-indigo-500 hover:text-indigo-700 text-[11px] flex items-center gap-0.5"
+                >
+                  <Plus className="w-3 h-3" /> Add
+                </button>
+              </div>
+              <ButtonEditor
+                buttons={btn.sub_prompt.buttons || []}
+                onChange={(subBtns) => updateSubPrompt(i, { buttons: subBtns })}
+                websiteTeams={websiteTeams}
+                depth={depth + 1}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  )
 }
 
 // ─── Node config panel ────────────────────────────────────────────────────
@@ -390,60 +621,18 @@ function NodeConfigPanel({
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Buttons</label>
               <button
-                onClick={() => set({ buttons: [...(cfg.buttons || []), { label: '', reply: '', team_id: null }] })}
+                onClick={() => set({ buttons: [...(cfg.buttons || []), { label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true }] })}
                 className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" /> Add
               </button>
             </div>
-            {(cfg.buttons || []).map((btn: any, i: number) => (
-              <div key={i} className="border border-gray-200 dark:border-gray-700 rounded p-2 mb-2 space-y-1.5 bg-gray-50 dark:bg-gray-900">
-                <div className="flex items-center gap-1">
-                  <Input
-                    value={btn.label}
-                    onChange={(e) => {
-                      const next = [...cfg.buttons]
-                      next[i] = { ...btn, label: e.target.value }
-                      set({ buttons: next })
-                    }}
-                    placeholder="Button label"
-                    className="h-7 text-xs flex-1"
-                  />
-                  <button
-                    onClick={() => set({ buttons: cfg.buttons.filter((_: any, j: number) => j !== i) })}
-                    className="text-red-400 hover:text-red-600 flex-shrink-0"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-                <Input
-                  value={btn.reply || ''}
-                  onChange={(e) => {
-                    const next = [...cfg.buttons]
-                    next[i] = { ...btn, reply: e.target.value }
-                    set({ buttons: next })
-                  }}
-                  placeholder="Bot reply after click (optional)"
-                  className="h-7 text-xs"
-                />
-                {websiteTeams.length > 0 && (
-                  <select
-                    value={btn.team_id ?? ''}
-                    onChange={(e) => {
-                      const next = [...cfg.buttons]
-                      next[i] = { ...btn, team_id: e.target.value === '' ? null : Number(e.target.value) }
-                      set({ buttons: next })
-                    }}
-                    className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
-                  >
-                    <option value="">— No team assigned —</option>
-                    {websiteTeams.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            ))}
+            <ButtonEditor
+              buttons={cfg.buttons || []}
+              onChange={(buttons) => set({ buttons })}
+              websiteTeams={websiteTeams}
+              depth={0}
+            />
           </div>
         </>
       )}
@@ -737,7 +926,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
             onPaneClick={() => setSelectedNodeId(null)}
             colorMode={colorMode}
             fitView
-            fitViewOptions={{ padding: 0.3 }}
+            fitViewOptions={{ padding: 0.3, maxZoom: 1.3 }}
             deleteKeyCode={null}
           >
             <Background gap={16} size={1} className="!bg-gray-50 dark:!bg-gray-950" />
@@ -746,7 +935,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
         </div>
 
         {/* Config panel */}
-        <div className="w-72 shrink-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 overflow-y-auto">
+        <div className="w-96 shrink-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 overflow-y-auto">
           {selectedNode ? (
             <NodeConfigPanel
               node={selectedNode}

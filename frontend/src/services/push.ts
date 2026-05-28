@@ -48,54 +48,83 @@ export async function requestPermissionAndSubscribe(): Promise<NotificationPermi
     return perm
 }
 
+// Last subscription error, surfaced in the Notifications settings UI.
+let _lastSubscriptionError: string | null = null
+
+export function getLastPushSubscriptionError(): string | null {
+    return _lastSubscriptionError
+}
+
 export async function ensurePushSubscription(): Promise<void> {
-    if (!('serviceWorker' in navigator)) return
-    if (!('PushManager' in window)) return
-    if (!window.isSecureContext) return
+    _lastSubscriptionError = null
+
+    if (!('serviceWorker' in navigator)) {
+        _lastSubscriptionError = 'Service workers are not supported in this browser.'
+        return
+    }
+    if (!('PushManager' in window)) {
+        _lastSubscriptionError = 'Web Push is not supported in this browser.'
+        return
+    }
+    if (!window.isSecureContext) {
+        _lastSubscriptionError = 'Push notifications require a secure context (HTTPS or localhost).'
+        return
+    }
     if (Notification.permission !== 'granted') return
 
-    const registration = await navigator.serviceWorker.ready
-
-    const publicKey = await getVapidPublicKey()
-    if (!publicKey) return
-
-    // If the backend VAPID key changes, any existing subscription was created with the
-    // old applicationServerKey. In that case we must unsubscribe + resubscribe.
-    let cachedKey: string | null = null
     try {
-        cachedKey = localStorage.getItem(_VAPID_PUBLIC_KEY_CACHE)
-    } catch {
-        cachedKey = null
-    }
+        const registration = await navigator.serviceWorker.ready
 
-    const existing = await registration.pushManager.getSubscription()
-    if (existing && cachedKey && cachedKey !== publicKey) {
-        try {
-            await existing.unsubscribe()
-        } catch {
-            // best-effort
+        const publicKey = await getVapidPublicKey()
+        if (!publicKey) {
+            _lastSubscriptionError = 'Push configuration is missing on the server (VAPID key not set).'
+            return
         }
-    } else if (existing) {
-        await registerSubscription(existing)
+
+        // If the backend VAPID key changes, any existing subscription was created with the
+        // old applicationServerKey. In that case we must unsubscribe + resubscribe.
+        let cachedKey: string | null = null
+        try {
+            cachedKey = localStorage.getItem(_VAPID_PUBLIC_KEY_CACHE)
+        } catch {
+            cachedKey = null
+        }
+
+        const existing = await registration.pushManager.getSubscription()
+        if (existing && cachedKey && cachedKey !== publicKey) {
+            try {
+                await existing.unsubscribe()
+            } catch {
+                // best-effort
+            }
+        } else if (existing) {
+            await registerSubscription(existing)
+            try {
+                localStorage.setItem(_VAPID_PUBLIC_KEY_CACHE, publicKey)
+            } catch {
+                // ignore
+            }
+            return
+        }
+
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,
+        })
+
+        await registerSubscription(subscription)
+
         try {
             localStorage.setItem(_VAPID_PUBLIC_KEY_CACHE, publicKey)
         } catch {
             // ignore
         }
-        return
-    }
-
-    const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,
-    })
-
-    await registerSubscription(subscription)
-
-    try {
-        localStorage.setItem(_VAPID_PUBLIC_KEY_CACHE, publicKey)
-    } catch {
-        // ignore
+    } catch (err: any) {
+        // Surface the error so the settings UI can show actionable guidance.
+        const msg = String(err?.message || err || 'Unknown error')
+        _lastSubscriptionError = msg
+        // Re-throw so callers like App.tsx that use .catch() still see it.
+        throw err
     }
 }
 
@@ -112,4 +141,36 @@ export async function registerSubscription(subscription: PushSubscription): Prom
         method: 'POST',
         body: JSON.stringify({ endpoint, keys: { p256dh, auth } }),
     })
+}
+
+/**
+ * Unsubscribe from push notifications.
+ * Calls the server to remove the subscription row, then unsubscribes the browser channel.
+ * Must be called BEFORE the auth token is cleared (server needs it to authenticate).
+ */
+export async function unsubscribeFromPush(): Promise<void> {
+    if (!('serviceWorker' in navigator)) return
+    try {
+        const registration = await navigator.serviceWorker.ready
+        const subscription = await registration.pushManager.getSubscription()
+        if (!subscription) return
+
+        const json = subscription.toJSON() as any
+        const endpoint = String(json?.endpoint || '').trim()
+        const p256dh = String(json?.keys?.p256dh || '').trim()
+        const auth = String(json?.keys?.auth || '').trim()
+
+        // Tell server to delete the row first — do this while auth token is still valid.
+        if (endpoint && p256dh && auth) {
+            await apiRequest('/push/unsubscribe', {
+                method: 'POST',
+                body: JSON.stringify({ endpoint, keys: { p256dh, auth } }),
+            }).catch(() => {})  // best-effort
+        }
+
+        // Remove the browser-level push channel.
+        await subscription.unsubscribe().catch(() => {})
+    } catch {
+        // best-effort — never let this block logout
+    }
 }

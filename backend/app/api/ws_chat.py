@@ -44,7 +44,23 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
 
 
 VISITOR_LEFT_DELAY_SECONDS = 15
+_PRESENCE_HEARTBEAT_INTERVAL = 60  # seconds between Redis TTL renewals
 _visitor_left_scheduled: set[int] = set()
+# Keyed by "website_id:session_id" — prevents duplicate welcome tasks for the
+# same session (e.g. rapid reconnect / double-connect within the delay window).
+_welcome_pending: set[str] = set()
+
+
+async def _presence_heartbeat(*, website_id: int, session_id: str) -> None:
+    """Periodically renew the Redis TTL for an online session so it doesn't auto-expire."""
+    try:
+        while True:
+            await asyncio.sleep(_PRESENCE_HEARTBEAT_INTERVAL)
+            ChatService.refresh_session_online_ttl(int(website_id), str(session_id))
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
 
 
 async def _send_delayed_session_presence_event(
@@ -132,6 +148,8 @@ async def _send_delayed_welcome(
     welcome — visitor hasn't sent a message yet). The graph executor handles
     cooldown, message content, and delivery.
     """
+    _key = f"{website_id}:{session_id}"
+    _welcome_pending.add(_key)
     try:
         await asyncio.sleep(delay_seconds)
 
@@ -193,6 +211,8 @@ async def _send_delayed_welcome(
             session_id=session_id,
             error=str(e),
         )
+    finally:
+        _welcome_pending.discard(_key)
 
 
 def _ws_close_reason(reason: str | None) -> str:
@@ -285,8 +305,12 @@ async def chat_ws(
             return
 
         # Track session-level presence (used by Customers -> Visitors).
+        _heartbeat_task_1 = None
         try:
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+            _heartbeat_task_1 = asyncio.create_task(
+                _presence_heartbeat(website_id=int(website_id), session_id=str(session_id))
+            )
         except Exception:
             pass
 
@@ -434,15 +458,17 @@ async def chat_ws(
                     conversation.visit_count = int(conversation.visit_count or 0) + 1
                 db.commit()
 
-            # Always schedule the welcome — _send_delayed_welcome will create
+            # Schedule the welcome — _send_delayed_welcome will create
             # the conversation if the visitor hasn't sent a message yet.
-            asyncio.create_task(
-                _send_delayed_welcome(
-                    website_id=website_id,
-                    session_id=session_id,
-                    delay_seconds=3.0,
+            # Skip if a task is already pending for this session (rapid reconnect guard).
+            if f"{website_id}:{session_id}" not in _welcome_pending:
+                asyncio.create_task(
+                    _send_delayed_welcome(
+                        website_id=website_id,
+                        session_id=session_id,
+                        delay_seconds=3.0,
+                    )
                 )
-            )
         except Exception as e:
             try:
                 db.rollback()
@@ -629,6 +655,7 @@ async def chat_ws(
                                 website_id=website_id,
                                 message_data=event,
                                 include_global=False,
+                                conversation_team_id=getattr(conversation, "team_id", None),
                             )
                     except Exception:
                         pass
@@ -638,10 +665,17 @@ async def chat_ws(
             # Bot button click: visitor tapped a button from a bot_prompt_buttons message.
             if message_type == "bot_button_click":
                 btn_automation_id = payload.get("automation_id")
-                btn_button_index = payload.get("button_index")
+                btn_button_path = payload.get("button_path")  # preferred: list[int]
+                btn_button_index = payload.get("button_index")  # legacy scalar
 
-                if btn_automation_id is None or btn_button_index is None:
+                if btn_automation_id is None:
                     continue
+                # Require at least one of path or index
+                if btn_button_path is None and btn_button_index is None:
+                    continue
+                # Normalise to a list
+                if btn_button_path is None:
+                    btn_button_path = [int(btn_button_index)]
 
                 # Resolve conversation
                 btn_conversation_id: int | None = registered_conversation_id
@@ -664,7 +698,7 @@ async def chat_ws(
                     await orchestrator.handle_bot_button_click(
                         conversation_id=btn_conversation_id,
                         automation_id=int(btn_automation_id),
-                        button_index=int(btn_button_index),
+                        button_path=[int(x) for x in btn_button_path],
                         visitor_ws=websocket,
                     )
                 except Exception as e:
@@ -701,6 +735,7 @@ async def chat_ws(
             if message_type == "submit_rating":
                 rating_val = payload.get("rating")
                 conv_id = payload.get("conversation_id")
+                feedback_val = payload.get("feedback") or None
                 if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
                     try:
                         from app.models.conversation_rating import ConversationRating
@@ -721,11 +756,14 @@ async def chat_ws(
                             )
                             if existing:
                                 existing.rating = rating_val
+                                if feedback_val is not None:
+                                    existing.feedback = feedback_val
                                 db.commit()
                             else:
                                 new_rating = ConversationRating(
                                     conversation_id=conv_id,
                                     rating=rating_val,
+                                    feedback=feedback_val,
                                     session_id=session_id,
                                 )
                                 db.add(new_rating)
@@ -739,22 +777,24 @@ async def chat_ws(
                                 await orchestrator.visitor_rated(
                                     conversation_id=conv_id,
                                     rating_val=rating_val,
+                                    feedback=feedback_val,
                                 )
                             except Exception:
                                 pass
                             # Broadcast to agents so the right panel updates immediately.
                             try:
                                 _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
+                                _rating_conv = conversations_repo.get_conversation_by_id(db, conv_id)
                                 await agent_service.broadcast_to_active_agents(
                                     website_id=website_id,
-                                    conversation_id=conv_id,
-                                    message={
+                                    message_data={
                                         "type": "visitor_rated",
                                         "conversation_id": conv_id,
                                         "rating": rating_val,
                                         "rating_label": _rating_labels.get(rating_val, str(rating_val)),
                                         "website_id": website_id,
                                     },
+                                    conversation_team_id=getattr(_rating_conv, "team_id", None),
                                 )
                             except Exception:
                                 pass
@@ -780,13 +820,14 @@ async def chat_ws(
                                 db, _wo_conversation.id, "bot_prompt_buttons"
                             )
                         if not last_welcome:
-                            asyncio.create_task(
-                                _send_delayed_welcome(
-                                    website_id=website_id,
-                                    session_id=session_id,
-                                    delay_seconds=0.5,
+                            if f"{website_id}:{session_id}" not in _welcome_pending:
+                                asyncio.create_task(
+                                    _send_delayed_welcome(
+                                        website_id=website_id,
+                                        session_id=session_id,
+                                        delay_seconds=0.5,
+                                    )
                                 )
-                            )
                 except Exception as _e:
                     logger.warning("widget_opened_handler_failed", error=str(_e))
                 continue
@@ -825,20 +866,22 @@ async def chat_ws(
                     "is_typing": is_typing,
                 }
 
+                _typing_team_id = getattr(conversation, "team_id", None)
                 if conversation and conversation.assigned_agent_id:
                     await agent_service.send_to_agent(conversation.assigned_agent_id, event)
-                    # Also broadcast to spectating agents (exclude assigned to avoid double-delivery).
                     await agent_service.broadcast_to_active_agents(
                         website_id=website_id,
                         message_data=event,
                         include_global=True,
                         exclude_agent_id=conversation.assigned_agent_id,
+                        conversation_team_id=_typing_team_id,
                     )
                 else:
                     await agent_service.broadcast_to_active_agents(
                         website_id=website_id,
                         message_data=event,
                         include_global=True,
+                        conversation_team_id=_typing_team_id,
                     )
 
                 continue
@@ -988,6 +1031,12 @@ async def chat_ws(
             pass
 
         try:
+            if _heartbeat_task_1 is not None:
+                _heartbeat_task_1.cancel()
+        except Exception:
+            pass
+
+        try:
             ChatService.unregister_session_socket(websocket)
         except Exception:
             pass
@@ -1094,8 +1143,12 @@ async def chat_ws_with_conversation(
         # Always register session-level presence so resolved-conv visitors appear in the Visitors page.
         is_open = conv.status not in (ConversationStatus.RESOLVED,)
         _was_active_cid = False
+        _heartbeat_task_2 = None
         try:
             ChatService.register_session(website_id=int(website_id), session_id=str(session_id), websocket=websocket)
+            _heartbeat_task_2 = asyncio.create_task(
+                _presence_heartbeat(website_id=int(website_id), session_id=str(session_id))
+            )
         except Exception:
             pass
         if is_open and str(conv.session_id) == str(session_id):
@@ -1199,18 +1252,22 @@ async def chat_ws_with_conversation(
                         "session_id": session_id,
                         "is_typing": is_typing,
                     }
+                    _conv_team_id = getattr(conv, "team_id", None)
                     if conv.assigned_agent_id:
                         await agent_service.send_to_agent(conv.assigned_agent_id, event)
-                        # Also broadcast to spectating agents.
                         await agent_service.broadcast_to_active_agents(
                             website_id=website_id,
                             message_data=event,
                             include_global=True,
                             exclude_agent_id=conv.assigned_agent_id,
+                            conversation_team_id=_conv_team_id,
                         )
                     else:
                         await agent_service.broadcast_to_active_agents(
-                            website_id=website_id, message_data=event, include_global=True
+                            website_id=website_id,
+                            message_data=event,
+                            include_global=True,
+                            conversation_team_id=_conv_team_id,
                         )
                     continue
 
@@ -1246,13 +1303,16 @@ async def chat_ws_with_conversation(
 
                 if message_type == "bot_button_click":
                     btn_automation_id = payload.get("automation_id")
-                    btn_button_index = payload.get("button_index")
-                    if btn_automation_id is not None and btn_button_index is not None:
+                    btn_button_path = payload.get("button_path")  # preferred: list[int]
+                    btn_button_index = payload.get("button_index")  # legacy scalar
+                    if btn_automation_id is not None and (btn_button_path is not None or btn_button_index is not None):
+                        if btn_button_path is None:
+                            btn_button_path = [int(btn_button_index)]
                         try:
                             await orchestrator.handle_bot_button_click(
                                 conversation_id=int(conv.id),
                                 automation_id=int(btn_automation_id),
-                                button_index=int(btn_button_index),
+                                button_path=[int(x) for x in btn_button_path],
                                 visitor_ws=websocket,
                             )
                         except Exception as e:
@@ -1289,6 +1349,7 @@ async def chat_ws_with_conversation(
 
                 if message_type == "submit_rating":
                     rating_val = payload.get("rating")
+                    feedback_val = payload.get("feedback") or None
                     if rating_val is not None and isinstance(rating_val, int) and -1 <= rating_val <= 1:
                         try:
                             from app.models.conversation_rating import ConversationRating
@@ -1300,11 +1361,14 @@ async def chat_ws_with_conversation(
                             )
                             if existing:
                                 existing.rating = rating_val
+                                if feedback_val is not None:
+                                    existing.feedback = feedback_val
                                 db.commit()
                             else:
                                 new_rating = ConversationRating(
                                     conversation_id=conv.id,
                                     rating=rating_val,
+                                    feedback=feedback_val,
                                     session_id=session_id,
                                 )
                                 db.add(new_rating)
@@ -1313,6 +1377,7 @@ async def chat_ws_with_conversation(
                                 await orchestrator.visitor_rated(
                                     conversation_id=conv.id,
                                     rating_val=rating_val,
+                                    feedback=feedback_val,
                                 )
                             except Exception:
                                 pass
@@ -1321,14 +1386,14 @@ async def chat_ws_with_conversation(
                                 _rating_labels = {1: "\U0001f60a Good", 0: "\U0001f610 Neutral", -1: "\U0001f61e Bad"}
                                 await agent_service.broadcast_to_active_agents(
                                     website_id=website_id,
-                                    conversation_id=conv.id,
-                                    message={
+                                    message_data={
                                         "type": "visitor_rated",
                                         "conversation_id": conv.id,
                                         "rating": rating_val,
                                         "rating_label": _rating_labels.get(rating_val, str(rating_val)),
                                         "website_id": website_id,
                                     },
+                                    conversation_team_id=getattr(conv, "team_id", None),
                                 )
                             except Exception:
                                 pass
@@ -1389,6 +1454,11 @@ async def chat_ws_with_conversation(
             pass
         try:
             ChatService.unregister_visitor_socket(websocket)
+        except Exception:
+            pass
+        try:
+            if _heartbeat_task_2 is not None:
+                _heartbeat_task_2.cancel()
         except Exception:
             pass
         try:

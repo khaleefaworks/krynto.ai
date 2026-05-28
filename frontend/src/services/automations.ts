@@ -35,10 +35,22 @@ export interface NodePosition {
   y: number
 }
 
+export interface BotPromptSubPrompt {
+  message: string
+  allow_input?: boolean
+  /** When true, suppress the "agent will be with you" waiting message after a leaf click. */
+  suppress_waiting_message?: boolean
+  /** When false, leaf sub-buttons never show the offline contact form (e.g. informational/Jobs path). Default true. */
+  collect_contact?: boolean
+  buttons: BotPromptButton[]
+}
+
 export interface BotPromptButton {
   label: string
   team_id?: number | null
   reply?: string
+  /** If set, clicking this button shows a nested sub-prompt instead of completing the flow. */
+  sub_prompt?: BotPromptSubPrompt | null
 }
 
 export interface AutomationNode {

@@ -655,6 +655,10 @@
   flex-direction: column;
   gap: 12px;
   background: #f0f4f8;
+  /* Prevent scroll from bubbling to the parent page when the message list
+     reaches its top or bottom boundary (desktop wheel + mobile overscroll). */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 #chatassist-messages::-webkit-scrollbar {
@@ -1242,6 +1246,22 @@
 .chatassist-end-overlay-cancel {
   flex: 1;
   padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  background: #3b82f6;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.chatassist-end-overlay-cancel:hover {
+  opacity: 0.9;
+}
+
+.chatassist-end-overlay-confirm {
+  flex: 1;
+  padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   background: #fff;
@@ -1251,24 +1271,8 @@
   transition: background 0.15s;
 }
 
-.chatassist-end-overlay-cancel:hover {
-  background: #f9fafb;
-}
-
-.chatassist-end-overlay-confirm {
-  flex: 1;
-  padding: 10px 12px;
-  border: none;
-  border-radius: 12px;
-  background: #ef4444;
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
 .chatassist-end-overlay-confirm:hover {
-  opacity: 0.9;
+  background: #f9fafb;
 }
 
 /* --- Footer --- */
@@ -1648,20 +1652,21 @@
 
 .chatassist-rating-btn {
   background: none;
-  border: 3px solid transparent;
+  border: none;
   border-radius: 50%;
   cursor: pointer;
-  padding: 8px;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  padding: 6px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .chatassist-rating-btn:hover {
-  transform: scale(1.15);
+  transform: scale(1.1);
 }
 
 .chatassist-rating-btn.selected {
-  border-color: #3b82f6;
-  transform: scale(1.15);
+  box-shadow: 0 0 0 2px #3b82f6;
+  transform: scale(1.1);
+  height: 60px;
 }
 
 .chatassist-rating-emoji {
@@ -1675,6 +1680,46 @@
   font-size: 14px;
   font-weight: 600;
   color: #10b981;
+}
+
+.chatassist-rating-feedback {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #374151;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  resize: none;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.chatassist-rating-feedback:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: #fff;
+}
+
+.chatassist-rating-submit {
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.chatassist-rating-submit:hover {
+  background: #2563eb;
 }
 
 /* --- Conversation List View --- */
@@ -1948,12 +1993,22 @@
 }
 
 .chatassist-theme-dark .chatassist-end-overlay-cancel {
+  background: #2563eb;
+  border: none;
+  color: #fff;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-cancel:hover {
+  opacity: 0.9;
+}
+
+.chatassist-theme-dark .chatassist-end-overlay-confirm {
   background: #0f172a;
   border-color: #334155;
   color: #e2e8f0;
 }
 
-.chatassist-theme-dark .chatassist-end-overlay-cancel:hover {
+.chatassist-theme-dark .chatassist-end-overlay-confirm:hover {
   background: #1e293b;
 }
 
@@ -1973,6 +2028,21 @@
 
 .chatassist-theme-dark .chatassist-rating-close:hover {
   color: #e2e8f0;
+}
+
+.chatassist-theme-dark .chatassist-rating-feedback {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+
+.chatassist-theme-dark .chatassist-rating-feedback:focus {
+  border-color: #3b82f6;
+  background: #0f172a;
+}
+
+.chatassist-theme-dark .chatassist-rating-feedback::placeholder {
+  color: #64748b;
 }
 
 /* Conv list extras */

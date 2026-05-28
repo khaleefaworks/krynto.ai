@@ -101,8 +101,46 @@
   let pendingOfflineAttachments = [];
   // Deferred bot button click (when offline form intercepts a button press).
   let pendingBotButtonClick = null;
+  // True when the contact overlay was triggered by a team-level offline event
+  // while the website is globally online.  Prevents applyPresence() from
+  // dismissing the overlay on the next presence ping.
+  let _forceContactOverlay = false;
+  // Set true once a leaf bot button click has been committed (automation_complete
+  // received).  Used to skip the contact overlay when bot_offline arrives after
+  // the visitor has already passed the IVR and input is open.
+  let _leafButtonCommitted = false;
   // Set true once contact info is sent for this conversation; clears on enterStartView().
   let _contactVerifiedThisConversation = false;
+  // Set true the moment the visitor touches any field in the contact overlay.
+  // Prevents applyPresence() from auto-dismissing the form mid-fill when
+  // agents come online. Reset each time the overlay opens.
+  let _contactFormTouched = false;
+  // Reference to closeWidget(), set by createWidget(). Allows outer-scope
+  // functions (hideRatingOverlay, WS handlers) to minimize the widget without
+  // causing a ReferenceError — closeWidget is a nested function in createWidget.
+  let _closeWidgetFn = null;
+
+  // ── Input-lock persistence ──────────────────────────────────────────────────
+  // When automation_complete fires with allow_input=false (terminal informational
+  // paths like "Check Application Status"), we persist a flag to localStorage so
+  // the input stays hidden after a page reload.  Cleared when an agent joins.
+  function _inputLockKey() {
+    if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
+    return 'chatassist_input_locked_' + CONFIG.websiteId + '_' + CONFIG.conversationId;
+  }
+  function _setInputLocked() {
+    var k = _inputLockKey();
+    if (k) try { localStorage.setItem(k, '1'); } catch (e) {}
+  }
+  function _clearInputLocked() {
+    var k = _inputLockKey();
+    if (k) try { localStorage.removeItem(k); } catch (e) {}
+  }
+  function _isInputLocked() {
+    var k = _inputLockKey();
+    if (!k) return false;
+    try { return localStorage.getItem(k) === '1'; } catch (e) { return false; }
+  }
 
   let uploadingAttachmentsCount = 0;
   let draftAttachments = [];
@@ -540,6 +578,7 @@
 
   let ratingConversationId = null;
   let hasRatedSession = false;
+  let pendingRatingValue = null;
 
   function _ratedStorageKey() {
     if (!CONFIG.websiteId || !CONFIG.conversationId) return null;
@@ -561,12 +600,17 @@
       return;
     }
     ratingConversationId = conversationId || ratingConversationId || null;
+    pendingRatingValue = null;
     // Reset state
     const thanks = $id('chatassist-rating-thanks');
     if (thanks) thanks.style.display = 'none';
     const emojis = el.querySelector('.chatassist-rating-emojis');
     if (emojis) emojis.style.display = 'flex';
     el.querySelectorAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
+    const fbSection = $id('chatassist-rating-feedback-section');
+    if (fbSection) fbSection.style.display = 'none';
+    const fbInput = $id('chatassist-rating-feedback');
+    if (fbInput) fbInput.value = '';
     el.style.display = 'flex';
     el.classList.add('chatassist-rating-overlay-visible');
   }
@@ -585,38 +629,42 @@
       ratingTriggeredByVisitorEnd = false;
       ratingTriggeredByAgentResolve = false;
       afterConversationClose();
-      try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+      if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
     } else if (viewMode === 'thread' && !isReadOnlyThread) {
       afterConversationClose();
     }
   }
 
-  function submitRating(ratingValue) {
+  function submitRating(ratingValue, feedback) {
     hasRatedSession = true;
     try {
       const key = _ratedStorageKey();
       if (key) localStorage.setItem(key, '1');
     } catch (e) { }
 
-    // Submit via WebSocket if connected
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    const feedbackText = (feedback || '').trim() || null;
+
+    // WS rejects submit_rating for RESOLVED conversations (server returns error, never saves).
+    // Use WS only for live OPEN conversations; always use HTTP for read-only threads.
+    const canUseWs = ws && ws.readyState === WebSocket.OPEN && !isReadOnlyThread;
+    if (canUseWs) {
       try {
         ws.send(JSON.stringify({
           type: 'submit_rating',
           rating: ratingValue,
+          feedback: feedbackText,
           conversation_id: ratingConversationId,
         }));
       } catch (e) { }
     } else {
-      // Fallback: HTTP POST
       try {
-        const apiBase = CONFIG.serverUrl.replace(/\/widget\/.*$/, '').replace(/\/ws\/.*$/, '');
-        fetch(apiBase + '/ratings/submit', {
+        fetch((CONFIG.apiUrl || '') + '/ratings/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversation_id: ratingConversationId,
             rating: ratingValue,
+            feedback: feedbackText,
             session_id: CONFIG.sessionId,
           }),
         }).catch(() => { });
@@ -626,8 +674,10 @@
     // Show thank you & auto-close
     const thanks = $id('chatassist-rating-thanks');
     const emojis = $qs('.chatassist-rating-emojis');
+    const fbSection = $id('chatassist-rating-feedback-section');
     if (thanks) thanks.style.display = 'block';
     if (emojis) emojis.style.display = 'none';
+    if (fbSection) fbSection.style.display = 'none';
     setTimeout(() => hideRatingOverlay(), 1500);
   }
 
@@ -667,6 +717,9 @@
     _inputRevealTimer = null;
     const inputCont = $id('chatassist-input-container');
     if (inputCont) inputCont.style.display = '';
+    // Remeasure after reveal: scrollHeight was 0 while container was display:none,
+    // which left the textarea at height:0px. A deferred call gets the correct value.
+    setTimeout(function () { autoResizeInput(); }, 0);
   }
 
   // --- API & State Management ---
@@ -824,10 +877,11 @@
     body.innerHTML = '';
 
     const history = (listData && listData.history) || [];
+    const active = listData && listData.active;
+    const activeIsEnded = active && Boolean(active.visitor_ended);
 
-    // "New Conversation" button — always show when no active conv, or when active is ended.
-    // Rendered first so it appears at the top as the primary call-to-action.
-    if (!listData || !listData.active || (listData.active && listData.active.visitor_ended)) {
+    // "New Conversation" button — show when no active conv, or when active is ended.
+    if (!active || activeIsEnded) {
       const newBtn = document.createElement('button');
       newBtn.className = 'chatassist-conv-new-btn';
       newBtn.type = 'button';
@@ -838,49 +892,40 @@
       body.appendChild(newBtn);
     }
 
-    // Ended / active conversation — rendered below the New Conversation button
-    if (listData && listData.active) {
-      const conv = listData.active;
-      const isEnded = Boolean(conv.visitor_ended);
+    // Non-ended active conversation: pin at top with "Active" badge.
+    if (active && !activeIsEnded) {
+      const conv = active;
       const activeItem = document.createElement('div');
       activeItem.className = 'chatassist-conv-item';
       activeItem.setAttribute('role', 'button');
       activeItem.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
-      const dateText = conv.last_message_at
+      const aTitleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
+      const aDateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
-      const titleEl = document.createElement('div');
-      titleEl.className = 'chatassist-conv-item-title';
-      titleEl.textContent = titleText;
+      const aTitleEl = document.createElement('div');
+      aTitleEl.className = 'chatassist-conv-item-title';
+      aTitleEl.textContent = aTitleText;
 
-      const metaEl = document.createElement('div');
-      metaEl.className = 'chatassist-conv-item-meta';
+      const aMetaEl = document.createElement('div');
+      aMetaEl.className = 'chatassist-conv-item-meta';
 
-      const dateEl = document.createElement('span');
-      dateEl.className = 'chatassist-conv-item-date';
-      dateEl.textContent = dateText;
+      const aDateEl = document.createElement('span');
+      aDateEl.className = 'chatassist-conv-item-date';
+      aDateEl.textContent = aDateText;
 
-      const badgeEl = document.createElement('span');
-      if (isEnded) {
-        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-ended';
-        badgeEl.textContent = 'Ended';
-      } else {
-        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
-        badgeEl.textContent = 'Active';
-      }
+      const aBadgeEl = document.createElement('span');
+      aBadgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
+      aBadgeEl.textContent = 'Active';
 
-      metaEl.appendChild(dateEl);
-      metaEl.appendChild(badgeEl);
-      activeItem.appendChild(titleEl);
-      activeItem.appendChild(metaEl);
+      aMetaEl.appendChild(aDateEl);
+      aMetaEl.appendChild(aBadgeEl);
+      activeItem.appendChild(aTitleEl);
+      activeItem.appendChild(aMetaEl);
 
-      // Ended conversations open as read-only; active ones are resumable.
-      const resumeFn = isEnded
-        ? function () { enterThreadView(conv.id, true); }
-        : function () { enterThreadView(conv.id, false); };
+      const resumeFn = function () { enterThreadView(conv.id, false); };
       activeItem.addEventListener('click', resumeFn);
       activeItem.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resumeFn(); }
@@ -888,15 +933,27 @@
       body.appendChild(activeItem);
     }
 
-    if (!history.length) {
+    // Past conversations: merge ended-active (if any) with history, sorted newest first.
+    // This ensures a stale OPEN+visitor_ended conv never appears above a newer resolved one.
+    const pastConvs = [];
+    if (activeIsEnded) {
+      pastConvs.push({ id: active.id, conv: active, badgeText: 'Ended', badgeClass: 'chatassist-conv-item-badge-ended' });
+    }
+    history.forEach(function (conv) {
+      pastConvs.push({ id: conv.id, conv: conv, badgeText: 'Resolved', badgeClass: '' });
+    });
+    pastConvs.sort(function (a, b) { return b.id - a.id; });
+
+    if (!pastConvs.length) {
       const emptyEl = document.createElement('div');
       emptyEl.className = 'chatassist-conv-list-empty';
-      emptyEl.textContent = listData && listData.active ? 'No past conversations' : 'No past conversations';
+      emptyEl.textContent = 'No past conversations';
       body.appendChild(emptyEl);
       return;
     }
 
-    history.forEach(function (conv) {
+    pastConvs.forEach(function (entry) {
+      const conv = entry.conv;
       const item = document.createElement('div');
       item.className = 'chatassist-conv-item';
       item.setAttribute('role', 'button');
@@ -919,15 +976,20 @@
       dateEl.textContent = dateText;
 
       const badgeEl = document.createElement('span');
-      badgeEl.className = 'chatassist-conv-item-badge';
-      badgeEl.textContent = 'Resolved';
+      badgeEl.className = 'chatassist-conv-item-badge' + (entry.badgeClass ? (' ' + entry.badgeClass) : '');
+      badgeEl.textContent = entry.badgeText;
 
       metaEl.appendChild(dateEl);
       metaEl.appendChild(badgeEl);
       item.appendChild(titleEl);
       item.appendChild(metaEl);
 
-      const openFn = function () { openHistoryThread(conv.id); };
+      const openFn = function () {
+        enterThreadView(conv.id, true);
+        if (_shouldShowRatingPrompt(conv)) {
+          setTimeout(function () { showRatingOverlay(conv.id); }, 800);
+        }
+      };
       item.addEventListener('click', openFn);
       item.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFn(); }
@@ -973,6 +1035,7 @@
     ratingConversationId = null;
     CONFIG.conversationId = 0;
     _contactVerifiedThisConversation = false;
+    _leafButtonCommitted = false;
     pendingBotButtonClick = null;
     // Clear the welcome-popup dismissed key so the popup can appear fresh for
     // the new conversation (it was suppressed for the just-closed conversation).
@@ -1089,8 +1152,25 @@
     enterStartView();
   }
 
+  // Returns true if the rating popup should be shown for a resolved conversation object
+  // from the conversation list API (contains id, status, closed_by, is_rated).
+  function _shouldShowRatingPrompt(conv) {
+    if (!conv) return false;
+    if (conv.status !== 'resolved') return false;   // OPEN or visitor_ended-OPEN: no prompt
+    if (conv.closed_by === 'bot') return false;      // bot-only flow: no agent to rate
+    if (conv.is_rated) return false;                 // already rated in DB
+    return true;
+  }
+
   function openHistoryThread(convId) {
     enterThreadView(convId, true);
+    // Show rating prompt if this past conversation hasn't been rated yet.
+    // convListHistory holds the resolved history objects returned by the last
+    // fetchConversationList call — each contains is_rated and closed_by.
+    var conv = convListHistory && convListHistory.find(function (c) { return c.id === convId; });
+    if (_shouldShowRatingPrompt(conv)) {
+      setTimeout(function () { showRatingOverlay(conv.id); }, 800);
+    }
   }
 
   function _appendClosedBanner() {
@@ -1347,8 +1427,10 @@
         } else if (actor === 'bot' || (actor === 'system' && kind === 'chat') || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))) {
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
-          if (eventType === 'agent_join') showJoinMessage(m.content, m.created_at);
-          else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
+          if (eventType === 'agent_join') {
+            showJoinMessage(m.content, m.created_at);
+            _clearInputLocked(); // Agent joined after suppress_waiting — unlock input
+          } else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
           else if (eventType === 'visitor_ended') showSystemMessage('You ended the chat.');
           else if (eventType === 'conversation_resolved' && m.closed_by === 'visitor') showSystemMessage('You have ended the chat.');
           else showSystemMessage(m.content);
@@ -1366,9 +1448,16 @@
       // If empty (new session), we'll restore when the welcome/bot_prompt arrives.
       if (data.messages.length > 0) {
         _restoreWidgetState();
-        // Reveal input unless a bot_prompt is pending, or this is a read-only (ended/resolved) thread.
+        // Reveal input unless a bot_prompt is still pending, the thread is
+        // read-only, or the input was locked by automation_complete(allow_input=false).
         if (!hasPendingBotPrompt && !isReadOnlyThread) {
-          showInputContainer();
+          if (!_isInputLocked()) {
+            showInputContainer();
+          } else {
+            // Locked by suppress_waiting path — cancel reveal timer too.
+            clearTimeout(_inputRevealTimer);
+            _inputRevealTimer = null;
+          }
         } else {
           // Cancel the connect-time reveal timer so it doesn't override the
           // hidden input state after a page reload with a pending button prompt.
@@ -1502,7 +1591,7 @@
                 _awaitingRatingAfterResolve = false;
                 ratingTriggeredByAgentResolve = false;
                 afterConversationClose();
-                try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+                if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
               }
             }, 7000);
           }
@@ -1515,6 +1604,14 @@
         showNewMsgIndicator();
       }
       smartScroll();
+      return;
+    }
+
+    // Bot-only conversation completed: resolve silently with no rating popup or
+    // "support resolved" system message. Widget clears its state and navigates
+    // to the conversation list / start view exactly like afterConversationClose().
+    if (data.type === 'bot_conversation_complete') {
+      afterConversationClose();
       return;
     }
 
@@ -1548,10 +1645,11 @@
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
       const allowInput = data.allow_input === true;
+      const buttonPathPrefix = Array.isArray(data.button_path_prefix) ? data.button_path_prefix : [];
       // Cancel any pending input-reveal timer — buttons control input visibility.
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput);
+      appendBotPromptWithButtons(data.message, createdAt, buttons, automationId, data.message_obj?.id, allowInput, buttonPathPrefix);
       notifyNewMessage(null, null, data.message);
       if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
       showNewMsgIndicator();
@@ -1570,11 +1668,19 @@
       // overlay so the visitor can provide their details.
       try {
         if (data.message_obj && data.message_obj.event_type === 'bot_offline') {
-          // Immediately check if contact info can be satisfied silently.
-          // Show the form right away (before visitor tries to send) if not.
           if (_checkAndSendContactSilently()) {
+            // Contact already on file — send silently and reveal input.
+            showInputContainer();
+          } else if (_leafButtonCommitted) {
+            // Visitor already completed the IVR (automation_complete received).
+            // Input is already open (or intentionally hidden for suppress_waiting
+            // paths). Show the offline message as a chat bubble only — no overlay.
             showInputContainer();
           } else {
+            // Visitor hasn't clicked a button yet (e.g. typed directly while
+            // offline).  Collect contact details before proceeding.
+            // If globally online but bot_offline fired, this is team-level offline.
+            if (presenceOnline) _forceContactOverlay = true;
             showContactOverlay();
           }
         }
@@ -1607,10 +1713,12 @@
       smartScroll();
     } else if (data.type === 'agent_joined') {
       setAgentTyping(false);
+      _clearInputLocked(); // Agent taking over always unlocks input
       const createdAt = (data.message_obj && data.message_obj.created_at) || null;
       showJoinMessage(`${data.agent_name || 'A support agent'} joined the chat.`, createdAt);
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
+      showInputContainer();
       smartScroll();
     } else if (data.type === 'agent_typing') {
       const isTyping = Boolean(data.is_typing);
@@ -1632,11 +1740,22 @@
       appendMessage(sender, data.message, data.created_at, null, data.message_obj?.id || data.id);
       smartScroll();
     } else if (data.type === 'automation_complete') {
-      // IVR flow is done — reveal the free-form input and clear any fallback timer.
+      // IVR flow is done. Clear any fallback timer.
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      showInputContainer();
-      try { $id('chatassist-input')?.focus(); } catch (e) { }
+      // allow_input=false → suppress_waiting path (e.g. Careers informational reply).
+      // Persist the lock so input stays hidden after a page reload.
+      // allow_input=true (or absent) → normal routing path: clear any stale lock and open input.
+      if (data.allow_input !== false) {
+        _clearInputLocked();
+        showInputContainer();
+        try { $id('chatassist-input')?.focus(); } catch (e) { }
+      } else {
+        _setInputLocked();
+      }
+      // Mark that the visitor completed the IVR so bot_offline won't re-open
+      // the contact overlay on top of an already-open input.
+      _leafButtonCommitted = true;
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -2262,7 +2381,9 @@
     } catch (e) { }
   }
 
-  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput) {
+  function appendBotPromptWithButtons(content, createdAtIso, buttons, automationId, messageId, allowInput, buttonPathPrefix) {
+    // buttonPathPrefix is the path that leads to this sub-prompt ([] for top-level).
+    if (!Array.isArray(buttonPathPrefix)) buttonPathPrefix = [];
     const container = $id('chatassist-messages');
     if (!container) return;
 
@@ -2325,34 +2446,67 @@
         btnEl.textContent = btn.label || 'Option ' + (idx + 1);
         btnEl.type = 'button';
         btnEl.addEventListener('click', function () {
-          // Disable all buttons after click
-          const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
-          allBtns.forEach(function (b) {
-            b.disabled = true;
-            b.classList.add('chatassist-prompt-btn-disabled');
-          });
-          // Highlight selected
-          btnEl.classList.add('chatassist-prompt-btn-selected');
+          // Offline interception: only for leaf buttons where collect_contact is
+          // enabled.  Branch buttons (is_branch=true) navigate to a sub-menu and
+          // must never be blocked — the team hasn't been picked yet.  Buttons with
+          // collect_contact=false are informational paths (e.g. Careers replies)
+          // that should never show the contact overlay.
 
-          // If offline and contact not yet on file, collect it before firing.
-          if (!presenceOnline && !_checkAndSendContactSilently()) {
-            pendingBotButtonClick = { automationId: automationId, idx: idx, label: btn.label || 'Option ' + (idx + 1) };
-            showContactOverlay();
-            return;
+          // All paths that decide to proceed converge here.
+          function commitClick() {
+            const allBtns = buttonsWrap.querySelectorAll('.chatassist-prompt-btn');
+            allBtns.forEach(function (b) {
+              b.disabled = true;
+              b.classList.add('chatassist-prompt-btn-disabled');
+            });
+            btnEl.classList.add('chatassist-prompt-btn-selected');
+            // Input reveal is deferred: the server sends automation_complete
+            // after processing (so the reply appears before the input opens).
+            // Only arm the 5-second fallback if free-text input is allowed.
+            clearTimeout(_inputRevealTimer);
+            if (allowInput) {
+              _inputRevealTimer = setTimeout(showInputContainer, 5000);
+            }
+            // Optimistically append the visitor's selection as a visitor message.
+            appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
+            isAtBottom = true;
+            smartScroll();
+            sendBotButtonClick(automationId, [...buttonPathPrefix, idx]);
           }
 
-          // Input reveal is deferred: the server sends automation_complete
-          // after processing (so the reply appears before the input opens).
-          // A 5-second fallback fires if the event never arrives.
-          clearTimeout(_inputRevealTimer);
-          _inputRevealTimer = setTimeout(showInputContainer, 5000);
+          if (!btn.is_branch && btn.collect_contact !== false) {
+            if (!presenceOnline && !_checkAndSendContactSilently()) {
+              // Website definitively offline (real-time WS presence) — block immediately.
+              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              showContactOverlay();
+              return;
+            }
+            if (presenceOnline && btn.team_id && !_checkAndSendContactSilently()) {
+              // btn.team_online is a one-time snapshot baked at conversation-creation
+              // time — it is stale in both directions (team may have gone offline OR
+              // come online since). Always verify the specific team in real time.
+              var _pendingClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              btnEl.disabled = true;
+              fetch(
+                CONFIG.apiUrl + '/widget/team-online?website_id=' + encodeURIComponent(CONFIG.websiteId) +
+                '&team_id=' + encodeURIComponent(btn.team_id)
+              )
+                .then(function (r) { return r.ok ? r.json() : { online: false }; })
+                .catch(function () { return { online: false }; })
+                .then(function (data) {
+                  btnEl.disabled = false;
+                  if (data.online) {
+                    commitClick();
+                  } else {
+                    pendingBotButtonClick = _pendingClick;
+                    showContactOverlay();
+                  }
+                });
+              return;
+            }
+          }
 
-          // Optimistically append the visitor's selection as a visitor message
-          appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
-          isAtBottom = true;
-          smartScroll();
-
-          sendBotButtonClick(automationId, idx);
+          commitClick();
         });
         buttonsWrap.appendChild(btnEl);
       });
@@ -2378,7 +2532,7 @@
     }
   }
 
-  function sendBotButtonClick(automationId, buttonIndex) {
+  function sendBotButtonClick(automationId, buttonPath) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       showToast('Not connected. Please wait...');
       return;
@@ -2386,7 +2540,7 @@
     ws.send(JSON.stringify({
       type: 'bot_button_click',
       automation_id: automationId,
-      button_index: buttonIndex,
+      button_path: buttonPath,
     }));
     // Button click counts as a visitor action — re-enable the end button
     // in case it was hidden after a previous "End chat".
@@ -2496,11 +2650,16 @@
     // Show pending message preview so visitor knows their message is safe.
     const preview = $id('chatassist-contact-msg-preview');
     if (preview) {
+      var _previewText = null;
       if (pendingOfflineMessage) {
-        const truncated = pendingOfflineMessage.length > 120
+        _previewText = pendingOfflineMessage.length > 120
           ? pendingOfflineMessage.slice(0, 120) + '…'
           : pendingOfflineMessage;
-        preview.textContent = '"' + truncated + '"';
+      } else if (pendingBotButtonClick && pendingBotButtonClick.label) {
+        _previewText = pendingBotButtonClick.label;
+      }
+      if (_previewText) {
+        preview.textContent = '“' + _previewText + '”';
         preview.style.display = 'block';
       } else {
         preview.style.display = 'none';
@@ -2533,6 +2692,13 @@
 
     el.style.display = 'flex';
     el.classList.add('chatassist-contact-overlay-visible');
+    // Reset touched state each time the form opens so applyPresence() can
+    // auto-dismiss if agents come online before the visitor starts typing.
+    _contactFormTouched = false;
+    if (!el._touchHandlerAttached) {
+      el.addEventListener('input', function () { _contactFormTouched = true; });
+      el._touchHandlerAttached = true;
+    }
     // Focus first input (name field)
     const firstField = $id('chatassist-contact-name');
     try { firstField && firstField.focus(); } catch (e) { }
@@ -2548,6 +2714,10 @@
     el.style.display = 'none';
     if (!wasVisible) return;
     if (restore) {
+      // User explicitly dismissed the overlay — discard any deferred button click
+      // so it doesn't fire unexpectedly on the next offline form submission.
+      pendingBotButtonClick = null;
+      _forceContactOverlay = false;
       const input = $id('chatassist-input');
       if (input && pendingOfflineMessage != null) input.value = pendingOfflineMessage;
       if (pendingOfflineAttachments && pendingOfflineAttachments.length) {
@@ -2610,6 +2780,7 @@
     const atts = Array.isArray(pendingOfflineAttachments) ? pendingOfflineAttachments.slice() : [];
     pendingOfflineMessage = null;
     pendingOfflineAttachments = [];
+    _forceContactOverlay = false;
     hideContactOverlay(false);
     try {
       if (visitorName) localStorage.setItem(`ai_chatassist_contact_name_${CONFIG.websiteId}`, visitorName);
@@ -2642,18 +2813,29 @@
           visitor_email: visitorEmail || undefined,
         }));
       }
+      // The offline automation message told the visitor they can leave additional
+      // details — open the input now so they actually can.
+      showInputContainer();
     }
 
     // If a bot button click was deferred waiting for contact, fire it now.
     if (pendingBotButtonClick) {
       const pbc = pendingBotButtonClick;
       pendingBotButtonClick = null;
+      // Disable and highlight the deferred button now that the click is committed.
+      if (pbc._allBtns) {
+        pbc._allBtns.forEach(function (b) {
+          b.disabled = true;
+          b.classList.add('chatassist-prompt-btn-disabled');
+        });
+      }
+      if (pbc._btnEl) pbc._btnEl.classList.add('chatassist-prompt-btn-selected');
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = setTimeout(showInputContainer, 5000);
       appendMessage('visitor', pbc.label, new Date().toISOString(), null, null);
       isAtBottom = true;
       smartScroll();
-      sendBotButtonClick(pbc.automationId, pbc.idx);
+      sendBotButtonClick(pbc.automationId, pbc.buttonPath);
     }
   }
 
@@ -2716,8 +2898,8 @@
             <div class="chatassist-end-overlay-title">End this chat?</div>
             <div class="chatassist-end-overlay-desc">By ending this conversation you won&rsquo;t be able to continue it later.</div>
             <div class="chatassist-end-overlay-actions">
-              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
               <button id="chatassist-end-confirm" class="chatassist-end-overlay-confirm">End chat</button>
+              <button id="chatassist-end-cancel" class="chatassist-end-overlay-cancel">Minimize</button>
             </div>
           </div>
         </div>
@@ -2736,6 +2918,10 @@
               <button class="chatassist-rating-btn" data-rating="-1" title="Bad">
                 <span class="chatassist-rating-emoji">&#x1F61E;</span>
               </button>
+            </div>
+            <div id="chatassist-rating-feedback-section" style="display:none;">
+              <textarea id="chatassist-rating-feedback" class="chatassist-rating-feedback" placeholder="Tell us more (optional)..." rows="3"></textarea>
+              <button id="chatassist-rating-submit" class="chatassist-rating-submit">Submit</button>
             </div>
             <div id="chatassist-rating-thanks" class="chatassist-rating-thanks" style="display:none;">
               Thank you for your feedback!
@@ -2756,11 +2942,11 @@
             </div>
           </div>
           <div class="chatassist-header-actions">
-            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat" title="Minimize">
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
             <button id="chatassist-end" class="chatassist-header-btn chatassist-end-btn" aria-label="End chat" title="End chat">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+            <button id="chatassist-minimize" class="chatassist-header-btn" aria-label="Minimize chat" title="Minimize">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </button>
           </div>
         </div>
@@ -2832,6 +3018,11 @@
     const bubble = $id('chatassist-bubble');
     const win = $id('chatassist-window');
     const input = $id('chatassist-input');
+
+    // Expose closeWidget to outer-scope callers (hideRatingOverlay, WS handlers).
+    // closeWidget is hoisted but captures win/bubble from this scope, so it must
+    // be assigned here after those locals exist.
+    _closeWidgetFn = closeWidget;
 
     function openWidget() {
       enableNotificationSound();
@@ -2920,7 +3111,7 @@
       if (hasRatedSession) {
         ratingTriggeredByVisitorEnd = false;
         afterConversationClose();
-        try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+        if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
         return;
       }
 
@@ -2939,15 +3130,27 @@
 
     // Rating overlay buttons
     $id('chatassist-rating-close').addEventListener('click', () => {
+      pendingRatingValue = null;
       hideRatingOverlay();
     });
     $qsAll('.chatassist-rating-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         $qsAll('.chatassist-rating-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
-        const val = parseInt(btn.getAttribute('data-rating'), 10);
-        submitRating(val);
+        pendingRatingValue = parseInt(btn.getAttribute('data-rating'), 10);
+        // Show feedback textarea
+        const fbSection = $id('chatassist-rating-feedback-section');
+        if (fbSection) fbSection.style.display = 'block';
+        const fbInput = $id('chatassist-rating-feedback');
+        if (fbInput) { fbInput.value = ''; setTimeout(function(){ fbInput.focus(); }, 50); }
       });
+    });
+    $id('chatassist-rating-submit').addEventListener('click', () => {
+      if (pendingRatingValue === null) return;
+      const feedback = ($id('chatassist-rating-feedback').value || '').trim();
+      const v = pendingRatingValue;
+      pendingRatingValue = null;
+      submitRating(v, feedback);
     });
 
     $id('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
@@ -3046,7 +3249,22 @@
     });
 
     const messagesContainer = $id('chatassist-messages');
-    if (messagesContainer) messagesContainer.addEventListener('scroll', handleMessagesScroll);
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', handleMessagesScroll);
+      // Prevent wheel events from reaching the host page when the message list
+      // is already at its scroll boundary (complements overscroll-behavior:contain
+      // for browsers that don't support it).
+      messagesContainer.addEventListener('wheel', function(e) {
+        const el = messagesContainer;
+        const atTop = el.scrollTop === 0;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+        // Only stop propagation when scrolling would otherwise bubble out.
+        if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+          e.preventDefault();
+        }
+        e.stopPropagation();
+      }, { passive: false });
+    }
 
     // Prefill
     try {
@@ -3168,7 +3386,14 @@
 
     const count = presence.available_agents_count ?? (presence.agents?.length || 0);
     presenceOnline = count > 0;
-    if (presenceOnline) hideContactOverlay(false);
+    // Dismiss the contact overlay when the website comes back online, unless
+    // the visitor has already started filling the form (closing mid-input
+    // would discard their work). _forceContactOverlay is also cleared here:
+    // if agents are online again, the team-level offline reason is gone.
+    if (presenceOnline && !_contactFormTouched) {
+      _forceContactOverlay = false;
+      hideContactOverlay(false);
+    }
 
     // Update bubble online dot
     const bubbleDot = $id('chatassist-bubble-online-dot');
@@ -3356,32 +3581,51 @@
       if (listData && listData.active) {
         if (listData.active.visitor_ended) {
           // Visitor had ended this conversation — don't auto-resume it.
+          // If a more recent resolved conversation exists in history, show that instead
+          // (stale OPEN+visitor_ended conv should not shadow a newer resolved one).
+          const newestHistory = listData.history && listData.history[0];
+          const showId = (newestHistory && newestHistory.id > listData.active.id)
+            ? newestHistory.id
+            : listData.active.id;
           if (!widgetShowHistory) {
-            // History disabled: load the thread as read-only so the visitor can
-            // see their previous messages and the "Start new chat" banner.
-            // The conv_id WS route sends history without firing visitor_socket_connected
-            // or the welcome automation, avoiding noisy agent-side events.
-            await enterThreadView(listData.active.id, true);
+            await enterThreadView(showId, true);
+            // Prompt for rating on the conversation being shown (if unrated and agent-handled).
+            // visitor_ended active is OPEN so _shouldShowRatingPrompt returns false for it;
+            // newestHistory (resolved) is the only case where the prompt fires.
+            const shownConv = (newestHistory && newestHistory.id === showId) ? newestHistory : listData.active;
+            if (_shouldShowRatingPrompt(shownConv)) {
+              setTimeout(function () { showRatingOverlay(shownConv.id); }, 800);
+            }
           } else {
-            // History enabled: show list so visitor can start a new one
             enterListView(listData);
           }
         } else {
           // Resume the active (open) conversation directly.
           await enterThreadView(listData.active.id, false);
         }
-      } else if (!widgetShowHistory && _loadClosedState()) {
-        // History is disabled and the visitor previously ended a chat.
-        // Reload the closed conversation as read-only so they see their
-        // history and the "Start new chat" button — no welcome loop.
-        // enterThreadView → connectWebSocket → backend sends {type:'history',
-        // status:'resolved'} which re-injects the banner automatically.
-        const closedId = _loadClosedState();
-        await enterThreadView(closedId, true);
       } else {
-        // No active conversation — start fresh so the bot welcome fires
-        // and the new-message popup can show for returning visitors.
-        enterStartView();
+        // No active conversation.
+        if (!widgetShowHistory) {
+          // History disabled: use most recent resolved conv from API; localStorage is last resort.
+          const histConv = listData && listData.history && listData.history[0];
+          if (histConv) {
+            await enterThreadView(histConv.id, true);
+            // Prompt for rating if visitor never rated this conversation.
+            if (_shouldShowRatingPrompt(histConv)) {
+              setTimeout(function () { showRatingOverlay(histConv.id); }, 800);
+            }
+          } else if (_loadClosedState()) {
+            await enterThreadView(_loadClosedState(), true);
+          } else {
+            enterStartView();
+          }
+        } else if (listData && listData.history.length > 0) {
+          // History enabled and past conversations exist — show the list.
+          enterListView(listData);
+        } else {
+          // No active conversation, no history — start fresh.
+          enterStartView();
+        }
       }
 
       armSoundOnFirstGesture();

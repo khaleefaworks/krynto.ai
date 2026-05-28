@@ -159,26 +159,19 @@ def _run_auto_resolve_visitor_ended() -> None:
 
 
 def start_scheduler() -> None:
-    """Start the APScheduler background jobs. Call once at app startup."""
+    """Start the APScheduler background jobs. Call once at app startup.
+
+    NOTE: The automatic inactivity-close jobs (_run_auto_close and
+    _run_auto_resolve_visitor_ended) have been intentionally disabled.
+    Conversations now stay OPEN until an agent or visitor explicitly resolves
+    them.  The job functions are preserved below for reference / manual use.
+    """
     global _scheduler
     if _scheduler is not None:
         return  # Already running (e.g. reload in dev mode).
 
     _scheduler = AsyncIOScheduler(timezone="UTC")
-    _scheduler.add_job(
-        _run_auto_close,
-        trigger="interval",
-        hours=1,
-        id="auto_close_conversations",
-        replace_existing=True,
-    )
-    _scheduler.add_job(
-        _run_auto_resolve_visitor_ended,
-        trigger="interval",
-        minutes=30,
-        id="auto_resolve_visitor_ended",
-        replace_existing=True,
-    )
+    # No recurring jobs registered — scheduler is kept alive for future use.
     _scheduler.start()
     logger.info("auto_close_scheduler_started")
 

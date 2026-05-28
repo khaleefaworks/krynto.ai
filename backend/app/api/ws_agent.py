@@ -248,6 +248,7 @@ async def agent_ws(
                     },
                     include_global=True,
                     exclude_agent_id=agent_id,
+                    conversation_team_id=getattr(conv, "team_id", None),
                 )
                 continue
             

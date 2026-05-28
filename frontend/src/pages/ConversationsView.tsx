@@ -283,7 +283,7 @@ interface VisitorConversation {
     last_visitor_message_at: string | null
 }
 
-type FilterCategory = 'all' | 'mine' | 'unassigned' | 'resolved'
+type FilterCategory = 'all' | 'mine' | 'unassigned' | 'bot' | 'resolved'
 
 function sortChatsByActivity(chats: any[]): any[] {
     return [...chats].sort((a, b) => {
@@ -335,6 +335,9 @@ export default function ConversationsView() {
     const [resolvedHasMore, setResolvedHasMore] = useState(false)
     const [resolvedLoadingMore, setResolvedLoadingMore] = useState(false)
     const [resolvedTotal, setResolvedTotal] = useState<number | null>(null)
+    // Incremented when a conversation_closed WS event arrives so the resolved
+    // list refetches even if the filter key (search/team/etc.) hasn't changed.
+    const [resolvedRefreshCounter, setResolvedRefreshCounter] = useState(0)
     const [visitorTyping, setVisitorTyping] = useState(false)
     const [spectatorAgentTyping, setSpectatorAgentTyping] = useState<string | null>(null)
 
@@ -370,6 +373,7 @@ export default function ConversationsView() {
     const joinedRef = useRef(false)
     const prevSelectedChatRef = useRef<number | null>(selectedChat)
     const loadMessagesTokenRef = useRef(0)
+    const chatLoadingTokenRef = useRef(0)
     const hasLoadedChatsRef = useRef(false)
     const loadDetailsTokenRef = useRef(0)
     const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -909,6 +913,7 @@ export default function ConversationsView() {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'conversation_closed') {
                 fetchActiveChats({ showSpinner: false })
+                setResolvedRefreshCounter(prev => prev + 1)
             } else if (data.type === 'new_conversation') {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'connected') {
@@ -941,6 +946,24 @@ export default function ConversationsView() {
                     ? ((dto as any)?.timestamp || (dto as any)?.created_at)
                     : null) || new Date().toISOString()
                 if (typeof content === 'string' && content.trim()) {
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], last_message: content, last_message_at: ts }
+                        setActiveChats(sortChatsByActivity(next))
+                    }
+                }
+            } else if (data.type === 'agent_message' && dataConversationId) {
+                // Update list preview when the assigned agent sends a message (spectator path).
+                // The chat-specific handler only fires for the selected conversation, so this
+                // global handler ensures the list stays current even when another chat is open.
+                const dto = (data as any)?.message_obj
+                const content = dto && typeof dto === 'object' ? String((dto as any)?.content ?? '').trim() : ''
+                const ts = (dto && typeof dto === 'object'
+                    ? ((dto as any)?.timestamp || (dto as any)?.created_at)
+                    : null) || new Date().toISOString()
+                if (content) {
                     const latest = activeChatsRef.current
                     const idx = latest.findIndex(c => c.id === dataConversationId)
                     if (idx >= 0) {
@@ -1255,6 +1278,7 @@ export default function ConversationsView() {
     ) => {
         const token = ++loadMessagesTokenRef.current
         if (showSpinner) {
+            chatLoadingTokenRef.current = token
             setChatLoading(true)
         }
         if (!preserveMessages) {
@@ -1322,7 +1346,7 @@ export default function ConversationsView() {
         } catch (error) {
             console.error("Failed to load chat:", error)
         } finally {
-            if (showSpinner && loadMessagesTokenRef.current === token) {
+            if (showSpinner && chatLoadingTokenRef.current === token) {
                 setChatLoading(false)
             }
         }
@@ -1780,13 +1804,15 @@ export default function ConversationsView() {
             // Category filter
             switch (activeFilter) {
                 case 'all':
-                    return chat.status === 'open'
+                    return chat.status === 'open' && !(chat as any).bot_only
                 case 'mine':
-                    return chat.status === 'open' && (chat as any).assigned_agent_id === user?.id
+                    return chat.status === 'open' && !(chat as any).bot_only && (chat as any).assigned_agent_id === user?.id
                 case 'unassigned':
-                    return chat.status === 'open' && (chat as any).assigned_agent_id == null
+                    return chat.status === 'open' && !(chat as any).bot_only && (chat as any).assigned_agent_id == null
+                case 'bot':
+                    return chat.status === 'open' && (chat as any).bot_only === true
                 default:
-                    return chat.status === 'open'
+                    return chat.status === 'open' && !(chat as any).bot_only
             }
         })
 
@@ -1847,7 +1873,7 @@ export default function ConversationsView() {
     useEffect(() => {
         if (activeFilter !== 'resolved') return
 
-        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo].join('|')
+        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo, resolvedRefreshCounter].join('|')
 
         // Same filter params and we already have data — activeFilter bounced back, skip reset
         if (resolvedFetchKeyRef.current === newKey && resolvedChatsLoadedRef.current) return
@@ -1893,7 +1919,7 @@ export default function ConversationsView() {
         }
         load()
         return () => { cancelled = true }
-    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo])
+    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo, resolvedRefreshCounter])
 
     const getFilterHeaderText = () => {
         switch (activeFilter) {
@@ -1986,7 +2012,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <MessageCircle className="h-4 w-4 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open').length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && !(c as any).bot_only).length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -1995,7 +2021,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left text-sm">All</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'open').length}
+                                                    {activeChats.filter(c => c.status === 'open' && !(c as any).bot_only).length}
                                                 </Badge>
                                             </>
                                         )}
@@ -2016,7 +2042,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Users className="h-4 w-4 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id === user?.id).length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -2025,7 +2051,7 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left text-sm">Mine</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length}
+                                                    {activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id === user?.id).length}
                                                 </Badge>
                                             </>
                                         )}
@@ -2046,7 +2072,7 @@ export default function ConversationsView() {
                                         {leftFilterCollapsed ? (
                                             <>
                                                 <Inbox className="h-4 w-4 flex-shrink-0" />
-                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}</span>
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id == null).length}</span>
                                             </>
                                         ) : (
                                             <>
@@ -2055,13 +2081,43 @@ export default function ConversationsView() {
                                                     <span className="flex-1 text-left text-sm">Unassigned</span>
                                                 </div>
                                                 <Badge variant="secondary" className="ml-auto">
-                                                    {activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length}
+                                                    {activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id == null).length}
                                                 </Badge>
                                             </>
                                         )}
                                     </button>
                                 </TooltipTrigger>
                                 {leftFilterCollapsed && <TooltipContent side="right">Unassigned</TooltipContent>}
+                            </Tooltip>
+
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        onClick={() => setActiveFilter('bot')}
+                                        className={`w-full flex items-center justify-between px-2 py-2 rounded-lg transition-colors ${activeFilter === 'bot'
+                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            }`}
+                                    >
+                                        {leftFilterCollapsed ? (
+                                            <>
+                                                <Bot className="h-4 w-4 flex-shrink-0" />
+                                                <span className="text-xs font-semibold">{activeChats.filter(c => c.status === 'open' && (c as any).bot_only === true).length}</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="flex items-center gap-3">
+                                                    <Bot className="h-4 w-4 flex-shrink-0" />
+                                                    <span className="flex-1 text-left text-sm">Bot</span>
+                                                </div>
+                                                <Badge variant="secondary" className="ml-auto">
+                                                    {activeChats.filter(c => c.status === 'open' && (c as any).bot_only === true).length}
+                                                </Badge>
+                                            </>
+                                        )}
+                                    </button>
+                                </TooltipTrigger>
+                                {leftFilterCollapsed && <TooltipContent side="right">Bot</TooltipContent>}
                             </Tooltip>
                         </TooltipProvider>
                     </div>
@@ -2287,9 +2343,10 @@ export default function ConversationsView() {
                     {/* Filter tabs — visible below lg (when Col1 sidebar is hidden) */}
                     <div className="lg:hidden flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
                         {([
-                            { key: 'all' as FilterCategory, label: 'All', count: activeChats.filter(c => c.status === 'open').length },
-                            { key: 'mine' as FilterCategory, label: 'Mine', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id === user?.id).length },
-                            { key: 'unassigned' as FilterCategory, label: 'Unassigned', count: activeChats.filter(c => c.status === 'open' && (c as any).assigned_agent_id == null).length },
+                            { key: 'all' as FilterCategory, label: 'All', count: activeChats.filter(c => c.status === 'open' && !(c as any).bot_only).length },
+                            { key: 'mine' as FilterCategory, label: 'Mine', count: activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id === user?.id).length },
+                            { key: 'unassigned' as FilterCategory, label: 'Unassigned', count: activeChats.filter(c => c.status === 'open' && !(c as any).bot_only && (c as any).assigned_agent_id == null).length },
+                            { key: 'bot' as FilterCategory, label: 'Bot', count: activeChats.filter(c => c.status === 'open' && (c as any).bot_only === true).length },
                             { key: 'resolved' as FilterCategory, label: 'Resolved', count: resolvedTotal === null ? 0 : resolvedTotal >= 100 ? -1 : resolvedTotal },
                         ]).map(tab => (
                             <button

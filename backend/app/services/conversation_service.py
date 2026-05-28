@@ -9,13 +9,13 @@ Responsibilities:
 - Enforce conversation state rules
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.message import Message, MessageSenderType
 from app.models.website import Website
 from app.services.website_resolver import is_website_online
-from app.repos.conversations import CONVERSATION_RESUME_CUTOFF_HOURS
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.avatar_colors import pick_avatar_color
@@ -49,11 +49,9 @@ class ConversationService:
         Returns:
             Conversation object with status=OPEN
         """
-        # Only resume an OPEN conversation that the visitor has NOT intentionally
-        # ended AND that has been active within the cooldown window. Stale or
-        # visitor-ended conversations stay OPEN for agent follow-up, but the
-        # visitor gets a fresh conversation on their next connect.
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=CONVERSATION_RESUME_CUTOFF_HOURS)
+        # Resume any OPEN conversation for this session that the visitor has NOT
+        # intentionally ended. There is no inactivity cutoff: OPEN conversations
+        # stay resumable until explicitly resolved.
         conversation = (
             self.db.query(Conversation)
             .filter(
@@ -61,7 +59,6 @@ class ConversationService:
                 Conversation.website_id == website_id,
                 Conversation.status == ConversationStatus.OPEN,
                 Conversation.visitor_ended == False,  # noqa: E712
-                Conversation.updated_at > cutoff,
             )
             .order_by(Conversation.id.desc())
             .first()
@@ -113,10 +110,47 @@ class ConversationService:
             visitor_ip=(str(visitor_ip).strip() if visitor_ip else None),
             visitor_avatar_color=pick_avatar_color(str(session_id)),
         )
-        
-        self.db.add(conversation)
-        self.db.commit()
-        self.db.refresh(conversation)
+
+        try:
+            self.db.add(conversation)
+            self.db.commit()
+            self.db.refresh(conversation)
+        except IntegrityError:
+            # Race condition: a concurrent connection for the same session
+            # already inserted an OPEN conversation and the partial unique index
+            # (website_id, session_id) WHERE status='open' rejected ours.
+            # Roll back and resume the row that won the race.
+            self.db.rollback()
+            # Retry up to 3 times with a short sleep — the winning transaction
+            # may not yet be visible if commit() and our SELECT overlap tightly.
+            import time as _time
+            conversation = None
+            for _attempt in range(3):
+                conversation = (
+                    self.db.query(Conversation)
+                    .filter(
+                        Conversation.session_id == session_id,
+                        Conversation.website_id == website_id,
+                        Conversation.status == ConversationStatus.OPEN,
+                        Conversation.visitor_ended == False,  # noqa: E712
+                    )
+                    .order_by(Conversation.id.desc())
+                    .first()
+                )
+                if conversation is not None:
+                    break
+                _time.sleep(0.05)  # 50 ms — gives the winner time to commit
+            if conversation is None:
+                raise RuntimeError(
+                    f"Race condition on conversation creation for session {session_id!r} "
+                    "could not be resolved."
+                )
+            logger.info(
+                "conversation_race_resolved",
+                conversation_id=conversation.id,
+                session_id=session_id,
+            )
+            return conversation
 
         # Attach any pre-conversation browsing events captured before the first message.
         # This preserves the invariant: we don't create a conversation just to track page views.
@@ -238,6 +272,7 @@ class ConversationService:
         old_status = conversation.status
         conversation.status = ConversationStatus.RESOLVED
         conversation.closed_by = str(closed_by).strip() if closed_by else None
+        conversation.resolved_at = datetime.utcnow()
         self.db.commit()
         try:
             self.db.refresh(conversation)

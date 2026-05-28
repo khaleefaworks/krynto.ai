@@ -19,6 +19,7 @@ export const docsNav: DocSection[] = [
     slug: 'getting-started',
     pages: [
       { title: 'Introduction', slug: 'getting-started/introduction' },
+      { title: 'Install as PWA', slug: 'getting-started/install-pwa' },
     ],
   },
   {

@@ -12,7 +12,7 @@ FastAPI + PostgreSQL backend. Handles REST API, WebSocket connections (visitor +
 - **JWT HS256** + bcrypt — authentication
 - **slowapi** — rate limiting
 - **structlog** — structured JSON logging
-- **APScheduler** — background jobs (auto-close inactive conversations)
+- **APScheduler** — background jobs (scheduler is running but no recurring jobs are registered; reserved for future use)
 - **pydantic-settings** — typed env config
 
 ## Directory structure
@@ -97,7 +97,8 @@ backend/
 ├── alembic.ini
 ├── start_server.sh       # Gunicorn launch script
 ├── seed_data.py
-└── reset_application.py  # Dev-only: wipe + reseed DB
+├── reset_application.py  # Dev-only: wipe + reseed DB
+└── db_audit.py           # Schema audit CLI — find orphaned/dead columns (bench trim-tables equivalent)
 ```
 
 ## Environment variables
@@ -248,6 +249,37 @@ pytest tests/ --cov=app --cov-report=term-missing
 ```
 
 Tests use SQLite in-memory. No PostgreSQL, Redis, or email services needed.
+
+## Database schema audit
+
+`db_audit.py` is a standalone CLI tool that compares the live PostgreSQL schema against the SQLAlchemy model definitions. Equivalent to Frappe's `bench trim-tables`.
+
+```bash
+# Full report — read-only, safe to run anytime
+python db_audit.py
+
+# Focus on a single table
+python db_audit.py --table conversations
+
+# Flag columns with >90 % NULL values (default threshold is 100 %)
+python db_audit.py --null-threshold 90
+
+# Print DROP COLUMN SQL for orphaned columns (doesn't execute)
+python db_audit.py --generate-sql
+
+# Actually drop orphaned columns (asks for confirmation)
+python db_audit.py --execute
+```
+
+**What it checks:**
+
+| Check | Description |
+|-------|-------------|
+| Orphaned columns | Column exists in DB but has no matching SQLAlchemy model field — safe to drop |
+| Always-null columns | Column exists in model + DB but has 0 non-NULL rows — review before dropping |
+| Ghost tables | Table exists in DB but has no matching model — leftover from a dropped model |
+
+Run after any migration that removes model fields to catch any `ALTER TABLE … DROP COLUMN` you forgot to include.
 
 ## Alembic cheatsheet
 

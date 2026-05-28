@@ -119,8 +119,12 @@ function _preloadKnownSounds(): void {
   }
 }
 
-function _playFile(url: string): void {
-  if (typeof window === 'undefined' || !url) return
+/**
+ * Attempts to play a sound file. Returns true if playback started, false if
+ * blocked by autoplay policy (e.g. iOS, inactive tab). Never throws.
+ */
+async function _playFile(url: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !url) return false
   try {
     // Create a fresh Audio each time — cloneNode(true) does not reliably copy
     // the decoded audio source across browsers, especially in background tabs.
@@ -132,10 +136,12 @@ function _playFile(url: string): void {
       ;(a as any).setSinkId(sinkId).catch(() => {})
     }
 
-    // Properly handle autoplay rejection (browser policy in inactive tabs).
-    a.play().catch(() => {})
+    // Return the promise — caller can detect autoplay rejection (iOS, inactive tab).
+    await a.play()
+    return true
   } catch {
-    // ignore
+    // Autoplay blocked — signal caller to use AudioContext fallback.
+    return false
   }
 }
 
@@ -216,7 +222,7 @@ export function installNotificationSoundArm(): void {
  * Plays a short notification beep in-app.
  * No-op if audio isn't available/armed.
  */
-function _playNotificationSound(kind: NotificationSoundKind): void {
+async function _playNotificationSound(kind: NotificationSoundKind): Promise<void> {
   const url = kind === 'new_visitor'
     ? _getSoundUrl('newChat')
     : kind === 'new_visitor_website'
@@ -225,18 +231,22 @@ function _playNotificationSound(kind: NotificationSoundKind): void {
 
   // 1) Prefer file-based sounds. Empty URL means user chose silent.
   if (!url) return
-  try {
-    _playFile(url)
+
+  const fileOk = await _playFile(url)
+  if (fileOk) {
     isArmed = true
     return
-  } catch {
-    // fall back
   }
 
-  // 2) Fallback to synthesized tone so notifications still work even
-  //    if the sound file is missing/misconfigured.
+  // 2) Fallback to synthesized tone — works on iOS PWA where new Audio().play()
+  //    is blocked by autoplay policy but an already-armed AudioContext can play.
   const ctx = getAudioContext()
   if (!ctx) return
+
+  // Resume context if suspended by background inactivity (common on iOS).
+  try {
+    if (ctx.state === 'suspended') await ctx.resume()
+  } catch { /* ignore */ }
 
   const now = ctx.currentTime
 
@@ -290,17 +300,17 @@ function _playNotificationSound(kind: NotificationSoundKind): void {
 
 // Backward-compatible name used across the app (treated as normal message sound).
 export function playNotificationBeep(): void {
-  _playNotificationSound('message')
+  void _playNotificationSound('message')
 }
 
 /** Plays the 'New chat' sound (configurable, plays from any dashboard page). */
 export function playNewVisitorNotificationSound(): void {
-  _playNotificationSound('new_visitor')
+  void _playNotificationSound('new_visitor')
 }
 
 /** Plays the 'New message' sound (configurable). */
 export function playMessageNotificationSound(): void {
-  _playNotificationSound('message')
+  void _playNotificationSound('message')
 }
 
 /**
@@ -308,5 +318,5 @@ export function playMessageNotificationSound(): void {
  * This should only be called when the agent is on the Customers → Visitors tab.
  */
 export function playNewVisitorOnWebsiteSound(): void {
-  _playNotificationSound('new_visitor_website')
+  void _playNotificationSound('new_visitor_website')
 }
