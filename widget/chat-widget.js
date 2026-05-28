@@ -115,6 +115,10 @@
   // Prevents applyPresence() from auto-dismissing the form mid-fill when
   // agents come online. Reset each time the overlay opens.
   let _contactFormTouched = false;
+  // Reference to closeWidget(), set by createWidget(). Allows outer-scope
+  // functions (hideRatingOverlay, WS handlers) to minimize the widget without
+  // causing a ReferenceError — closeWidget is a nested function in createWidget.
+  let _closeWidgetFn = null;
 
   // ── Input-lock persistence ──────────────────────────────────────────────────
   // When automation_complete fires with allow_input=false (terminal informational
@@ -619,7 +623,7 @@
       ratingTriggeredByVisitorEnd = false;
       ratingTriggeredByAgentResolve = false;
       afterConversationClose();
-      try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+      if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
     } else if (viewMode === 'thread' && !isReadOnlyThread) {
       afterConversationClose();
     }
@@ -701,6 +705,9 @@
     _inputRevealTimer = null;
     const inputCont = $id('chatassist-input-container');
     if (inputCont) inputCont.style.display = '';
+    // Remeasure after reveal: scrollHeight was 0 while container was display:none,
+    // which left the textarea at height:0px. A deferred call gets the correct value.
+    setTimeout(function () { autoResizeInput(); }, 0);
   }
 
   // --- API & State Management ---
@@ -858,10 +865,11 @@
     body.innerHTML = '';
 
     const history = (listData && listData.history) || [];
+    const active = listData && listData.active;
+    const activeIsEnded = active && Boolean(active.visitor_ended);
 
-    // "New Conversation" button — always show when no active conv, or when active is ended.
-    // Rendered first so it appears at the top as the primary call-to-action.
-    if (!listData || !listData.active || (listData.active && listData.active.visitor_ended)) {
+    // "New Conversation" button — show when no active conv, or when active is ended.
+    if (!active || activeIsEnded) {
       const newBtn = document.createElement('button');
       newBtn.className = 'chatassist-conv-new-btn';
       newBtn.type = 'button';
@@ -872,49 +880,40 @@
       body.appendChild(newBtn);
     }
 
-    // Ended / active conversation — rendered below the New Conversation button
-    if (listData && listData.active) {
-      const conv = listData.active;
-      const isEnded = Boolean(conv.visitor_ended);
+    // Non-ended active conversation: pin at top with "Active" badge.
+    if (active && !activeIsEnded) {
+      const conv = active;
       const activeItem = document.createElement('div');
       activeItem.className = 'chatassist-conv-item';
       activeItem.setAttribute('role', 'button');
       activeItem.setAttribute('tabindex', '0');
 
-      const titleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
-      const dateText = conv.last_message_at
+      const aTitleText = conv.title || conv.last_message_preview || ('Conversation ' + (conv.short_id || ('#' + conv.id)));
+      const aDateText = conv.last_message_at
         ? new Date(conv.last_message_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : (conv.created_at ? new Date(conv.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 
-      const titleEl = document.createElement('div');
-      titleEl.className = 'chatassist-conv-item-title';
-      titleEl.textContent = titleText;
+      const aTitleEl = document.createElement('div');
+      aTitleEl.className = 'chatassist-conv-item-title';
+      aTitleEl.textContent = aTitleText;
 
-      const metaEl = document.createElement('div');
-      metaEl.className = 'chatassist-conv-item-meta';
+      const aMetaEl = document.createElement('div');
+      aMetaEl.className = 'chatassist-conv-item-meta';
 
-      const dateEl = document.createElement('span');
-      dateEl.className = 'chatassist-conv-item-date';
-      dateEl.textContent = dateText;
+      const aDateEl = document.createElement('span');
+      aDateEl.className = 'chatassist-conv-item-date';
+      aDateEl.textContent = aDateText;
 
-      const badgeEl = document.createElement('span');
-      if (isEnded) {
-        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-ended';
-        badgeEl.textContent = 'Ended';
-      } else {
-        badgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
-        badgeEl.textContent = 'Active';
-      }
+      const aBadgeEl = document.createElement('span');
+      aBadgeEl.className = 'chatassist-conv-item-badge chatassist-conv-item-badge-active';
+      aBadgeEl.textContent = 'Active';
 
-      metaEl.appendChild(dateEl);
-      metaEl.appendChild(badgeEl);
-      activeItem.appendChild(titleEl);
-      activeItem.appendChild(metaEl);
+      aMetaEl.appendChild(aDateEl);
+      aMetaEl.appendChild(aBadgeEl);
+      activeItem.appendChild(aTitleEl);
+      activeItem.appendChild(aMetaEl);
 
-      // Ended conversations open as read-only; active ones are resumable.
-      const resumeFn = isEnded
-        ? function () { enterThreadView(conv.id, true); }
-        : function () { enterThreadView(conv.id, false); };
+      const resumeFn = function () { enterThreadView(conv.id, false); };
       activeItem.addEventListener('click', resumeFn);
       activeItem.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resumeFn(); }
@@ -922,15 +921,27 @@
       body.appendChild(activeItem);
     }
 
-    if (!history.length) {
+    // Past conversations: merge ended-active (if any) with history, sorted newest first.
+    // This ensures a stale OPEN+visitor_ended conv never appears above a newer resolved one.
+    const pastConvs = [];
+    if (activeIsEnded) {
+      pastConvs.push({ id: active.id, conv: active, badgeText: 'Ended', badgeClass: 'chatassist-conv-item-badge-ended' });
+    }
+    history.forEach(function (conv) {
+      pastConvs.push({ id: conv.id, conv: conv, badgeText: 'Resolved', badgeClass: '' });
+    });
+    pastConvs.sort(function (a, b) { return b.id - a.id; });
+
+    if (!pastConvs.length) {
       const emptyEl = document.createElement('div');
       emptyEl.className = 'chatassist-conv-list-empty';
-      emptyEl.textContent = listData && listData.active ? 'No past conversations' : 'No past conversations';
+      emptyEl.textContent = 'No past conversations';
       body.appendChild(emptyEl);
       return;
     }
 
-    history.forEach(function (conv) {
+    pastConvs.forEach(function (entry) {
+      const conv = entry.conv;
       const item = document.createElement('div');
       item.className = 'chatassist-conv-item';
       item.setAttribute('role', 'button');
@@ -953,15 +964,15 @@
       dateEl.textContent = dateText;
 
       const badgeEl = document.createElement('span');
-      badgeEl.className = 'chatassist-conv-item-badge';
-      badgeEl.textContent = 'Resolved';
+      badgeEl.className = 'chatassist-conv-item-badge' + (entry.badgeClass ? (' ' + entry.badgeClass) : '');
+      badgeEl.textContent = entry.badgeText;
 
       metaEl.appendChild(dateEl);
       metaEl.appendChild(badgeEl);
       item.appendChild(titleEl);
       item.appendChild(metaEl);
 
-      const openFn = function () { openHistoryThread(conv.id); };
+      const openFn = function () { enterThreadView(conv.id, true); };
       item.addEventListener('click', openFn);
       item.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFn(); }
@@ -1546,7 +1557,7 @@
                 _awaitingRatingAfterResolve = false;
                 ratingTriggeredByAgentResolve = false;
                 afterConversationClose();
-                try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+                if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
               }
             }, 7000);
           }
@@ -2970,6 +2981,11 @@
     const win = $id('chatassist-window');
     const input = $id('chatassist-input');
 
+    // Expose closeWidget to outer-scope callers (hideRatingOverlay, WS handlers).
+    // closeWidget is hoisted but captures win/bubble from this scope, so it must
+    // be assigned here after those locals exist.
+    _closeWidgetFn = closeWidget;
+
     function openWidget() {
       enableNotificationSound();
       setUnreadCount(0);
@@ -3057,7 +3073,7 @@
       if (hasRatedSession) {
         ratingTriggeredByVisitorEnd = false;
         afterConversationClose();
-        try { setTimeout(function () { closeWidget(false); }, 200); } catch (e) { }
+        if (_closeWidgetFn) setTimeout(function () { _closeWidgetFn(false); }, 200);
         return;
       }
 
@@ -3515,32 +3531,40 @@
       if (listData && listData.active) {
         if (listData.active.visitor_ended) {
           // Visitor had ended this conversation — don't auto-resume it.
+          // If a more recent resolved conversation exists in history, show that instead
+          // (stale OPEN+visitor_ended conv should not shadow a newer resolved one).
+          const newestHistory = listData.history && listData.history[0];
+          const showId = (newestHistory && newestHistory.id > listData.active.id)
+            ? newestHistory.id
+            : listData.active.id;
           if (!widgetShowHistory) {
-            // History disabled: load the thread as read-only so the visitor can
-            // see their previous messages and the "Start new chat" banner.
-            // The conv_id WS route sends history without firing visitor_socket_connected
-            // or the welcome automation, avoiding noisy agent-side events.
-            await enterThreadView(listData.active.id, true);
+            await enterThreadView(showId, true);
           } else {
-            // History enabled: show list so visitor can start a new one
             enterListView(listData);
           }
         } else {
           // Resume the active (open) conversation directly.
           await enterThreadView(listData.active.id, false);
         }
-      } else if (!widgetShowHistory && _loadClosedState()) {
-        // History is disabled and the visitor previously ended a chat.
-        // Reload the closed conversation as read-only so they see their
-        // history and the "Start new chat" button — no welcome loop.
-        // enterThreadView → connectWebSocket → backend sends {type:'history',
-        // status:'resolved'} which re-injects the banner automatically.
-        const closedId = _loadClosedState();
-        await enterThreadView(closedId, true);
       } else {
-        // No active conversation — start fresh so the bot welcome fires
-        // and the new-message popup can show for returning visitors.
-        enterStartView();
+        // No active conversation.
+        if (!widgetShowHistory) {
+          // History disabled: use most recent resolved conv from API; localStorage is last resort.
+          const histConv = listData && listData.history && listData.history[0];
+          if (histConv) {
+            await enterThreadView(histConv.id, true);
+          } else if (_loadClosedState()) {
+            await enterThreadView(_loadClosedState(), true);
+          } else {
+            enterStartView();
+          }
+        } else if (listData && listData.history.length > 0) {
+          // History enabled and past conversations exist — show the list.
+          enterListView(listData);
+        } else {
+          // No active conversation, no history — start fresh.
+          enterStartView();
+        }
       }
 
       armSoundOnFirstGesture();

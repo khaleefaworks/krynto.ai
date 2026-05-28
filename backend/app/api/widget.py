@@ -684,12 +684,32 @@ async def get_widget_conversations(
             "visitor_ended": bool(conv.visitor_ended),
         }
 
-    # Active (OPEN) conversation
+    # Active (OPEN) conversation — prefer non-ended (visitor still present), most recent first.
+    # Without ORDER BY, PostgreSQL returns the oldest row (lowest ID) which is wrong when a
+    # visitor_ended=True conversation exists alongside a newer visitor_ended=False one.
     active_conv = (
         db.query(Conversation)
-        .filter_by(website_id=website_id, session_id=session_id, status=ConversationStatus.OPEN)
+        .filter(
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+            Conversation.status == ConversationStatus.OPEN,
+            Conversation.visitor_ended == False,
+        )
+        .order_by(Conversation.id.desc())
         .first()
     )
+    if active_conv is None:
+        # Fall back: a visitor_ended OPEN conversation (agent hasn't resolved yet)
+        active_conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.website_id == website_id,
+                Conversation.session_id == session_id,
+                Conversation.status == ConversationStatus.OPEN,
+            )
+            .order_by(Conversation.id.desc())
+            .first()
+        )
 
     # Resolved history (most recent first, paginated)
     history_query = (
@@ -736,7 +756,12 @@ async def create_new_widget_conversation(
 
     existing_open = (
         db.query(Conversation)
-        .filter_by(website_id=website_id, session_id=session_id, status=ConversationStatus.OPEN)
+        .filter(
+            Conversation.website_id == website_id,
+            Conversation.session_id == session_id,
+            Conversation.status == ConversationStatus.OPEN,
+        )
+        .order_by(Conversation.id.desc())
         .first()
     )
     if existing_open:
