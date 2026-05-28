@@ -11,7 +11,7 @@ AI ChatAssist can be installed as a **Progressive Web App (PWA)** on your deskto
 | **Instant access** | Launch from your taskbar or home screen — no URL to type. |
 | **Dedicated window** | Runs in its own window, separate from your browser tabs. |
 | **Push notifications** | Receive alerts even when the app window is closed. |
-| **Offline resilience** | Service worker caches the app shell, so it loads immediately even on flaky connections. |
+| **Offline resilience** | The app loads immediately even on flaky connections. |
 
 ---
 
@@ -23,8 +23,6 @@ The easiest way to install is via the **Install App** button built into the dash
 2. Look for the **download icon (⬇)** in the sidebar — it appears automatically when your browser supports PWA installation and the app is not yet installed.
 3. Click it and follow the browser prompt to confirm.
 4. The button disappears once the app is installed.
-
-> The button is hidden if you are already running in standalone (installed) mode or if your browser does not support `beforeinstallprompt`.
 
 ---
 
@@ -55,7 +53,7 @@ The app icon will appear on your home screen and in the app drawer.
 3. Scroll down and tap **Add to Home Screen**.
 4. Edit the name if desired and tap **Add**.
 
-> **Note:** iOS Safari does not fire the `beforeinstallprompt` event, so the in-sidebar install button will not appear. Use the Share menu method above.
+> **Note:** On iOS, use the Safari Share menu — the in-sidebar install button is not available on this platform.
 
 ### Firefox
 
@@ -97,33 +95,12 @@ Sound alerts complement push notifications when the dashboard is open. Configure
 
 ---
 
-## VAPID Keys (Admin / Self-hosted)
-
-Push notifications require VAPID keys configured in the backend. If you are self-hosting:
-
-```bash
-cd frontend
-npx --yes web-push generate-vapid-keys
-```
-
-Add the output to `backend/.env`:
-
-```env
-VAPID_PUBLIC_KEY=<generated-public-key>
-VAPID_PRIVATE_KEY=<generated-private-key>
-VAPID_SUBJECT=mailto:admin@yourdomain.com
-```
-
-Restart the backend after updating. Agents can then enable push notifications from their Settings page.
-
----
-
 ## Troubleshooting
 
 | Problem | Solution |
 | :--- | :--- |
 | Install button not visible | Your browser may not support PWA install, or the app is already installed. |
 | Push permission was denied | Reset in browser site settings (see above), then re-enable from Settings. |
-| Notifications not arriving | Ensure VAPID keys are set on the server and the backend has been restarted. |
-| iOS notifications not working | Apple added Web Push support for iOS 16.4+ home-screen PWAs only. Install via Safari's Add to Home Screen first. |
+| Notifications not arriving | Check that browser permissions are set to Allow. If the problem persists, contact your administrator. |
+| iOS notifications not working | Web Push on iOS requires iOS 16.4 or later. Install the app via Safari's Add to Home Screen first, then enable notifications from within the installed app. |
 | App opens in browser tab, not standalone | Uninstall and reinstall the PWA from the browser. |

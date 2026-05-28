@@ -16,7 +16,7 @@ Three summary cards at the top of the page always show both **Agent** and **Bot*
 
 Each row shows the current period value, a percentage change badge, and the previous period value it compares against.
 
-> **Counting rule:** A conversation is counted only once a visitor sends a real message (`last_visitor_message_at` is set). WebSocket connect events and welcome messages that received no reply are excluded.
+> **Counting rule:** A conversation is counted only once the visitor actively sends a message. Sessions where the widget was opened but no message was sent are excluded.
 
 ---
 
