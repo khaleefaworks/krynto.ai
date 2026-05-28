@@ -826,7 +826,7 @@ class ConversationOrchestrator:
                         subscriptions=subs,
                         title="New chat",
                         body=(last_message or "New conversation")[:120],
-                        url="/dashboard/chats",
+                        url=f"/dashboard/chats/{conversation.short_id}" if conversation.short_id else "/dashboard/chats",
                         push_type="new_chat",
                     ),
                 )
