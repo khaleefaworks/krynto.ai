@@ -174,3 +174,58 @@ Last updated: 2026-01-12
 ### DB schema audit tool
 - `backend/db_audit.py` — detects orphaned columns, always-null columns, ghost tables
 - Supports `--null-threshold`, `--generate-sql`, `--execute`
+
+---
+
+## Completed (May 2026 — Analytics + Rating + Push batch)
+
+### Analytics Overhaul (AN1) ✅ COMPLETE
+
+| Area | What was done |
+|------|---------------|
+| **resolved_at column** | Added `resolved_at DateTime` to `conversations` (migration `cc1dd2ee3ff4`). Backfilled from `updated_at` for existing resolved rows. Set on close in `conversation_service.py` and `conversation_orchestrator.py`. |
+| **Ghost session exclusion** | All analytics counts and Excel export now filter `last_visitor_message_at IS NOT NULL` — WebSocket-connect-only sessions no longer inflate numbers. |
+| **New conv counting (NC-1/NC-2)** | New conversations grouped by `last_visitor_message_at` (first real interaction), not `created_at` (WS connect). Bot-only conversations excluded from agent new-conv count. |
+| **Resolved chart correctness** | Resolved conversations grouped/filtered by `resolved_at`, not `updated_at`. |
+| **Tag chart timing** | Tag chart now attributes to conversation `created_at`, not tag-application date. |
+| **Bot filter + KPI split** | `analytics_overview` always returns `{agent: KpiMetric, bot: KpiMetric}` shape. Frontend shows `SplitKpiCard` for New Conversations, Resolved Conversations, and Avg First Response. |
+| **Bot tab** | New "Bot" tab with 3 summary cards and 2 daily area charts (purple palette). |
+| **Export columns** | 26-column Excel report: Chat Duration (mins), Agents (merged deduplicated), Lead Source (utm_source/direct), Referrer, Contact Filled, Rating Feedback, Visitor Messages, Agent Messages, Resolved At, description row. |
+| **Export ghost exclusion** | Export query filters `last_visitor_message_at IS NOT NULL`. |
+| **Chat duration in SQL** | Duration computed via `extract(epoch, resolved_at - date_with_time)` to avoid Python timezone arithmetic issues. |
+
+### Rating System Fixes ✅ COMPLETE
+
+| Fix | Detail |
+|-----|--------|
+| **Rating popup on reload** | `_shouldShowRatingPrompt(conv)` checks `status=resolved`, `closed_by≠bot`, `!is_rated`. Fires after `enterThreadView` for closed thread paths in `init()`. `renderConvList` `openFn` also checks and prompts when opening past convs. |
+| **HTTP fallback was broken** | `CONFIG.serverUrl` was undefined — HTTP fallback silently crashed. Fixed to use `CONFIG.apiUrl`. WS path skipped for `isReadOnlyThread` (resolved-conv WS loop rejects `submit_rating`). |
+| **Rating saved via HTTP** | `/ratings/submit` is now `async def`, calls `orchestrator.visitor_rated()` + broadcasts `visitor_rated` to agents after saving to DB. |
+| **Rating feedback as bot message** | `visitor_rated(feedback=)` adds a second `is_agent_only=True` bot message (`Visitor comment: "..."`) and broadcasts `system_message` to agents for real-time display. |
+| **WS handlers pass feedback** | Both `submit_rating` WS handlers (route 1 and route 2) pass `feedback_val` to `orchestrator.visitor_rated()`. |
+| **Close button fixed** | Rating popup ✕ always dismisses without submitting — only Submit button sends. |
+
+### Push Notification Fixes ✅ COMPLETE
+
+| Fix | Detail |
+|-----|--------|
+| **New chat URL** | `_broadcast_new_chat_to_agents` was sending `url="/dashboard/chats"` — clicking opened the list. Fixed to `url=f"/dashboard/chats/{conversation.short_id}"` so notification click lands on the specific conversation. |
+
+### Resolved Filter Real-time Update ✅ COMPLETE
+
+| Fix | Detail |
+|-----|--------|
+| **Resolved list stale on agent-resolve** | `conversation_closed` WS event now increments `resolvedRefreshCounter` state, which is included in the resolved chats fetch key. List refetches immediately when a conversation is resolved, no full page reload needed. |
+
+### Widget Improvements ✅ COMPLETE
+
+| Fix | Detail |
+|-----|--------|
+| **Rating popup UI** | Selected emoji shows `box-shadow` ring (not oversized border). Textarea explicit light/dark styles. Submit button. |
+| **Rating feedback textarea** | Widget rating popup: select emoji → feedback textarea appears → click Submit. Feedback sent alongside rating. |
+
+### PWA Install Button ✅ COMPLETE
+
+| Fix | Detail |
+|-----|--------|
+| **Install App sidebar button** | `usePwaInstall` hook wraps `beforeinstallprompt`. Download icon appears in desktop sidebar bottom actions and mobile sidebar footer. Hidden when already in standalone mode or browser doesn't support PWA install. |
