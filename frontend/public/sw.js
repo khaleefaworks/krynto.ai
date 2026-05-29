@@ -124,11 +124,15 @@ self.addEventListener('push', (event) => {
     const url = String(data.url || '/')
     const pushType = String(data.push_type || 'new_message')   // "new_chat" | "new_message"
 
-    // Use different tags per type so Android stacks them in separate notification groups.
-    // Collapse rapid duplicates within the same type+url.
+    // Tags control notification collapsing on the device.
+    // new_chat: collapse per-conversation (same chat = replace, not stack).
+    // new_message: each message gets a unique tag via timestamp so Android
+    // treats it as a fresh notification and plays the alert sound every time.
+    // Without a unique tag, Android/Samsung silently replaces the existing
+    // notification even when renotify:true is set — causing silent messages.
     const tag = pushType === 'new_chat'
         ? `aica:new_chat:${url.slice(0, 60)}`
-        : `aica:new_message:${url.slice(0, 60)}`
+        : `aica:new_message:${url.slice(0, 60)}:${Date.now()}`
 
     // Different vibration patterns help users feel the difference without unlocking.
     // new_chat: two short pulses (attention-grabbing)
@@ -210,6 +214,43 @@ self.addEventListener('notificationclick', (event) => {
             // No open app tab — open a new window at the exact target URL.
             if (self.clients.openWindow) {
                 try { await self.clients.openWindow(targetUrl) } catch { }
+            }
+        })()
+    )
+})
+
+// ─── Push subscription change ────────────────────────────────────────────────
+// Fired by Chrome/Firefox when the browser rotates push subscription keys
+// (happens on browser update, storage clear, or periodic key rotation).
+// We re-subscribe with the same options and notify the app to send the new
+// subscription to the server — without this, pushes silently stop working.
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+    event.waitUntil(
+        (async () => {
+            try {
+                // Re-subscribe using the same options as before.
+                const options = event.oldSubscription?.options || { userVisibleOnly: true }
+                const newSubscription = await self.registration.pushManager.subscribe(options)
+
+                const msg = { type: 'push_resubscribe', subscription: newSubscription.toJSON() }
+
+                // Notify all open app windows so they can re-register with the server.
+                const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+                for (const client of allClients) {
+                    try { client.postMessage(msg) } catch { }
+                }
+
+                if (typeof BroadcastChannel !== 'undefined') {
+                    try {
+                        const bc = new BroadcastChannel('aica_sw')
+                        bc.postMessage(msg)
+                        bc.close()
+                    } catch { }
+                }
+            } catch {
+                // Re-subscription failed (e.g., permission revoked).
+                // Next app open will call ensurePushSubscription() and handle it.
             }
         })()
     )

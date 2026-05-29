@@ -75,3 +75,22 @@ Your notification preferences are securely stored in the cloud and synchronized 
 For the best notification experience — especially on mobile — install ChatAssist as a Progressive Web App (PWA). This gives the app its own window and enables push alerts even when no browser tab is open.
 
 See the [Install as PWA](../getting-started/install-pwa) guide for step-by-step instructions for all browsers and platforms.
+
+---
+
+## Samsung Android: Notification Categories & Custom Sounds
+
+On Samsung devices, Android lets you assign a **custom sound** and configure **notification categories** per app. This means you can give ChatAssist its own distinct tone so it stands out from other apps — even when your phone is on silent with priority mode on.
+
+The video below walks through exactly how to do this on a Samsung Galaxy phone:
+
+[![Samsung — Enable Notification Categories & Set Custom Sounds](https://img.youtube.com/vi/MByJ9vUdZ80/0.jpg)](https://youtu.be/MByJ9vUdZ80)
+
+### What the video covers
+
+1. Opening **Settings > Notifications > App Notifications** and finding ChatAssist (or your browser/PWA)
+2. Enabling **notification categories** so individual alert types can be tuned separately
+3. Tapping a category and assigning a **custom sound** from your device storage
+4. Setting **importance level** (Silent / Low / Medium / High / Urgent) per category
+
+> **Tip — Install the PWA first**: Samsung's per-category controls work best when ChatAssist is installed as a PWA, because the PWA registers as a standalone app with its own entry in the notification settings rather than being grouped under your browser's notifications.

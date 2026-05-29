@@ -1,6 +1,24 @@
 let audioContext: AudioContext | null = null
 let isArmed = false
 
+// Cache of pre-loaded HTMLAudioElements keyed by URL.
+// Pre-loading avoids the background-tab network/decode delay that makes
+// `new Audio(url).play()` fail (or be silently blocked by autoplay policy)
+// when the tab has been inactive. The browser decodes the file once at arm
+// time and keeps it in memory; subsequent `.play()` calls hit the cache.
+const _audioCache = new Map<string, HTMLAudioElement>()
+
+function _getCachedAudio(url: string): HTMLAudioElement {
+  let audio = _audioCache.get(url)
+  if (!audio) {
+    audio = new Audio(url)
+    audio.preload = 'auto'
+    audio.load()
+    _audioCache.set(url, audio)
+  }
+  return audio
+}
+
 // localStorage keys for user-configurable notification sounds
 export const SOUND_PREF_KEYS = {
   newChat: 'notif_sound_new_chat',
@@ -82,6 +100,13 @@ export async function setNotificationAudioSink(sinkId: string): Promise<void> {
     if (ctx && typeof (ctx as any).setSinkId === 'function') {
       try { await (ctx as any).setSinkId(effectiveSinkId) } catch { }
     }
+
+    // Update all cached Audio elements
+    for (const audio of _audioCache.values()) {
+      if (typeof (audio as any).setSinkId === 'function') {
+        try { await (audio as any).setSinkId(effectiveSinkId) } catch { }
+      }
+    }
   } catch {
     // ignore
   }
@@ -106,12 +131,12 @@ function _preloadKnownSounds(): void {
       _getSoundUrl('newChat'),
       _getSoundUrl('message'),
       _getSoundUrl('newVisitorWebsite'),
-    ].filter(Boolean)
+    ].filter(Boolean) as string[]
     for (const url of urls) {
       try {
-        const a = new Audio(url)
-        a.preload = 'auto'
-        a.load()
+        // _getCachedAudio creates the element, calls .load(), and keeps the
+        // reference alive in _audioCache so it isn't garbage-collected.
+        _getCachedAudio(url)
       } catch { }
     }
   } catch {
@@ -120,23 +145,35 @@ function _preloadKnownSounds(): void {
 }
 
 /**
+ * Clears and rebuilds the audio cache with the current sound preferences.
+ * Call this whenever the user changes their notification sound settings so
+ * the new files are pre-loaded before the next event fires.
+ */
+export function refreshAudioCache(): void {
+  _audioCache.clear()
+  _preloadKnownSounds()
+}
+
+/**
  * Attempts to play a sound file. Returns true if playback started, false if
  * blocked by autoplay policy (e.g. iOS, inactive tab). Never throws.
+ *
+ * Uses a pre-loaded, cached Audio element so the browser doesn't need to
+ * fetch/decode the file at play-time — critical for inactive tabs where
+ * background network requests are throttled and immediate play() calls fail.
  */
 async function _playFile(url: string): Promise<boolean> {
   if (typeof window === 'undefined' || !url) return false
   try {
-    // Create a fresh Audio each time — cloneNode(true) does not reliably copy
-    // the decoded audio source across browsers, especially in background tabs.
-    const a = new Audio(url)
-    a.volume = 1.0
+    const a = _getCachedAudio(url)
 
     const sinkId = _getEffectiveSinkId()
     if (typeof (a as any).setSinkId === 'function') {
-      ;(a as any).setSinkId(sinkId).catch(() => {})
+      try { await (a as any).setSinkId(sinkId) } catch { }
     }
 
-    // Return the promise — caller can detect autoplay rejection (iOS, inactive tab).
+    // Reset to the beginning (required if the element just finished playing).
+    a.currentTime = 0
     await a.play()
     return true
   } catch {

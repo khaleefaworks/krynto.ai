@@ -87,6 +87,15 @@ def send_web_push_to_subscriptions(
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": settings.VAPID_SUBJECT},
                 requests_session=push_session,
+                # Buffer the push for up to 24 hours so messages survive Android
+                # Doze mode and brief network outages. TTL=0 (the pywebpush default)
+                # tells the push service to drop the message immediately if the
+                # device is unreachable — the main cause of silent failures on mobile.
+                ttl=86400,
+                # Urgency=high asks FCM/APNs to wake the device even during battery
+                # optimisation / Doze. Without this, Android can silently defer or
+                # discard the message while the phone is idle.
+                headers={"Urgency": "high"},
             )
             count += 1
         except Exception as e:

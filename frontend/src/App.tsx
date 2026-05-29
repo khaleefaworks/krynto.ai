@@ -84,6 +84,10 @@ const _pendingMsgSoundTimers = new Map<number, ReturnType<typeof setTimeout>>()
 // Drained by the visibilitychange handler when the agent returns to the tab.
 const _pendingPushQueue: Array<{ push_type: string }> = []
 
+// Throttle for push subscription refresh on tab visibility (max once per 30 min).
+let _lastSubscriptionRefreshAt = 0
+const _SUBSCRIPTION_REFRESH_INTERVAL_MS = 30 * 60 * 1000
+
 function App() {
   const {
     token,
@@ -145,6 +149,15 @@ function App() {
           window.location.href = path
           return
         }
+        if (data?.type === 'push_resubscribe') {
+          // SW pushsubscriptionchange fired — browser rotated push keys.
+          // Re-register the new subscription with the server immediately.
+          try {
+            const { ensurePushSubscription: _ensure } = await import('./services/push')
+            await _ensure()
+          } catch { }
+          return
+        }
         if (data?.type !== 'push') return
         await playFromPushData(data)
       } catch { }
@@ -176,20 +189,34 @@ function App() {
   useEffect(() => {
     const onVisible = async () => {
       if (document.hidden) return
+
+      // Drain sounds queued while the tab was hidden.
       const pending = _pendingPushQueue.splice(0)
-      if (!pending.length) return
-      try {
-        await resumeAudioContextIfSuspended()
-        if (!_shouldPlaySound()) return
-        // Play one sound for the highest-priority pending notification
-        // (new_chat takes precedence; avoid spamming multiple sounds).
-        const hasNewChat = pending.some(p => p.push_type === 'new_chat')
-        if (hasNewChat) {
-          playNewVisitorNotificationSound()
-        } else {
-          playMessageNotificationSound()
-        }
-      } catch { }
+      if (pending.length) {
+        try {
+          await resumeAudioContextIfSuspended()
+          if (_shouldPlaySound()) {
+            // Play one sound for the highest-priority pending notification
+            // (new_chat takes precedence; avoid spamming multiple sounds).
+            const hasNewChat = pending.some(p => p.push_type === 'new_chat')
+            if (hasNewChat) {
+              playNewVisitorNotificationSound()
+            } else {
+              playMessageNotificationSound()
+            }
+          }
+        } catch { }
+      }
+
+      // Throttled subscription refresh: verify / re-register push subscription
+      // when the user returns to the PWA after a long period away. On mobile,
+      // subscriptions can silently expire or become stale without any error —
+      // re-checking here ensures push keeps working without requiring a re-login.
+      const now = Date.now()
+      if (now - _lastSubscriptionRefreshAt > _SUBSCRIPTION_REFRESH_INTERVAL_MS) {
+        _lastSubscriptionRefreshAt = now
+        ensurePushSubscription().catch(() => {})
+      }
     }
 
     document.addEventListener('visibilitychange', onVisible)
@@ -423,8 +450,19 @@ function App() {
 
         try {
           const chats = await fetchActiveChats()
-          const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
-          setUnreadChatsCount(unreadChats.length)
+          // Sum total unread messages across all open conversations (not conversation count).
+          // One visitor sending 5 messages = 5 unread, not 1.
+          const totalUnread = chats
+            .filter((c: any) => c.status === 'open')
+            .reduce((sum: number, c: any) => sum + (c.unread_count ?? 0), 0)
+          setUnreadChatsCount(totalUnread)
+          try {
+            if ('setAppBadge' in navigator) {
+              totalUnread > 0
+                ? (navigator as any).setAppBadge(totalUnread)
+                : (navigator as any).clearAppBadge()
+            }
+          } catch { }
         } catch (error) {
           console.error('Failed to update chat count:', error)
         }
@@ -435,8 +473,17 @@ function App() {
     const updateChatCount = async () => {
       try {
         const chats = await fetchActiveChats()
-        const unreadChats = chats.filter((c: any) => c.status === 'open' && (c.unread_count ?? 0) > 0)
-        setUnreadChatsCount(unreadChats.length)
+        const totalUnread = chats
+          .filter((c: any) => c.status === 'open')
+          .reduce((sum: number, c: any) => sum + (c.unread_count ?? 0), 0)
+        setUnreadChatsCount(totalUnread)
+        try {
+          if ('setAppBadge' in navigator) {
+            totalUnread > 0
+              ? (navigator as any).setAppBadge(totalUnread)
+              : (navigator as any).clearAppBadge()
+          }
+        } catch { }
       } catch (error) {
         console.error('Failed to update chat count:', error)
       }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bell, BellOff, Volume2, Play, HelpCircle, RefreshCcw, AlertTriangle, Lock, Unlock, CheckCircle2 } from 'lucide-react'
 import { getNotificationPermission, getVapidPublicKey, isPushSupported, requestPermissionAndSubscribe } from '@/services/push'
-import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound, setNotificationAudioSink, ensureHardwareLabelsUnlocked } from '@/lib/notificationSound'
+import { SOUND_PREF_KEYS, playNewVisitorNotificationSound, playMessageNotificationSound, playNewVisitorOnWebsiteSound, setNotificationAudioSink, ensureHardwareLabelsUnlocked, refreshAudioCache } from '@/lib/notificationSound'
 import { saveNotificationPreferences, fetchNotificationPreferences, syncPrefsToLocalStorage } from '@/services/notificationPrefs'
 
 const SOUND_VERSION = '2024.04.29.v1' // Force update version
@@ -190,6 +190,9 @@ export default function NotificationSettings() {
 
     const handleSoundChange = useCallback((key: keyof typeof SOUND_PREF_KEYS, value: string) => {
         try { localStorage.setItem(SOUND_PREF_KEYS[key], value) } catch { }
+        // Rebuild the pre-loaded audio cache so the new file is decoded in memory
+        // before the next notification fires (avoids background-tab fetch delays).
+        refreshAudioCache()
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
             const pwo = (() => { try { const v = localStorage.getItem('notif_push_when_offline'); return v !== null ? v !== 'false' : true } catch { return true } })()
