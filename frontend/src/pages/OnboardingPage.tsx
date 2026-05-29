@@ -44,7 +44,7 @@ export default function OnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: 'Administrator',
-          email: data.email,
+          email: data.email.trim().toLowerCase(),
           password: data.password,
           setup_secret: data.setupKey,
         }),

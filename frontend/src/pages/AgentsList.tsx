@@ -233,7 +233,7 @@ export default function AgentsList() {
   // ─── CRUD ─────────────────────────────────────────────
   const handleSave = async () => {
     const name = formName.trim()
-    const email = formEmail.trim()
+    const email = formEmail.trim().toLowerCase()
     if (!name || !email) {
       setError('Name and email are required.')
       return

@@ -184,7 +184,7 @@ async def bootstrap_admin(request: Request, bootstrap_request: BootstrapRequest)
                 detail="Users already exist. System may be corrupted."
             )
 
-        admin_email = bootstrap_request.email
+        admin_email = bootstrap_request.email.strip().lower()
         admin_name = bootstrap_request.name or "Administrator"
         
         admin = User(
@@ -246,8 +246,8 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
         )
     
     # Special case: Allow "Administrator" as username (even if email changes).
-    email = login_request.email
-    if str(email or "").strip().lower() == "administrator":
+    email = login_request.email.strip().lower() if login_request.email else ""
+    if email == "administrator":
         user = (
             db.query(User)
             .filter(User.role == UserRole.SYSTEM_MANAGER)
@@ -405,6 +405,7 @@ async def signup(request: Request, signup_request: SignupRequest, db: Session = 
             detail="System not initialized. Create admin first via /auth/bootstrap",
         )
 
+    signup_request.email = signup_request.email.strip().lower()
     existing = db.query(User).filter_by(email=signup_request.email).first()
     if existing and not existing.is_deleted:
         raise HTTPException(
@@ -481,6 +482,7 @@ async def verify_otp(request: Request, body: VerifyOTPRequest, db: Session = Dep
     On success, marks the user as email-verified and returns a JWT exactly
     like the login endpoint does.
     """
+    body.email = body.email.strip().lower()
     user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
     # Avoid leaking whether the email exists
     if not user or not user.is_active:
@@ -542,6 +544,7 @@ async def resend_otp(request: Request, body: ResendOTPRequest, db: Session = Dep
     Re-send the signup OTP.  Always returns 200 to prevent email enumeration.
     Invalidates any existing unused OTP records for this user first.
     """
+    body.email = body.email.strip().lower()
     user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
     if user and user.is_active and not user.is_email_verified:
         # Invalidate previous unused OTPs
@@ -714,6 +717,7 @@ async def forgot_password(
     Always returns HTTP 200 regardless of whether the email exists
     — prevents email enumeration attacks.
     """
+    body.email = body.email.strip().lower()
     user = db.query(User).filter_by(email=body.email, is_deleted=False).first()
     if user and user.is_active:
         # Invalidate any existing unused tokens for this user.
@@ -799,6 +803,7 @@ async def register(
     Only accessible by admins (FULL_ACCESS).
     """
     # Check if user already exists
+    register_request.email = register_request.email.strip().lower()
     existing_user = db.query(User).filter_by(email=register_request.email).first()
     if existing_user:
         if existing_user.is_deleted:

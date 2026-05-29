@@ -25,7 +25,7 @@ export default function ForgotPasswordPage() {
         try {
             await apiRequest('/auth/forgot-password', {
                 method: 'POST',
-                body: JSON.stringify({ email: data.email }),
+                body: JSON.stringify({ email: data.email.trim().toLowerCase() }),
             })
         } catch {
             // Intentionally swallow errors — always show the same generic message
