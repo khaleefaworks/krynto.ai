@@ -24,8 +24,9 @@ def upgrade() -> None:
     # 1. Drop orphaned column: conversations.mode
     #    This column exists in the DB but was removed from the SQLAlchemy
     #    model without a corresponding migration.
+    #    Use IF EXISTS — some environments already had this column removed.
     # ------------------------------------------------------------------
-    op.drop_column('conversations', 'mode')
+    op.execute("ALTER TABLE conversations DROP COLUMN IF EXISTS mode")
 
     # ------------------------------------------------------------------
     # 2. Drop dead column: conversations.title

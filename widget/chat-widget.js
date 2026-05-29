@@ -2673,8 +2673,8 @@
       if (panel) {
         const titleEl = panel.querySelector('.chatassist-contact-overlay-title');
         const subtitleEl = panel.querySelector('.chatassist-contact-overlay-subtitle');
-        if (titleEl) titleEl.textContent = 'Please introduce yourself';
-        if (subtitleEl) subtitleEl.textContent = panel.querySelector('#chatassist-contact-msg-preview')?.style.display === 'block' ? subtitleEl.textContent : (subtitleEl.textContent || 'Leave your contact info so we can get back to you.');
+        if (titleEl) titleEl.textContent = "We'll reach out to you shortly";
+        if (subtitleEl) subtitleEl.textContent = panel.querySelector('#chatassist-contact-msg-preview')?.style.display === 'block' ? subtitleEl.textContent : (subtitleEl.textContent || 'We are currently offline.\nKindly share your contact details with us and our workspace expert will get in touch with you soon!');
       }
     } catch (e) { }
 
@@ -2877,10 +2877,10 @@
           <div class="chatassist-contact-overlay-backdrop"></div>
           <div class="chatassist-contact-overlay-panel">
             <div class="chatassist-contact-overlay-header">
-              <div class="chatassist-contact-overlay-title">Please introduce yourself</div>
+              <div class="chatassist-contact-overlay-title">We'll reach out to you shortly</div>
               <button id="chatassist-contact-overlay-close" class="chatassist-contact-overlay-close">&times;</button>
             </div>
-            <div class="chatassist-contact-overlay-subtitle">Leave your contact info so we can get back to you.</div>
+            <div class="chatassist-contact-overlay-subtitle">We are currently offline.\nKindly share your contact details with us and our workspace expert will get in touch with you soon!</div>
             <div id="chatassist-contact-msg-preview" class="chatassist-contact-msg-preview" style="display:none;"></div>
             <div class="chatassist-contact-form">
               <input type="text" id="chatassist-contact-name" placeholder="Your name *" autocomplete="name" />
