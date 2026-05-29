@@ -46,10 +46,14 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, email: data.email.trim().toLowerCase() }),
       })
-      const result = await res.json()
       if (!res.ok) {
-        throw new Error(result.detail || 'Login failed')
+        if (res.status === 429) {
+          throw new Error('Too many login attempts. Please wait a moment and try again.')
+        }
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody.detail || 'Login failed')
       }
+      const result = await res.json()
 
       // Email not yet verified — backend has sent a fresh verification link to the inbox
       if (result.needs_verification) {
