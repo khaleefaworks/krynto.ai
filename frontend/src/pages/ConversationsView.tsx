@@ -643,23 +643,12 @@ export default function ConversationsView() {
 
     const openVisitorConversation = useCallback((vc: VisitorConversation) => {
         const isResolved = (vc.status || '').toLowerCase() !== 'open'
-        // Switch filter tab so the conversation appears in the list sidebar
+        // Switch filter tab so the sidebar shows the right list
         setActiveFilter(isResolved ? 'resolved' : 'all')
-        // Inject a minimal entry so getShortId() can resolve the short_id
-        // (the conversation may not be in the paginated list yet)
-        if (isResolved) {
-            setResolvedChats((prev: any[]) =>
-                prev.some((c: any) => c.id === vc.id) ? prev : [vc as any, ...prev]
-            )
-        } else {
-            if (!activeChats.some((c) => c.id === vc.id)) {
-                setActiveChats(sortChatsByActivity([vc as any, ...activeChats]))
-            }
-        }
-        // Navigate directly using short_id we already have from the VisitorConversation object
+        // Navigate directly using short_id we already have — no list injection needed
         navigate(`/dashboard/chats/${vc.short_id}`)
         openChat(vc.id)
-    }, [navigate, openChat, setActiveFilter, activeChats, setActiveChats, setResolvedChats])
+    }, [navigate, openChat, setActiveFilter])
 
     // Refresh list/messages when global chat events arrive.
     // This is a safety net: if the per-website WS misses an event, we still
