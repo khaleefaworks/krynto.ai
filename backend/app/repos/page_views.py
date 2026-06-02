@@ -1,11 +1,29 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional
 
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models.conversation_page_view import ConversationPageView
+
+# De-dupe window: consecutive identical URLs within this period are merged.
+# Visits beyond this threshold create a new page_view row so timestamps reflect reality.
+_DEDUP_WINDOW = timedelta(minutes=30)
+
+
+def _within_dedup_window(created_at: object) -> bool:
+    """Return True if created_at is recent enough to be treated as a duplicate."""
+    try:
+        ts = created_at  # type: ignore[assignment]
+        if ts is None:
+            return False
+        if ts.tzinfo is None:  # type: ignore[union-attr]
+            ts = ts.replace(tzinfo=timezone.utc)  # type: ignore[union-attr]
+        return (datetime.now(timezone.utc) - ts) <= _DEDUP_WINDOW
+    except Exception:
+        return False
 
 
 def create_page_view(
@@ -32,7 +50,7 @@ def create_page_view(
         .first()
     )
 
-    if latest and latest.url == url:
+    if latest and latest.url == url and _within_dedup_window(latest.created_at):
         changed = False
         if conversation_id is not None and latest.conversation_id is None:
             latest.conversation_id = conversation_id

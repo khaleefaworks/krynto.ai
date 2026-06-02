@@ -372,6 +372,12 @@ export default function ConversationsView() {
     const [resolving, setResolving] = useState(false)
     const joinedRef = useRef(false)
     const prevSelectedChatRef = useRef<number | null>(selectedChat)
+    // Mirror of selectedChat used by the URL-sync effect to avoid oscillation.
+    // See the comment on that effect for full explanation.
+    const selectedChatRef = useRef<number | null>(selectedChat)
+    useEffect(() => {
+        selectedChatRef.current = selectedChat
+    }, [selectedChat])
     const loadMessagesTokenRef = useRef(0)
     const chatLoadingTokenRef = useRef(0)
     const hasLoadedChatsRef = useRef(false)
@@ -771,10 +777,21 @@ export default function ConversationsView() {
 
     // Handle conversation selection from URL.
     // Canonical URL is /dashboard/chats/:chatId where chatId is the conversation PK.
+    //
+    // NOTE: `selectedChat` is intentionally NOT in the dependency array — we read it via
+    // `selectedChatRef` instead. When a user clicks a conversation in the "Other
+    // conversations" panel, `openChat(id)` sets `selectedChat` immediately, but the URL
+    // hasn't updated yet (Effect B's `navigate()` runs in the same flush, after this
+    // effect). With `selectedChat` in the deps, this effect fired, saw that
+    // `getPreferredConversationId()` (still reading the old URL) returned the old
+    // conversation's ID, and called `openChat(oldId)` — reverting the click. That
+    // triggered Effect B again → infinite oscillation / "page reload" symptom.
+    // Using a ref breaks the cycle: the ref always holds the latest value but does not
+    // cause this effect to re-run on programmatic selections.
     useEffect(() => {
         const preferredId = getPreferredConversationId()
         if (preferredId) {
-            if (preferredId !== selectedChat) {
+            if (preferredId !== selectedChatRef.current) {
                 openChat(preferredId)
                 // Auto-switch the filter tab so the conversation is visible in the list,
                 // but only when the filter actually needs to change to avoid spurious renders.
@@ -784,7 +801,8 @@ export default function ConversationsView() {
             }
             return
         }
-    }, [getPreferredConversationId, selectedChat, openChat, resolvedChats, activeFilter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [getPreferredConversationId, openChat, resolvedChats, activeFilter])
 
     // Deep-link fallback: when chatIdParam is a short_id not found in loaded chats,
     // fetch the conversation from the API and inject it so it can be selected.
