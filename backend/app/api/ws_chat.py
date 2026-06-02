@@ -809,7 +809,6 @@ async def chat_ws(
             # Widget opened by visitor click — trigger welcome if not yet sent.
             if message_type == "widget_opened":
                 try:
-                    from app.repos import messages as messages_repo
                     _wo_conversation = conversations_repo.get_open_conversation_by_session(
                         db, website_id=website_id, session_id=session_id
                     )
