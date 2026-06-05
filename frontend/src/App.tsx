@@ -52,6 +52,13 @@ const _SOUND_MIN_INTERVAL_MS = 1500
 // so other tabs skip their own playback within the same window.
 const _SOUND_CROSS_TAB_KEY = 'ai_chatassist_last_sound_at'
 
+// Tracks the last time a WS-triggered sound played (not push-triggered).
+// Used to suppress duplicate sound from the SW BroadcastChannel push message
+// when the WS event already handled the notification (FCM is typically 1–5 s
+// slower than WS, so without this the agent hears the sound twice).
+let _lastWsSoundAt = 0
+const _WS_PUSH_DEDUP_MS = 6000
+
 function _shouldPlaySound(): boolean {
   const now = Date.now()
   // In-process gate
@@ -62,7 +69,12 @@ function _shouldPlaySound(): boolean {
     if (now - crossTabTs < _SOUND_MIN_INTERVAL_MS) return false
   } catch { /* ignore */ }
   _lastAnySoundAt = now
-  try { localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now)) } catch { /* ignore */ }
+  // Only broadcast to other tabs when this tab can actually play audio.
+  // A hidden tab that writes this key without playing causes visible sibling
+  // tabs to skip their own sound (RC2 cross-tab false-claim).
+  if (!document.hidden) {
+    try { localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now)) } catch { /* ignore */ }
+  }
   return true
 }
 
@@ -79,10 +91,6 @@ function _shouldToast(key: string, minIntervalMs: number): boolean {
 // new_chat event can cancel it and play the correct "New chat" sound instead.
 // The existing 1500 ms gate handles the reverse order (new_chat first).
 const _pendingMsgSoundTimers = new Map<number, ReturnType<typeof setTimeout>>()
-
-// Push events received while the tab was hidden (throttled/frozen).
-// Drained by the visibilitychange handler when the agent returns to the tab.
-const _pendingPushQueue: Array<{ push_type: string }> = []
 
 // Throttle for push subscription refresh on tab visibility (max once per 30 min).
 let _lastSubscriptionRefreshAt = 0
@@ -116,16 +124,16 @@ function App() {
 
     const playFromPushData = async (data: any) => {
       try {
-        const pushType = String(data?.push_type || 'new_message')
-        const title = String(data?.title || '')
+        // Only play in-app sound when the tab is visible — the OS notification
+        // handles alerting the agent when the tab is hidden or frozen.
+        if (document.hidden) return
 
-        // Tab is hidden — queue for catch-up playback when the agent returns.
-        // Browsers freeze JS in background tabs after ~5 min; AudioContext.play()
-        // will fail silently. The visibilitychange handler below drains this queue.
-        if (document.hidden) {
-          _pendingPushQueue.push({ push_type: pushType })
-          return
-        }
+        const pushType = String(data?.push_type || 'new_message')
+
+        // The WS event handler plays the in-app sound immediately (before FCM
+        // delivers the push). If a WS sound played recently, skip the push-triggered
+        // sound to prevent the agent hearing the notification twice (RC3).
+        if (Date.now() - _lastWsSoundAt < _WS_PUSH_DEDUP_MS) return
 
         await resumeAudioContextIfSuspended()
         if (!_shouldPlaySound()) return
@@ -183,35 +191,12 @@ function App() {
     }
   }, [])
 
-  // Catch-up: play a sound when the agent switches back to the tab after being away.
-  // Covers the case where pushes arrived while the tab was frozen/throttled and the
-  // message handler above could not play audio (AudioContext blocked while hidden).
+  // Throttled push subscription refresh when the agent returns to the tab.
+  // On mobile, subscriptions can silently expire — re-checking ensures push
+  // keeps working without requiring a re-login.
   useEffect(() => {
     const onVisible = async () => {
       if (document.hidden) return
-
-      // Drain sounds queued while the tab was hidden.
-      const pending = _pendingPushQueue.splice(0)
-      if (pending.length) {
-        try {
-          await resumeAudioContextIfSuspended()
-          if (_shouldPlaySound()) {
-            // Play one sound for the highest-priority pending notification
-            // (new_chat takes precedence; avoid spamming multiple sounds).
-            const hasNewChat = pending.some(p => p.push_type === 'new_chat')
-            if (hasNewChat) {
-              playNewVisitorNotificationSound()
-            } else {
-              playMessageNotificationSound()
-            }
-          }
-        } catch { }
-      }
-
-      // Throttled subscription refresh: verify / re-register push subscription
-      // when the user returns to the PWA after a long period away. On mobile,
-      // subscriptions can silently expire or become stale without any error —
-      // re-checking here ensures push keeps working without requiring a re-login.
       const now = Date.now()
       if (now - _lastSubscriptionRefreshAt > _SUBSCRIPTION_REFRESH_INTERVAL_MS) {
         _lastSubscriptionRefreshAt = now
@@ -364,6 +349,7 @@ function App() {
             try {
               await resumeAudioContextIfSuspended()
               playNewVisitorNotificationSound()
+              _lastWsSoundAt = Date.now()
             } catch { }
           }
           const websiteName = String((data as any)?.website_name || '').trim()
@@ -408,6 +394,7 @@ function App() {
                   try {
                     await resumeAudioContextIfSuspended()
                     playMessageNotificationSound()
+                    _lastWsSoundAt = Date.now()
                   } catch { }
                 }
               }, 200)
@@ -418,6 +405,7 @@ function App() {
                 try {
                   await resumeAudioContextIfSuspended()
                   playMessageNotificationSound()
+                  _lastWsSoundAt = Date.now()
                 } catch { }
               }
             }

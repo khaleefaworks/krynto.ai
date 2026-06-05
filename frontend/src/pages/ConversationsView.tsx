@@ -1108,6 +1108,7 @@ export default function ConversationsView() {
                 setSelectedChat(null)
                 navigate('/dashboard/chats')
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
+                setConversation(prev => prev ? { ...prev, visitor_ended: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
                 setConversation(prev => prev ? { ...prev, is_online: false } as any : prev)
@@ -1122,6 +1123,7 @@ export default function ConversationsView() {
                         next[idx] = { ...next[idx], visitor_ended: true }
                         setActiveChats(next)
                     }
+                    setConversation(prev => prev ? { ...prev, visitor_ended: true } as any : prev)
                 }
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_socket_connected' && dataConversationId === selectedChat) {
