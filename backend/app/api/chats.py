@@ -167,6 +167,11 @@ async def join_chat(
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
 
+    # Record first agent claim time for missed-chat analytics.
+    if conv.first_agent_joined_at is None:
+        conv.first_agent_joined_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+
     return {
         "success": True,
         "conversation_id": conv.id,

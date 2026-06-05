@@ -17,6 +17,7 @@ from app.services.presence_service import PresenceService
 from app.services.agent_service import AgentService
 from app.services.agent_resolver import is_agent_eligible
 from app.repos import users as users_repo
+from app.models.agent_status_log import AgentStatusLog
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -214,6 +215,11 @@ async def update_availability(
     An agent must be BOTH available AND connected to receive chats.
     """
     current_user.is_available = payload.is_available
+    db.add(AgentStatusLog(
+        agent_id=int(current_user.id),
+        organization_id=int(current_user.organization_id) if current_user.organization_id else None,
+        is_available=payload.is_available,
+    ))
     db.commit()
     db.refresh(current_user)
 

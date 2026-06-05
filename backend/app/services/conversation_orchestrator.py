@@ -771,6 +771,29 @@ class ConversationOrchestrator:
         if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
             return
 
+        # Snapshot which agents are currently available so analytics can later prove
+        # who was online when this chat arrived.
+        try:
+            from app.models.website import Website as _Website
+            from app.models.user import User as _User
+            _site = self.db.query(_Website).filter_by(id=conversation.website_id).first()
+            if _site and _site.organization_id:
+                _online = (
+                    self.db.query(_User.id, _User.name)
+                    .filter(
+                        _User.organization_id == _site.organization_id,
+                        _User.is_available == True,  # noqa: E712
+                        _User.is_active == True,      # noqa: E712
+                    )
+                    .all()
+                )
+                conversation.agents_online_snapshot = json.dumps(
+                    [{"id": r.id, "name": r.name} for r in _online]
+                )
+                self.db.commit()
+        except Exception:
+            pass  # never let snapshot failure block notification delivery
+
         # Get website info
         from app.models.website import Website
         website = self.db.query(Website).filter_by(id=conversation.website_id).first()

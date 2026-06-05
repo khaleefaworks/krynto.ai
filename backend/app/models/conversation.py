@@ -76,6 +76,11 @@ class Conversation(Base, TimestampMixin):
     # entry. They are auto-resolved after a configurable delay once the bot reply is sent.
     bot_only = Column(Boolean, nullable=False, default=False, server_default='false')
 
+    # Availability analytics: JSON array of {id, name} for agents available at chat creation.
+    agents_online_snapshot = Column(Text, nullable=True)
+    # Timestamp when the first agent actively joined this conversation.
+    first_agent_joined_at = Column(DateTime, nullable=True)
+
     website = relationship("Website", back_populates="conversations")
     team = relationship("WebsiteTeam")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", passive_deletes=True)

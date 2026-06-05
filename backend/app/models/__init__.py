@@ -26,6 +26,7 @@ from app.models.website_form import WebsiteForm
 from app.models.website_form_submission import WebsiteFormSubmission
 from app.models.verification_token import VerificationToken
 from app.models.user_login_session import UserLoginSession
+from app.models.agent_status_log import AgentStatusLog
 
 __all__ = [
     "Website",
@@ -58,4 +59,5 @@ __all__ = [
     "AutomationTemplate",
     "VerificationToken",
     "UserLoginSession",
+    "AgentStatusLog",
 ]

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { apiRequest } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { API_BASE } from '@/config/endpoints'
@@ -263,11 +264,21 @@ function ResponseTimeChart({ data }: { data: ChartPoint[] }) {
 // Main Component
 // ---------------------------------------------------------------------------
 
+const VALID_TABS = ['conversations', 'agents', 'tags', 'ratings', 'teams', 'bot', 'availability'] as const
+type AnalyticsTab = typeof VALID_TABS[number]
+
 export default function Analytics() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [websites, setWebsites] = useState<Website[]>([])
   const [selectedWebsite, setSelectedWebsite] = useState<number | ''>('')
   const [dateRange, setDateRange] = useState(30)
-  const [activeTab, setActiveTab] = useState<'conversations' | 'agents' | 'tags' | 'ratings' | 'teams' | 'bot'>('conversations')
+
+  const rawTab = searchParams.get('tab') ?? ''
+  const activeTab: AnalyticsTab = (VALID_TABS as readonly string[]).includes(rawTab) ? rawTab as AnalyticsTab : 'conversations'
+
+  const setActiveTab = (tab: AnalyticsTab) => {
+    setSearchParams(prev => { prev.set('tab', tab); return prev }, { replace: true })
+  }
 
   // Data
   const [overview, setOverview] = useState<OverviewData | null>(null)
@@ -300,6 +311,11 @@ export default function Analytics() {
   const [allAgents, setAllAgents] = useState<AgentStat[]>([])
   const [allTags, setAllTags] = useState<TagStat[]>([])
   const [allTeams, setAllTeams] = useState<{ id: number; name: string; website_id: number }[]>([])
+
+  // Availability analytics state (2A / 2B / 2C)
+  const [availDay, setAvailDay] = useState<string>(todayStr())
+  const [availLoading, setAvailLoading] = useState(false)
+  const [availData, setAvailData] = useState<any>(null)
 
   const startDate = dateNDaysAgo(dateRange - 1)
   const endDate = todayStr()
@@ -360,6 +376,16 @@ export default function Analytics() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [qs])
+
+  // Fetch availability data when the availability tab is active or filters change
+  useEffect(() => {
+    if (activeTab !== 'availability') return
+    setAvailLoading(true)
+    apiRequest<any>(`/analytics/agent-availability?day=${availDay}`)
+      .then(av => setAvailData(av))
+      .catch(console.error)
+      .finally(() => setAvailLoading(false))
+  }, [activeTab, availDay, selectedWebsite])
 
   return (
     <>
@@ -484,7 +510,7 @@ export default function Analytics() {
 
             {/* Tabs */}
             <div className="flex gap-1 bg-gray-200/60 dark:bg-gray-800 p-1 rounded-lg w-fit flex-wrap">
-              {(['conversations', 'agents', 'tags', 'ratings', 'teams', 'bot'] as const).map(tab => (
+              {(['conversations', 'agents', 'tags', 'ratings', 'teams', 'bot', 'availability'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab as typeof activeTab)}
@@ -493,7 +519,7 @@ export default function Analytics() {
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                     }`}
                 >
-                  {tab === 'bot' ? 'Bot' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab === 'bot' ? 'Bot' : tab === 'availability' ? 'Availability' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
@@ -796,6 +822,97 @@ export default function Analytics() {
                     <ConversationChart data={botResolvedChart} color="#a78bfa" label="Bot Resolved" />
                   </ChartCard>
                 </div>
+              </div>
+            )}
+
+            {/* Availability Tab */}
+            {activeTab === 'availability' && (
+              <div className="space-y-6">
+                {/* Availability-specific date filter (website uses the header filter above) */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-600 dark:text-gray-400 font-medium">Date</label>
+                    <input
+                      type="date"
+                      value={availDay}
+                      max={todayStr()}
+                      onChange={e => setAvailDay(e.target.value)}
+                      className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  {availLoading && (
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500" />
+                  )}
+                </div>
+
+                {/* 2A — Agent Availability Timeline */}
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Availability Timeline</h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">When each agent marked themselves available/unavailable</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block" /> Available</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-300 dark:bg-gray-600 inline-block" /> Unavailable</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-200 dark:bg-gray-700 inline-block border border-dashed border-gray-400" /> No data</span>
+                    </div>
+                  </div>
+
+                  {!availData || availData.agents?.length === 0 ? (
+                    <div className="px-5 py-12 text-center text-gray-400 dark:text-gray-500 text-sm">
+                      No availability data for this date. Agents need to toggle their availability for it to appear here.
+                    </div>
+                  ) : (
+                    <div className="p-5 space-y-3">
+                      {/* Time axis labels */}
+                      <div className="flex text-xs text-gray-400 dark:text-gray-500 mb-1 pl-36">
+                        {[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => (
+                          <div key={h} style={{ left: `${(h / 24) * 100}%` }} className="flex-1 text-center first:text-left last:text-right">
+                            {h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`}
+                          </div>
+                        ))}
+                      </div>
+
+                      {availData.agents.map((agent: any) => (
+                        <div key={agent.agent_id} className="flex items-center gap-3">
+                          {/* Agent name */}
+                          <div className="w-32 flex-shrink-0 text-right">
+                            <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate" title={agent.agent_name}>{agent.agent_name}</p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500">{formatDuration(agent.total_online_seconds)}</p>
+                          </div>
+                          {/* Timeline bar */}
+                          <div className="flex-1 h-8 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden relative flex">
+                            {!agent.has_history ? (
+                              <div className="flex-1 h-full bg-gray-200 dark:bg-gray-700 border border-dashed border-gray-400 dark:border-gray-500 rounded-lg" title="No availability changes recorded this day" />
+                            ) : (
+                              agent.segments.map((seg: any, i: number) => {
+                                const dayStart = new Date(`${availDay}T00:00:00`).getTime()
+                                const dayEnd = new Date(`${availDay}T23:59:59`).getTime()
+                                const dayMs = dayEnd - dayStart
+                                const segStart = new Date(seg.start + 'Z').getTime()
+                                const segEnd = new Date(seg.end + 'Z').getTime()
+                                const left = Math.max(0, ((segStart - dayStart) / dayMs) * 100)
+                                const width = Math.min(100 - left, ((segEnd - segStart) / dayMs) * 100)
+                                const startTime = new Date(seg.start + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                const endTime = new Date(seg.end + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                return (
+                                  <div
+                                    key={i}
+                                    title={`${seg.is_available ? 'Available' : 'Unavailable'}: ${startTime} – ${endTime} (${formatDuration(seg.duration_seconds)})`}
+                                    style={{ position: 'absolute', left: `${left}%`, width: `${Math.max(width, 0.5)}%`, top: 0, bottom: 0 }}
+                                    className={`${seg.is_available ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'} transition-opacity hover:opacity-80`}
+                                  />
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
               </div>
             )}
           </>

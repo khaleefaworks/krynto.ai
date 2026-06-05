@@ -209,16 +209,24 @@ def conversation_summary(
         Conversation.id.in_(db.query(replied_subq.c.conversation_id))
     ).count()
 
-    # Avg first response time (seconds) — time from conversation.created_at
-    # to the first agent message in that conversation.
+    # Avg first response time — from first visitor message to first agent reply.
+    # Using conversation.created_at was wrong: that fires with the welcome message
+    # before the visitor types anything, inflating response times artificially.
     first_agent_msg = (
         db.query(
             Message.conversation_id,
             func.min(Message.created_at).label("first_agent_at"),
         )
-        .filter(
-            Message.sender_type == MessageSenderType.AGENT,
+        .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    first_visitor_msg = (
+        db.query(
+            Message.conversation_id,
+            func.min(Message.created_at).label("first_visitor_at"),
         )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
         .group_by(Message.conversation_id)
         .subquery()
     )
@@ -227,13 +235,16 @@ def conversation_summary(
         db.query(
             func.avg(
                 func.extract("epoch", first_agent_msg.c.first_agent_at)
-                - func.extract("epoch", Conversation.created_at)
+                - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
             )
         )
+        .select_from(Conversation)
         .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+        .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
     if allowed_ids is not None:
@@ -423,19 +434,30 @@ def response_time_chart(
         .group_by(Message.conversation_id)
         .subquery()
     )
+    first_visitor_msg = (
+        db.query(
+            Message.conversation_id,
+            func.min(Message.created_at).label("first_visitor_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
 
     rows = (
         db.query(
             func.date(Conversation.created_at).label("day"),
             (
                 func.extract("epoch", first_agent_msg.c.first_agent_at)
-                - func.extract("epoch", Conversation.created_at)
+                - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
             ).label("response_seconds"),
         )
         .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+        .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
     if allowed_ids is not None:
@@ -532,7 +554,7 @@ def agents_summary(
     msgs_q = msgs_q.group_by(Message.sender)
     msgs_map = {row[0]: row[1] for row in msgs_q.all()}
 
-    # First response time per agent (avg)
+    # First response time per agent — from first visitor message to first agent reply.
     first_agent_msg = (
         db.query(
             Message.conversation_id,
@@ -543,19 +565,30 @@ def agents_summary(
         .group_by(Message.conversation_id, Message.sender)
         .subquery()
     )
+    first_visitor_msg = (
+        db.query(
+            Message.conversation_id,
+            func.min(Message.created_at).label("first_visitor_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
 
     resp_q = (
         db.query(
             first_agent_msg.c.agent_email,
             func.avg(
                 func.extract("epoch", first_agent_msg.c.first_agent_at)
-                - func.extract("epoch", Conversation.created_at)
+                - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
             ).label("avg_seconds"),
         )
         .join(Conversation, Conversation.id == first_agent_msg.c.conversation_id)
+        .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
     if allowed_ids is not None:
@@ -651,7 +684,7 @@ def teams_summary(
     )
     resolved_map = {row[0]: row[1] for row in resolved_q.all()}
 
-    # Avg first-response per team
+    # Avg first-response per team — from first visitor message to first agent reply.
     first_agent_msg = (
         db.query(
             Message.conversation_id,
@@ -661,19 +694,30 @@ def teams_summary(
         .group_by(Message.conversation_id)
         .subquery()
     )
+    first_visitor_msg = (
+        db.query(
+            Message.conversation_id,
+            func.min(Message.created_at).label("first_visitor_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
     resp_q = (
         db.query(
             Conversation.team_id,
             func.avg(
                 func.extract("epoch", first_agent_msg.c.first_agent_at)
-                - func.extract("epoch", Conversation.created_at)
+                - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
             ).label("avg_seconds"),
         )
         .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+        .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
             Conversation.team_id.in_(team_ids),
             Conversation.created_at >= start_dt,
             Conversation.created_at <= end_dt,
+            first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
         .group_by(Conversation.team_id)
     )
@@ -807,7 +851,7 @@ def analytics_overview(
         return q.scalar() or 0
 
     def _avg_response(s: datetime, e: datetime) -> float | None:
-        """Agent-only first-response time (bots have no agent replies)."""
+        """First-response time: from first visitor message to first agent reply."""
         first_agent_msg = (
             db.query(
                 Message.conversation_id,
@@ -817,18 +861,30 @@ def analytics_overview(
             .group_by(Message.conversation_id)
             .subquery()
         )
+        first_visitor_msg = (
+            db.query(
+                Message.conversation_id,
+                func.min(Message.created_at).label("first_visitor_at"),
+            )
+            .filter(Message.sender_type == MessageSenderType.VISITOR)
+            .group_by(Message.conversation_id)
+            .subquery()
+        )
         q = (
             db.query(
                 func.avg(
                     func.extract("epoch", first_agent_msg.c.first_agent_at)
-                    - func.extract("epoch", Conversation.created_at)
+                    - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
                 )
             )
+            .select_from(Conversation)
             .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
+            .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
             .filter(
                 Conversation.bot_only == False,  # noqa: E712
                 Conversation.created_at >= s,
                 Conversation.created_at <= e,
+                first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
             )
         )
         if allowed_ids is not None:
@@ -954,6 +1010,7 @@ def export_xlsx(
         "Visitor Messages", "Agent Messages",
         "Rating", "Rating Feedback", "Closed By", "Tags",
         "Lead Source", "Referrer", "Page URL",
+        "Agents Online at Arrival", "Time to First Join (s)",
     ]
     _REPORT_DESCRIPTIONS = [
         "Short unique conversation ID", "OPEN or RESOLVED", "Website name", "Routed team name",
@@ -971,6 +1028,8 @@ def export_xlsx(
         "utm_source from page URL if present, otherwise 'direct'",
         "HTTP referrer URL of visitor's first page view",
         "URL of the visitor's first page view",
+        "Agents marked available when this chat arrived (comma-separated names)",
+        "Seconds from chat arrival to first agent joining (accepting) the chat",
     ]
 
     # Empty workbook if user has no accessible websites
@@ -996,6 +1055,17 @@ def export_xlsx(
             func.min(Message.created_at).label("first_agent_at"),
         )
         .filter(Message.sender_type == MessageSenderType.AGENT)
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # first visitor message timestamp per conversation (response time baseline)
+    first_visitor_at_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.min(Message.created_at).label("first_visitor_at"),
+        )
+        .filter(Message.sender_type == MessageSenderType.VISITOR)
         .group_by(Message.conversation_id)
         .subquery()
     )
@@ -1141,7 +1211,7 @@ def export_xlsx(
                 "epoch",
                 Conversation.resolved_at - func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at)
             ).label("chat_duration_seconds"),
-            (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", Conversation.created_at)).label("response_time_seconds"),
+            (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", first_visitor_at_subq.c.first_visitor_at)).label("response_time_seconds"),
             func.coalesce(visitor_msg_count_subq.c.visitor_msg_count, 0).label("visitor_msg_count"),
             func.coalesce(agent_msg_count_subq.c.agent_msg_count, 0).label("agent_msg_count"),
             rating_alias.rating.label("rating"),
@@ -1150,12 +1220,16 @@ def export_xlsx(
             func.coalesce(tags_subq.c.tags, "").label("tags"),
             func.coalesce(first_pv_referrer_subq.c.referrer, "").label("referrer"),
             func.coalesce(first_pv.c.url, first_pv_session.c.session_url).label("page_url"),
+            Conversation.agents_online_snapshot.label("agents_online_snapshot"),
+            Conversation.first_agent_joined_at.label("first_agent_joined_at"),
+            Conversation.created_at.label("conv_created_at"),
         )
         .outerjoin(website_alias, website_alias.id == Conversation.website_id)
         .outerjoin(team_alias, team_alias.id == Conversation.team_id)
         .outerjoin(rating_alias, rating_alias.conversation_id == Conversation.id)
         .outerjoin(assigned_user, assigned_user.id == Conversation.assigned_agent_id)
         .outerjoin(first_agent_at, first_agent_at.c.conversation_id == Conversation.id)
+        .outerjoin(first_visitor_at_subq, first_visitor_at_subq.c.conversation_id == Conversation.id)
         .outerjoin(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
         .outerjoin(msg_user, msg_user.email == first_agent_msg.c.agent_sender)
         .outerjoin(tags_subq, tags_subq.c.conversation_id == Conversation.id)
@@ -1247,6 +1321,25 @@ def export_xlsx(
             except Exception:
                 pass
 
+        # Agents online at arrival — parse JSON snapshot
+        agents_at_arrival = ""
+        if row.agents_online_snapshot:
+            try:
+                import json as _json
+                _snap = _json.loads(row.agents_online_snapshot)
+                agents_at_arrival = ", ".join(ag.get("name", "") for ag in _snap if ag.get("name"))
+            except Exception:
+                pass
+
+        # Time to first join — seconds from chat arrival to agent joining
+        time_to_first_join: float | str = ""
+        if row.first_agent_joined_at and row.conv_created_at:
+            try:
+                _created = row.conv_created_at.astimezone(timezone.utc).replace(tzinfo=None) if row.conv_created_at.tzinfo else row.conv_created_at
+                time_to_first_join = round((row.first_agent_joined_at - _created).total_seconds(), 1)
+            except Exception:
+                pass
+
         ws.append([
             row.short_id or "",
             status_val,
@@ -1274,6 +1367,8 @@ def export_xlsx(
             lead_source,
             row.referrer or "",
             row.page_url or "",
+            agents_at_arrival,
+            time_to_first_join,
         ])
 
     out = io.BytesIO()
@@ -1460,3 +1555,361 @@ def export_transcripts(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Availability Analytics (2A, 2B, 2C)
+# ---------------------------------------------------------------------------
+
+def _avail_day_bounds(day: date):
+    """Return UTC-naive start/end datetimes covering the full calendar day."""
+    start = datetime.combine(day, time.min)
+    end = datetime.combine(day, time.max)
+    return start, end
+
+
+def _agent_org_id(db: Session, current_user: User) -> int | None:
+    return int(current_user.organization_id) if current_user.organization_id else None
+
+
+@router.get("/agent-availability")
+def agent_availability(
+    day: str = Query(..., description="Date in YYYY-MM-DD format"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return availability segments for each agent on the given day.
+
+    Each segment is {agent_id, agent_name, start, end, is_available}.
+    Admins see all agents in their org; regular agents see only themselves.
+    """
+    import json as _json
+    from app.models.agent_status_log import AgentStatusLog
+
+    try:
+        target_day = date.fromisoformat(day)
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
+
+    day_start, day_end = _avail_day_bounds(target_day)
+    org_id = _agent_org_id(db, current_user)
+
+    is_admin = current_user.is_admin()
+
+    # Which agents to show
+    agent_filter_ids: list[int] | None = None
+    if not is_admin:
+        agent_filter_ids = [int(current_user.id)]
+
+    # Fetch all agents in scope
+    agent_q = db.query(User.id, User.name, User.email).filter(User.is_active == True)  # noqa: E712
+    if org_id:
+        agent_q = agent_q.filter(User.organization_id == org_id)
+    if agent_filter_ids:
+        agent_q = agent_q.filter(User.id.in_(agent_filter_ids))
+    agents = agent_q.all()
+    agent_map = {a.id: {"id": a.id, "name": a.name, "email": a.email} for a in agents}
+    agent_ids = list(agent_map.keys())
+
+    if not agent_ids:
+        return {"day": day, "agents": []}
+
+    # Fetch log entries for this day + the most recent entry before day start per agent
+    # (to know the opening state at midnight).
+    entries_today = (
+        db.query(AgentStatusLog)
+        .filter(
+            AgentStatusLog.agent_id.in_(agent_ids),
+            AgentStatusLog.changed_at >= day_start,
+            AgentStatusLog.changed_at <= day_end,
+        )
+        .order_by(AgentStatusLog.agent_id, AgentStatusLog.changed_at)
+        .all()
+    )
+
+    # For each agent, find their last status before this day to seed the opening state.
+    from sqlalchemy import func as _func
+    subq = (
+        db.query(
+            AgentStatusLog.agent_id,
+            _func.max(AgentStatusLog.changed_at).label("max_at"),
+        )
+        .filter(
+            AgentStatusLog.agent_id.in_(agent_ids),
+            AgentStatusLog.changed_at < day_start,
+        )
+        .group_by(AgentStatusLog.agent_id)
+        .subquery()
+    )
+    prior_rows = (
+        db.query(AgentStatusLog)
+        .join(subq, and_(
+            AgentStatusLog.agent_id == subq.c.agent_id,
+            AgentStatusLog.changed_at == subq.c.max_at,
+        ))
+        .all()
+    )
+    prior_state: dict[int, bool] = {r.agent_id: r.is_available for r in prior_rows}
+
+    # Build per-agent segments
+    from collections import defaultdict
+    by_agent: dict[int, list] = defaultdict(list)
+    for e in entries_today:
+        by_agent[int(e.agent_id)].append(e)
+
+    result = []
+    for aid, info in agent_map.items():
+        logs = by_agent.get(aid, [])
+        segments = []
+        total_online_seconds = 0
+
+        # Seed: state at midnight
+        current_state = prior_state.get(aid, None)  # None = no history yet
+        seg_start = day_start
+
+        for log in logs:
+            seg_end = log.changed_at
+            if current_state is not None:
+                duration = (seg_end - seg_start).total_seconds()
+                segments.append({
+                    "start": seg_start.isoformat(),
+                    "end": seg_end.isoformat(),
+                    "is_available": current_state,
+                    "duration_seconds": int(duration),
+                })
+                if current_state:
+                    total_online_seconds += int(duration)
+            current_state = log.is_available
+            seg_start = log.changed_at
+
+        # Final segment to end of day (or now, whichever is earlier)
+        now_naive = datetime.utcnow()
+        seg_end = min(day_end, now_naive)
+        if current_state is not None and seg_start < seg_end:
+            duration = (seg_end - seg_start).total_seconds()
+            segments.append({
+                "start": seg_start.isoformat(),
+                "end": seg_end.isoformat(),
+                "is_available": current_state,
+                "duration_seconds": int(duration),
+            })
+            if current_state:
+                total_online_seconds += int(duration)
+
+        result.append({
+            "agent_id": aid,
+            "agent_name": info["name"],
+            "agent_email": info["email"],
+            "segments": segments,
+            "total_online_seconds": total_online_seconds,
+            "has_history": current_state is not None,
+        })
+
+    return {"day": day, "agents": result}
+
+
+@router.get("/chat-arrivals")
+def chat_arrivals(
+    day: str = Query(..., description="Date in YYYY-MM-DD format"),
+    website_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List all conversations that arrived on the given day with their online-agent
+    snapshot and claim info (2B).
+    """
+    import json as _json
+
+    try:
+        target_day = date.fromisoformat(day)
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
+
+    day_start, day_end = _avail_day_bounds(target_day)
+    org_id = _agent_org_id(db, current_user)
+    is_admin = current_user.is_admin()
+
+    # Scope websites
+    allowed_wids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+
+    conv_q = (
+        db.query(
+            Conversation.id,
+            Conversation.short_id,
+            Conversation.visitor_name,
+            Conversation.visitor_email,
+            Conversation.created_at,
+            Conversation.agents_online_snapshot,
+            Conversation.assigned_agent_id,
+            Conversation.first_agent_joined_at,
+            Conversation.website_id,
+            Conversation.bot_only,
+        )
+        .filter(
+            Conversation.created_at >= day_start,
+            Conversation.created_at <= day_end,
+            Conversation.bot_only == False,  # noqa: E712
+        )
+    )
+    if allowed_wids is not None:
+        conv_q = conv_q.filter(Conversation.website_id.in_(allowed_wids))
+
+    rows = conv_q.order_by(Conversation.created_at).all()
+
+    # Fetch agent names for claimed_by
+    claimed_agent_ids = {r.assigned_agent_id for r in rows if r.assigned_agent_id}
+    agent_names: dict[int, str] = {}
+    if claimed_agent_ids:
+        for u in db.query(User.id, User.name).filter(User.id.in_(claimed_agent_ids)).all():
+            agent_names[u.id] = u.name
+
+    chats = []
+    for r in rows:
+        snapshot = []
+        if r.agents_online_snapshot:
+            try:
+                snapshot = _json.loads(r.agents_online_snapshot)
+            except Exception:
+                pass
+
+        seconds_to_claim = None
+        if r.first_agent_joined_at and r.created_at:
+            created_naive = r.created_at.astimezone(timezone.utc).replace(tzinfo=None) if r.created_at.tzinfo else r.created_at
+            seconds_to_claim = int((r.first_agent_joined_at - created_naive).total_seconds())
+
+        chats.append({
+            "conversation_id": r.id,
+            "short_id": r.short_id,
+            "visitor_name": r.visitor_name or "Visitor",
+            "visitor_email": r.visitor_email,
+            "arrived_at": r.created_at.isoformat() if r.created_at else None,
+            "agents_online": snapshot,
+            "claimed_by_agent_id": r.assigned_agent_id,
+            "claimed_by_agent_name": agent_names.get(r.assigned_agent_id) if r.assigned_agent_id else None,
+            "first_agent_joined_at": r.first_agent_joined_at.isoformat() if r.first_agent_joined_at else None,
+            "seconds_to_claim": seconds_to_claim,
+        })
+
+    return {"day": day, "total": len(chats), "chats": chats}
+
+
+@router.get("/missed-chats")
+def missed_chats(
+    day: str = Query(..., description="Date in YYYY-MM-DD format"),
+    website_id: Optional[int] = Query(None),
+    threshold_minutes: int = Query(5, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return missed-chat counts for the given day (2C).
+
+    A chat is missed if no agent joined within threshold_minutes of arrival.
+    Per-agent breakdown shows who was in the online snapshot but didn't claim.
+    """
+    import json as _json
+
+    try:
+        target_day = date.fromisoformat(day)
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
+
+    day_start, day_end = _avail_day_bounds(target_day)
+    is_admin = current_user.is_admin()
+    allowed_wids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    threshold_secs = threshold_minutes * 60
+
+    conv_q = (
+        db.query(
+            Conversation.id,
+            Conversation.short_id,
+            Conversation.created_at,
+            Conversation.agents_online_snapshot,
+            Conversation.assigned_agent_id,
+            Conversation.first_agent_joined_at,
+        )
+        .filter(
+            Conversation.created_at >= day_start,
+            Conversation.created_at <= day_end,
+            Conversation.bot_only == False,  # noqa: E712
+        )
+    )
+    if allowed_wids is not None:
+        conv_q = conv_q.filter(Conversation.website_id.in_(allowed_wids))
+
+    rows = conv_q.all()
+
+    missed_convs = []
+    for r in rows:
+        if r.first_agent_joined_at is None:
+            # Never claimed at all = missed
+            missed_convs.append(r)
+        else:
+            secs = (r.first_agent_joined_at - r.created_at).total_seconds()
+            if secs > threshold_secs:
+                missed_convs.append(r)
+
+    # Build per-agent breakdown: who was online but the chat was missed
+    agent_online_count: dict[int, int] = {}   # times they were in a snapshot
+    agent_missed_count: dict[int, int] = {}   # times chat was missed and they were online
+    agent_info: dict[int, dict] = {}
+
+    for r in missed_convs:
+        snapshot = []
+        if r.agents_online_snapshot:
+            try:
+                snapshot = _json.loads(r.agents_online_snapshot)
+            except Exception:
+                pass
+        for ag in snapshot:
+            aid = ag.get("id")
+            if not aid:
+                continue
+            agent_online_count[aid] = agent_online_count.get(aid, 0) + 1
+            agent_missed_count[aid] = agent_missed_count.get(aid, 0) + 1
+            if aid not in agent_info:
+                agent_info[aid] = {"id": aid, "name": ag.get("name", "")}
+
+    # Also count how many total arrived chats each agent was online for (across all chats)
+    agent_total_online: dict[int, int] = {}
+    for r in rows:
+        snapshot = []
+        if r.agents_online_snapshot:
+            try:
+                snapshot = _json.loads(r.agents_online_snapshot)
+            except Exception:
+                pass
+        for ag in snapshot:
+            aid = ag.get("id")
+            if aid:
+                agent_total_online[aid] = agent_total_online.get(aid, 0) + 1
+                if aid not in agent_info:
+                    agent_info[aid] = {"id": aid, "name": ag.get("name", "")}
+
+    # Non-admin: filter to self only
+    if not is_admin:
+        my_id = int(current_user.id)
+        agent_info = {k: v for k, v in agent_info.items() if k == my_id}
+
+    breakdown = []
+    for aid, info in agent_info.items():
+        breakdown.append({
+            "agent_id": aid,
+            "agent_name": info["name"],
+            "chats_arrived_while_online": agent_total_online.get(aid, 0),
+            "missed_count": agent_missed_count.get(aid, 0),
+        })
+    breakdown.sort(key=lambda x: x["missed_count"], reverse=True)
+
+    return {
+        "day": day,
+        "threshold_minutes": threshold_minutes,
+        "total_chats": len(rows),
+        "total_missed": len(missed_convs),
+        "breakdown": breakdown,
+    }
