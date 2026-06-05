@@ -143,6 +143,18 @@ export async function registerSubscription(subscription: PushSubscription): Prom
     })
 }
 
+export async function testPushNotification(): Promise<{ subscriptions: number; attempted: number; vapid_configured: boolean }> {
+    const res = await apiRequest('/push/test', {
+        method: 'POST',
+        body: JSON.stringify({
+            title: 'Notification test',
+            body: "Sound is working! You're all set to receive chat alerts.",
+            url: '/dashboard/chats',
+        }),
+    })
+    return res as any
+}
+
 /**
  * Unsubscribe from push notifications.
  * Calls the server to remove the subscription row, then unsubscribes the browser channel.

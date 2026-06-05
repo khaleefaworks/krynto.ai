@@ -19,6 +19,7 @@ import {
     type Note
 } from '@/services/conversationMetadata'
 import { apiRequest } from '@/services/api'
+import { isPushSupported, testPushNotification } from '@/services/push'
 import { updateConversationMetadata } from '@/services/conversationMetadata'
 import { fetchChatSummary } from '@/services/chats'
 import { Button } from '@/components/ui/button'
@@ -48,6 +49,11 @@ import {
     Globe,
     UserRound,
     Calendar,
+    Bell,
+    BellRing,
+    Loader2,
+    CheckCircle2,
+    AlertCircle,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -415,6 +421,8 @@ export default function ConversationsView() {
 
     const [tagPickerOpen, setTagPickerOpen] = useState(false)
     const [tagPickerQuery, setTagPickerQuery] = useState('')
+
+    const [testNotifState, setTestNotifState] = useState<'idle' | 'loading' | 'sent' | 'no_sub' | 'error'>('idle')
 
     const unassignedTags = useMemo(() => {
         const assigned = new Set(conversationTags.map((t: any) => Number(t?.id)))
@@ -1793,6 +1801,22 @@ export default function ConversationsView() {
         }
     }
 
+    const handleTestNotification = async () => {
+        if (testNotifState === 'loading') return
+        setTestNotifState('loading')
+        try {
+            const res = await testPushNotification()
+            if (res.attempted > 0) {
+                setTestNotifState('sent')
+            } else {
+                setTestNotifState('no_sub')
+            }
+        } catch {
+            setTestNotifState('error')
+        }
+        setTimeout(() => setTestNotifState('idle'), 4000)
+    }
+
     const chatsForList = activeFilter === 'resolved'
         ? (Array.isArray(resolvedChats) ? resolvedChats : [])
         : activeChats
@@ -3019,6 +3043,33 @@ export default function ConversationsView() {
                         <p className="text-gray-600 dark:text-gray-400">
                             Choose a chat from the list to view messages and reply.
                         </p>
+                        {isPushSupported() && Notification.permission === 'granted' && (
+                            <div className="mt-6">
+                                <button
+                                    onClick={handleTestNotification}
+                                    disabled={testNotifState === 'loading'}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors
+                                        disabled:opacity-60 disabled:cursor-not-allowed
+                                        border-gray-200 dark:border-gray-700
+                                        bg-white dark:bg-gray-800
+                                        text-gray-600 dark:text-gray-400
+                                        hover:bg-gray-50 dark:hover:bg-gray-700
+                                        hover:text-gray-900 dark:hover:text-gray-200"
+                                >
+                                    {testNotifState === 'loading' && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {testNotifState === 'sent' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                                    {testNotifState === 'error' && <AlertCircle className="h-4 w-4 text-red-500" />}
+                                    {testNotifState === 'no_sub' && <BellRing className="h-4 w-4 text-yellow-500" />}
+                                    {testNotifState === 'idle' && <Bell className="h-4 w-4" />}
+                                    <span>
+                                        {testNotifState === 'sent' && 'Notification sent — check for sound!'}
+                                        {testNotifState === 'no_sub' && 'No subscription — enable notifications in settings'}
+                                        {testNotifState === 'error' && 'Failed to send — try again'}
+                                        {(testNotifState === 'idle' || testNotifState === 'loading') && 'Test notification sound'}
+                                    </span>
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
