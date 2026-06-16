@@ -2250,8 +2250,16 @@ export default function ConversationsView() {
                                 placeholder="Search name, email, ID…"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-9 dark:bg-gray-700 dark:border-gray-600"
+                                className="pl-9 pr-8 dark:bg-gray-700 dark:border-gray-600"
                             />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                >
+                                    <X className="h-3.5 w-3.5" />
+                                </button>
+                            )}
                         </div>
                         <TooltipProvider>
                             <Tooltip>
