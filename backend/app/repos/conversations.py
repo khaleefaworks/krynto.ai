@@ -258,7 +258,13 @@ def resolved_conversations_with_counts_and_last_message(
             sa.or_(
                 sa.func.lower(Conversation.visitor_name).like(q),
                 sa.func.lower(Conversation.visitor_email).like(q),
+                sa.func.lower(Conversation.visitor_phone).like(q),
                 sa.func.lower(Conversation.short_id).like(q),
+                Conversation.id.in_(
+                    db.query(Message.conversation_id).filter(
+                        sa.func.lower(Message.content).like(q)
+                    )
+                ),
             )
         )
 
@@ -342,7 +348,13 @@ def resolved_conversations_count(
             sa.or_(
                 sa.func.lower(Conversation.visitor_name).like(s),
                 sa.func.lower(Conversation.visitor_email).like(s),
+                sa.func.lower(Conversation.visitor_phone).like(s),
                 sa.func.lower(Conversation.short_id).like(s),
+                Conversation.id.in_(
+                    db.query(Message.conversation_id).filter(
+                        sa.func.lower(Message.content).like(s)
+                    )
+                ),
             )
         )
 

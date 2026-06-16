@@ -360,6 +360,7 @@ export default function ConversationsView() {
     // List state
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
 
     // Advanced conversation filters
     const [filterPanelOpen, setFilterPanelOpen] = useState(false)
@@ -467,6 +468,12 @@ export default function ConversationsView() {
     useEffect(() => {
         localStorage.setItem('chat_right_sidebar_collapsed', String(rightSidebarCollapsed))
     }, [rightSidebarCollapsed])
+
+    // Debounce search query for server-side resolved search (300ms)
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+        return () => clearTimeout(timer)
+    }, [searchQuery])
 
     // Close mobile visitor details overlay when switching conversations
     useEffect(() => {
@@ -1825,13 +1832,15 @@ export default function ConversationsView() {
         // Resolved: filtering is server-side, results are already correct
         ? chatsForList
         : chatsForList.filter(chat => {
-            // Search: name, email, short_id, session_id, last_message
+            // Search: name, email, phone, short_id, title, session_id, last_message
             if (searchQuery) {
                 const q = searchQuery.toLowerCase().trim()
                 const fields = [
                     String((chat as any).visitor_name || ''),
                     String((chat as any).visitor_email || ''),
+                    String((chat as any).visitor_phone || ''),
                     String((chat as any).short_id || ''),
+                    String((chat as any).title || ''),
                     String(chat.session_id || ''),
                     String((chat as any).last_message || ''),
                 ]
@@ -1908,9 +1917,9 @@ export default function ConversationsView() {
         return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name))
     }, [activeChats, resolvedChats, availableTags])
 
-    // Server-side filters for resolved list — rebuilt any time a filter/search changes
+    // Server-side filters for resolved list — use debouncedSearchQuery to avoid per-keystroke API requests
     const resolvedServerFilters = activeFilter === 'resolved' ? {
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery || undefined,
         teamId: filterTeamId ?? undefined,
         tagIds: filterTagIds.length ? filterTagIds : undefined,
         dateFrom: filterDateFrom || undefined,
@@ -1926,7 +1935,7 @@ export default function ConversationsView() {
     useEffect(() => {
         if (activeFilter !== 'resolved') return
 
-        const newKey = [searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo, resolvedRefreshCounter].join('|')
+        const newKey = [debouncedSearchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds.join(','), filterDateFrom, filterDateTo, resolvedRefreshCounter].join('|')
 
         // Same filter params and we already have data — activeFilter bounced back, skip reset
         if (resolvedFetchKeyRef.current === newKey && resolvedChatsLoadedRef.current) return
@@ -1949,7 +1958,7 @@ export default function ConversationsView() {
                     fetchResolvedCount({
                         websiteId: filterWebsiteId ?? undefined,
                         agentId: filterAgentId ?? undefined,
-                        search: searchQuery || undefined,
+                        search: debouncedSearchQuery || undefined,
                         teamId: filterTeamId ?? undefined,
                         tagIds: filterTagIds.length ? filterTagIds : undefined,
                         dateFrom: filterDateFrom || undefined,
@@ -1972,7 +1981,7 @@ export default function ConversationsView() {
         }
         load()
         return () => { cancelled = true }
-    }, [activeFilter, searchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo, resolvedRefreshCounter])
+    }, [activeFilter, debouncedSearchQuery, filterWebsiteId, filterAgentId, filterTeamId, filterTagIds, filterDateFrom, filterDateTo, resolvedRefreshCounter])
 
     const getFilterHeaderText = () => {
         switch (activeFilter) {
@@ -2195,12 +2204,12 @@ export default function ConversationsView() {
                                             }`}
                                     >
                                         {leftFilterCollapsed ? (
-                                            <>
+                                            <div className='flex flex-col w-full items-center'>
                                                 <Check className="h-4 w-4 flex-shrink-0" />
                                                 <span className="text-xs font-semibold">
                                                     {resolvedTotal === null ? '…' : resolvedTotal >= 100 ? '100+' : resolvedTotal}
                                                 </span>
-                                            </>
+                                            </div>
                                         ) : (
                                             <>
                                                 <div className="flex items-center gap-3">
@@ -2476,13 +2485,13 @@ export default function ConversationsView() {
                                         </div>
 
                                         <div className="flex-1 min-w-0">
-                                            {/* Row 1: name + website+ time */}
-                                            <div className="flex items-baseline justify-between gap-1">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-[14px] font-semibold text-gray-900 dark:text-white truncate leading-tight">
+                                            {/* Row 1: name + website + time */}
+                                            <div className="flex items-baseline justify-between gap-1 min-w-0">
+                                                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                                                    <span className="text-[14px] font-semibold text-gray-900 dark:text-white truncate leading-tight shrink">
                                                         {conversationDisplayName(chat as any)}
                                                     </span>
-                                                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] max-w-28 truncate rounded">
+                                                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] max-w-28 truncate rounded shrink-0">
                                                         {(chat as any).website_name || `Site #${(chat as any).website_id}`}
                                                     </Badge>
                                                 </div>
