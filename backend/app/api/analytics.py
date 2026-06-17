@@ -41,6 +41,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1070,6 +1072,17 @@ def export_xlsx(
         .subquery()
     )
 
+    # first human message (visitor OR agent) — true conversation start time
+    first_human_at = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.min(Message.created_at).label("first_human_at"),
+        )
+        .filter(Message.sender_type.in_([MessageSenderType.VISITOR, MessageSenderType.AGENT]))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
     # first agent message row to get sender
     first_agent_msg = (
         db.query(
@@ -1205,11 +1218,21 @@ def export_xlsx(
             Conversation.browser_info.label("browser_info"),
             func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
             agents_involved_subq.c.agents_involved.label("agents_involved"),
-            func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at).label("date_with_time"),
-            Conversation.resolved_at.label("resolved_at"),
-            func.extract(
-                "epoch",
-                Conversation.resolved_at - func.coalesce(first_pv.c.first_pv_at, first_pv_session.c.first_pv_at, Conversation.created_at)
+            func.coalesce(first_human_at.c.first_human_at, Conversation.created_at).label("date_with_time"),
+            case(
+                (Conversation.closed_by == "agent", Conversation.resolved_at),
+                else_=None,
+            ).label("resolved_at"),
+            case(
+                (
+                    Conversation.closed_by == "agent",
+                    func.extract(
+                        "epoch",
+                        func.timezone("UTC", Conversation.resolved_at)
+                        - func.coalesce(first_human_at.c.first_human_at, Conversation.created_at),
+                    ),
+                ),
+                else_=None,
             ).label("chat_duration_seconds"),
             (func.extract("epoch", first_agent_at.c.first_agent_at) - func.extract("epoch", first_visitor_at_subq.c.first_visitor_at)).label("response_time_seconds"),
             func.coalesce(visitor_msg_count_subq.c.visitor_msg_count, 0).label("visitor_msg_count"),
@@ -1230,6 +1253,7 @@ def export_xlsx(
         .outerjoin(assigned_user, assigned_user.id == Conversation.assigned_agent_id)
         .outerjoin(first_agent_at, first_agent_at.c.conversation_id == Conversation.id)
         .outerjoin(first_visitor_at_subq, first_visitor_at_subq.c.conversation_id == Conversation.id)
+        .outerjoin(first_human_at, first_human_at.c.conversation_id == Conversation.id)
         .outerjoin(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
         .outerjoin(msg_user, msg_user.email == first_agent_msg.c.agent_sender)
         .outerjoin(tags_subq, tags_subq.c.conversation_id == Conversation.id)
@@ -1278,6 +1302,9 @@ def export_xlsx(
             except Exception:
                 return str(dt_val)
         try:
+            if dt_val.tzinfo is None:
+                dt_val = dt_val.replace(tzinfo=timezone.utc)
+            dt_val = dt_val.astimezone(_IST)
             return f"{dt_val.date().isoformat()}  {dt_val.strftime('%I:%M:%S%p')}"
         except Exception:
             return str(dt_val)
@@ -1528,13 +1555,21 @@ def export_transcripts(
         rating = _RATING_LABEL_T.get(raw_rating, "") if raw_rating is not None else ""
         tags = tags_map.get(conv.id, "")
         closed_by = getattr(conv, "closed_by", "") or ""
-        started = conv.created_at.strftime("%Y-%m-%d %H:%M") if conv.created_at else ""
+        if conv.created_at:
+            ct = conv.created_at if conv.created_at.tzinfo else conv.created_at.replace(tzinfo=timezone.utc)
+            started = ct.astimezone(_IST).strftime("%Y-%m-%d %H:%M")
+        else:
+            started = ""
 
         for msg in msgs:
             sender = msg.sender or (
                 msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type)
             )
-            ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S") if msg.created_at else ""
+            if msg.created_at:
+                mt = msg.created_at if msg.created_at.tzinfo else msg.created_at.replace(tzinfo=timezone.utc)
+                ts = mt.astimezone(_IST).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                ts = ""
             msg_type = msg.event_type or ""
             content = msg.content or ""
             ws.append([
