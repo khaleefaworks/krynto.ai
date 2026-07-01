@@ -346,7 +346,7 @@ def get_chat_summary(
         "last_message": None,
         "last_message_at": None,
         "created_at": _utc_iso(conv.created_at),
-        "closed_at": _utc_iso(getattr(conv, "updated_at", None)),
+        "closed_at": _utc_iso(getattr(conv, "resolved_at", None)),
         "bot_only": bool(getattr(conv, "bot_only", False)),
         "tags": _safe_serialize_conversation_tags(conv),
     }
@@ -490,7 +490,7 @@ def get_resolved_conversations(
                 "last_message": last_message_val,
                 "last_message_at": _utc_iso(last_message_at),
                 "created_at": _utc_iso(conv.created_at),
-                "closed_at": _utc_iso(getattr(conv, "updated_at", None)),
+                "closed_at": _utc_iso(getattr(conv, "resolved_at", None)),
                 "tags": _safe_serialize_conversation_tags(conv),
             }
         )
