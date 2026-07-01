@@ -165,13 +165,48 @@ def start_scheduler() -> None:
     _run_auto_resolve_visitor_ended) have been intentionally disabled.
     Conversations now stay OPEN until an agent or visitor explicitly resolves
     them.  The job functions are preserved below for reference / manual use.
+
+    Registered jobs:
+    - Notification retry (every 5 min): Retry failed push notifications with backoff
+    - Notification cleanup (daily): Clean up old completed notifications
     """
     global _scheduler
     if _scheduler is not None:
         return  # Already running (e.g. reload in dev mode).
 
     _scheduler = AsyncIOScheduler(timezone="UTC")
-    # No recurring jobs registered — scheduler is kept alive for future use.
+
+    # Phase 2B: Register notification retry job
+    try:
+        from app.services.notification_retry_service import retry_failed_notifications, cleanup_old_notifications
+
+        # Retry failed notifications every 5 minutes
+        _scheduler.add_job(
+            retry_failed_notifications,
+            "interval",
+            minutes=5,
+            id="notification_retry_job",
+            name="Retry failed push notifications with exponential backoff",
+            max_instances=1,  # Prevent concurrent runs
+            replace_existing=True,
+        )
+        logger.info("notification_retry_job_registered")
+
+        # Clean up old notifications daily at 2 AM UTC
+        _scheduler.add_job(
+            cleanup_old_notifications,
+            "cron",
+            hour=2,
+            minute=0,
+            id="notification_cleanup_job",
+            name="Clean up old completed notifications",
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info("notification_cleanup_job_registered")
+    except Exception as e:
+        logger.warning("notification_jobs_registration_failed", error=str(e))
+
     _scheduler.start()
     logger.info("auto_close_scheduler_started")
 

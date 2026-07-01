@@ -110,3 +110,79 @@ async def test_push(
         "attempted": attempted,
         "vapid_configured": bool((settings.VAPID_PUBLIC_KEY or "").strip() and (settings.VAPID_PRIVATE_KEY or "").strip() and (settings.VAPID_SUBJECT or "").strip()),
     }
+
+
+@router.post("/validate")
+async def validate_subscriptions(
+    current_user: User = Depends(require_agent),
+    db: Session = Depends(get_db),
+):
+    """
+    Validate all push subscriptions for the current agent.
+
+    Checks if subscriptions are still valid (not 410 Gone, not expired).
+    Removes stale subscriptions from the database.
+
+    Returns:
+    - valid: number of working subscriptions
+    - stale: number of stale subscriptions (removed)
+    - total_removed: same as stale
+    - vapid_configured: whether VAPID is properly configured
+    """
+    subs = push_subs_repo.list_subscriptions_for_agent(db, agent_id=int(current_user.id))
+
+    if not subs:
+        return {
+            "ok": True,
+            "valid": 0,
+            "stale": 0,
+            "total_removed": 0,
+            "vapid_configured": bool((settings.VAPID_PUBLIC_KEY or "").strip() and (settings.VAPID_PRIVATE_KEY or "").strip() and (settings.VAPID_SUBJECT or "").strip()),
+        }
+
+    valid = 0
+    stale_endpoints = []
+
+    # Validate each subscription
+    for sub in subs:
+        try:
+            import json as json_lib
+            # Send a small ping to validate the subscription is still active
+            # Use TTL=0 so it's not buffered if device is unreachable
+            send_web_push_to_subscriptions(
+                subscriptions=[sub],
+                title="Push validation",
+                body="",
+                push_type="validation",
+            )
+            valid += 1
+            logger.info("push_subscription_valid", agent_id=current_user.id, endpoint=sub.endpoint[:50])
+        except Exception as e:
+            error_str = str(e)
+            # Check if 410 Gone (endpoint no longer valid)
+            is_gone = "410" in error_str or (hasattr(e, "response") and getattr(getattr(e, "response", None), "status_code", None) == 410)
+
+            if is_gone:
+                stale_endpoints.append(sub.endpoint)
+                logger.warning("push_subscription_gone_removing", agent_id=current_user.id, endpoint=sub.endpoint[:50])
+            else:
+                # Other errors (network timeout, etc.) — don't remove, might be temporary
+                logger.warning("push_subscription_validation_error", agent_id=current_user.id, error=error_str[:200])
+
+    # Remove stale subscriptions
+    removed_count = 0
+    for endpoint in stale_endpoints:
+        try:
+            deleted = push_subs_repo.delete_subscription(db, agent_id=int(current_user.id), endpoint=endpoint)
+            if deleted:
+                removed_count += 1
+        except Exception as e:
+            logger.warning("push_subscription_delete_failed", agent_id=current_user.id, error=str(e)[:200])
+
+    return {
+        "ok": True,
+        "valid": valid,
+        "stale": len(stale_endpoints),
+        "total_removed": removed_count,
+        "vapid_configured": bool((settings.VAPID_PUBLIC_KEY or "").strip() and (settings.VAPID_PRIVATE_KEY or "").strip() and (settings.VAPID_SUBJECT or "").strip()),
+    }

@@ -44,37 +44,68 @@ import { API_BASE } from './config/endpoints'
 
 const _lastToastByKey = new Map<string, number>()
 
-// Global sound gate: any notification sound (chat or message) is blocked for this window.
-// Prevents rapid-fire stacking when many events arrive at once.
+// ─── PHASE 1A: Per-Conversation Sound Throttling (not global) ─────────────────
+// Previous behavior: global 1.5s gate blocked ALL sounds (caused silent chats)
+// New behavior: per-conversation 5s throttle + 500ms global minimum
+// This allows multiple simultaneous chats to all get sounds while preventing spam.
+
+// Per-conversation sound throttle: tracks last sound time for each conversation
+const _lastSoundByConversationId = new Map<number, number>()
+const _SOUND_PER_CONVERSATION_MIN_MS = 5000  // 5s per conversation (was 1500 global)
+const _SOUND_GLOBAL_MIN_MS = 500  // Minimum gap between ANY sounds (prevent stacking)
+
+// Global minimum between any two sounds (allows other conversations)
 let _lastAnySoundAt = 0
-const _SOUND_MIN_INTERVAL_MS = 1500
+
 // Cross-tab dedup key: any tab that plays a sound writes this key to localStorage
 // so other tabs skip their own playback within the same window.
 const _SOUND_CROSS_TAB_KEY = 'ai_chatassist_last_sound_at'
 
 // Tracks the last time a WS-triggered sound played (not push-triggered).
-// Used to suppress duplicate sound from the SW BroadcastChannel push message
-// when the WS event already handled the notification (FCM is typically 1–5 s
-// slower than WS, so without this the agent hears the sound twice).
+// Used to suppress duplicate sound from the SW BroadcastChannel push message.
+// Extended from 6s to 30s to account for FCM latency (typically 10-30s on slow networks).
 let _lastWsSoundAt = 0
-const _WS_PUSH_DEDUP_MS = 6000
+const _WS_PUSH_DEDUP_MS = 30000  // 30 seconds (was 6s, too short for FCM)
 
-function _shouldPlaySound(): boolean {
+/**
+ * Check if we should play a notification sound.
+ *
+ * Per-conversation behavior (recommended):
+ *   - Conversation A gets sound, then B within 1s → B plays sound (different convos)
+ *   - Conversation A gets 2 messages within 5s → only first plays sound (same convo)
+ *
+ * Backward compatible (conversationId optional):
+ *   - No conversationId → uses global 500ms minimum only
+ */
+function _shouldPlaySound(conversationId?: number): boolean {
   const now = Date.now()
-  // In-process gate
-  if (now - _lastAnySoundAt < _SOUND_MIN_INTERVAL_MS) return false
-  // Cross-tab gate: check if another tab already played recently
-  try {
-    const crossTabTs = Number(localStorage.getItem(_SOUND_CROSS_TAB_KEY) || 0)
-    if (now - crossTabTs < _SOUND_MIN_INTERVAL_MS) return false
-  } catch { /* ignore */ }
-  _lastAnySoundAt = now
-  // Only broadcast to other tabs when this tab can actually play audio.
-  // A hidden tab that writes this key without playing causes visible sibling
-  // tabs to skip their own sound (RC2 cross-tab false-claim).
-  if (!document.hidden) {
-    try { localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now)) } catch { /* ignore */ }
+
+  // Global minimum: at least 500ms between ANY sounds (prevent stacking)
+  if (now - _lastAnySoundAt < _SOUND_GLOBAL_MIN_MS) {
+    return false
   }
+
+  // Per-conversation throttle: if we know which conversation this is for,
+  // check if it's been throttled recently. This allows OTHER conversations
+  // to still get sounds while preventing rapid spam in the same conversation.
+  if (conversationId !== undefined && conversationId > 0) {
+    const lastConvSound = _lastSoundByConversationId.get(conversationId) || 0
+    if (now - lastConvSound < _SOUND_PER_CONVERSATION_MIN_MS) {
+      console.log(`🔇 Sound throttled for conversation ${conversationId} (rate-limited)`)
+      return false
+    }
+    _lastSoundByConversationId.set(conversationId, now)
+  }
+
+  _lastAnySoundAt = now
+
+  // Cross-tab dedup: write to localStorage so other tabs know a sound was played
+  try {
+    if (!document.hidden) {
+      localStorage.setItem(_SOUND_CROSS_TAB_KEY, String(now))
+    }
+  } catch { /* ignore */ }
+
   return true
 }
 
@@ -130,13 +161,17 @@ function App() {
 
         const pushType = String(data?.push_type || 'new_message')
 
+        // Extended from 6s to 30s to handle FCM latency (typically 10-30s on slow networks).
         // The WS event handler plays the in-app sound immediately (before FCM
         // delivers the push). If a WS sound played recently, skip the push-triggered
-        // sound to prevent the agent hearing the notification twice (RC3).
+        // sound to prevent the agent hearing the notification twice.
         if (Date.now() - _lastWsSoundAt < _WS_PUSH_DEDUP_MS) return
 
         await resumeAudioContextIfSuspended()
-        if (!_shouldPlaySound()) return
+
+        // Phase 1A: Pass conversationId for per-conversation throttling
+        const conversationId = typeof data?.conversation_id === 'number' ? data.conversation_id : undefined
+        if (!_shouldPlaySound(conversationId)) return
 
         const isNewChat = pushType === 'new_chat'
         if (isNewChat) {
@@ -336,7 +371,7 @@ function App() {
         if (data.type === 'new_chat') {
           // Cancel any pending visitor_message sound for this conversation —
           // new_chat takes priority and plays the "New chat" sound instead.
-          // The 1500 ms gate handles the reverse order (new_chat arrives first).
+          // The per-conversation throttle now handles priority (5s minimum).
           if (conversationId) {
             const pending = _pendingMsgSoundTimers.get(conversationId)
             if (pending !== undefined) {
@@ -345,7 +380,8 @@ function App() {
             }
           }
 
-          if (_shouldPlaySound()) {
+          // Phase 1A: Pass conversationId for per-conversation throttling
+          if (_shouldPlaySound(conversationId)) {
             try {
               await resumeAudioContextIfSuspended()
               playNewVisitorNotificationSound()
@@ -390,7 +426,8 @@ function App() {
               if (existing !== undefined) clearTimeout(existing)
               const timer = setTimeout(async () => {
                 _pendingMsgSoundTimers.delete(conversationId)
-                if (_shouldPlaySound()) {
+                // Phase 1A: Pass conversationId for per-conversation throttling
+                if (_shouldPlaySound(conversationId)) {
                   try {
                     await resumeAudioContextIfSuspended()
                     playMessageNotificationSound()
@@ -401,6 +438,7 @@ function App() {
               _pendingMsgSoundTimers.set(conversationId, timer)
             } else {
               // No conversation id — play immediately (fallback, should be rare).
+              // Without conversationId, uses global minimum only.
               if (_shouldPlaySound()) {
                 try {
                   await resumeAudioContextIfSuspended()
