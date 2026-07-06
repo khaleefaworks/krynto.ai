@@ -416,6 +416,12 @@ export default function ConversationsView() {
 
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
+    // Always-fresh read for WS handler closures (avoids stale-closure staleness
+    // from the chat-specific effect's narrower dependency array).
+    const conversationRef = useRef(conversation)
+    useEffect(() => {
+        conversationRef.current = conversation
+    }, [conversation])
     const [notes, setNotes] = useState<Note[]>([])
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
@@ -1133,12 +1139,23 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
                 setConversation(prev => prev ? { ...prev, visitor_ended: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-            } else if (data.type === 'visitor_session_presence' && String((data as any)?.session_id || '') === conversation?.session_id) {
+            } else if (data.type === 'visitor_session_presence' && String((data as any)?.session_id || '') === conversationRef.current?.session_id) {
                 // Same signal the Customers -> Visitors page uses: fires on every
                 // connect/disconnect regardless of engagement, unlike the
                 // visitor_dropped/visitor_reconnected timeline events (which only
                 // fire once the visitor has sent a message or clicked a button).
-                setConversation(prev => prev ? { ...prev, is_online: Boolean((data as any)?.is_online) } as any : prev)
+                // Matches against the ref (not the closed-over `conversation`) so
+                // this can't miss due to the effect's closure being stale.
+                const isNowOnline = Boolean((data as any)?.is_online)
+                const disconnectedAt = (data as any)?.last_disconnected_at
+                setConversation(prev => prev ? {
+                    ...prev,
+                    is_online: isNowOnline,
+                    // Update last_seen_at live so the header doesn't need a reload
+                    // to reflect it: use the server's timestamp when given (offline
+                    // transition), otherwise "now" for the online transition.
+                    last_seen_at: isNowOnline ? new Date().toISOString() : (disconnectedAt || new Date().toISOString()),
+                } as any : prev)
             } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
                 const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
                 if (eventType === 'visitor_left') {
@@ -2711,7 +2728,13 @@ export default function ConversationsView() {
                                     )}
                                     {(() => {
                                         const isOnline = Boolean((conversation as any)?.is_online)
-                                        const lastActiveTs = (conversation as any)?.last_visitor_message_at || conversation?.last_seen_at
+                                        // last_seen_at tracks actual presence (connect + heartbeat pings),
+                                        // so it's the correct "last seen" signal. last_visitor_message_at
+                                        // only reflects when they last typed something, which can be far
+                                        // more stale than when they were actually last connected — using
+                                        // it as primary (the previous bug) showed wildly wrong times for
+                                        // anyone who stayed connected without sending more messages.
+                                        const lastActiveTs = conversation?.last_seen_at || (conversation as any)?.last_visitor_message_at
                                         if (isOnline) {
                                             return (
                                                 <p className="flex text-xs text-green-500 items-center gap-1">

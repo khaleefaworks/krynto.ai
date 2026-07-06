@@ -43,6 +43,18 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
         return dt
 
 
+def _utc_iso(dt: datetime | None) -> str | None:
+    """Serialize a datetime to ISO-8601, always appending '+00:00' for naive
+    (timezone-unaware) datetimes so browsers correctly interpret them as UTC
+    instead of local time (see app/api/chats.py's identical helper)."""
+    if dt is None:
+        return None
+    s = dt.isoformat()
+    if '+' not in s[10:] and not s.endswith('Z') and not s.endswith('z'):
+        s += '+00:00'
+    return s
+
+
 VISITOR_LEFT_DELAY_SECONDS = 15
 _PRESENCE_HEARTBEAT_INTERVAL = 60  # seconds between Redis TTL renewals
 _visitor_left_scheduled: set[int] = set()
@@ -99,7 +111,9 @@ async def _send_delayed_session_presence_event(
                     "website_id": int(website_id),
                     "session_id": str(session_id),
                     "is_online": False,
-                    "last_disconnected_at": last_disconnected_at.isoformat() if getattr(last_disconnected_at, "isoformat", None) else None,
+                    # Naive datetimes are stored as UTC — must suffix '+00:00' or JS
+                    # Date() silently reparses as local time (see chats.py _utc_iso).
+                    "last_disconnected_at": _utc_iso(last_disconnected_at),
                 },
                 include_global=True,
             )
