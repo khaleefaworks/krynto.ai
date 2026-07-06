@@ -288,15 +288,12 @@ class AutomationService:
             key = (str(trigger), str(name))
             try:
                 if key in existing_map:
-                    # Sync nodes/edges/category from seed; preserve user-set enabled.
-                    record = existing_map[key]
-                    record.nodes = payload.get("nodes") or []
-                    record.edges = payload.get("edges") or []
-                    record.category = str(payload.get("category") or "auto_message")
-                    from sqlalchemy.orm.attributes import flag_modified
-                    flag_modified(record, "nodes")
-                    flag_modified(record, "edges")
-                    changed = True
+                    # Already present — leave it alone. This seeder only backfills
+                    # missing defaults; it must never overwrite an existing row,
+                    # since admins customize these in place (e.g. Team routing
+                    # chatbot's actual buttons/team assignments) and a "sync"
+                    # here would silently wipe that back to the bare seed.
+                    continue
                 else:
                     automation = Automation(
                         website_id=website_id,

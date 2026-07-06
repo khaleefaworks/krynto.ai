@@ -333,7 +333,12 @@ def get_chat_summary(
         "visit_count": int(getattr(conv, "visit_count", 0) or 0) if hasattr(conv, "visit_count") else None,
         "last_seen_at": _utc_iso(getattr(conv, "last_seen_at", None)),
         "last_visitor_message_at": _utc_iso(getattr(conv, "last_visitor_message_at", None)),
-        "is_online": int(conv.id) in ChatService.active_visitors,
+        # Session-level presence (same source as Customers -> Visitors and the
+        # visitor_session_presence WS broadcast), not the per-conversation
+        # active_visitors registry — that one only reflects a socket registered
+        # against this specific conversation_id and can lag/diverge from the
+        # visitor's actual connection state.
+        "is_online": ChatService.is_session_online(website_id=int(conv.website_id), session_id=str(conv.session_id)),
         "status": conv.status.value if hasattr(conv.status, "value") else conv.status,
         "is_handoff": bool(getattr(conv, "is_handoff", False)),
         "assigned_agent_id": agent_id,

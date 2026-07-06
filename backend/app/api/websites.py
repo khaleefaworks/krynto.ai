@@ -117,6 +117,20 @@ def create_website(
     db.commit()
     db.refresh(website)
 
+    # Seed default automations for this website (waiting message, offline prompt,
+    # presence timeline, new-chat reminder, etc.). Non-fatal: website creation
+    # should still succeed even if this fails. Safe to re-run — only inserts
+    # missing (trigger, name) pairs, never touches existing/customized ones.
+    try:
+        from app.services.automation_service import AutomationService
+
+        AutomationService(db).ensure_default_automations_for_website(website_id=website.id)
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
     return website
 
 
