@@ -91,6 +91,21 @@
   let activeAgentAvatarUrl = null;
   let activeAgentName = null;
 
+  // "Connecting to agent..." rotating indicator (W3). Shown in the same spot
+  // as "Agent is typing" while a real human agent is expected but hasn't
+  // joined yet. Never shown for bot-only informational flows (e.g. Careers'
+  // sub_prompt replies), when the site/team is offline (contact form path),
+  // or before the visitor has actually engaged (still looking at the
+  // team-routing buttons, hasn't picked one yet).
+  let _agentJoinedThisConv = false;
+  let _visitorHasEngaged = false;
+  let _waitingRotateTimer = null;
+  const WAITING_FOR_AGENT_MESSAGES = [
+    'Connecting you to an agent…',
+    'Hang tight, almost there…',
+    'Thanks for your patience…',
+  ];
+
   // Input reveal state machine.
   // The input container starts hidden. It is revealed after 2500ms if no
   // chatbot_pending / bot_prompt message arrives first. On bot_prompt the
@@ -337,6 +352,7 @@
       const key = _endChatStorageKey();
       if (key) sessionStorage.setItem(key, endChatDisabled ? '1' : '0');
     } catch (e) { }
+    try { _updateWaitingForAgentIndicator(); } catch (e) { }
   }
 
   function hydrateEndChatDisabled() {
@@ -545,15 +561,75 @@
     }, 1200);
   }
 
+  function _isContactOverlayVisible() {
+    const el = $id('chatassist-contact-overlay');
+    return !!(el && el.classList.contains('chatassist-contact-overlay-visible'));
+  }
+
+  // True only while: a real thread is open, no agent has joined yet, the
+  // conversation isn't a bot-only/terminal informational path (input locked),
+  // the visitor hasn't ended the chat, and we're not showing the offline
+  // contact form (no real-time agent is coming in that case either).
+  function _shouldShowWaitingForAgent() {
+    return viewMode === 'thread'
+      && !isReadOnlyThread
+      && _visitorHasEngaged
+      && !_agentJoinedThisConv
+      && !_isInputLocked()
+      && !endChatDisabled
+      && !_forceContactOverlay
+      && !_isContactOverlayVisible();
+  }
+
+  function _updateWaitingForAgentIndicator() {
+    const el = $id('chatassist-typing');
+    if (!el) return;
+    // Never override a live "Agent is typing" — that always wins.
+    if (el.dataset.mode === 'typing') return;
+
+    if (!_shouldShowWaitingForAgent()) {
+      if (_waitingRotateTimer) {
+        clearInterval(_waitingRotateTimer);
+        _waitingRotateTimer = null;
+      }
+      if (el.dataset.mode === 'waiting') {
+        el.style.display = 'none';
+        el.dataset.mode = '';
+      }
+      return;
+    }
+
+    if (el.dataset.mode === 'waiting') return; // already rotating
+
+    const label = el.querySelector('.chatassist-typing-label');
+    if (!label) return;
+    el.dataset.mode = 'waiting';
+    el.style.display = 'flex';
+    let i = 0;
+    label.textContent = WAITING_FOR_AGENT_MESSAGES[i];
+    if (_waitingRotateTimer) clearInterval(_waitingRotateTimer);
+    _waitingRotateTimer = setInterval(function () {
+      i = (i + 1) % WAITING_FOR_AGENT_MESSAGES.length;
+      label.textContent = WAITING_FOR_AGENT_MESSAGES[i];
+    }, 3500);
+  }
+
   function setAgentTyping(isTyping, name) {
     const el = $id('chatassist-typing');
     if (!el) return;
     if (isTyping) {
+      if (_waitingRotateTimer) {
+        clearInterval(_waitingRotateTimer);
+        _waitingRotateTimer = null;
+      }
       const label = el.querySelector('.chatassist-typing-label');
       if (label) label.textContent = 'Agent is typing';
+      el.dataset.mode = 'typing';
       el.style.display = 'flex';
     } else {
       el.style.display = 'none';
+      el.dataset.mode = '';
+      _updateWaitingForAgentIndicator();
     }
   }
 
@@ -1336,11 +1412,13 @@
       if (meta.visitor_phone) payload.visitor_phone = meta.visitor_phone;
     }
     ws.send(JSON.stringify(payload));
+    _visitorHasEngaged = true;
 
     // Visitor has resumed the conversation; allow ending again.
     if (endChatDisabled) {
       setEndChatDisabled(false);
     }
+    _updateWaitingForAgentIndicator();
     return true;
   }
 
@@ -1381,6 +1459,10 @@
       lastAppendedDateStr = null;
       container.classList.add('chatassist-no-animate');
       var hasPendingBotPrompt = false;
+      // Re-derive from this conversation's actual history each time rather than
+      // carrying over state from a previous conversation in the same page session.
+      _agentJoinedThisConv = false;
+      _visitorHasEngaged = false;
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -1395,8 +1477,10 @@
         if (eventType === 'rating_popup_shown') return;
 
         if (actor === 'visitor') {
+          _visitorHasEngaged = true;
           appendMessage('visitor', m.content, m.created_at, null, m.id);
         } else if (actor === 'agent') {
+          _agentJoinedThisConv = true;
           if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
           if (m.sender_name) updateAgentName(m.sender_name);
           appendMessage('agent', m.content, m.created_at, { avatarUrl: m.sender_avatar_url, name: m.sender_name }, m.id);
@@ -1428,6 +1512,7 @@
           appendMessage('ai', m.content, m.created_at, null, m.id);
         } else if (actor === 'system') {
           if (eventType === 'agent_join') {
+            _agentJoinedThisConv = true;
             showJoinMessage(m.content, m.created_at);
             _clearInputLocked(); // Agent joined after suppress_waiting — unlock input
           } else if (eventType === 'visitor_left') showSystemMessage('You ended the chat.');
@@ -1468,6 +1553,8 @@
       // If 0 history messages (brand-new session): keep the _inputRevealTimer
       // running. The chatbot_pending signal (if any) will cancel it; otherwise
       // it fires after 2500ms and shows the input.
+
+      _updateWaitingForAgentIndicator();
 
       // Re-inject the "Start new chat" banner if we're restoring a closed
       // conversation on reload (history disabled). The banner was wiped above
@@ -1712,6 +1799,7 @@
       showNewMsgIndicator();
       smartScroll();
     } else if (data.type === 'agent_joined') {
+      _agentJoinedThisConv = true;
       setAgentTyping(false);
       _clearInputLocked(); // Agent taking over always unlocks input
       const createdAt = (data.message_obj && data.message_obj.created_at) || null;
@@ -1756,6 +1844,11 @@
       // Mark that the visitor completed the IVR so bot_offline won't re-open
       // the contact overlay on top of an already-open input.
       _leafButtonCommitted = true;
+      // Only a committed LEAF fires automation_complete (branch clicks like
+      // "Careers" itself don't) — this is the right point to consider the
+      // visitor "engaged", not the moment any button (incl. a branch) is clicked.
+      _visitorHasEngaged = true;
+      _updateWaitingForAgentIndicator();
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -1764,6 +1857,7 @@
         viewMode = 'thread';
         isReadOnlyThread = false;
         _updateHeaderButtons();
+        _updateWaitingForAgentIndicator();
       }
     }
   }
@@ -2702,6 +2796,7 @@
     // Focus first input (name field)
     const firstField = $id('chatassist-contact-name');
     try { firstField && firstField.focus(); } catch (e) { }
+    _updateWaitingForAgentIndicator();
   }
 
   function hideContactOverlay(restore) {
@@ -2729,6 +2824,7 @@
       const input = $id('chatassist-input');
       if (input) input.value = '';
     }
+    _updateWaitingForAgentIndicator();
   }
 
   function showEndOverlay() {
