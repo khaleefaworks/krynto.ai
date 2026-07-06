@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -29,7 +29,10 @@ type ShortcutMatch = {
 
 type Props = {
     conversationId: number | null
-    onSend: (content: string) => void
+    // Returning `false` (or a Promise resolving to `false`) tells the composer the
+    // send was blocked (e.g. an offline-agent confirmation gate) so it must NOT
+    // clear the drafted text. Any other return value (including void) clears as before.
+    onSend: (content: string) => void | boolean | Promise<void | boolean>
     onTyping?: (value: string) => void
     disabled?: boolean
     placeholder?: string
@@ -37,6 +40,12 @@ type Props = {
     readOnlyText?: string
     personalShortcuts: ComposerShortcut[]
     websiteShortcuts: ComposerShortcut[]
+}
+
+export type ChatComposerHandle = {
+    /** Imperatively clear the drafted text/attachments — used after a send that was
+     * initially blocked (e.g. offline gate) later completes successfully. */
+    clear: () => void
 }
 
 type ShortcutContext = {
@@ -305,7 +314,7 @@ function serializeDocToMarkdown(doc: JSONContent | null | undefined): string {
     return out.join('\n\n').trim()
 }
 
-export default function ChatComposer({
+const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer({
     conversationId,
     onSend,
     onTyping,
@@ -315,7 +324,7 @@ export default function ChatComposer({
     readOnlyText,
     personalShortcuts,
     websiteShortcuts,
-}: Props) {
+}, ref) {
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const [uploadingCount, setUploadingCount] = useState(0)
@@ -541,6 +550,16 @@ export default function ChatComposer({
         return parts.join('\n')
     }, [attachments])
 
+    const clearComposer = useCallback(() => {
+        editor?.commands.clearContent(true)
+        setPlainValue('')
+        setAttachments([])
+        onTyping?.('')
+        setShortcutMenuIndex(0)
+    }, [editor, onTyping])
+
+    useImperativeHandle(ref, () => ({ clear: clearComposer }), [clearComposer])
+
     const sendNow = useCallback(() => {
         if (!editor) return
         if (disabled) return
@@ -550,13 +569,15 @@ export default function ChatComposer({
         const combined = [md, attachmentsMd].filter(Boolean).join('\n\n').trim()
         if (!combined || !conversationId) return
 
-        onSend(combined)
-        editor.commands.clearContent(true)
-        setPlainValue('')
-        setAttachments([])
-        onTyping?.('')
-        setShortcutMenuIndex(0)
-    }, [buildAttachmentsMarkdown, conversationId, disabled, editor, getMarkdown, onSend, onTyping])
+        const result = onSend(combined)
+        // Only clear the draft once we know the send actually went through. A
+        // gate (e.g. offline-agent confirmation) returns `false` to block the
+        // send — in that case the typed text must stay put, not disappear.
+        Promise.resolve(result).then((ok) => {
+            if (ok === false) return
+            clearComposer()
+        })
+    }, [buildAttachmentsMarkdown, clearComposer, conversationId, disabled, editor, getMarkdown, onSend])
 
     // Keep refs in sync every render so handleKeyDown inside useEditor always reads fresh values.
     shortcutMenuOpenRef.current = shortcutMenuOpen
@@ -818,4 +839,6 @@ export default function ChatComposer({
 
         </div>
     )
-}
+})
+
+export default ChatComposer

@@ -4,6 +4,7 @@ import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
 import { joinChat, closeConversation, takeoverConversation, markChatRead, fetchChatReadState } from '@/services/chats'
+import { updateAvailability } from '@/services/auth'
 import { fetchChatMessages } from '@/services/messages'
 import {
     connectAgentSocket,
@@ -24,7 +25,7 @@ import { updateConversationMetadata } from '@/services/conversationMetadata'
 import { fetchChatSummary } from '@/services/chats'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import ChatComposer from '@/components/chat/ChatComposer'
+import ChatComposer, { type ChatComposerHandle } from '@/components/chat/ChatComposer'
 import MarkdownMessage from '@/components/chat/MarkdownMessage'
 import Logo from '@/components/Logo'
 import DocsLink from '@/components/DocsLink'
@@ -54,6 +55,7 @@ import {
     Loader2,
     CheckCircle2,
     AlertCircle,
+    AlertTriangle,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
@@ -405,6 +407,12 @@ export default function ConversationsView() {
     // Takeover confirmation (Smartsupp-like)
     const [showTakeoverConfirm, setShowTakeoverConfirm] = useState(false)
     const [pendingSendMessage, setPendingSendMessage] = useState<string | null>(null)
+
+    // Offline warning (AV1): agent must confirm going online before sending/joining a chat
+    const [showOfflineConfirm, setShowOfflineConfirm] = useState(false)
+    const [pendingOfflineMessage, setPendingOfflineMessage] = useState<string | null>(null)
+    const [goingOnline, setGoingOnline] = useState(false)
+    const composerRef = useRef<ChatComposerHandle>(null)
 
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
@@ -1624,10 +1632,25 @@ export default function ConversationsView() {
         }
     }
 
-    const handleSendMessage = async (overrideContent?: string) => {
+    // Returns whether the message actually went out. `false` tells ChatComposer
+    // (via its onSend contract) to keep the drafted text instead of clearing it —
+    // used when the send is blocked by the offline gate or a takeover race.
+    const handleSendMessage = async (overrideContent?: string): Promise<boolean> => {
         const raw = typeof overrideContent === 'string' ? overrideContent : input
-        if (!raw.trim() || !selectedChat) return
-        if (isResolvedSelected) return
+        if (!raw.trim() || !selectedChat) return false
+        if (isResolvedSelected) return false
+
+        // AV1: block the send and ask the agent to go online first, instead of
+        // silently flipping their availability server-side. Reads the store
+        // directly (not the `user` closure) so the recursive call from
+        // confirmGoOnlineAndSend sees the just-updated is_available immediately,
+        // rather than a stale value from this render.
+        const currentUserForGate = useAppStore.getState().user
+        if (currentUserForGate && currentUserForGate.is_available === false) {
+            setPendingOfflineMessage(raw.trim())
+            setShowOfflineConfirm(true)
+            return false
+        }
 
         const messageContent = raw.trim()
         setInput('')
@@ -1662,7 +1685,7 @@ export default function ConversationsView() {
                     if (msg.toLowerCase().includes('already assigned') || msg.toLowerCase().includes('already')) {
                         setPendingSendMessage(messageContent)
                         setShowTakeoverConfirm(true)
-                        return
+                        return false
                     }
                     throw e
                 }
@@ -1697,10 +1720,13 @@ export default function ConversationsView() {
             } catch {
                 // ignore
             }
+
+            return true
         } catch (error) {
             console.error("Failed to send message:", error)
-            // Restore input on error
-            setInput(messageContent)
+            // Note: intentionally do not restore into `input` — ChatComposer owns
+            // its own draft text and, since we return false here, never cleared it.
+            return false
         }
     }
 
@@ -1709,10 +1735,9 @@ export default function ConversationsView() {
         setShowTakeoverConfirm(false)
         setPendingSendMessage(null)
 
-        if (!confirm) {
-            if (content) setInput(content)
-            return
-        }
+        // On cancel, do nothing to the composer — it never cleared its draft
+        // since handleSendMessage returned false before this modal opened.
+        if (!confirm) return
 
         if (!selectedChat || !content) return
         if (isResolvedSelected) return
@@ -1750,9 +1775,42 @@ export default function ConversationsView() {
                 sender_name: user?.name || undefined,
                 sender_avatar_url: (user as any)?.avatar_url || undefined,
             } as any)
+
+            // The composer held onto its draft since the original onSend call
+            // returned false (takeover race) — now that it's actually sent, clear it.
+            composerRef.current?.clear()
         } catch (error) {
             console.error('Failed to takeover and send:', error)
-            setInput(content)
+        }
+    }
+
+    // AV1: agent confirmed (or cancelled) going online from the offline-warning popup.
+    const confirmGoOnlineAndSend = async (confirm: boolean) => {
+        const content = pendingOfflineMessage
+        setShowOfflineConfirm(false)
+        setPendingOfflineMessage(null)
+
+        // On cancel, do nothing to the composer — it never cleared its draft
+        // since handleSendMessage returned false before this modal opened.
+        if (!confirm) return
+
+        if (!content) return
+
+        setGoingOnline(true)
+        try {
+            const response = await updateAvailability(true)
+            const current = useAppStore.getState().user
+            if (current) {
+                setUser({ ...current, is_available: response.is_available })
+            }
+            // Re-run the send now that the agent is online; the top-of-function
+            // offline check will pass since is_available is now true.
+            const sent = await handleSendMessage(content)
+            if (sent) composerRef.current?.clear()
+        } catch (error) {
+            console.error('Failed to go online:', error)
+        } finally {
+            setGoingOnline(false)
         }
     }
 
@@ -2032,6 +2090,38 @@ export default function ConversationsView() {
                             <Button onClick={() => confirmTakeoverAndSend(true)}>
                                 Yes
                             </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {showOfflineConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => confirmGoOnlineAndSend(false)}>
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                            </div>
+                            <h3 className="text-base font-semibold text-gray-900 dark:text-white">You're offline</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                            Please go online to join or reply to this chat. Your message won't be sent until you're available.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => confirmGoOnlineAndSend(false)}
+                                disabled={goingOnline}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => confirmGoOnlineAndSend(true)}
+                                disabled={goingOnline}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                            >
+                                {goingOnline && <Loader2 className="w-4 h-4 animate-spin" />}
+                                Go online & send
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -3039,6 +3129,7 @@ export default function ConversationsView() {
                     </div>
 
                     <ChatComposer
+                        ref={composerRef}
                         conversationId={selectedChat}
                         onTyping={scheduleAgentTyping}
                         onSend={(content) => handleSendMessage(content)}
