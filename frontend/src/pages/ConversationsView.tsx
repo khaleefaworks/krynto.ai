@@ -2705,7 +2705,7 @@ export default function ConversationsView() {
                             <div className="flex items-center gap-3 min-w-0">
                                 <button
                                     className="md:hidden flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
-                                    onClick={() => navigate(-1)}
+                                    onClick={() => { setSelectedChat(null); navigate('/dashboard/chats') }}
                                     aria-label="Back to conversations"
                                 >
                                     <ChevronLeft className="h-5 w-5" />
