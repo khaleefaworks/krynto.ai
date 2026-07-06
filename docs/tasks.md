@@ -12,7 +12,7 @@
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| PN1 | **Bot message push notifications (staggered)** | When bot sends a message, send push notifications to agents at intervals: 10s, 30s, 60s, then every 10s thereafter (avoiding spam). Stagger multiple bot messages so they don't all fire at the same time. | Medium |
+| PN1 | ~~**New chat notification repeats until claimed**~~ | ✅ Done — redefined from the original "staggered bot message" description. Agents were missing the one-shot new-chat sound/push (busy, backgrounded tab). Now `_broadcast_new_chat_to_agents` re-fires every 15s (WS + push) until an agent joins, the conversation resolves, or the visitor ends the chat. Visitor/widget side untouched (agent-only notification). | Medium |
 | PN2 | **Visitor rejoin push notification** | Send push notification when a visitor reconnects/rejoins during an ongoing conversation (e.g., refreshed page, returned from another tab). | Medium |
 | W1 | **Widget new message popup styling** | Reduce popup size and button size. Remove "chat" label on mobile to save space. | Medium |
 | W2 | **Team routing notification dedup** | When switching pages with team-routed conversations, widget notification plays repeatedly. Cap at max 2-3 plays per message. | Medium |
@@ -22,7 +22,7 @@
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| AV1 | **Agent offline warning on send** | When an agent tries to send a message but they are offline (`is_available=False`), show a popup: "You are offline. Please go online to join/reply to this chat." Prevent the send action. | High |
+| AV1 | ~~**Agent offline warning on send**~~ | ✅ Done (d2ceb97) — agent sees a confirmation popup before send/join while offline instead of silent auto-toggle. | High |
 
 ## Automations & Reporting
 

@@ -35,9 +35,62 @@ logger = get_logger(__name__)
 # Prevent scheduling duplicate delayed "waiting" bot messages
 _waiting_bot_message_scheduled: set[int] = set()
 
+# Prevent scheduling duplicate "new chat" reminder loops (PN1)
+_new_chat_reminder_scheduled: set[int] = set()
+
+# PN1: repeat interval for the new-chat notification (sound + push) while a
+# conversation sits unassigned. Agents were missing the one-shot notification,
+# so this re-fires it every 15s until an agent joins.
+_NEW_CHAT_REMINDER_INTERVAL_SECONDS = 15
+
 # Sentinel for _broadcast_new_chat_to_agents: distinguishes "no hint supplied
 # (read from conversation.team_id)" from an explicit None (unrouted).
 _TEAM_HINT_UNSET = object()
+
+
+async def _repeat_new_chat_notification_until_claimed(
+    *, conversation_id: int, website_id: int, interval_seconds: int = _NEW_CHAT_REMINDER_INTERVAL_SECONDS
+) -> None:
+    """Re-fire the 'new chat' notification (WS + sound + push) every interval_seconds
+    until an agent joins, the conversation ends, or it stops being unassigned.
+
+    PN1: agents reported missing the sound/push for brand-new chats entirely
+    (busy, tab backgrounded, etc.) since it only fired once. This keeps nagging
+    every 15s — same payload as the original broadcast — until someone claims it.
+    Bounded in practice by AutoCloseScheduler, which resolves stale unassigned
+    conversations after 24h of inactivity.
+    """
+    from app.core.database import SessionLocal
+    from app.models.conversation import Conversation
+
+    try:
+        while True:
+            await asyncio.sleep(max(1, int(interval_seconds or 15)))
+
+            db = SessionLocal()
+            try:
+                conversation = db.query(Conversation).filter_by(id=conversation_id).first()
+                if (
+                    not conversation
+                    or conversation.assigned_agent_id
+                    or conversation.status != ConversationStatus.OPEN
+                    or conversation.visitor_ended
+                ):
+                    return
+
+                orchestrator = ConversationOrchestrator(db)
+                await orchestrator._broadcast_new_chat_to_agents(conversation)
+            except Exception as e:
+                logger.error(
+                    "new_chat_reminder_iteration_failed",
+                    conversation_id=conversation_id,
+                    website_id=website_id,
+                    error=str(e),
+                )
+            finally:
+                db.close()
+    finally:
+        _new_chat_reminder_scheduled.discard(conversation_id)
 
 
 def _get_eligible_agent_ids_for_push(
@@ -677,6 +730,14 @@ class ConversationOrchestrator:
         # receive a push notification.
         if prior_message_count == 0:
             await self._broadcast_new_chat_to_agents(conversation)
+            if conversation.id not in _new_chat_reminder_scheduled:
+                _new_chat_reminder_scheduled.add(conversation.id)
+                asyncio.create_task(
+                    _repeat_new_chat_notification_until_claimed(
+                        conversation_id=conversation.id,
+                        website_id=website_id,
+                    )
+                )
 
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
@@ -1214,6 +1275,14 @@ class ConversationOrchestrator:
         # For regular paths: depth formula fires exactly once on the first leaf click.
         if not _is_bot_only and prior_visitor_msg_count <= len(path) - 1:
             await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
+            if conversation.id not in _new_chat_reminder_scheduled:
+                _new_chat_reminder_scheduled.add(conversation.id)
+                asyncio.create_task(
+                    _repeat_new_chat_notification_until_claimed(
+                        conversation_id=conversation.id,
+                        website_id=int(conversation.website_id),
+                    )
+                )
 
         # Send reply message to visitor
         if reply and isinstance(reply, str) and reply.strip():
