@@ -33,12 +33,13 @@ const NODE_META: Record<string, { label: string; icon: string; color: string }> 
   tag_with_agent_name:{ label: 'Tag agent name', icon: '👤', color: 'bg-pink-50 dark:bg-pink-950 border-pink-400' },
   bot_prompt_buttons: { label: 'Button prompt',  icon: '🤖', color: 'bg-indigo-50 dark:bg-indigo-950 border-indigo-400' },
   end:                { label: 'End',             icon: '🔚', color: 'bg-red-50 dark:bg-red-950 border-red-400' },
+  repeat_new_chat_notification: { label: 'Repeat notification', icon: '🔁', color: 'bg-teal-50 dark:bg-teal-950 border-teal-400' },
 }
 
 const PALETTE_NODES = [
   'send_bot_message', 'emit_system_event', 'wait', 'condition',
   'show_rating_popup', 'tag_conversation', 'tag_with_agent_name',
-  'bot_prompt_buttons', 'end',
+  'bot_prompt_buttons', 'repeat_new_chat_notification', 'end',
 ]
 
 const TRIGGERS: { value: AutomationTrigger; label: string }[] = [
@@ -68,6 +69,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
   if (type === 'condition') return config.field || ''
   if (type === 'tag_conversation') return config.tag || ''
   if (type === 'bot_prompt_buttons') return config.message ? `"${config.message.slice(0, 30)}…"` : ''
+  if (type === 'repeat_new_chat_notification') return config.interval_seconds ? `every ${config.interval_seconds}s` : ''
   if (type === 'trigger') {
     const parts = []
     if (config.repeat === 'cooldown') parts.push(`cooldown ${config.cooldown_hours ?? 24}h`)
@@ -172,6 +174,7 @@ function defaultConfig(type: string): Record<string, any> {
   if (type === 'tag_conversation') return { tag: '' }
   if (type === 'tag_with_agent_name') return {}
   if (type === 'bot_prompt_buttons') return { message: '', allow_input: false, suppress_waiting_message: false, buttons: [] }
+  if (type === 'repeat_new_chat_notification') return { interval_seconds: 15 }
   return {}
 }
 
@@ -560,6 +563,23 @@ function NodeConfigPanel({
             onChange={(e) => set({ seconds: Number(e.target.value) })}
             className="h-8 text-xs"
           />
+        </div>
+      )}
+
+      {type === 'repeat_new_chat_notification' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Repeat every (seconds)</label>
+          <Input
+            type="number" min={1}
+            value={cfg.interval_seconds || 15}
+            onChange={(e) => set({ interval_seconds: Number(e.target.value) })}
+            className="h-8 text-xs"
+          />
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+            While a new chat sits unclaimed, re-fires the sound + push notification at this
+            interval until an agent joins. Disable this automation to go back to a single
+            one-shot notification.
+          </p>
         </div>
       )}
 

@@ -930,22 +930,24 @@ class ConversationOrchestrator:
     def _maybe_schedule_new_chat_reminder(self, *, conversation_id: int, website_id: int) -> None:
         """Schedule the PN1 repeat-notification loop, if enabled for this website.
 
-        Configurable via the 'new_chat_unclaimed' automation trigger (seeded by
-        default, enabled): its trigger node's cooldown_seconds sets the repeat
-        interval, reusing the same repeat/cooldown UI every other automation
-        already has. Disabling that automation turns the repeat off entirely —
-        the initial one-shot broadcast (already sent by the caller) still fires.
+        Configurable via the 'new_chat_unclaimed' automation's
+        repeat_new_chat_notification action node — its interval_seconds sets
+        the repeat interval, same as any other node's config. Disabling the
+        automation (or removing the node) turns the repeat off entirely — the
+        initial one-shot broadcast (already sent by the caller) still fires.
         """
         if conversation_id in _new_chat_reminder_scheduled:
             return
         automation_service = AutomationService(self.db)
-        if not automation_service.list_enabled_for_trigger(website_id=website_id, trigger="new_chat_unclaimed"):
-            return
-        interval = automation_service.get_cooldown_seconds(
-            website_id=website_id,
-            trigger="new_chat_unclaimed",
-            default_seconds=_NEW_CHAT_REMINDER_INTERVAL_SECONDS,
+        actions = automation_service.get_actions_by_type(
+            website_id=website_id, trigger="new_chat_unclaimed", action_type="repeat_new_chat_notification"
         )
+        if not actions:
+            return
+        try:
+            interval = int(actions[0].get("interval_seconds") or _NEW_CHAT_REMINDER_INTERVAL_SECONDS)
+        except (TypeError, ValueError):
+            interval = _NEW_CHAT_REMINDER_INTERVAL_SECONDS
         _new_chat_reminder_scheduled.add(conversation_id)
         asyncio.create_task(
             _repeat_new_chat_notification_until_claimed(
@@ -2179,6 +2181,11 @@ class ConversationOrchestrator:
 
             if node_type == "trigger":
                 pass  # entry point only
+
+            elif node_type == "repeat_new_chat_notification":
+                pass  # config carrier only (PN1) — interval_seconds is read directly
+                      # by _maybe_schedule_new_chat_reminder, not executed here. The
+                      # repeat itself is a background asyncio loop, not a graph walk.
 
             elif node_type == "send_bot_message":
                 message = str(cfg.get("message") or "").strip()

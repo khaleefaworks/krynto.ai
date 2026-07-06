@@ -151,17 +151,22 @@ class AutomationService:
                 ],
             },
             # ─── New chat reminder (PN1) ──────────────────────────────────────
-            # Config-only automation: no action nodes. The repeat loop in
-            # conversation_orchestrator.py reads this trigger's cooldown_seconds
-            # for the nag interval, and skips scheduling entirely if disabled.
+            # The repeat_new_chat_notification node is a config carrier, not
+            # something _execute_flow runs (the repeat itself is a background
+            # asyncio loop, not a graph walk) — but it gives the automation a
+            # real action node with its own interval_seconds, same as every
+            # other automation, instead of burying config on the bare trigger.
             {
                 "name": "New chat reminder",
                 "trigger": "new_chat_unclaimed",
                 "enabled": True,
                 "nodes": [
-                    {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 15}, "position": {"x": 0, "y": 0}},
+                    {"id": "trigger", "type": "trigger", "config": {}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "repeat_new_chat_notification", "config": {"interval_seconds": 15}, "position": {"x": 0, "y": 150}},
                 ],
-                "edges": [],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
             },
             # ─── Presence timeline ────────────────────────────────────────────
             {

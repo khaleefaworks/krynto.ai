@@ -27,6 +27,7 @@ export type AutomationNodeType =
   | 'show_rating_popup'
   | 'tag_conversation'
   | 'tag_with_agent_name'
+  | 'repeat_new_chat_notification'
   | 'end'
 
 export type AutomationCategory = 'auto_message' | 'chatbot_flow' | 'ai_agent'
