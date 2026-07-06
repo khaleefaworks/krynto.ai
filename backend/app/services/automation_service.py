@@ -157,7 +157,7 @@ class AutomationService:
                 "enabled": True,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
-                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor left the page.", "event_type": "visitor_dropped", "send_to_visitor": False, "visitor_content": "", "show_notification": True}, "position": {"x": 0, "y": 150}},
                 ],
                 "edges": [
                     {"id": "e1", "from": "trigger", "to": "n1"},
@@ -169,7 +169,7 @@ class AutomationService:
                 "enabled": False,
                 "nodes": [
                     {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 10}, "position": {"x": 0, "y": 0}},
-                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": ""}, "position": {"x": 0, "y": 150}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "Visitor returned to the page.", "event_type": "visitor_reconnected", "send_to_visitor": False, "visitor_content": "", "show_notification": True}, "position": {"x": 0, "y": 150}},
                 ],
                 "edges": [
                     {"id": "e1", "from": "trigger", "to": "n1"},

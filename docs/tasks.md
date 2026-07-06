@@ -13,7 +13,7 @@
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
 | PN1 | ~~**New chat notification repeats until claimed**~~ | ✅ Done — redefined from the original "staggered bot message" description. Agents were missing the one-shot new-chat sound/push (busy, backgrounded tab). Now `_broadcast_new_chat_to_agents` re-fires every 15s (WS + push) until an agent joins, the conversation resolves, or the visitor ends the chat. Visitor/widget side untouched (agent-only notification). | Medium |
-| PN2 | **Visitor rejoin push notification** | Send push notification when a visitor reconnects/rejoins during an ongoing conversation (e.g., refreshed page, returned from another tab). | Medium |
+| PN2 | ~~**Visitor rejoin push notification**~~ | ✅ Done — implemented as a generic `show_notification` toggle on automation `emit_system_event` nodes (reusable for any future node/trigger), turned on for the "Visitor dropped event" and "Visitor reconnected" seed automations. Plays each agent's own "message" sound preference + sends push, same as a regular message. New websites get it by default; existing orgs (e.g. org 1) need to flip the toggle once in Settings → Automations. | Medium |
 | W1 | **Widget new message popup styling** | Reduce popup size and button size. Remove "chat" label on mobile to save space. | Medium |
 | W2 | **Team routing notification dedup** | When switching pages with team-routed conversations, widget notification plays repeatedly. Cap at max 2-3 plays per message. | Medium |
 | W3 | **"Connecting to agent..." indicator** | Show "Connecting to agent..." status in the same location where "Agent is typing..." appears, when agent is joining the conversation. | Medium |

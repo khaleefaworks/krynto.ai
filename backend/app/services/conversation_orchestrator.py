@@ -917,6 +917,73 @@ class ConversationOrchestrator:
         except Exception:
             pass
 
+    async def _notify_agents_like_message(
+        self,
+        *,
+        conversation: Conversation,
+        website_id: int,
+        title: str,
+        body: str,
+        event_type: str,
+    ) -> None:
+        """Generic 'notify agents like a new message' signal (sound + push).
+
+        Any automation node can opt into this via node config `show_notification:
+        true`. Mirrors the exact assigned/unassigned delivery pattern used for
+        regular visitor messages in handle_visitor_message, so it behaves
+        identically from an agent's point of view — same push eligibility rules,
+        same WS scoping. Emits a dedicated `automation_notification` WS type
+        (not `visitor_message`/`system_message`) so it can't be mistaken for a
+        real chat message or double-count unread badges; the frontend just uses
+        it as a cue to play the agent's own "message" sound preference.
+        """
+        conv_team_id = getattr(conversation, "team_id", None)
+        assigned_agent_id = getattr(conversation, "assigned_agent_id", None)
+
+        payload = {
+            "type": "automation_notification",
+            "conversation_id": conversation.id,
+            "website_id": website_id,
+            "event_type": event_type,
+            "title": title,
+            "body": body,
+            "_assigned_agent_id": assigned_agent_id,
+        }
+
+        if assigned_agent_id:
+            await self.agent_service.send_to_agent(assigned_agent_id, payload)
+            push_agent_ids = {assigned_agent_id}
+        else:
+            await self.agent_service.broadcast_to_active_agents(
+                website_id=website_id,
+                message_data=payload,
+                include_global=True,
+                conversation_team_id=conv_team_id,
+            )
+            push_agent_ids = _get_eligible_agent_ids_for_push(
+                self.db, website_id=website_id, conversation_team_id=conv_team_id
+            )
+
+        try:
+            from app.repos import push_subscriptions as push_subs_repo
+            from app.services.push_service import send_web_push_to_subscriptions
+
+            subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=push_agent_ids)
+            if subs:
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(
+                    None,
+                    lambda: send_web_push_to_subscriptions(
+                        subscriptions=subs,
+                        title=title,
+                        body=body,
+                        url=f"/dashboard/chats/{conversation.short_id}" if conversation.short_id else "/dashboard/chats",
+                        push_type="new_message",
+                    ),
+                )
+        except Exception:
+            pass
+
     async def _fire_conversation_created_automations(
         self,
         *,
@@ -2004,6 +2071,7 @@ class ConversationOrchestrator:
 
         # Fetch conversation once for ctx enrichment and team_id scoping.
         _conv_team_id: int | None = None
+        _enrich_conv: Conversation | None = None
         try:
             _enrich_conv = self.db.query(Conversation).filter_by(id=conversation_id).first()
             if _enrich_conv:
@@ -2166,6 +2234,20 @@ class ConversationOrchestrator:
                         include_global=True,
                         conversation_team_id=_conv_team_id,
                     )
+
+                    # Opt-in per-node setting: also nag agents with sound + push,
+                    # same as a regular message, instead of just a silent transcript entry.
+                    if cfg.get("show_notification") and _enrich_conv is not None:
+                        try:
+                            await self._notify_agents_like_message(
+                                conversation=_enrich_conv,
+                                website_id=website_id,
+                                title=f"Conversation #{_enrich_conv.short_id}" if getattr(_enrich_conv, "short_id", None) else "Conversation update",
+                                body=content,
+                                event_type=event_type,
+                            )
+                        except Exception as e:
+                            logger.warning("automation_show_notification_failed", conversation_id=conversation_id, error=str(e))
 
             elif node_type == "wait":
                 secs = int(cfg.get("seconds") or 0)

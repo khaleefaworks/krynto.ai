@@ -164,7 +164,7 @@ function newNodeId() {
 function defaultConfig(type: string): Record<string, any> {
   if (type === 'trigger') return { repeat: 'once' }
   if (type === 'send_bot_message') return { message: '', event_type: '' }
-  if (type === 'emit_system_event') return { content: '', event_type: '', visitor_content: '', send_to_visitor: true }
+  if (type === 'emit_system_event') return { content: '', event_type: '', visitor_content: '', send_to_visitor: true, show_notification: false }
   if (type === 'wait') return { seconds: 5 }
   if (type === 'condition') return { field: 'agent_online' }
   if (type === 'show_rating_popup') return { event_type: 'rating_popup_shown' }
@@ -535,6 +535,16 @@ function NodeConfigPanel({
             <Switch
               checked={cfg.send_to_visitor !== false}
               onCheckedChange={(v) => set({ send_to_visitor: v })}
+            />
+          </div>
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Notify agents</span>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Play sound + push, same as a new message</p>
+            </div>
+            <Switch
+              checked={cfg.show_notification === true}
+              onCheckedChange={(v) => set({ show_notification: v })}
             />
           </div>
         </>

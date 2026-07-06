@@ -449,6 +449,22 @@ function App() {
             }
           }
 
+        } else if (data.type === 'automation_notification') {
+          // Generic "notify like a message" signal opted into by an automation
+          // node (show_notification config flag) — e.g. visitor left/reconnected.
+          // Reuses the exact same sound + spectator rules as a real message so
+          // it respects each agent's own "message" sound preference.
+          const assignedAgentId = (data as any)?._assigned_agent_id
+          const currentUserId = useAppStore.getState().user?.id
+          const isSpectating = assignedAgentId != null && assignedAgentId !== currentUserId
+
+          if (!isSpectating && _shouldPlaySound(conversationId)) {
+            try {
+              await resumeAudioContextIfSuspended()
+              playMessageNotificationSound()
+              _lastWsSoundAt = Date.now()
+            } catch { }
+          }
         }
       } catch {
         // Never break realtime handling because of toast UI.
