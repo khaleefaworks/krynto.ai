@@ -22,6 +22,7 @@ interface WidgetConfig {
     bubble_text?: string
     show_emoji_picker?: boolean
     show_attachments?: boolean
+    show_end_chat_button?: boolean
     branding_text?: string | null
     header_icon_url?: string | null
     popup_name?: string
@@ -688,6 +689,21 @@ export default function WebsiteWidgetTab({
                             <Switch
                                 checked={showConversationHistory}
                                 onCheckedChange={onShowConversationHistoryChange}
+                            />
+                        </div>
+
+                        <div className="border-t border-gray-100 dark:border-gray-700/50" />
+
+                        <div className="flex items-center justify-between py-1">
+                            <div>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">End Chat Button</span>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Let visitors end/close the conversation themselves from the chat window
+                                </p>
+                            </div>
+                            <Switch
+                                checked={widgetConfig.show_end_chat_button !== false}
+                                onCheckedChange={(checked) => update({ show_end_chat_button: checked })}
                             />
                         </div>
 

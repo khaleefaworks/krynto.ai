@@ -52,6 +52,8 @@
     headerIconUrl: globalConfig.headerIconUrl || null,
     showEmojiPicker: globalConfig.showEmojiPicker || false,
     showAttachments: globalConfig.showAttachments || false,
+    // Default true (preserve existing behavior) unless explicitly disabled per-website.
+    showEndChatButton: globalConfig.showEndChatButton !== false,
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist',
     popupName: globalConfig.popupName || 'Support',
     popupButtonText: globalConfig.popupButtonText || 'Reply',
@@ -388,7 +390,7 @@
     if (endBtn) {
       // Only toggle visibility in active (non-readonly) thread mode
       const inActiveThread = viewMode === 'thread' && !isReadOnlyThread;
-      endBtn.style.display = (inActiveThread && !endChatDisabled) ? '' : 'none';
+      endBtn.style.display = (inActiveThread && !endChatDisabled && CONFIG.showEndChatButton) ? '' : 'none';
     }
     if (endChatDisabled) {
       try { hideEndOverlay(); } catch (e) { }
@@ -979,8 +981,9 @@
       backBtn.style.display = showBack ? '' : 'none';
     }
     if (endBtn) {
-      // Show end button only in active (non-readonly) thread
-      const showEnd = viewMode === 'thread' && !isReadOnlyThread && !endChatDisabled;
+      // Show end button only in active (non-readonly) thread, and only if this
+      // website hasn't disabled it (CONFIG.showEndChatButton).
+      const showEnd = viewMode === 'thread' && !isReadOnlyThread && !endChatDisabled && CONFIG.showEndChatButton;
       endBtn.style.display = showEnd ? '' : 'none';
     }
   }

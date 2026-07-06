@@ -35,6 +35,7 @@ interface Website {
     bubble_text?: string
     show_emoji_picker?: boolean
     show_attachments?: boolean
+    show_end_chat_button?: boolean
     branding_text?: string | null
     header_icon_url?: string | null
     popup_name?: string
@@ -171,6 +172,7 @@ export default function WebsiteDetail() {
       bubble_text: 'Chat',
       show_emoji_picker: true,
       show_attachments: false,
+      show_end_chat_button: true,
       branding_text: null as string | null,
       header_icon_url: null as string | null,
       popup_name: '',
@@ -284,6 +286,7 @@ export default function WebsiteDetail() {
           bubble_text: data.widget_config?.bubble_text || 'Chat',
           show_emoji_picker: data.widget_config?.show_emoji_picker !== undefined ? data.widget_config.show_emoji_picker : true,
           show_attachments: data.widget_config?.show_attachments || false,
+          show_end_chat_button: data.widget_config?.show_end_chat_button !== undefined ? data.widget_config.show_end_chat_button : true,
           branding_text: data.widget_config?.branding_text ?? null,
           header_icon_url: data.widget_config?.header_icon_url ?? null,
           popup_name: (data.widget_config as any)?.popup_name || '',
