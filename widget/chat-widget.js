@@ -101,9 +101,9 @@
   let _visitorHasEngaged = false;
   let _waitingRotateTimer = null;
   const WAITING_FOR_AGENT_MESSAGES = [
-    'Connecting you to an agent…',
-    'Hang tight, almost there…',
-    'Thanks for your patience…',
+    'Connecting you to an agent',
+    'Hang tight, almost there',
+    'Thanks for your patience',
   ];
 
   // Input reveal state machine.
