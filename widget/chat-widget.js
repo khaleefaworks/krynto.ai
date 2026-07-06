@@ -231,6 +231,51 @@
     } catch (e) { return false; }
   }
 
+  // --- Welcome popup auto-reshow cap ---
+  // Without this, a visitor who never clicks the "x" gets the exact same
+  // welcome popup on every single page navigation within the site (each page
+  // load is a fresh widget init + WS history replay). Industry-standard
+  // pattern (Intercom/Drift/Crisp-style proactive messages): show it a
+  // couple of times, then back off for the same 12h window used for an
+  // explicit dismissal — silence reads as "seen it", not "still nagging".
+  const WELCOME_POPUP_MAX_AUTO_SHOWS = 2;
+  const WELCOME_POPUP_SHOW_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+  function _welcomePopupShowCountKey() {
+    if (!CONFIG.websiteId) return null;
+    return `ai_chatassist_welcome_popup_shown_${CONFIG.websiteId}`;
+  }
+
+  function _recordWelcomePopupShown() {
+    try {
+      const k = _welcomePopupShowCountKey();
+      if (!k) return;
+      let state = null;
+      try { state = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { state = null; }
+      const now = Date.now();
+      if (!state || typeof state.count !== 'number' || (now - state.firstAt) >= WELCOME_POPUP_SHOW_WINDOW_MS) {
+        state = { count: 0, firstAt: now };
+      }
+      state.count += 1;
+      localStorage.setItem(k, JSON.stringify(state));
+    } catch (e) { }
+  }
+
+  // Returns true once the popup has auto-shown its cap within the current
+  // 12h window (same window as the dismissal cooldown, for one consistent
+  // "leave the visitor alone for a while" rule regardless of which path
+  // silenced it).
+  function _hasWelcomePopupShownTooManyTimes() {
+    try {
+      const k = _welcomePopupShowCountKey();
+      if (!k) return false;
+      const state = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!state || typeof state.count !== 'number') return false;
+      if ((Date.now() - state.firstAt) >= WELCOME_POPUP_SHOW_WINDOW_MS) return false; // window expired
+      return state.count >= WELCOME_POPUP_MAX_AUTO_SHOWS;
+    } catch (e) { return false; }
+  }
+
   // --- Contact verification (offline form, 12h cooldown per websiteId) ---
   function _contactVerifiedKey() {
     if (!CONFIG.websiteId) return null;
@@ -1566,8 +1611,11 @@
 
       // Welcome popup re-show on return visit.
       // Conditions: open conversation, widget is minimized, visitor has NOT sent
-      // any message yet, and the popup was not dismissed within the last 12h.
-      if (data.status !== 'resolved' && !isWidgetOpen() && !_isWelcomePopupRecentlyDismissed()) {
+      // any message yet, the popup was not dismissed within the last 12h, and it
+      // hasn't already auto-shown its cap for this 12h window (see
+      // _hasWelcomePopupShownTooManyTimes — this is what stops the exact same
+      // welcome popup reappearing on every single page navigation).
+      if (data.status !== 'resolved' && !isWidgetOpen() && !_isWelcomePopupRecentlyDismissed() && !_hasWelcomePopupShownTooManyTimes()) {
         var hasVisitorMsg = data.messages.some(function (m) {
           return (m.sender_type || m.sender) === 'visitor' || m.actor === 'visitor';
         });
@@ -1600,6 +1648,7 @@
               var _wpText = _popupText;
               setTimeout(function () {
                 if (isWidgetOpen()) return; // visitor opened widget during delay
+                _recordWelcomePopupShown();
                 bumpUnread();
                 showDotsPreview();
                 dotsPreviewTimer = setTimeout(function () {
