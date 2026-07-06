@@ -694,6 +694,20 @@ async def chat_ws(
                 if btn_conversation_id is None:
                     continue
 
+                # Conversation may have been created after this connection was
+                # established (e.g. the proactive welcome flow creates it a few
+                # seconds post-connect) and this is the visitor's first action —
+                # same gap handle_visitor_message backfills below. Without this,
+                # a visitor who only ever clicks bot buttons (never types) leaves
+                # registered_conversation_id unset, so the disconnect handler
+                # never schedules the visitor_dropped/reconnected check at all.
+                if registered_conversation_id is None:
+                    registered_conversation_id = btn_conversation_id
+                    try:
+                        ChatService.register_visitor(btn_conversation_id, websocket)
+                    except Exception:
+                        pass
+
                 try:
                     await orchestrator.handle_bot_button_click(
                         conversation_id=btn_conversation_id,
