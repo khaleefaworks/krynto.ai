@@ -116,6 +116,12 @@ async def _send_delayed_session_presence_event(
                     "last_disconnected_at": _utc_iso(last_disconnected_at),
                 },
                 include_global=True,
+                # Explicit "broadcast to all" — this is session/website-level
+                # presence, not tied to any one conversation's team routing.
+                # Leaving this unset defaults to the _UNROUTED sentinel, which
+                # silently blocks every team-scoped AGENT/MANAGER from ever
+                # receiving it, regardless of which conversation they're viewing.
+                conversation_team_id=None,
             )
         finally:
             db2.close()
@@ -347,9 +353,12 @@ async def chat_ws(
                     "website_id": int(website_id),
                     "session_id": str(session_id),
                     "is_online": True,
-                    "connected_at": connected_at.isoformat() if getattr(connected_at, "isoformat", None) else None,
+                    "connected_at": _utc_iso(connected_at),
                 },
                 include_global=True,
+                # See the matching comment on the offline broadcast below — this
+                # must reach every agent regardless of team membership.
+                conversation_team_id=None,
             )
         except Exception:
             pass
@@ -1178,6 +1187,38 @@ async def chat_ws_with_conversation(
             )
         except Exception:
             pass
+
+        # Realtime: notify agents about session-level presence, same as chat_ws.
+        # Missing here previously — this route is what every reconnect after the
+        # first message uses, so the online dot never went "online" live either.
+        try:
+            snap_cid = ChatService.session_presence_snapshot(
+                website_id=int(website_id),
+                recently_left_within_seconds=86400,
+            )
+            connected_at_cid = None
+            for r in snap_cid:
+                if int(r.get("website_id")) == int(website_id) and str(r.get("session_id")) == str(session_id):
+                    connected_at_cid = r.get("connected_at")
+                    break
+
+            # agent_service isn't instantiated until later in this function —
+            # use a local instance rather than depend on that ordering.
+            await AgentService(db).broadcast_to_active_agents(
+                website_id=int(website_id),
+                message_data={
+                    "type": "visitor_session_presence",
+                    "website_id": int(website_id),
+                    "session_id": str(session_id),
+                    "is_online": True,
+                    "connected_at": _utc_iso(connected_at_cid),
+                },
+                include_global=True,
+                conversation_team_id=None,
+            )
+        except Exception:
+            pass
+
         if is_open and str(conv.session_id) == str(session_id):
             try:
                 _was_active_cid = int(conv.id) in ChatService.active_visitors
@@ -1490,6 +1531,21 @@ async def chat_ws_with_conversation(
             pass
         try:
             ChatService.unregister_session_socket(websocket)
+        except Exception:
+            pass
+        # Realtime: broadcast offline after a short delay to avoid refresh flicker.
+        # Missing here previously — this route (reconnecting to a known
+        # conversation_id) is what the widget uses for every connection after
+        # the first, so the online dot / last-seen never updated live for any
+        # conversation past its very first message; only chat_ws scheduled this.
+        try:
+            asyncio.create_task(
+                _send_delayed_session_presence_event(
+                    website_id=int(website_id),
+                    session_id=str(session_id),
+                    delay_seconds=VISITOR_LEFT_DELAY_SECONDS,
+                )
+            )
         except Exception:
             pass
         # Best-effort: schedule visitor_left_website event for OPEN conversations.
