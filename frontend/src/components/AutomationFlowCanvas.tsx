@@ -49,6 +49,7 @@ const TRIGGERS: { value: AutomationTrigger; label: string }[] = [
   { value: 'visitor_dropped',            label: 'Visitor dropped' },
   { value: 'visitor_reconnected',        label: 'Visitor reconnected' },
   { value: 'no_agent_assigned_for',      label: 'No agent assigned for…' },
+  { value: 'new_chat_unclaimed',         label: 'New chat unclaimed (repeat reminder)' },
   { value: 'website_offline_first_message', label: 'Website offline (first message)' },
   { value: 'agent_joined',              label: 'Agent joined' },
   { value: 'conversation_created',       label: 'Conversation created' },

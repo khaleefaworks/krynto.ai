@@ -78,8 +78,15 @@ async def _repeat_new_chat_notification_until_claimed(
                 ):
                     return
 
+                # Visitor isn't currently connected — nagging agents about a chat
+                # nobody can see them typing in is pointless noise. Skip this tick
+                # but keep the loop alive: it resumes on its own the moment the
+                # visitor reconnects (ChatService.active_visitors gets them back).
+                if conversation_id not in ChatService.active_visitors:
+                    continue
+
                 orchestrator = ConversationOrchestrator(db)
-                await orchestrator._broadcast_new_chat_to_agents(conversation)
+                await orchestrator._broadcast_new_chat_to_agents(conversation, is_reminder=True)
             except Exception as e:
                 logger.error(
                     "new_chat_reminder_iteration_failed",
@@ -730,14 +737,7 @@ class ConversationOrchestrator:
         # receive a push notification.
         if prior_message_count == 0:
             await self._broadcast_new_chat_to_agents(conversation)
-            if conversation.id not in _new_chat_reminder_scheduled:
-                _new_chat_reminder_scheduled.add(conversation.id)
-                asyncio.create_task(
-                    _repeat_new_chat_notification_until_claimed(
-                        conversation_id=conversation.id,
-                        website_id=website_id,
-                    )
-                )
+            self._maybe_schedule_new_chat_reminder(conversation_id=conversation.id, website_id=website_id)
 
         # No agent assigned yet.
         # If nobody is online, accept the message (leave-a-message flow).
@@ -822,11 +822,16 @@ class ConversationOrchestrator:
 
         return None
     
-    async def _broadcast_new_chat_to_agents(self, conversation: Conversation, _team_id_hint=_TEAM_HINT_UNSET):
+    async def _broadcast_new_chat_to_agents(
+        self, conversation: Conversation, _team_id_hint=_TEAM_HINT_UNSET, *, is_reminder: bool = False
+    ):
         """Notify all connected agents about new unassigned chat via global notification socket.
 
         _team_id_hint: when provided, overrides conversation.team_id for push/WS scoping.
         Used by handle_bot_button_click which knows the intended team before the DB write.
+        is_reminder: True for PN1's repeat calls — swaps the push copy from "New chat"
+        to "still waiting to be claimed" wording so a repeat doesn't read as a duplicate
+        of the same alert (and isn't mistaken for an actual second new chat).
         """
         # Only broadcast if conversation is still open and unassigned
         if conversation.status != ConversationStatus.OPEN or conversation.assigned_agent_id:
@@ -884,6 +889,7 @@ class ConversationOrchestrator:
                 "last_message": last_message,
                 "status": conversation.status.value,
                 "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
+                "is_reminder": is_reminder,
             },
             include_global=True,
             conversation_team_id=_new_chat_team_id,
@@ -903,19 +909,51 @@ class ConversationOrchestrator:
             subs = push_subs_repo.list_subscriptions_for_agents(self.db, agent_ids=agent_ids)
 
             if subs:
+                push_title = "Chat waiting to be claimed" if is_reminder else "New chat"
+                push_body = (
+                    f"Still unclaimed — {website_name}" if is_reminder else (last_message or "New conversation")
+                )[:120]
                 loop = asyncio.get_running_loop()
                 loop.run_in_executor(
                     None,
                     lambda: send_web_push_to_subscriptions(
                         subscriptions=subs,
-                        title="New chat",
-                        body=(last_message or "New conversation")[:120],
+                        title=push_title,
+                        body=push_body,
                         url=f"/dashboard/chats/{conversation.short_id}" if conversation.short_id else "/dashboard/chats",
                         push_type="new_chat",
                     ),
                 )
         except Exception:
             pass
+
+    def _maybe_schedule_new_chat_reminder(self, *, conversation_id: int, website_id: int) -> None:
+        """Schedule the PN1 repeat-notification loop, if enabled for this website.
+
+        Configurable via the 'new_chat_unclaimed' automation trigger (seeded by
+        default, enabled): its trigger node's cooldown_seconds sets the repeat
+        interval, reusing the same repeat/cooldown UI every other automation
+        already has. Disabling that automation turns the repeat off entirely —
+        the initial one-shot broadcast (already sent by the caller) still fires.
+        """
+        if conversation_id in _new_chat_reminder_scheduled:
+            return
+        automation_service = AutomationService(self.db)
+        if not automation_service.list_enabled_for_trigger(website_id=website_id, trigger="new_chat_unclaimed"):
+            return
+        interval = automation_service.get_cooldown_seconds(
+            website_id=website_id,
+            trigger="new_chat_unclaimed",
+            default_seconds=_NEW_CHAT_REMINDER_INTERVAL_SECONDS,
+        )
+        _new_chat_reminder_scheduled.add(conversation_id)
+        asyncio.create_task(
+            _repeat_new_chat_notification_until_claimed(
+                conversation_id=conversation_id,
+                website_id=website_id,
+                interval_seconds=interval,
+            )
+        )
 
     async def _notify_agents_like_message(
         self,
@@ -1342,14 +1380,7 @@ class ConversationOrchestrator:
         # For regular paths: depth formula fires exactly once on the first leaf click.
         if not _is_bot_only and prior_visitor_msg_count <= len(path) - 1:
             await self._broadcast_new_chat_to_agents(conversation, _team_id_hint=_button_team_id)
-            if conversation.id not in _new_chat_reminder_scheduled:
-                _new_chat_reminder_scheduled.add(conversation.id)
-                asyncio.create_task(
-                    _repeat_new_chat_notification_until_claimed(
-                        conversation_id=conversation.id,
-                        website_id=int(conversation.website_id),
-                    )
-                )
+            self._maybe_schedule_new_chat_reminder(conversation_id=conversation.id, website_id=int(conversation.website_id))
 
         # Send reply message to visitor
         if reply and isinstance(reply, str) and reply.strip():

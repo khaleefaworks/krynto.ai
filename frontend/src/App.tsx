@@ -390,13 +390,16 @@ function App() {
           }
           const websiteName = String((data as any)?.website_name || '').trim()
           const lastMessage = String((data as any)?.last_message || '').trim()
-          const body = lastMessage ? lastMessage.slice(0, 120) : undefined
+          const isReminder = Boolean((data as any)?.is_reminder)
+          const body = isReminder
+            ? `Still unclaimed — ${websiteName || 'no agent has joined yet'}`
+            : (lastMessage ? lastMessage.slice(0, 120) : undefined)
 
           const sessionId = String((data as any)?.session_id || '').trim()
           const url = sessionId ? `/dashboard/chats/${encodeURIComponent(sessionId)}` : '/dashboard/chats'
 
           maybeBrowserNotify({
-            title: websiteName ? `New chat — ${websiteName}` : 'New chat',
+            title: isReminder ? 'Chat waiting to be claimed' : (websiteName ? `New chat — ${websiteName}` : 'New chat'),
             body,
             url,
             tag: conversationId ? `new_chat:${conversationId}` : 'new_chat',
@@ -477,7 +480,8 @@ function App() {
         data.type === 'conversation_closed' ||
         data.type === 'visitor_message' ||
         data.type === 'visitor_closed_chat' ||
-        data.type === 'visitor_left_website' ||
+        data.type === 'visitor_dropped' ||
+        data.type === 'visitor_reconnected' ||
         data.type === 'visitor_socket_connected'
       ) {
         bumpChatEventsVersion({

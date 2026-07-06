@@ -8,6 +8,7 @@ export type AutomationTrigger =
   | 'visitor_dropped'
   | 'visitor_reconnected'
   | 'no_agent_assigned_for'
+  | 'new_chat_unclaimed'
   | 'website_offline_first_message'
   | 'agent_joined'
   | 'conversation_created'

@@ -970,7 +970,7 @@ export default function ConversationsView() {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'visitor_closed_chat' && dataConversationId) {
                 fetchActiveChats({ showSpinner: false })
-            } else if (data.type === 'visitor_left_website' && dataConversationId) {
+            } else if (data.type === 'visitor_dropped' && dataConversationId) {
                 fetchActiveChats({ showSpinner: false })
             } else if (data.type === 'system_message' && dataConversationId) {
                 const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
@@ -1133,9 +1133,12 @@ export default function ConversationsView() {
             } else if (data.type === 'visitor_closed_chat' && dataConversationId === selectedChat) {
                 setConversation(prev => prev ? { ...prev, visitor_ended: true } as any : prev)
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
-            } else if (data.type === 'visitor_left_website' && dataConversationId === selectedChat) {
-                setConversation(prev => prev ? { ...prev, is_online: false } as any : prev)
-                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+            } else if (data.type === 'visitor_session_presence' && String((data as any)?.session_id || '') === conversation?.session_id) {
+                // Same signal the Customers -> Visitors page uses: fires on every
+                // connect/disconnect regardless of engagement, unlike the
+                // visitor_dropped/visitor_reconnected timeline events (which only
+                // fire once the visitor has sent a message or clicked a button).
+                setConversation(prev => prev ? { ...prev, is_online: Boolean((data as any)?.is_online) } as any : prev)
             } else if (data.type === 'system_message' && dataConversationId === selectedChat) {
                 const eventType = (data as any)?.message_obj?.event_type || (data as any)?.event_type
                 if (eventType === 'visitor_left') {

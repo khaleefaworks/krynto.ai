@@ -150,6 +150,19 @@ class AutomationService:
                     {"id": "e1", "from": "trigger", "to": "n1"},
                 ],
             },
+            # ─── New chat reminder (PN1) ──────────────────────────────────────
+            # Config-only automation: no action nodes. The repeat loop in
+            # conversation_orchestrator.py reads this trigger's cooldown_seconds
+            # for the nag interval, and skips scheduling entirely if disabled.
+            {
+                "name": "New chat reminder",
+                "trigger": "new_chat_unclaimed",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "cooldown", "cooldown_seconds": 15}, "position": {"x": 0, "y": 0}},
+                ],
+                "edges": [],
+            },
             # ─── Presence timeline ────────────────────────────────────────────
             {
                 "name": "Visitor dropped event",
