@@ -8,22 +8,6 @@
 
 ---
 
-## Push Notifications & Widget
-
-| # | Title | Description | Priority |
-|---|-------|-------------|----------|
-| PN1 | ~~**New chat notification repeats until claimed**~~ | ✅ Done — redefined from the original "staggered bot message" description. `_broadcast_new_chat_to_agents` re-fires (WS + push) until an agent joins, the conversation resolves, or the visitor ends the chat. Refined: (1) pauses while the visitor is actually disconnected, auto-resumes on reconnect (checks `ChatService.active_visitors` each tick); (2) the repeat interval + on/off switch is the `new_chat_unclaimed` automation trigger (cooldown_seconds) — now auto-seeded (enabled, 15s) for every website, same as the other default automations; (3) repeat pushes say "Chat waiting to be claimed" instead of reusing the "New chat" wording. Also fixed: default-automation seeding (`ensure_default_automations_for_website`) was dead code since Apr 2026 (never wired into `create_website`) — restored, and made non-destructive (only backfills missing defaults, never overwrites customized ones like Team routing chatbot's buttons). Also fixed: chat panel's visitor online dot now reads the same session-level presence (`ChatService.is_session_online`) everywhere (WS push + REST snapshot), instead of two different, sometimes-inconsistent sources. | Medium |
-| PN2 | ~~**Visitor rejoin push notification**~~ | ✅ Done — implemented as a generic `show_notification` toggle on automation `emit_system_event` nodes (reusable for any future node/trigger), turned on for the "Visitor dropped event" and "Visitor reconnected" seed automations. Plays each agent's own "message" sound preference + sends push, same as a regular message. New websites get it by default; existing orgs (e.g. org 1) need to flip the toggle once in Settings → Automations. | Medium |
-| W1 | ~~**Widget new message popup styling**~~ | ✅ Done — popup shrunk (300px→272px, tighter padding/avatar/close button, shorter body max-height) and launcher pill tightened (icon 40→36px, text 15→14px) on all screen sizes. On mobile (≤480px) the "Chat with us" text label is hidden entirely (icon + unread badge only) and the popup width becomes viewport-relative instead of a fixed 300px. Desktop keeps the text label. Widget-only change — verified visually via rendered screenshots at 800px and 375px. | Medium |
-| W2 | ~~**Welcome popup repeats on every page nav**~~ | ✅ Done — redefined from the original "team routing notification dedup" description. Actual issue: the proactive welcome popup was only silenced by an explicit "x" dismissal (12h cooldown); a visitor who never clicked it got the same popup — sound, unread bump, all — on every single page navigation, since each page load replays history and re-triggers the "hasn't sent a message yet" re-show path. Added a shown-count cap (industry-standard proactive-message pattern): shows at most twice per 12h rolling window (same window as the dismissal cooldown), then stays silent until it rolls over — same as if explicitly dismissed. Doesn't affect genuine new-message notifications (agent replies, new bot messages), only the recurring welcome greeting. | Medium |
-| W3 | ~~**"Connecting to agent..." indicator**~~ | ✅ Done — rotating reassurance text ("Connecting you to an agent…" → "Hang tight, almost there…" → "Thanks for your patience…", every 3.5s) in the same spot as "Agent is typing". Shows only after the visitor has actually engaged (message sent or leaf button committed) and a real agent is expected — suppressed for bot-only informational paths (e.g. Careers → New Application/Check Status, where `automation_complete.allow_input=false`) and while the offline contact-form overlay is up. Hides for good once `agent_joined` fires; correctly re-derived from history on reload. Verified end-to-end in a real headless-browser session against the live backend (not just code review). | Medium |
-
-## Availability & Status
-
-| # | Title | Description | Priority |
-|---|-------|-------------|----------|
-| AV1 | ~~**Agent offline warning on send**~~ | ✅ Done (d2ceb97) — agent sees a confirmation popup before send/join while offline instead of silent auto-toggle. | High |
-
 ## Automations & Reporting
 
 | # | Title | Description | Priority |

@@ -23,10 +23,33 @@
 }
 
 /* Position variants (set by JS: chatassist-position-b-r, b-l, t-r, t-l) */
-#chatassist-widget.chatassist-position-b-r { bottom: 20px; right: 20px; top: auto; left: auto; }
-#chatassist-widget.chatassist-position-b-l { bottom: 20px; left: 20px; top: auto; right: auto; }
-#chatassist-widget.chatassist-position-t-r { top: 20px; right: 20px; bottom: auto; left: auto; }
-#chatassist-widget.chatassist-position-t-l { top: 20px; left: 20px; bottom: auto; right: auto; }
+#chatassist-widget.chatassist-position-b-r {
+  bottom: 20px;
+  right: 20px;
+  top: auto;
+  left: auto;
+}
+
+#chatassist-widget.chatassist-position-b-l {
+  bottom: 20px;
+  left: 20px;
+  top: auto;
+  right: auto;
+}
+
+#chatassist-widget.chatassist-position-t-r {
+  top: 20px;
+  right: 20px;
+  bottom: auto;
+  left: auto;
+}
+
+#chatassist-widget.chatassist-position-t-l {
+  top: 20px;
+  left: 20px;
+  bottom: auto;
+  right: auto;
+}
 
 /* For top-anchored widgets, hide by translating upward instead of downward */
 #chatassist-widget.chatassist-position-t-r:not(.chatassist-visible),
@@ -55,7 +78,7 @@
   border-radius: 999px;
   font-size: 14px;
   font-weight: 600;
-  transition: box-shadow 0.28s cubic-bezier(.2,.9,.3,1), filter 0.28s ease;
+  transition: box-shadow 0.28s cubic-bezier(.2, .9, .3, 1), filter 0.28s ease;
   position: relative;
   white-space: nowrap;
 }
@@ -68,7 +91,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: none; /* avoid hard border */
+  border: none;
+  /* avoid hard border */
   background: transparent;
   box-sizing: border-box;
   flex-shrink: 0;
@@ -83,7 +107,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: rgba(255,255,255,0.12);
+  background: rgba(255, 255, 255, 0.12);
   z-index: 0;
   transform-origin: center;
   transition: background 180ms, opacity 180ms;
@@ -92,7 +116,7 @@
 .chatassist-bubble-icon svg {
   width: 22px;
   height: 22px;
-  transition: transform 300ms cubic-bezier(.2,.9,.3,1), color 160ms ease;
+  transition: transform 300ms cubic-bezier(.2, .9, .3, 1), color 160ms ease;
   transform-origin: center;
   transform: translateY(-1px) scale(1);
   color: #fff;
@@ -104,13 +128,13 @@
 /* Hover sequencing: pill -> circle -> icon
    Icon only scales on hover (no upward translation) */
 #chatassist-bubble-pill:hover .chatassist-bubble-icon {
-  box-shadow: 0 8px 20px rgba(0,0,0,0.10);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.10);
 }
 
 /* Hover should only toggle the circular "lite" — pause pulse and brighten */
 #chatassist-bubble-pill:hover .chatassist-bubble-icon::before {
   animation-play-state: paused;
-  background: rgba(255,255,255,0.26);
+  background: rgba(255, 255, 255, 0.26);
   opacity: 1;
 }
 
@@ -136,14 +160,14 @@
   position: absolute;
   bottom: -2px;
   left: 4px;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #ef4444;
   /* very small, subtle white border */
-  border: 1px solid rgba(255,255,255,0.9);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   /* softer shadow */
-  box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
   display: block;
   z-index: 3;
   transform: translateY(0);
@@ -161,19 +185,19 @@
 /* Unread badge */
 #chatassist-bubble-unread {
   position: absolute;
-  top: 0px;
-  right: 0px;
+  top: -9px;
+  right: -3px;
   min-width: 20px;
   height: 20px;
   border-radius: 9999px;
   background: #ef4444;
   color: #fff;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   display: none;
   align-items: center;
   justify-content: center;
-  line-height: 1;
+  line-height: 0;
   box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
   pointer-events: none;
   z-index: 3;
@@ -202,6 +226,7 @@
 #chatassist-widget.chatassist-position-t-l #chatassist-bubble {
   float: left;
 }
+
 #chatassist-widget.chatassist-position-b-r #chatassist-bubble,
 #chatassist-widget.chatassist-position-t-r #chatassist-bubble {
   float: right;
@@ -222,6 +247,7 @@
   transform-origin: bottom left;
   animation-name: chatassist-window-open-left;
 }
+
 #chatassist-widget.chatassist-position-b-l #chatassist-window.chatassist-window-closing,
 #chatassist-widget.chatassist-position-t-l #chatassist-window.chatassist-window-closing {
   animation-name: chatassist-window-close-left;
@@ -232,6 +258,7 @@
     opacity: 0;
     transform: scale(0.4) translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -243,6 +270,7 @@
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+
   to {
     opacity: 0;
     transform: scale(0.4) translateY(20px);
@@ -416,6 +444,7 @@
     opacity: 0;
     transform: translateY(10px) scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -427,6 +456,7 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+
   to {
     opacity: 0;
     transform: translateY(10px) scale(0.95);
@@ -462,6 +492,7 @@
     opacity: 0;
     transform: scale(0.4) translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -473,6 +504,7 @@
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+
   to {
     opacity: 0;
     transform: scale(0.4) translateY(20px);
@@ -595,6 +627,7 @@
     opacity: 0;
     transform: translateX(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -606,6 +639,7 @@
     opacity: 0;
     transform: translateX(20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -617,6 +651,7 @@
     opacity: 0;
     transform: translateX(-30px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -628,6 +663,7 @@
     opacity: 0;
     transform: translateX(30px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -639,6 +675,7 @@
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1314,10 +1351,14 @@
 }
 
 @keyframes chatassist-typing-bounce {
-  0%, 80%, 100% {
+
+  0%,
+  80%,
+  100% {
     transform: translateY(0);
     opacity: 0.5;
   }
+
   40% {
     transform: translateY(-4px);
     opacity: 1;
@@ -1514,8 +1555,13 @@
 }
 
 @keyframes chatassist-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* --- Branding --- */
@@ -1538,7 +1584,7 @@
   font-weight: 500;
   padding: 8px 16px;
   border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000000;
   white-space: nowrap;
   pointer-events: none;
@@ -1554,6 +1600,7 @@
     opacity: 0;
     transform: translate(-50%, 10px);
   }
+
   to {
     opacity: 1;
     transform: translate(-50%, 0);
@@ -1561,8 +1608,15 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* --- Responsive --- */
@@ -1611,7 +1665,29 @@
   /* New-message popup: fit the viewport instead of a fixed desktop width. */
   #chatassist-msg-popup {
     width: calc(100vw - 32px);
-    max-width: 260px;
+    max-width: 200px;
+  }
+
+  .chatassist-popup-header {
+    padding: 8px 8px;
+  }
+
+  .chatassist-popup-avatar {
+    width: 25px;
+    height: 25px;
+  }
+
+  .chatassist-popup-name{
+    font-size: 11px;
+  }
+
+  .chatassist-popup-body{
+    font-size: 12px;
+  }
+
+  .chatassist-popup-reply{
+    padding: 5px 0;
+    font-size: 11px;
   }
 }
 
@@ -1884,33 +1960,40 @@
 /* Popup & bubble overrides (dark theme) */
 .chatassist-theme-dark #chatassist-msg-popup {
   background: #0f172a;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35);
   color: #e2e8f0;
 }
+
 .chatassist-theme-dark #chatassist-dots-preview {
   background: #0f172a;
   color: #e2e8f0;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
+
 .chatassist-theme-dark .chatassist-popup-avatar {
   background: #334155;
   color: #e2e8f0;
 }
+
 .chatassist-theme-dark .chatassist-popup-avatar-placeholder {
   background: #334155;
   color: #e2e8f0;
 }
+
 .chatassist-theme-dark .chatassist-popup-name {
   color: #e2e8f0;
 }
+
 .chatassist-theme-dark .chatassist-popup-close {
   background: #0f172a;
   color: #64748b;
 }
+
 .chatassist-theme-dark .chatassist-popup-close:hover {
   background: #1e293b;
   color: #e2e8f0;
 }
+
 .chatassist-theme-dark .chatassist-popup-body {
   color: #e2e8f0;
 }
@@ -2178,5 +2261,3 @@
   background: #0f172a;
   color: #94a3b8;
 }
-
-

@@ -533,12 +533,17 @@
         else plain = 'New message';
         bodyEl.textContent = plain;
       } else {
+        // Truncate to the first 10 words so the preview always fits the
+        // popup and shows an explicit ellipsis instead of a hard CSS clip.
+        var words = plain.split(/\s+/);
+        var isTruncated = words.length > 10;
+        var truncatedPlain = isTruncated ? words.slice(0, 10).join(' ') : plain;
         // Truncate the markdown source proportionally to plain length so that
-        // rendered output roughly fits within 150 visible characters.
-        var mdSrc = plain.length > 150 ? raw.slice(0, raw.length * 150 / plain.length | 0) : raw;
+        // rendered output roughly matches the truncated plain-text length.
+        var mdSrc = isTruncated ? raw.slice(0, raw.length * truncatedPlain.length / plain.length | 0) : raw;
         bodyEl.textContent = '';
         bodyEl.appendChild(renderInlineMarkdown(mdSrc));
-        if (plain.length > 150) {
+        if (isTruncated) {
           bodyEl.appendChild(document.createTextNode('\u2026'));
         }
       }
