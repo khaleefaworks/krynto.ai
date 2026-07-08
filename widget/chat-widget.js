@@ -73,6 +73,17 @@
   let presenceWs = null;
   let isConnecting = false;
   let reconnectTimeout = null;
+  // Set when the page itself is navigating away/reloading (not a real
+  // connectivity drop). The browser tears down the socket as part of
+  // unload, which fires ws.onclose — without this flag that looks
+  // identical to a genuine disconnect and flashes "Connection lost" during
+  // the normal page-swap window (more visible in production, where the
+  // next page takes real time to load, than in dev's near-instant swap).
+  let _pageUnloading = false;
+  try {
+    window.addEventListener('pagehide', function () { _pageUnloading = true; });
+    window.addEventListener('beforeunload', function () { _pageUnloading = true; });
+  } catch (e) { }
   let presencePingInterval = null;
   let presenceReconnectTimeout = null;
   let presenceReconnectAttempts = 0;
@@ -1433,6 +1444,7 @@
         isConnecting = false;
         ws = null;
         if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
+        if (_pageUnloading) return; // page is navigating/reloading — expected, not a real drop
         showToast('Connection lost. Reconnecting...');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
