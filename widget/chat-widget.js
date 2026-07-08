@@ -83,6 +83,17 @@
   try {
     window.addEventListener('pagehide', function () { _pageUnloading = true; });
     window.addEventListener('beforeunload', function () { _pageUnloading = true; });
+    // pagehide also fires when the page is frozen into the bfcache (back/forward
+    // cache) rather than actually torn down; the browser closes the socket as part
+    // of that freeze too. Without this, a bfcache-restored page (Safari/Firefox
+    // back button) would be left with _pageUnloading stuck true and no reconnect
+    // ever scheduled — chat silently dead until a hard reload.
+    window.addEventListener('pageshow', function (e) {
+      _pageUnloading = false;
+      if (e.persisted && (!ws || ws.readyState !== WebSocket.OPEN) && !isConnecting) {
+        connectWebSocket();
+      }
+    });
   } catch (e) { }
   let presencePingInterval = null;
   let presenceReconnectTimeout = null;
