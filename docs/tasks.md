@@ -4,17 +4,27 @@
 
 | # | Item | Notes |
 |---|------|-------|
-| 40 | **Mobile app — native or PWA** | Mobile app for agents. Low priority. Requires pnpm monorepo migration first — see `docs/MONOREPO_PLAN.md` |
+| 40 | **Mobile app — native** | PWA already exists and covers agents today. Native app is a future consideration only, no active plan. Would still require pnpm monorepo migration first — see `docs/MONOREPO_PLAN.md` |
 
 ---
 
-## Automations & Reporting
+## Integrations
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| AU1 | **Automation for bot message delay (1+ min)** | Create automation trigger for bot messages that take longer than 1 minute to complete (e.g., waiting for external API response). Low priority — deferred feature. | Low |
-| AU2 | **Automation for missed chats** | Trigger automation when a conversation is not assigned within a certain time window (e.g., 5 min of visitor message). Can route to escalation or offline handling. | Medium |
-| REP1 | **Chat timing accuracy issue** | Report: Conversation initialization and resolving times are not accurate. Investigate whether `created_at`, `resolved_at`, and other timestamps are set correctly throughout the lifecycle. | Medium |
+| INT1 | **Third-party integrations (CRM, webhooks, etc.)** | Outbound webhooks for key events (new conversation, resolved, contact captured) so customers can wire their own CRM (HubSpot, Salesforce, Pipedrive) without a bespoke integration per customer. Check what established competitors ship as a baseline before scoping: Chatwoot offers signed-payload webhooks + a full REST API, native Slack integration (handle conversations from Slack), Shopify (order history surfaced in-panel), and Dialogflow/Rasa/Lex hookups for bot handoff to agents. Decide which of these are worth building here — generic webhooks are the obvious first cut, e-commerce/Slack passthrough lower priority — and whether any other competitor (Crisp, Intercom, Tidio) has an integration pattern worth copying. | Medium |
+
+## Analytics
+
+| # | Title | Description | Priority |
+|---|-------|-------------|----------|
+| REP1 | **Analytics UI & calculation overhaul** | Broader than the original timing-accuracy report: revisit the Analytics section end to end — UI/layout and correctness of the underlying calculations. Known issue: conversation `created_at`/`resolved_at` and other lifecycle timestamps aren't accurate, throwing off duration metrics; audit the full metric pipeline while in there, not just the timestamps. | Medium |
+
+## AI
+
+| # | Title | Description | Priority |
+|---|-------|-------------|----------|
+| AI1 | **AI integration** | Not yet scoped — needs more thinking before this becomes an actionable item. Candidate directions to weigh: AI-drafted agent replies, auto-summarization of long conversations, an AI-first bot tier beyond the current rule-based automations, or ticket/intent classification. Revisit once there's a concrete first use case. | TBD |
 
 ## Visitor Contact Capture
 
@@ -33,6 +43,12 @@ Found 2026-07-06: an agent can copy a visitor's `session_id` (visible as a full,
 | SEC3 | **Separate session identifier from session credential** | The actual structural fix. Generate a second random secret alongside `session_id` at first connect, store both in the widget's localStorage entry, and require *both* (not just session_id) to open a WS or read history. Never return the secret in any agent-facing API response. Means a fully-exposed session_id (visible to agents, logged, whatever) stops being sufficient on its own. Real auth-model change — scope as its own piece of work, don't bundle with SEC1/SEC2. | Medium |
 | SEC4 | **Use `crypto.randomUUID()` for session_id generation** | `widget/chat-widget.js`'s `getSessionId()` builds a UUID-shaped string via `Math.random()` instead of `crypto.randomUUID()`, which the same file already uses correctly for message IDs and attachment IDs. Inconsistent, lower-grade randomness. Small fix, bundle with SEC3 since both touch session creation. | Low |
 | SEC5 | **Rate-limit connects/history-reads, add session expiry** | Defense in depth. Today's rate limiter (`backend/app/infra/ws_rate_limit.py`) only throttles outgoing chat messages per session — someone scripting `/widget/read-state` or `/widget/conversations` with a harvested session_id can scrape at any speed with no throttle, and a leaked session_id never expires. Add per-session_id/IP rate limiting on connect/read endpoints, and an idle-expiry for sessions (there's already a precedent pattern: resolved conversations expire after 24h inactivity). | Low |
+
+## Super Admin
+
+| # | Title | Description | Priority |
+|---|-------|-------------|----------|
+| SA1 | **Flesh out the Super Admin (platform) dashboard** | `SuperAdminHome.tsx` is still a stub ("Organization management pages will live under /superadmin/*"), and `SuperAdminStats`/`SuperAdminOrgs` only show raw counts and a bare org list — no drill-down actions beyond org detail. Needs the operational features a platform admin actually reaches for: org lifecycle actions (suspend/reactivate/verify from the list, not just view), plan/billing visibility, system health (WS connection counts, queue/job status, error rates), recent-signups/activity feed, and impersonation or support-login for debugging a tenant's issue. Scope out which of these are must-have vs. nice-to-have before building. | Medium |
 
 ## Audit Trail
 
