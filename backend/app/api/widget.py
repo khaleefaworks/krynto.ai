@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.widget_origin import enforce_widget_domain_or_403
+from app.infra.ws_rate_limit import is_widget_read_rate_limited
 from app.models.website import Website
 from app.services.website_resolver import is_website_online, is_team_online
 from app.api.deps import require_authenticated_user
@@ -146,6 +147,14 @@ async def get_widget_read_state(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
+
+    client_ip = request.client.host if request.client else None
+    if await is_widget_read_rate_limited(ip=client_ip):
+        # Return directly (not raise) so the CORS headers just set above are
+        # actually carried onto the response the widget's browser sees —
+        # raising loses them, since FastAPI's exception path builds its own
+        # response and ignores the mutated `response` dependency object.
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"}, headers=dict(response.headers))
 
     if conversation_id:
         conv = db.query(Conversation).filter(
@@ -650,6 +659,10 @@ async def get_widget_conversations(
 
     enforce_widget_domain_or_403(headers=request.headers, website_domain=website.domain)
     _set_widget_cors_headers(response=response, request=request)
+
+    client_ip = request.client.host if request.client else None
+    if await is_widget_read_rate_limited(ip=client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"}, headers=dict(response.headers))
 
     def _conv_summary(conv: Conversation, include_agent: bool = True) -> dict:
         # Last message preview

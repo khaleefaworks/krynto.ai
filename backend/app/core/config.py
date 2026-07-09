@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "100/minute"  # Default rate limit for API endpoints
     RATE_LIMIT_AUTH: str = "5/minute"  # Stricter limit for auth endpoints
     RATE_LIMIT_CHAT_MESSAGE: int = 10  # Max messages per minute per session
+    RATE_LIMIT_WS_CONNECT: int = 30  # Max chat WS connect attempts per minute per IP
+    RATE_LIMIT_WIDGET_READ: int = 60  # Max widget read-state/conversations-list requests per minute per IP
 
     # Auth / JWT
     # 30-day lifetime — sessions are revoked server-side via user_login_sessions (jti).

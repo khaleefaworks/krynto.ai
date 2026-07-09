@@ -285,7 +285,7 @@ export default function CustomersVisitors() {
             const pageHost = safeHostFromUrl(r.current_page?.url)
             const cameFrom = r.came_from || ''
             return (
-                r.session_id.toLowerCase().includes(q) ||
+                shortSessionId(r.session_id).toLowerCase().includes(q) ||
                 String((r as any).visitor_name || '').toLowerCase().includes(q) ||
                 (r.current_page?.title || '').toLowerCase().includes(q) ||
                 (pageHost || '').toLowerCase().includes(q) ||
@@ -454,7 +454,7 @@ export default function CustomersVisitors() {
                                                 </div>
 
                                                 <div className="min-w-0">
-                                                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate" title={r.session_id}>
+                                                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate" title={shortSessionId(r.session_id)}>
                                                         {getVisitorDisplayName(r)}
                                                     </div>
                                                     {/* Mobile: show page title inline */}

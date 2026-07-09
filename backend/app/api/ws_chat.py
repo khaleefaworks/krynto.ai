@@ -16,7 +16,7 @@ from app.repos import conversations as conversations_repo
 from app.repos import messages as messages_repo
 from app.repos import page_views as page_views_repo
 from app.core.widget_origin import get_widget_request_host, is_host_allowed_for_website
-from app.infra.ws_rate_limit import is_chat_rate_limited
+from app.infra.ws_rate_limit import is_chat_rate_limited, is_ws_connect_rate_limited
 from app.infra.metrics import ws_connect, ws_disconnect, ws_error, ws_message
 import structlog
 import uuid
@@ -273,6 +273,12 @@ async def chat_ws(
     except Exception:
         pass
     logger.info("visitor_websocket_connected", website_id=website_id, session_id=session_id)
+
+    client_ip = getattr(getattr(websocket, "client", None), "host", None)
+    if await is_ws_connect_rate_limited(ip=client_ip):
+        logger.warning("chat_ws_connect_rate_limited", website_id=website_id, ip=client_ip)
+        await websocket.close(code=1008, reason=_ws_close_reason("Too many connections"))
+        return
 
     db = SessionLocal()
 
@@ -1156,6 +1162,12 @@ async def chat_ws_with_conversation(
     except Exception:
         pass
 
+    client_ip = getattr(getattr(websocket, "client", None), "host", None)
+    if await is_ws_connect_rate_limited(ip=client_ip):
+        logger.warning("chat_ws_with_conversation_connect_rate_limited", website_id=website_id, ip=client_ip)
+        await websocket.close(code=1008, reason=_ws_close_reason("Too many connections"))
+        return
+
     db = SessionLocal()
     try:
         # Validate website exists.
@@ -1167,6 +1179,34 @@ async def chat_ws_with_conversation(
             await websocket.close(code=1008, reason=_ws_close_reason("Website not found"))
             return
 
+        # Domain lock: same enforcement as chat_ws. This route has none today,
+        # so anyone off-site who obtains website_id+session_id+conversation_id
+        # can connect directly.
+        request_host = get_widget_request_host(websocket.headers)
+        if request_host and (not is_host_allowed_for_website(request_host=request_host, website_domain=website.domain)):
+            logger.warning(
+                "widget_origin_rejected",
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                origin=str(websocket.headers.get("origin") or ""),
+                referer=str(websocket.headers.get("referer") or ""),
+                request_host=request_host,
+                website_domain=str(website.domain or ""),
+            )
+            await websocket.close(code=1008, reason=_ws_close_reason("Widget origin not allowed"))
+            return
+
+        if (request_host is None) and settings.is_production():
+            logger.warning(
+                "widget_origin_missing",
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+            )
+            await websocket.close(code=1008, reason=_ws_close_reason("Widget origin is required"))
+            return
+
         # Validate conversation belongs to this website.
         conv = db.query(Conversation).filter(
             Conversation.id == conversation_id,
@@ -1174,6 +1214,20 @@ async def chat_ws_with_conversation(
         ).first()
         if not conv:
             await websocket.close(code=1008, reason=_ws_close_reason("Conversation not found"))
+            return
+
+        # Ownership gate: session_id must belong to this conversation. Without
+        # this, the history send below was unconditional — anyone who knew
+        # website_id + a (small, sequential) conversation_id got the full
+        # transcript regardless of the session_id in the URL.
+        if str(conv.session_id) != str(session_id):
+            logger.warning(
+                "chat_ws_with_conversation_session_mismatch",
+                website_id=website_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+            )
+            await websocket.close(code=1008, reason=_ws_close_reason("Session mismatch"))
             return
 
         # Always register session-level presence so resolved-conv visitors appear in the Visitors page.

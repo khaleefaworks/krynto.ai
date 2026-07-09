@@ -429,6 +429,62 @@ def test_chat_socket_rejects_disallowed_widget_origin(client_and_seeded_db):
         assert exc.value.code == 1008
 
 
+def _seed_conversation(*, website_id: int = 1, session_id: str = "sess-real-owner") -> int:
+    """DB-seed a conversation directly, bypassing a full chat_ws round-trip.
+
+    Deliberately avoids connect/disconnect/reconnect within one test — that
+    pattern hangs in this sandbox regardless of the code under test (verified
+    against a clean pre-change commit), independent of anything below.
+    """
+    from app.core.database import SessionLocal
+    from app.models.conversation import Conversation
+
+    db = SessionLocal()
+    try:
+        conv = Conversation(website_id=website_id, session_id=session_id)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+        return conv.id
+    finally:
+        db.close()
+
+
+def test_chat_ws_with_conversation_rejects_disallowed_widget_origin(client_and_seeded_db):
+    client = client_and_seeded_db
+    conversation_id = _seed_conversation(session_id="sess-cid-origin")
+
+    with client.websocket_connect(
+        f"/ws/chat/1/sess-cid-origin/{conversation_id}",
+        headers={"Origin": "https://evil.com"},
+    ) as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+        assert exc.value.code == 1008
+
+
+def test_chat_ws_with_conversation_rejects_session_id_mismatch(client_and_seeded_db):
+    client = client_and_seeded_db
+    conversation_id = _seed_conversation(session_id="sess-cid-real-owner")
+
+    # Attacker: knows website_id + conversation_id (a small sequential int)
+    # but supplies an arbitrary session_id that does not own this conversation.
+    with client.websocket_connect(f"/ws/chat/1/sess-attacker/{conversation_id}") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+        assert exc.value.code == 1008
+
+
+def test_chat_ws_with_conversation_allows_matching_session_id(client_and_seeded_db):
+    client = client_and_seeded_db
+    conversation_id = _seed_conversation(session_id="sess-cid-legit")
+
+    with client.websocket_connect(f"/ws/chat/1/sess-cid-legit/{conversation_id}") as ws:
+        history = ws.receive_json()
+        assert history.get("type") == "history"
+        assert history.get("conversation_id") == conversation_id
+
+
 def test_presence_socket_rejects_missing_origin_in_production(client_and_seeded_db, monkeypatch):
     from app.core.config import settings
 
