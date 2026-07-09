@@ -374,6 +374,25 @@ class ChatService:
 
         logger.warning("visitor_not_connected", conversation_id=conversation_id)
 
+    @staticmethod
+    async def send_bot_message_to_visitor(conversation_id: int, message_data: dict, *, visitor_ws=None):
+        """Send a bot-authored payload, preceded by a `chatbot_pending` marker.
+
+        There's no real "bot is composing" signal (unlike agent_typing, which
+        comes from a live agent), so this marker is what lets the widget show a
+        typing indicator instead of guessing with a fixed fake delay.
+        """
+        pending = {"type": "chatbot_pending"}
+        if visitor_ws is not None:
+            try:
+                await visitor_ws.send_json(pending)
+                await visitor_ws.send_json(message_data)
+                return
+            except Exception:
+                pass
+        await ChatService.send_to_visitor(conversation_id, pending)
+        await ChatService.send_to_visitor(conversation_id, message_data)
+
     @classmethod
     async def deliver_bus_event(cls, event: dict) -> None:
         """Deliver a Redis bus event to a locally connected visitor socket."""

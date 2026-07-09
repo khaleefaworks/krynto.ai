@@ -186,6 +186,7 @@
 
   let agentTypingActive = false;
   let agentTypingTimer = null;
+  let launcherTypingOffTimer = null;
   let visitorTypingActive = false;
   let visitorTypingTimer = null;
 
@@ -512,6 +513,12 @@
   let dotsPreviewTimer = null;
   let msgPopupTimer = null;
 
+  // True while the collapsed dot is showing because of a real signal
+  // (agent_typing or chatbot_pending) rather than the fixed fake delay below.
+  let _liveDotActive = false;
+  let _liveDotShownAt = 0;
+  const LIVE_DOT_MIN_MS = 500;
+
   function showDotsPreview() {
     hideMessagePopup(true);
     const el = $id('chatassist-dots-preview');
@@ -524,6 +531,21 @@
     if (dotsPreviewTimer) {
       clearTimeout(dotsPreviewTimer);
       dotsPreviewTimer = null;
+    }
+    _liveDotActive = false;
+  }
+
+  // Collapsed-state counterpart to setAgentTyping(): shows the same dots
+  // element the launcher badge already uses, driven by a real typing/pending
+  // signal instead of guessing after the message has already arrived.
+  function setLauncherTyping(isTyping) {
+    if (isWidgetOpen()) return; // open thread has its own indicator
+    if (isTyping) {
+      _liveDotActive = true;
+      _liveDotShownAt = Date.now();
+      showDotsPreview();
+    } else {
+      hideDotsPreview();
     }
   }
 
@@ -625,8 +647,24 @@
       return;
     }
 
-    // Widget collapsed: show typing dots, then play sound + popup together
+    // Widget collapsed.
     bumpUnread();
+
+    if (_liveDotActive) {
+      // A real signal (agent_typing / chatbot_pending) already showed the dot —
+      // just enforce a minimum visible time so it doesn't flicker on a
+      // near-instant reply, instead of re-running the fake delay below.
+      var remaining = Math.max(0, LIVE_DOT_MIN_MS - (Date.now() - _liveDotShownAt));
+      dotsPreviewTimer = setTimeout(function () {
+        hideDotsPreview();
+        playNotificationSound('collapsed');
+        showMessagePopup(senderName, avatarUrl, messageText);
+      }, remaining);
+      return;
+    }
+
+    // Fallback: no live signal preceded this message (dropped event, race) —
+    // fake the dots exactly as before.
     showDotsPreview();
     dotsPreviewTimer = setTimeout(function () {
       hideDotsPreview();
@@ -1710,6 +1748,10 @@
       _inputRevealTimer = null;
       const inputCont = $id('chatassist-input-container');
       if (inputCont) inputCont.style.display = 'none';
+      // No live "bot is typing" signal exists beyond this marker (the real
+      // message follows immediately), so there's no off-event to wait for —
+      // notifyNewMessage()/hideDotsPreview() clear it once the message lands.
+      setLauncherTyping(true);
       return;
     }
 
@@ -1803,6 +1845,11 @@
       const _rpInputCont = $id('chatassist-input-container');
       if (_rpInputCont) _rpInputCont.style.display = 'none';
       showRatingOverlay(ratingConversationId);
+      // Collapsed visitors got no heads-up before this — the overlay was armed
+      // silently and only appeared once they opened the widget. Reuse the same
+      // dots -> popup notification as a regular message, just with rating copy;
+      // opening from it lands straight on the overlay above (already armed).
+      notifyNewMessage(null, null, 'How was your chat? Tap to leave a rating.');
       return;
     }
 
@@ -1871,6 +1918,17 @@
       }
     } else if (data.type === 'agent') {
       setAgentTyping(false);
+      // Real message has landed — stop the 3s auto-off timer and the
+      // launcher grace-off timer from later hiding an unrelated future dot;
+      // notifyNewMessage() below consumes the live dot state itself.
+      if (agentTypingTimer) {
+        clearTimeout(agentTypingTimer);
+        agentTypingTimer = null;
+      }
+      if (launcherTypingOffTimer) {
+        clearTimeout(launcherTypingOffTimer);
+        launcherTypingOffTimer = null;
+      }
       if (data.agent_name) updateAgentName(data.agent_name);
       if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
       appendMessage('agent', data.message, data.created_at, { avatarUrl: data.agent_avatar, name: data.agent_name }, data.message_obj?.id);
@@ -1896,12 +1954,30 @@
       }
       if (isTyping) {
         setAgentTyping(true, data.agent_name);
+        setLauncherTyping(true);
+        if (launcherTypingOffTimer) {
+          clearTimeout(launcherTypingOffTimer);
+          launcherTypingOffTimer = null;
+        }
         agentTypingTimer = setTimeout(() => {
           agentTypingTimer = null;
           setAgentTyping(false);
+          setLauncherTyping(false);
         }, 3000);
       } else {
+        // The in-thread indicator can clear instantly — it's live and visible,
+        // no race to worry about. The launcher dot can't: the composer sends
+        // is_typing:false the instant Enter is hit, a beat before the real
+        // message frame lands, so hiding it here would wipe the live-dot state
+        // notifyNewMessage() needs to do a clean dot->popup handoff. Give the
+        // real message a grace window to arrive; only hide if nothing does
+        // (agent stopped typing without sending).
         setAgentTyping(false);
+        if (launcherTypingOffTimer) clearTimeout(launcherTypingOffTimer);
+        launcherTypingOffTimer = setTimeout(() => {
+          launcherTypingOffTimer = null;
+          setLauncherTyping(false);
+        }, 2000);
       }
     } else if (data.message) {
       const sender = data.sender === 'user' ? 'visitor' : (data.sender || 'ai');

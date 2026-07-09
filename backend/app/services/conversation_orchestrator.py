@@ -1279,13 +1279,9 @@ class ConversationOrchestrator:
                     "button_path_prefix": path,
                     "message_obj": serialize_message(self.db, sub_saved),
                 }
-                if visitor_ws is not None:
-                    try:
-                        await visitor_ws.send_json(sub_ws_payload)
-                    except Exception:
-                        pass
-                else:
-                    await ChatService.send_to_visitor(conversation.id, sub_ws_payload)
+                await ChatService.send_bot_message_to_visitor(
+                    conversation.id, sub_ws_payload, visitor_ws=visitor_ws
+                )
                 logger.info(
                     "bot_sub_prompt_sent",
                     conversation_id=conversation.id,
@@ -1398,13 +1394,9 @@ class ConversationOrchestrator:
                 "message_obj": serialize_message(self.db, saved_reply),
             }
 
-            if visitor_ws is not None:
-                try:
-                    await visitor_ws.send_json(reply_payload)
-                except Exception:
-                    pass
-            else:
-                await ChatService.send_to_visitor(conversation.id, reply_payload)
+            await ChatService.send_bot_message_to_visitor(
+                conversation.id, reply_payload, visitor_ws=visitor_ws
+            )
 
         # IVR complete: the visitor has made their selection and the conversation
         # continues normally, so always open the text input.
@@ -2207,7 +2199,7 @@ class ConversationOrchestrator:
                         saved = self.conversation_service.add_bot_message(
                             conversation_id, message, event_type=event_type
                         )
-                        await ChatService.send_to_visitor(
+                        await ChatService.send_bot_message_to_visitor(
                             conversation_id,
                             {"type": "bot", "message": message, "message_obj": serialize_message(self.db, saved)},
                         )
@@ -2260,11 +2252,20 @@ class ConversationOrchestrator:
                     node_sends_to_visitor = send_to_visitor and cfg.get("send_to_visitor", True)
                     if node_sends_to_visitor:
                         visitor_text = visitor_content if visitor_content else content
-                        await ChatService.send_to_visitor(
-                            conversation_id,
-                            {"type": "system", "event_type": event_type, "message": visitor_text,
-                             "message_obj": msg_obj, "conversation_id": conversation_id, "website_id": website_id},
-                        )
+                        visitor_payload = {
+                            "type": "system", "event_type": event_type, "message": visitor_text,
+                            "message_obj": msg_obj, "conversation_id": conversation_id, "website_id": website_id,
+                        }
+                        # emit_system_event covers both real chat-bubble content and
+                        # pure timeline banners (e.g. "resolved"/"visitor ended").
+                        # Only the former ever reaches the widget's notifyNewMessage()
+                        # to clear a pending chatbot_pending dot — sending the marker
+                        # ahead of a banner (kind == "event") would leave the launcher
+                        # dot stuck forever, since nothing on the client consumes it.
+                        if msg_obj.get("kind") == "chat":
+                            await ChatService.send_bot_message_to_visitor(conversation_id, visitor_payload)
+                        else:
+                            await ChatService.send_to_visitor(conversation_id, visitor_payload)
                     await self.agent_service.broadcast_to_active_agents(
                         website_id=website_id,
                         message_data={"type": "system_message", "conversation_id": conversation_id,
@@ -2363,7 +2364,7 @@ class ConversationOrchestrator:
                         "message_obj": serialize_message(self.db, saved),
                     }
                     if send_to_visitor:
-                        await ChatService.send_to_visitor(conversation_id, ws_payload)
+                        await ChatService.send_bot_message_to_visitor(conversation_id, ws_payload)
 
             elif node_type == "end":
                 break
