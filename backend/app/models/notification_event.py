@@ -47,14 +47,27 @@ class NotificationEvent(Base):
 
     # How we tried to deliver it
     delivery_method = Column(
-        SQLEnum(NotificationEventDeliveryMethod, name="notification_delivery_method"),
+        SQLEnum(
+            NotificationEventDeliveryMethod,
+            name="notification_delivery_method",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
         nullable=False,
         default=NotificationEventDeliveryMethod.PUSH,
     )
 
     # Delivery status
     status = Column(
-        SQLEnum(NotificationEventStatus, name="notification_event_status"),
+        # values_callable: without it, SQLAlchemy binds Python Enum members by
+        # .name ("PENDING") instead of .value ("pending") even though this is a
+        # (str, Enum) hybrid — but the DB-side enum type (migration b2c3d4e5f6a1)
+        # only allows the lowercase .value strings, so every insert/query against
+        # this column was raising InvalidTextRepresentation.
+        SQLEnum(
+            NotificationEventStatus,
+            name="notification_event_status",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
         nullable=False,
         default=NotificationEventStatus.PENDING,
     )
