@@ -169,6 +169,7 @@ def start_scheduler() -> None:
     Registered jobs:
     - Notification retry (every 5 min): Retry failed push notifications with backoff
     - Notification cleanup (daily): Clean up old completed notifications
+    - Scheduled backup (every 2h): Dump DB + uploads to local disk (SA2)
     """
     global _scheduler
     if _scheduler is not None:
@@ -206,6 +207,23 @@ def start_scheduler() -> None:
         logger.info("notification_cleanup_job_registered")
     except Exception as e:
         logger.warning("notification_jobs_registration_failed", error=str(e))
+
+    # SA2: automated DB + uploads backup every 2 hours.
+    try:
+        from app.services.backup_service import run_scheduled_backup
+
+        _scheduler.add_job(
+            run_scheduled_backup,
+            "interval",
+            hours=2,
+            id="scheduled_backup_job",
+            name="Back up the database and uploads directory",
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info("scheduled_backup_job_registered")
+    except Exception as e:
+        logger.warning("scheduled_backup_job_registration_failed", error=str(e))
 
     _scheduler.start()
     logger.info("auto_close_scheduler_started")

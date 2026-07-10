@@ -28,6 +28,7 @@ from app.models.verification_token import VerificationToken
 from app.models.user_login_session import UserLoginSession
 from app.models.agent_status_log import AgentStatusLog
 from app.models.notification_event import NotificationEvent, NotificationEventStatus, NotificationEventDeliveryMethod
+from app.models.backup import Backup, BackupStatus, BackupTrigger
 
 __all__ = [
     "Website",
@@ -64,4 +65,7 @@ __all__ = [
     "NotificationEvent",
     "NotificationEventStatus",
     "NotificationEventDeliveryMethod",
+    "Backup",
+    "BackupStatus",
+    "BackupTrigger",
 ]

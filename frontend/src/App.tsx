@@ -34,6 +34,7 @@ import SuperAdminLayout from './pages/SuperAdminLayout'
 import SuperAdminOrgs from './pages/SuperAdminOrgs'
 import SuperAdminOrgDetail from './pages/SuperAdminOrgDetail'
 import SuperAdminStats from './pages/SuperAdminStats'
+import SuperAdminBackups from './pages/SuperAdminBackups'
 import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
@@ -613,6 +614,7 @@ function App() {
                   <Route path="organizations" element={<SuperAdminOrgs />} />
                   <Route path="organizations/:id" element={<SuperAdminOrgDetail />} />
                   <Route path="stats" element={<SuperAdminStats />} />
+                  <Route path="backups" element={<SuperAdminBackups />} />
                   <Route index element={<Navigate to="/superadmin/organizations" replace />} />
                 </Route>
                 <Route

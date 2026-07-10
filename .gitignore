@@ -66,3 +66,6 @@ backend/uploads/
 # Repo-root uploads dir (prod uses a symlink here)
 uploads/
 uploads
+
+# Generated DB+uploads backups (SA2) — never belongs in git, contains full PII
+backend/backups/
