@@ -200,7 +200,7 @@ export default function Teams() {
             {!loading && !error && sorted.length ? (
                 <div className="mx-4 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-4 md:h-[calc(100vh-6rem)]">
                     <Card className={`lg:col-span-4 xl:col-span-3 dark:bg-gray-800 dark:border-gray-700 overflow-hidden ${selectedWebsiteId !== null ? 'hidden lg:block' : ''}`}>
-                        <CardHeader className="pb-3">
+                        <CardHeader className="pb-3 bg-gray-200 dark:bg-gray-900">
                             <CardTitle className="text-base">Websites</CardTitle>
                             <CardDescription className="text-xs">Select a website to view teams</CardDescription>
                         </CardHeader>
