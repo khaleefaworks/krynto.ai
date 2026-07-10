@@ -104,13 +104,20 @@ def _date_range(
     end: date | None,
     default_days: int = 30,
 ) -> tuple[datetime, datetime]:
-    """Return a (start_dt, end_dt) pair in UTC from date strings."""
+    """Return a (start_dt, end_dt) pair anchored to IST calendar days.
+
+    The DB session and server OS both run in Asia/Kolkata, and SQL-side day
+    bucketing (func.date() on a timestamptz column) already converts to that
+    timezone — so boundaries must be labeled IST too, not UTC. Mislabeling
+    IST midnight as UTC midnight shifts every window 5.5 hours later than
+    the calendar day a user actually selects.
+    """
     if end is None:
         end = date.today()
     if start is None:
         start = end - timedelta(days=default_days - 1)
-    start_dt = datetime.combine(start, time.min, tzinfo=timezone.utc)
-    end_dt = datetime.combine(end, time.max, tzinfo=timezone.utc)
+    start_dt = datetime.combine(start, time.min, tzinfo=_IST)
+    end_dt = datetime.combine(end, time.max, tzinfo=_IST)
     return start_dt, end_dt
 
 
@@ -198,7 +205,9 @@ def conversation_summary(
         Conversation.resolved_at <= end_dt,
     ).count()
 
-    # Replied = conversations (created in period) with at least one agent message.
+    # Replied = conversations (in period) with at least one agent message.
+    # Same date field as total_new (last_visitor_message_at, not created_at)
+    # so the two are counted on the same axis and stay directly comparable.
     replied_subq = (
         db.query(Message.conversation_id)
         .filter(Message.sender_type == MessageSenderType.AGENT)
@@ -206,8 +215,9 @@ def conversation_summary(
         .subquery()
     )
     total_replied = base.filter(
-        Conversation.created_at >= start_dt,
-        Conversation.created_at <= end_dt,
+        Conversation.last_visitor_message_at.isnot(None),
+        Conversation.last_visitor_message_at >= start_dt,
+        Conversation.last_visitor_message_at <= end_dt,
         Conversation.id.in_(db.query(replied_subq.c.conversation_id))
     ).count()
 
@@ -244,8 +254,9 @@ def conversation_summary(
         .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
         .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
             first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
@@ -263,7 +274,7 @@ def conversation_summary(
         "total_new": total_new,
         "total_replied": total_replied,
         "total_resolved": total_resolved,
-        "avg_first_response_seconds": round(avg_response_seconds, 1) if avg_response_seconds else None,
+        "avg_first_response_seconds": round(avg_response_seconds, 1) if avg_response_seconds is not None else None,
     }
 
 
@@ -448,7 +459,7 @@ def response_time_chart(
 
     rows = (
         db.query(
-            func.date(Conversation.created_at).label("day"),
+            func.date(Conversation.last_visitor_message_at).label("day"),
             (
                 func.extract("epoch", first_agent_msg.c.first_agent_at)
                 - func.extract("epoch", first_visitor_msg.c.first_visitor_at)
@@ -457,8 +468,9 @@ def response_time_chart(
         .join(first_agent_msg, first_agent_msg.c.conversation_id == Conversation.id)
         .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
             first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
@@ -588,15 +600,16 @@ def agents_summary(
         .join(Conversation, Conversation.id == first_agent_msg.c.conversation_id)
         .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
             first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
     )
     if allowed_ids is not None:
         resp_q = resp_q.filter(Conversation.website_id.in_(allowed_ids))
     resp_q = resp_q.group_by(first_agent_msg.c.agent_email)
-    resp_map = {row[0]: round(row[1], 1) if row[1] else None for row in resp_q.all()}
+    resp_map = {row[0]: round(row[1], 1) if row[1] is not None else None for row in resp_q.all()}
 
     result: list[dict[str, Any]] = []
     for agent in agents:
@@ -717,13 +730,14 @@ def teams_summary(
         .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
         .filter(
             Conversation.team_id.in_(team_ids),
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
+            Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
             first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
         )
         .group_by(Conversation.team_id)
     )
-    resp_map = {row[0]: round(row[1], 1) if row[1] else None for row in resp_q.all()}
+    resp_map = {row[0]: round(row[1], 1) if row[1] is not None else None for row in resp_q.all()}
 
     result = [
         {
@@ -809,7 +823,7 @@ def analytics_overview(
 
     prev_end_dt = start_dt - timedelta(seconds=1)
     prev_start_dt = prev_end_dt - timedelta(days=period_days - 1)
-    prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=timezone.utc)
+    prev_start_dt = datetime.combine(prev_start_dt.date(), time.min, tzinfo=_IST)
 
     _empty_metric = {"value": 0, "previous": 0, "change_pct": None}
 
@@ -884,15 +898,16 @@ def analytics_overview(
             .join(first_visitor_msg, first_visitor_msg.c.conversation_id == Conversation.id)
             .filter(
                 Conversation.bot_only == False,  # noqa: E712
-                Conversation.created_at >= s,
-                Conversation.created_at <= e,
+                Conversation.last_visitor_message_at.isnot(None),
+                Conversation.last_visitor_message_at >= s,
+                Conversation.last_visitor_message_at <= e,
                 first_agent_msg.c.first_agent_at > first_visitor_msg.c.first_visitor_at,
             )
         )
         if allowed_ids is not None:
             q = q.filter(Conversation.website_id.in_(allowed_ids))
         val = q.scalar()
-        return round(val, 1) if val else None
+        return round(val, 1) if val is not None else None
 
     def _pct_change(current: int | float | None, previous: int | float | None) -> float | None:
         if previous is None or previous == 0 or current is None:
@@ -943,10 +958,17 @@ def ratings_summary(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Satisfaction rating breakdown for the period."""
     start_dt, end_dt = _date_range(start, end)
+
+    allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
+    if allowed_ids is not None and not allowed_ids:
+        return {
+            "total": 0, "good": 0, "neutral": 0, "bad": 0,
+            "good_pct": 0, "neutral_pct": 0, "bad_pct": 0,
+        }
 
     q = (
         db.query(
@@ -957,8 +979,8 @@ def ratings_summary(
         .filter(ConversationRating.created_at >= start_dt)
         .filter(ConversationRating.created_at <= end_dt)
     )
-    if website_id:
-        q = q.filter(Conversation.website_id == website_id)
+    if allowed_ids is not None:
+        q = q.filter(Conversation.website_id.in_(allowed_ids))
 
     rows = q.group_by(ConversationRating.rating).all()
 
@@ -986,7 +1008,7 @@ def export_xlsx(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
     agent_id: Optional[int] = Query(None),
-    team_id: Optional[int] = Query(None),
+    team_ids: Optional[str] = Query(None),
     rating: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
 ):
@@ -995,11 +1017,17 @@ def export_xlsx(
 
     allowed_ids = _allowed_website_ids(db, current_user=current_user, requested_website_id=website_id)
 
-    # Parse tag_ids CSV
+    # Parse tag_ids / team_ids CSV
     parsed_tag_ids: list[int] = []
     if tag_ids:
         try:
             parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
+    parsed_team_ids: list[int] = []
+    if team_ids:
+        try:
+            parsed_team_ids = [int(x) for x in team_ids.split(",") if x.strip()]
         except ValueError:
             pass
 
@@ -1008,7 +1036,7 @@ def export_xlsx(
         "Visitor Name", "Visitor Email", "Visitor Phone", "Contact Filled",
         "Session ID", "Visitor IP", "Device", "Browser",
         "Agents",
-        "Started At", "Resolved At", "Chat Duration (mins)", "First Response Time (s)",
+        "Started Date", "Started Time", "Resolved Date", "Resolved Time", "Chat Duration (mins)", "First Response Time (s)",
         "Visitor Messages", "Agent Messages",
         "Rating", "Rating Feedback", "Closed By", "Tags",
         "Lead Source", "Referrer", "Page URL",
@@ -1020,7 +1048,8 @@ def export_xlsx(
         "Yes if any contact field was filled by visitor",
         "Browser session identifier", "Visitor IP address", "Device type", "Browser name/version",
         "Assigned agent + all agents who sent a message (comma-separated, deduplicated)",
-        "Timestamp of first visitor interaction", "Timestamp conversation was resolved",
+        "Date of first visitor interaction (IST)", "Time of first visitor interaction (IST)",
+        "Date conversation was resolved (IST)", "Time conversation was resolved (IST)",
         "Minutes from first interaction to resolution (blank if unresolved)",
         "Seconds from first interaction to first agent reply",
         "Number of messages sent by visitor", "Number of messages sent by agents",
@@ -1219,13 +1248,13 @@ def export_xlsx(
             func.coalesce(assigned_user.name, msg_user.name, first_agent_msg.c.agent_sender).label("agent_name"),
             agents_involved_subq.c.agents_involved.label("agents_involved"),
             func.coalesce(first_human_at.c.first_human_at, Conversation.created_at).label("date_with_time"),
-            case(
-                (Conversation.closed_by == "agent", Conversation.resolved_at),
-                else_=None,
-            ).label("resolved_at"),
+            # Resolved At / Chat Duration reflect any resolved conversation, not just
+            # agent-closed ones — the column descriptions already promise "blank if
+            # unresolved", not "blank unless an agent closed it".
+            Conversation.resolved_at.label("resolved_at"),
             case(
                 (
-                    Conversation.closed_by == "agent",
+                    Conversation.resolved_at.isnot(None),
                     func.extract(
                         "epoch",
                         func.timezone("UTC", Conversation.resolved_at)
@@ -1264,9 +1293,9 @@ def export_xlsx(
         .outerjoin(first_pv_session, first_pv_session.c.session_id == Conversation.session_id)
         .outerjoin(first_pv_referrer_subq, first_pv_referrer_subq.c.conversation_id == Conversation.id)
         .filter(
-            Conversation.created_at >= start_dt,
-            Conversation.created_at <= end_dt,
             Conversation.last_visitor_message_at.isnot(None),
+            Conversation.last_visitor_message_at >= start_dt,
+            Conversation.last_visitor_message_at <= end_dt,
         )
     )
 
@@ -1276,8 +1305,8 @@ def export_xlsx(
     # Optional extra filters
     if agent_id is not None:
         q = q.filter(Conversation.assigned_agent_id == agent_id)
-    if team_id is not None:
-        q = q.filter(Conversation.team_id == team_id)
+    if parsed_team_ids:
+        q = q.filter(Conversation.team_id.in_(parsed_team_ids))
     if rating is not None:
         rated_conv_ids = (
             db.query(ConversationRating.conversation_id)
@@ -1293,21 +1322,23 @@ def export_xlsx(
                 )
             )
 
-    def _fmt_dt(dt_val) -> str:
+    def _split_dt(dt_val) -> tuple[str, str]:
+        """Return (date_str, time_str) in IST, split into separate columns
+        instead of one combined field."""
         if dt_val is None:
-            return ""
+            return "", ""
         if isinstance(dt_val, str):
             try:
                 dt_val = datetime.fromisoformat(dt_val)
             except Exception:
-                return str(dt_val)
+                return str(dt_val), ""
         try:
             if dt_val.tzinfo is None:
                 dt_val = dt_val.replace(tzinfo=timezone.utc)
             dt_val = dt_val.astimezone(_IST)
-            return f"{dt_val.date().isoformat()}  {dt_val.strftime('%I:%M:%S%p')}"
+            return dt_val.date().isoformat(), dt_val.strftime('%I:%M:%S%p')
         except Exception:
-            return str(dt_val)
+            return str(dt_val), ""
 
     _RATING_LABEL = {1: "Good", 0: "Neutral", -1: "Bad"}
 
@@ -1367,6 +1398,9 @@ def export_xlsx(
             except Exception:
                 pass
 
+        started_date, started_time = _split_dt(row.date_with_time)
+        resolved_date, resolved_time = _split_dt(row.resolved_at)
+
         ws.append([
             row.short_id or "",
             status_val,
@@ -1381,8 +1415,7 @@ def export_xlsx(
             row.device_info or "",
             row.browser_info or "",
             agents_col,
-            _fmt_dt(row.date_with_time),
-            _fmt_dt(row.resolved_at),
+            started_date, started_time, resolved_date, resolved_time,
             chat_duration_mins,
             float(row.response_time_seconds) if row.response_time_seconds is not None else "",
             int(row.visitor_msg_count) if row.visitor_msg_count is not None else 0,
@@ -1415,7 +1448,7 @@ def export_transcripts(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
     agent_id: Optional[int] = Query(None),
-    team_id: Optional[int] = Query(None),
+    team_ids: Optional[str] = Query(None),
     rating: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
 ):
@@ -1427,6 +1460,12 @@ def export_transcripts(
     if tag_ids:
         try:
             parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()]
+        except ValueError:
+            pass
+    parsed_team_ids: list[int] = []
+    if team_ids:
+        try:
+            parsed_team_ids = [int(x) for x in team_ids.split(",") if x.strip()]
         except ValueError:
             pass
 
@@ -1450,8 +1489,8 @@ def export_transcripts(
         conv_q = conv_q.filter(Conversation.website_id.in_(allowed_ids))
     if agent_id is not None:
         conv_q = conv_q.filter(Conversation.assigned_agent_id == agent_id)
-    if team_id is not None:
-        conv_q = conv_q.filter(Conversation.team_id == team_id)
+    if parsed_team_ids:
+        conv_q = conv_q.filter(Conversation.team_id.in_(parsed_team_ids))
     if rating is not None:
         rated_ids = (
             db.query(ConversationRating.conversation_id)
@@ -1597,9 +1636,16 @@ def export_transcripts(
 # ---------------------------------------------------------------------------
 
 def _avail_day_bounds(day: date):
-    """Return UTC-naive start/end datetimes covering the full calendar day."""
-    start = datetime.combine(day, time.min)
-    end = datetime.combine(day, time.max)
+    """Return IST-aware start/end datetimes covering the full calendar day.
+
+    Mirrors _date_range()'s fix: the day the caller picks is an IST calendar
+    day, so the bounds must be labeled IST, not left naive/UTC. Naive-UTC
+    columns (AgentStatusLog.changed_at) need an explicit conversion at the
+    call site — see agent_availability() — since that column doesn't store
+    the same way Conversation.created_at does.
+    """
+    start = datetime.combine(day, time.min, tzinfo=_IST)
+    end = datetime.combine(day, time.max, tzinfo=_IST)
     return start, end
 
 
@@ -1610,6 +1656,7 @@ def _agent_org_id(db: Session, current_user: User) -> int | None:
 @router.get("/agent-availability")
 def agent_availability(
     day: str = Query(..., description="Date in YYYY-MM-DD format"),
+    website_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1628,7 +1675,13 @@ def agent_availability(
         from fastapi import HTTPException
         raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
 
-    day_start, day_end = _avail_day_bounds(target_day)
+    ist_start, ist_end = _avail_day_bounds(target_day)
+    # AgentStatusLog.changed_at is a plain (naive-UTC) DateTime column, unlike
+    # Conversation.created_at — convert the IST day bounds to naive-UTC once
+    # here so every comparison/arithmetic against changed_at below stays in
+    # that same domain (including the .isoformat() output the frontend reads).
+    day_start = ist_start.astimezone(timezone.utc).replace(tzinfo=None)
+    day_end = ist_end.astimezone(timezone.utc).replace(tzinfo=None)
     org_id = _agent_org_id(db, current_user)
 
     is_admin = current_user.is_admin()
@@ -1644,6 +1697,14 @@ def agent_availability(
         agent_q = agent_q.filter(User.organization_id == org_id)
     if agent_filter_ids:
         agent_q = agent_q.filter(User.id.in_(agent_filter_ids))
+    if website_id is not None:
+        from app.models.agent_website_assignment import AgentWebsiteAssignment
+        assigned_ids = (
+            db.query(AgentWebsiteAssignment.agent_id)
+            .filter(AgentWebsiteAssignment.website_id == website_id)
+            .subquery()
+        )
+        agent_q = agent_q.filter(User.id.in_(db.query(assigned_ids.c.agent_id)))
     agents = agent_q.all()
     agent_map = {a.id: {"id": a.id, "name": a.name, "email": a.email} for a in agents}
     agent_ids = list(agent_map.keys())
