@@ -903,10 +903,14 @@
   animation: none;
 }
 
-/* --- Bot Prompt Buttons --- */
+/* --- Bot Prompt Buttons ---
+   Desktop: pills flow left-to-right, wrapping as needed ("next to next").
+   Mobile (see @media max-width: 480px below): reverts to one-per-line —
+   pills are too cramped to sit side by side on a phone-width panel. */
 .chatassist-prompt-buttons {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
   max-width: 100%;
@@ -914,6 +918,7 @@
 
 .chatassist-prompt-btn {
   display: inline-block;
+  flex: 0 1 auto;
   padding: 9px 16px;
   border: 1.5px solid #3b82f6;
   border-radius: 20px;
@@ -927,6 +932,7 @@
   line-height: 1.4;
   white-space: normal;
   word-break: break-word;
+  max-width: 100%;
 }
 
 .chatassist-prompt-btn:hover:not(:disabled) {
@@ -1626,6 +1632,16 @@
     height: calc(100dvh - 40px);
     height: calc(100vh - 40px);
     border-radius: 16px;
+  }
+
+  /* One button per line on mobile — a phone-width panel is too narrow for
+     pills to sit side by side without wrapping awkwardly mid-label. */
+  .chatassist-prompt-buttons {
+    flex-direction: column;
+  }
+
+  .chatassist-prompt-btn {
+    width: 100%;
   }
 
   @supports (height: 100dvh) {

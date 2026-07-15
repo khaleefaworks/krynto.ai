@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Trash2, RotateCcw } from 'lucide-react'
+import { X, Plus, Trash2, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react'
 import { apiRequest } from '@/services/api'
 import {
   automationsApi,
@@ -224,6 +224,16 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
     onChange(next)
   }
 
+  // Buttons render to the widget in this same array order, so reordering
+  // here is the whole fix — no separate "widget order" to keep in sync.
+  function moveBtn(i: number, dir: -1 | 1) {
+    const j = i + dir
+    if (j < 0 || j >= buttons.length) return
+    const next = [...buttons]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    onChange(next)
+  }
+
   return (
     <>
       {buttons.map((btn: any, i: number) => (
@@ -235,8 +245,26 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
               : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
           }`}
         >
-          {/* Label + delete */}
+          {/* Label + reorder + delete */}
           <div className="flex items-center gap-1">
+            <div className="flex flex-col flex-shrink-0 -my-1">
+              <button
+                onClick={() => moveBtn(i, -1)}
+                disabled={i === 0}
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-25 disabled:hover:text-gray-400"
+                title="Move up"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => moveBtn(i, 1)}
+                disabled={i === buttons.length - 1}
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-25 disabled:hover:text-gray-400"
+                title="Move down"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <Input
               value={btn.label || ''}
               onChange={(e) => updateBtn(i, { label: e.target.value })}
