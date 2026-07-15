@@ -56,9 +56,22 @@ const TRIGGERS: { value: AutomationTrigger; label: string }[] = [
   { value: 'conversation_created',       label: 'Conversation created' },
   { value: 'conversation_visitor_ended', label: 'Visitor ended chat' },
   { value: 'conversation_resolved',      label: 'Conversation resolved' },
+  { value: 'bot_conversation_resolved',  label: 'Bot resolved chat (bot-only)' },
   { value: 'conversation_auto_resolved', label: 'Auto-resolved' },
   { value: 'conversation_reopened',      label: 'Conversation reopened' },
 ]
+
+// Triggers the backend always fires with send_to_visitor=False, hardcoded at
+// the ConversationOrchestrator call site — no node in these flows can ever
+// reach the visitor, regardless of this node's own "Send to visitor" toggle.
+// Keep in sync with the `trigger=` call sites in conversation_orchestrator.py.
+const AGENT_ONLY_TRIGGERS = new Set<string>([
+  'agent_joined',
+  'visitor_dropped',
+  'visitor_reconnected',
+  'visitor_socket_connected',
+  'visitor_rated_conversation',
+])
 
 // ─── Summary helpers ──────────────────────────────────────────────────────
 
@@ -294,19 +307,27 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                 />
               </div>
               {btn.bot_only && (
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-1">
-                    Auto-resolve delay (seconds)
-                  </span>
+                <>
                   <Input
-                    type="number"
-                    min={1}
-                    max={30}
-                    value={btn.resolve_delay_seconds ?? 3}
-                    onChange={(e) => updateBtn(i, { resolve_delay_seconds: Math.max(1, Math.min(30, Number(e.target.value) || 3)) })}
-                    className="h-7 text-xs w-16 text-center"
+                    value={btn.bot_only_message || ''}
+                    onChange={(e) => updateBtn(i, { bot_only_message: e.target.value })}
+                    placeholder='Agent-only timeline note (default: "Bot joined the chat.")'
+                    className="h-7 text-xs"
                   />
-                </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-1">
+                      Auto-resolve delay (seconds)
+                    </span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={btn.resolve_delay_seconds ?? 3}
+                      onChange={(e) => updateBtn(i, { resolve_delay_seconds: Math.max(1, Math.min(30, Number(e.target.value) || 3)) })}
+                      className="h-7 text-xs w-16 text-center"
+                    />
+                  </div>
+                </>
               )}
               {!btn.bot_only && (
                 <div className="flex items-center justify-between">
@@ -345,6 +366,14 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                   })}
                 />
               </div>
+              {btn.sub_prompt.bot_only && (
+                <Input
+                  value={btn.sub_prompt.bot_only_message || ''}
+                  onChange={(e) => updateSubPrompt(i, { bot_only_message: e.target.value })}
+                  placeholder='Agent-only timeline note (default: "Bot joined the chat.")'
+                  className="h-7 text-xs"
+                />
+              )}
               {!btn.sub_prompt.bot_only && (
                 <>
                   <div className="flex items-center justify-between">
@@ -416,15 +445,18 @@ function NodeConfigPanel({
   onChange,
   onDelete,
   websiteTeams = [],
+  trigger,
 }: {
   node: Node
   onChange: (config: Record<string, any>) => void
   onDelete: () => void
   websiteTeams?: { id: number; name: string }[]
+  trigger?: string
 }) {
   const type = node.data.type as string
   const cfg = (node.data.config as Record<string, any>) || {}
   const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch })
+  const forcedAgentOnly = Boolean(trigger && AGENT_ONLY_TRIGGERS.has(trigger))
 
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">
@@ -513,15 +545,17 @@ function NodeConfigPanel({
               className="text-xs"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Visitor-side content (optional)</label>
-            <Input
-              value={cfg.visitor_content || ''}
-              onChange={(e) => set({ visitor_content: e.target.value })}
-              placeholder="e.g. Chat resolved."
-              className="h-8 text-xs"
-            />
-          </div>
+          {!forcedAgentOnly && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Visitor-side content (optional)</label>
+              <Input
+                value={cfg.visitor_content || ''}
+                onChange={(e) => set({ visitor_content: e.target.value })}
+                placeholder="e.g. Chat resolved."
+                className="h-8 text-xs"
+              />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Event type</label>
             <Input
@@ -533,11 +567,16 @@ function NodeConfigPanel({
           </div>
           <div className="flex items-center justify-between pt-1">
             <div>
-              <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Send to visitor</span>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Disable for agent-only messages</p>
+              <span className={`text-xs font-medium ${forcedAgentOnly ? 'text-gray-400 dark:text-gray-600' : 'text-gray-700 dark:text-gray-300'}`}>Send to visitor</span>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                {forcedAgentOnly
+                  ? 'This trigger is always agent-only — the visitor never sees it, regardless of this setting.'
+                  : 'Disable for agent-only messages'}
+              </p>
             </div>
             <Switch
-              checked={cfg.send_to_visitor !== false}
+              checked={!forcedAgentOnly && cfg.send_to_visitor !== false}
+              disabled={forcedAgentOnly}
               onCheckedChange={(v) => set({ send_to_visitor: v })}
             />
           </div>
@@ -973,6 +1012,7 @@ export default function AutomationFlowCanvas({ websiteId, automation, onClose, o
               onChange={updateSelectedNodeConfig}
               onDelete={deleteSelectedNode}
               websiteTeams={websiteTeams}
+              trigger={trigger}
             />
           ) : (
             <div className="p-4 text-sm text-gray-400 dark:text-gray-500">

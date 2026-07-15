@@ -257,6 +257,25 @@ class AutomationService:
                     {"id": "e2", "from": "n_wait", "to": "n2"},
                 ],
             },
+            # ─── Bot auto-resolved ─────────────────────────────────────────────
+            # Fires when a bot-only conversation self-resolves (IVR loop completed,
+            # or visitor abandoned mid-flow). Deliberately its own trigger, not
+            # conversation_resolved — a bot-only chat has no human agent, so a
+            # site's rating-popup-on-resolve setup for humans shouldn't also fire
+            # here. send_to_visitor defaults to False (agent-only) below, but it's
+            # a real, editable node setting — not hardcoded by the caller.
+            {
+                "name": "Bot resolved chat",
+                "trigger": "bot_conversation_resolved",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "event_type": "bot_conversation_resolved_message", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
             # ─── Visitor rated ────────────────────────────────────────────────
             {
                 "name": "Visitor rated",

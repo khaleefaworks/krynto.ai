@@ -46,6 +46,7 @@ export interface Conversation {
   short_id?: string | null
   title?: string | null
   visitor_ended?: boolean
+  bot_only?: boolean
 }
 
 export interface Message {

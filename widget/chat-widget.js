@@ -7,6 +7,11 @@
 (function () {
   'use strict';
 
+  // Shared bot/AI avatar mascot — used for every bot message avatar in the
+  // thread. Kept as one constant so future AI-handled flows reuse the same
+  // icon instead of re-inlining this SVG at each call site.
+  const BOT_AVATAR_SVG = '<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect fill="#eff3f9" height="29" rx="4" width="34" x="7" y="15"/><path d="m11 38v-23c-2.209 0-4 1.791-4 4v21c0 2.209 1.791 4 4 4h26c2.209 0 4-1.791 4-4h-28c-1.105 0-2-.895-2-2z" fill="#cfe0f3"/><circle cx="18" cy="25" fill="#afb4c2" r="2"/><circle cx="30" cy="25" fill="#afb4c2" r="2"/><path d="m45 36h-4v-13h4c1.105 0 2 .895 2 2v9c0 1.105-.895 2-2 2z" fill="#8c94af"/><path d="m3 36h4v-13h-4c-1.105 0-2 .895-2 2v9c0 1.105.895 2 2 2z" fill="#8c94af"/><path d="m45 32h-4v4h4c1.105 0 2-.895 2-2v-4c0 1.105-.895 2-2 2z" fill="#6f7792"/><path d="m1 30v4c0 1.105.895 2 2 2h4v-4h-4c-1.105 0-2-.895-2-2z" fill="#6f7792"/><circle cx="24" cy="6" fill="#ff3b65" r="3"/><path d="m25.5 7c-1.381 0-2.5-1.119-2.5-2.5 0-.54.175-1.037.467-1.446-1.402.252-2.467 1.472-2.467 2.946 0 1.657 1.343 3 3 3 1.474 0 2.694-1.065 2.946-2.467-.409.291-.906.467-1.446.467z" fill="#d82b50" opacity=".75"/><g fill="#08105e"><path d="m21 25c0-1.654-1.346-3-3-3s-3 1.346-3 3 1.346 3 3 3 3-1.346 3-3zm-3 1c-.551 0-1-.448-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z"/><path d="m30 22c-1.654 0-3 1.346-3 3s1.346 3 3 3 3-1.346 3-3-1.346-3-3-3zm0 4c-.551 0-1-.448-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z"/><path d="m28.543 33.91c-2.815 1.447-6.271 1.447-9.086 0-.492-.253-1.094-.059-1.347.433s-.059 1.094.433 1.347c1.669.857 3.556 1.311 5.457 1.311s3.788-.453 5.457-1.311c.491-.253.685-.855.433-1.347s-.855-.686-1.347-.433z"/><path d="m45 22h-3v-3c0-2.757-2.243-5-5-5h-12v-4.142c1.72-.447 3-2 3-3.858 0-2.206-1.794-4-4-4s-4 1.794-4 4c0 1.858 1.28 3.411 3 3.858v4.142h-12c-2.757 0-5 2.243-5 5v3h-3c-1.654 0-3 1.346-3 3v9c0 1.654 1.346 3 3 3h3v3c0 2.757 2.243 5 5 5h26c2.757 0 5-2.243 5-5v-3h3c1.654 0 3-1.346 3-3v-9c0-1.654-1.346-3-3-3zm-23-16c0-1.103.897-2 2-2s2 .897 2 2-.897 2-2 2-2-.897-2-2zm-19 29c-.551 0-1-.448-1-1v-9c0-.551.449-1 1-1h3v11zm37 5c0 1.654-1.346 3-3 3h-26c-1.654 0-3-1.346-3-3v-21c0-1.654 1.346-3 3-3h26c1.654 0 3 1.346 3 3zm6-6c0 .552-.449 1-1 1h-3v-11h3c.551 0 1 .449 1 1z"/></g></svg>';
+
   // --- Configuration & State ---
   const globalConfig = window._aichatassist || {};
   const scriptElement = document.currentScript || document.querySelector('script[src*="chat-widget.js"]');
@@ -123,6 +128,12 @@
   // team-routing buttons, hasn't picked one yet).
   let _agentJoinedThisConv = false;
   let _visitorHasEngaged = false;
+  // True once the backend has flagged this conversation bot_only (set on
+  // history load and live the moment a bot_only branch, e.g. Careers, is
+  // entered — see the 'history'/'bot_prompt' handlers). Monotonic per
+  // conversation: only reset on enterStartView(), never flips back to false
+  // mid-conversation since the backend itself never un-sets bot_only either.
+  let _conversationBotOnly = false;
   let _waitingRotateTimer = null;
   const WAITING_FOR_AGENT_MESSAGES = [
     'Connecting you to an agent',
@@ -687,6 +698,7 @@
       && !isReadOnlyThread
       && _visitorHasEngaged
       && !_agentJoinedThisConv
+      && !_conversationBotOnly
       && !_isInputLocked()
       && !endChatDisabled
       && !_forceContactOverlay
@@ -1223,6 +1235,7 @@
     hasRatedSession = false;
     ratingConversationId = null;
     CONFIG.conversationId = 0;
+    _conversationBotOnly = false;
     _contactVerifiedThisConversation = false;
     _leafButtonCommitted = false;
     pendingBotButtonClick = null;
@@ -1538,6 +1551,10 @@
 
   function handleIncomingMessage(data) {
     if (data.type === 'history' && Array.isArray(data.messages)) {
+      // Capture regardless of the isReadStateFetched queue detour below —
+      // bot_only drives the waiting-for-agent indicator, no reason to defer it.
+      if (data.bot_only) _conversationBotOnly = true;
+
       if (!isReadStateFetched) {
         historyQueue = data;
         return;
@@ -1577,6 +1594,7 @@
       // carrying over state from a previous conversation in the same page session.
       _agentJoinedThisConv = false;
       _visitorHasEngaged = false;
+      _conversationBotOnly = Boolean(data.bot_only);
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
         const actor = m.actor || senderType;
@@ -1607,6 +1625,8 @@
           var displayText = (promptData && promptData.message) ? promptData.message : m.content;
           var pButtons = (promptData && Array.isArray(promptData.buttons)) ? promptData.buttons : [];
           var pAutoId = promptData && promptData.automation_id;
+          var pAllowInput = Boolean(promptData && promptData.allow_input);
+          var pButtonPathPrefix = (promptData && Array.isArray(promptData.button_path_prefix)) ? promptData.button_path_prefix : [];
 
           // Check if visitor has already responded (any visitor message after this one).
           var currentIdx = data.messages.indexOf(m);
@@ -1614,9 +1634,11 @@
             return (s.sender_type || s.sender) === 'visitor';
           });
 
-          if (!hasResponse && pButtons.length > 0) {
+          // A resolved/ended conversation is read-only — never resume a pending
+          // prompt as clickable buttons, even if the visitor never answered it.
+          if (!hasResponse && pButtons.length > 0 && !isReadOnlyThread) {
             // Pending prompt: show interactive buttons + hide input.
-            appendBotPromptWithButtons(displayText, m.created_at, pButtons, pAutoId, m.id);
+            appendBotPromptWithButtons(displayText, m.created_at, pButtons, pAutoId, m.id, pAllowInput, pButtonPathPrefix);
             hasPendingBotPrompt = true;
           } else {
             // Already responded: show as plain text.
@@ -1748,9 +1770,13 @@
       _inputRevealTimer = null;
       const inputCont = $id('chatassist-input-container');
       if (inputCont) inputCont.style.display = 'none';
-      // No live "bot is typing" signal exists beyond this marker (the real
-      // message follows immediately), so there's no off-event to wait for —
-      // notifyNewMessage()/hideDotsPreview() clear it once the message lands.
+      // Backend now holds a real delay between this marker and the actual
+      // message (see send_bot_message_to_visitor), so reuse the same
+      // in-thread "Agent is typing" bubble a live human agent gets — makes
+      // bot replies feel like a reply arriving instead of an instant one.
+      // The bot_prompt/ai/bot handlers below clear it the moment the real
+      // message lands.
+      setAgentTyping(true);
       setLauncherTyping(true);
       return;
     }
@@ -1855,6 +1881,16 @@
 
     // Bot prompt with interactive buttons (team routing chatbot).
     if (data.type === 'bot_prompt') {
+      // Clear the typing bubble the chatbot_pending marker turned on above —
+      // the "reply" has now arrived.
+      setAgentTyping(false);
+      // Live signal the moment a bot_only branch (e.g. Careers) is entered —
+      // don't wait for a reconnect/history reload to suppress the waiting
+      // indicator for the rest of this session.
+      if (data.bot_only) {
+        _conversationBotOnly = true;
+        _updateWaitingForAgentIndicator(); // hide it immediately if already showing
+      }
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       const buttons = Array.isArray(data.buttons) ? data.buttons : [];
       const automationId = data.automation_id;
@@ -1874,6 +1910,9 @@
     }
 
     if (data.type === 'ai' || data.type === 'bot') {
+      // Clear the typing bubble the chatbot_pending marker turned on above —
+      // the "reply" has now arrived.
+      setAgentTyping(false);
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
       // If this is the offline automation bot message, collect visitor contact info.
@@ -2604,7 +2643,7 @@
       const avatar = document.createElement('div');
       avatar.className = `chatassist-message-avatar chatassist-message-avatar-${sender}`;
       if (sender === 'ai') {
-        avatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M9 16h.01" /><path d="M15 16h.01" /></svg>`;
+        avatar.innerHTML = BOT_AVATAR_SVG;
       } else {
         const url = getFullAssetUrl(meta?.avatarUrl || activeAgentAvatarUrl);
         const name = meta?.name || activeAgentName || 'Agent';
@@ -2669,7 +2708,7 @@
     // Bot avatar
     const avatar = document.createElement('div');
     avatar.className = 'chatassist-message-avatar chatassist-message-avatar-ai';
-    avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M9 16h.01" /><path d="M15 16h.01" /></svg>';
+    avatar.innerHTML = BOT_AVATAR_SVG;
 
     const contentWrap = document.createElement('div');
     contentWrap.className = 'chatassist-message-content';

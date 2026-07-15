@@ -13,6 +13,8 @@ import {
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import UserAvatar from "@/components/UserAvatar"
+import BotAvatarIcon from "@/components/BotAvatarIcon"
+import { API_BASE } from "@/config/endpoints"
 
 function shortSessionId(sessionId: string | null | undefined): string {
   const raw = String(sessionId || "").trim()
@@ -49,6 +51,9 @@ interface VisitorDetailsPanelProps {
     visitor_avatar_color?: string | null
     created_at?: string
     title?: string | null
+    bot_only?: boolean
+    assigned_agent_id?: number | null
+    assigned_agent?: { id: number; name: string | null; avatar_url: string | null } | null
   }
   notes?: Array<{
     id: number
@@ -157,13 +162,40 @@ export default function VisitorDetailsPanel({
       {/* Visitor Profile */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col items-center">
-          <UserAvatar
-            seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
-            bgColor={conversation.visitor_avatar_color}
-            className="w-16 h-16 shadow-lg mb-3"
-            iconClassName="w-16 h-16"
-            title={visitorDisplayName(conversation)}
-          />
+          <div className="relative mb-3">
+            <UserAvatar
+              seed={getVisitorAvatarSeed(conversation.visitor_name, conversation.session_id)}
+              bgColor={conversation.visitor_avatar_color}
+              className="w-16 h-16 shadow-lg"
+              iconClassName="w-16 h-16"
+              title={visitorDisplayName(conversation)}
+            />
+            {conversation.assigned_agent_id ? (
+              <div
+                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
+                title={conversation.assigned_agent?.name || `Agent #${conversation.assigned_agent_id}`}
+              >
+                <UserAvatar
+                  seed={String(conversation.assigned_agent_id)}
+                  imageUrl={conversation.assigned_agent?.avatar_url
+                    ? (String(conversation.assigned_agent.avatar_url).startsWith('http')
+                      ? conversation.assigned_agent.avatar_url
+                      : `${API_BASE}${conversation.assigned_agent.avatar_url}`)
+                    : null}
+                  className="w-5 h-5"
+                  iconClassName="w-5 h-5"
+                  title={conversation.assigned_agent?.name ?? undefined}
+                />
+              </div>
+            ) : conversation.bot_only ? (
+              <div
+                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
+                title="Handled by bot"
+              >
+                <BotAvatarIcon className="w-4.5 h-4.5" />
+              </div>
+            ) : null}
+          </div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
             {visitorDisplayName(conversation)}
           </h3>

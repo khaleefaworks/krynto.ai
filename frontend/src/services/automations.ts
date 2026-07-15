@@ -14,6 +14,7 @@ export type AutomationTrigger =
   | 'conversation_created'
   | 'conversation_visitor_ended'
   | 'conversation_resolved'
+  | 'bot_conversation_resolved'
   | 'conversation_auto_resolved'
   | 'conversation_reopened'
 
@@ -44,6 +45,10 @@ export interface BotPromptSubPrompt {
   suppress_waiting_message?: boolean
   /** When false, leaf sub-buttons never show the offline contact form (e.g. informational/Jobs path). Default true. */
   collect_contact?: boolean
+  /** When true, this entire branch is bot-handled — no agent notification, auto-resolves after resolve_delay_seconds. */
+  bot_only?: boolean
+  /** Agent-only timeline marker shown when bot_only kicks in. Defaults to "Bot joined the chat." if unset. */
+  bot_only_message?: string
   buttons: BotPromptButton[]
 }
 
@@ -53,6 +58,11 @@ export interface BotPromptButton {
   reply?: string
   /** If set, clicking this button shows a nested sub-prompt instead of completing the flow. */
   sub_prompt?: BotPromptSubPrompt | null
+  /** When true, this leaf is bot-handled — no agent notification, auto-resolves after resolve_delay_seconds. */
+  bot_only?: boolean
+  /** Agent-only timeline marker shown when bot_only kicks in. Defaults to "Bot joined the chat." if unset. */
+  bot_only_message?: string
+  resolve_delay_seconds?: number
 }
 
 export interface AutomationNode {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -7,6 +8,15 @@ from app.core.logging import get_logger
 from app.infra import realtime_bus, BusEvent
 
 logger = get_logger(__name__)
+
+# Pause between the `chatbot_pending` marker and the actual bot message, so the
+# widget's typing indicator is actually visible instead of appearing and being
+# instantly replaced (the two used to fire back-to-back with zero delay,
+# which is why bot responses — e.g. clicking into a Careers-style sub-menu —
+# felt instant/robotic instead of like a reply arriving).
+# ponytail: flat delay, tune to taste; scale by message length if a fixed
+# pause ever feels wrong for very short or very long replies.
+BOT_TYPING_DELAY_SECONDS = 1.3
 
 
 class ChatService:
@@ -376,21 +386,24 @@ class ChatService:
 
     @staticmethod
     async def send_bot_message_to_visitor(conversation_id: int, message_data: dict, *, visitor_ws=None):
-        """Send a bot-authored payload, preceded by a `chatbot_pending` marker.
+        """Send a bot-authored payload, preceded by a `chatbot_pending` marker
+        and a short delay so the widget's typing indicator has time to show.
 
         There's no real "bot is composing" signal (unlike agent_typing, which
-        comes from a live agent), so this marker is what lets the widget show a
-        typing indicator instead of guessing with a fixed fake delay.
+        comes from a live agent), so this marker + delay is what lets the
+        widget show a typing indicator instead of the message landing instantly.
         """
         pending = {"type": "chatbot_pending"}
         if visitor_ws is not None:
             try:
                 await visitor_ws.send_json(pending)
+                await asyncio.sleep(BOT_TYPING_DELAY_SECONDS)
                 await visitor_ws.send_json(message_data)
                 return
             except Exception:
                 pass
         await ChatService.send_to_visitor(conversation_id, pending)
+        await asyncio.sleep(BOT_TYPING_DELAY_SECONDS)
         await ChatService.send_to_visitor(conversation_id, message_data)
 
     @classmethod

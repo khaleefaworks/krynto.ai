@@ -442,6 +442,7 @@ async def chat_ws(
                         "conversation_id": conversation.id,
                         "status": conv_status,
                         "resolved_at": resolved_at,
+                        "bot_only": bool(getattr(conversation, "bot_only", False)),
                         "messages": history_messages,
                     }
                 )
@@ -1328,6 +1329,7 @@ async def chat_ws_with_conversation(
                     "conversation_id": conv.id,
                     "status": conv_status_str,
                     "resolved_at": resolved_at_str,
+                    "bot_only": bool(getattr(conv, "bot_only", False)),
                     "messages": history_msgs,
                 }
             )

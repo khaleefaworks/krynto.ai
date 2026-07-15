@@ -47,6 +47,10 @@ _NEW_CHAT_REMINDER_INTERVAL_SECONDS = 15
 # (read from conversation.team_id)" from an explicit None (unrouted).
 _TEAM_HINT_UNSET = object()
 
+# Fallback for the agent-only "bot took over" timeline marker when a
+# bot_prompt_buttons button/sub_prompt sets bot_only but no bot_only_message.
+DEFAULT_BOT_ONLY_MESSAGE = "Bot joined the chat."
+
 
 async def _repeat_new_chat_notification_until_claimed(
     *, conversation_id: int, website_id: int, interval_seconds: int = _NEW_CHAT_REMINDER_INTERVAL_SECONDS
@@ -75,6 +79,10 @@ async def _repeat_new_chat_notification_until_claimed(
                     or conversation.assigned_agent_id
                     or conversation.status != ConversationStatus.OPEN
                     or conversation.visitor_ended
+                    # A conversation can become bot_only *after* this loop started
+                    # (visitor clicks into a bot-only branch mid-wait) — no agent
+                    # will ever claim it, so stop nagging.
+                    or getattr(conversation, "bot_only", False)
                 ):
                     return
 
@@ -392,10 +400,24 @@ async def _close_bot_conversation_after_delay(
     website_id: int,
     delay_seconds: int,
 ) -> None:
-    """Wait delay_seconds then silently resolve a bot-only conversation.
+    """Wait delay_seconds then resolve a bot-only conversation.
 
-    Sends bot_conversation_complete to the visitor (no rating popup, no system
-    message) and conversation_closed to agents so the dashboard list updates.
+    Routes through ConversationOrchestrator.close_conversation(closed_by="bot",
+    agent_name="Bot", trigger="bot_conversation_resolved") — same status-write
+    + conversation_closed dashboard broadcast a human resolve uses, but its own
+    automation trigger. This is deliberately a separate trigger from
+    "conversation_resolved" (not the same one a human resolve fires): a
+    bot-only chat has no human on the other end, so reusing the human trigger
+    meant a site's rating-popup-on-resolve automation fired for bot chats too.
+
+    send_to_visitor is intentionally left at its default (True) here — the
+    node's own "Send to visitor" toggle in the flow editor is the real,
+    editable gate (default False in the seeded automation), not a Python-side
+    lock. A hardcoded False here would make that toggle decorative, defeating
+    the reason this trigger exists as its own automation in the first place.
+    The widget still gets its own explicit `bot_conversation_complete` signal
+    below to reset its UI (not a chat message, just a state transition) —
+    independent of whatever the automation does.
     If the process restarts before this fires the startup reconciliation job
     handles the cleanup.
     """
@@ -412,12 +434,14 @@ async def _close_bot_conversation_after_delay(
             if not conversation or conversation.status == ConversationStatus.RESOLVED:
                 return
 
-            conversation.status = ConversationStatus.RESOLVED
-            conversation.closed_by = "bot"
-            conversation.resolved_at = datetime.utcnow()
-            db.commit()
+            orchestrator = ConversationOrchestrator(db)
+            await orchestrator.close_conversation(
+                conversation_id=conversation_id,
+                closed_by="bot",
+                agent_name="Bot",
+                trigger="bot_conversation_resolved",
+            )
 
-            # Notify visitor so widget can clear its state silently.
             try:
                 await ChatService.send_to_visitor(
                     conversation_id,
@@ -426,19 +450,6 @@ async def _close_bot_conversation_after_delay(
             except Exception:
                 pass
 
-            # Notify agents so the conversation disappears from the Bot filter.
-            orchestrator = ConversationOrchestrator(db)
-            await orchestrator.agent_service.broadcast_to_active_agents(
-                website_id=website_id,
-                message_data={
-                    "type": "conversation_closed",
-                    "conversation_id": conversation_id,
-                    "website_id": website_id,
-                    "closed_by": "bot",
-                },
-                include_global=True,
-                conversation_team_id=getattr(conversation, "team_id", None),
-            )
             logger.info(
                 "bot_conversation_auto_resolved",
                 conversation_id=conversation_id,
@@ -976,7 +987,18 @@ class ConversationOrchestrator:
         (not `visitor_message`/`system_message`) so it can't be mistaken for a
         real chat message or double-count unread badges; the frontend just uses
         it as a cue to play the agent's own "message" sound preference.
+
+        Single choke point for every show_notification-opted-in automation node
+        (visitor_dropped/visitor_reconnected today, anything added later) — so
+        the bot_only guard belongs here, not duplicated per call site. A
+        bot_only conversation has no agent handoff by definition; nagging
+        agents with sound+push about one (e.g. a visitor leaving/returning
+        mid-way through a "Careers" IVR) is never correct, regardless of which
+        automation triggered it.
         """
+        if getattr(conversation, "bot_only", False):
+            return
+
         conv_team_id = getattr(conversation, "team_id", None)
         assigned_agent_id = getattr(conversation, "assigned_agent_id", None)
 
@@ -1137,6 +1159,14 @@ class ConversationOrchestrator:
             or (parent_sub_prompt and parent_sub_prompt.get("bot_only"))
             or (_sub_prompt_cfg_early and _sub_prompt_cfg_early.get("bot_only"))
         )
+        # Same priority order as _is_bot_only above, so a custom message set at
+        # any of those levels wins over the generic default.
+        _bot_only_message = (
+            button.get("bot_only_message")
+            or (parent_sub_prompt and parent_sub_prompt.get("bot_only_message"))
+            or (_sub_prompt_cfg_early and _sub_prompt_cfg_early.get("bot_only_message"))
+            or DEFAULT_BOT_ONLY_MESSAGE
+        )
 
         # Resolve the team this button will assign from config, before any DB write.
         # Both new_chat broadcast and visitor_message broadcast need the correct team
@@ -1244,6 +1274,28 @@ class ConversationOrchestrator:
             # show the offline contact form (e.g. informational / Jobs path).
             sub_collect_contact: bool = bool(sub_prompt_cfg.get("collect_contact", True))
             if sub_message and sub_buttons_raw:
+                # Mark conversation as bot_only *before* the sub-prompt message goes
+                # out — same ordering as a human agent join (the "X joined the chat"
+                # marker always precedes that agent's first message, never follows
+                # it). Also keeps it out of All/Mine/Unassigned immediately, before
+                # the leaf fires.
+                if _is_bot_only and not getattr(conversation, "bot_only", False):
+                    try:
+                        conversation.bot_only = True
+                        self.db.commit()
+                        self.conversation_service.add_system_message(
+                            conversation.id,
+                            _bot_only_message,
+                            event_type="bot_join",
+                            is_agent_only=True,
+                        )
+                    except Exception as _e:
+                        logger.error("bot_only_flag_set_branch_failed", error=str(_e))
+                        try:
+                            self.db.rollback()
+                        except Exception:
+                            pass
+
                 sub_validated = []
                 for b in sub_buttons_raw:
                     if not (isinstance(b, dict) and (b.get("label") or "").strip()):
@@ -1260,11 +1312,17 @@ class ConversationOrchestrator:
                         "collect_contact": _s_collect,
                         "is_branch": not _s_is_leaf,
                     })
-                # Persist the sub-prompt as a bot message so agents can see it
+                # Persist the sub-prompt as a bot message so agents can see it.
+                # button_path_prefix/allow_input are needed to correctly resume this
+                # exact sub-menu on a history reload (e.g. visitor reconnect mid-flow) —
+                # without it the widget defaults to path [] and misresolves clicks
+                # against the ROOT-level buttons instead of this nested branch.
                 sub_enriched = json.dumps({
                     "message": sub_message,
                     "automation_id": automation_id,
                     "buttons": sub_validated,
+                    "button_path_prefix": path,
+                    "allow_input": sub_allow_input,
                 })
                 sub_saved = self.conversation_service.add_bot_message(
                     conversation.id, sub_enriched, event_type="bot_prompt_buttons"
@@ -1278,6 +1336,10 @@ class ConversationOrchestrator:
                     "allow_input": sub_allow_input,
                     "button_path_prefix": path,
                     "message_obj": serialize_message(self.db, sub_saved),
+                    # So the widget can suppress "Connecting to agent..." live, the
+                    # moment a bot_only branch (e.g. Careers) is entered, not just
+                    # on next history reload.
+                    "bot_only": _is_bot_only,
                 }
                 await ChatService.send_bot_message_to_visitor(
                     conversation.id, sub_ws_payload, visitor_ws=visitor_ws
@@ -1288,18 +1350,6 @@ class ConversationOrchestrator:
                     parent_path=path,
                     sub_buttons=len(sub_validated),
                 )
-                # Mark conversation as bot_only immediately on branch click so it
-                # never appears in All/Mine/Unassigned, even before the leaf fires.
-                if _is_bot_only and not getattr(conversation, "bot_only", False):
-                    try:
-                        conversation.bot_only = True
-                        self.db.commit()
-                    except Exception as _e:
-                        logger.error("bot_only_flag_set_branch_failed", error=str(_e))
-                        try:
-                            self.db.rollback()
-                        except Exception:
-                            pass
                 return {"label": label, "team_id": None, "team_name": None, "sub_prompt": True}
 
         # ── Leaf button: team assign + reply + automation_complete ────────────
@@ -1366,6 +1416,12 @@ class ConversationOrchestrator:
             try:
                 conversation.bot_only = True
                 self.db.commit()
+                self.conversation_service.add_system_message(
+                    conversation.id,
+                    _bot_only_message,
+                    event_type="bot_join",
+                    is_agent_only=True,
+                )
             except Exception as _e:
                 logger.error("bot_only_flag_set_failed", error=str(_e))
                 try:
@@ -1743,11 +1799,23 @@ class ConversationOrchestrator:
             "availability_changed": availability_changed,
         }
 
-    async def close_conversation(self, *, conversation_id: int, closed_by: str = "agent", agent_name: str | None = None) -> dict:
+    async def close_conversation(
+        self,
+        *,
+        conversation_id: int,
+        closed_by: str = "agent",
+        agent_name: str | None = None,
+        trigger: str = "conversation_resolved",
+        send_to_visitor: bool = True,
+    ) -> dict:
         """Close a conversation.
 
-        A canonical `conversation_resolved` event is always recorded so visitor
-        lifecycle does not depend on optional automation wiring.
+        A canonical resolve-automation trigger is always fired so visitor
+        lifecycle does not depend on optional automation wiring. `trigger` and
+        `send_to_visitor` let callers point this at a different automation
+        trigger entirely (e.g. bot auto-resolve uses "bot_conversation_resolved"
+        with send_to_visitor=False) instead of hardcoding bot-specific behavior
+        here — admins configure it like any other automation.
         """
         conversation = self.conversation_service.close_conversation(
             conversation_id,
@@ -1762,9 +1830,9 @@ class ConversationOrchestrator:
         await self._run_automation_flows(
             conversation_id=conversation_id,
             website_id=website_id,
-            trigger="conversation_resolved",
+            trigger=trigger,
             log_key="conversation_resolve_automation_failed",
-            send_to_visitor=True,
+            send_to_visitor=send_to_visitor,
             context={"agent_name": resolved_name},
         )
 
@@ -1982,6 +2050,24 @@ class ConversationOrchestrator:
             log_key="visitor_dropped_automation_failed",
             send_to_visitor=False,
         )
+
+        # Bot-only conversations abandoned mid-flow (visitor left before ever
+        # reaching a leaf button) never otherwise get resolved — the existing
+        # auto-resolve-on-completion path only fires from a leaf click.
+        # _close_bot_conversation_after_delay is idempotent (no-ops if already
+        # resolved), so it's safe to schedule here even if the flow *did*
+        # complete and this fires later than an already-scheduled close.
+        if bool(getattr(conversation, "bot_only", False)) and conversation.status != ConversationStatus.RESOLVED:
+            delay_seconds = AutomationService(self.db).get_delay_seconds(
+                website_id=website_id, trigger="visitor_dropped", default_seconds=300,
+            )
+            asyncio.create_task(
+                _close_bot_conversation_after_delay(
+                    conversation_id=conversation_id,
+                    website_id=website_id,
+                    delay_seconds=delay_seconds,
+                )
+            )
 
         try:
             await self.agent_service.broadcast_to_active_agents(
@@ -2351,7 +2437,12 @@ class ConversationOrchestrator:
                             "collect_contact": _collect_contact,
                             "is_branch": not _is_leaf,
                         })
-                    enriched = json.dumps({"message": message_text, "automation_id": automation_id, "buttons": validated_buttons})
+                    enriched = json.dumps({
+                        "message": message_text,
+                        "automation_id": automation_id,
+                        "buttons": validated_buttons,
+                        "allow_input": bool(cfg.get("allow_input", False)),
+                    })
                     saved = self.conversation_service.add_bot_message(
                         conversation_id, enriched, event_type="bot_prompt_buttons"
                     )

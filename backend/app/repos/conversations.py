@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,27 @@ from app.models.conversation import Conversation, ConversationStatus
 from app.models.conversation_tag import ConversationTag
 from app.models.message import Message
 from app.models.website import Website
+
+
+def _unwrap_last_message(content: str | None, event_type: str | None) -> str | None:
+    """Undo bot_prompt_buttons' enriched-JSON storage for list previews.
+
+    Message.content for a bot_prompt_buttons row is the raw JSON blob (message
+    + buttons + automation_id) that the widget needs to resume a sub-menu.
+    serialize_message() already unwraps this for the thread view; this list
+    preview goes through a separate raw SQL subquery that never called it —
+    so a conversation whose latest message was a bot prompt showed the raw
+    JSON as its "last message" instead of the human-readable text.
+    """
+    if event_type != "bot_prompt_buttons" or not content:
+        return content
+    try:
+        parsed = json.loads(content)
+    except (ValueError, TypeError):
+        return content
+    if isinstance(parsed, dict) and "message" in parsed:
+        return parsed["message"]
+    return content
 
 
 def get_conversation_by_id(db: Session, conversation_id: int) -> Conversation | None:
@@ -80,6 +103,7 @@ def active_conversations_with_counts_and_last_message(
         db.query(
             Message.conversation_id.label("conversation_id"),
             Message.content.label("content"),
+            Message.event_type.label("event_type"),
             Message.created_at.label("created_at"),
             sa.func.row_number()
             .over(
@@ -92,7 +116,7 @@ def active_conversations_with_counts_and_last_message(
     )
 
     last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.created_at)
+        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.event_type, msg_ranked.c.created_at)
         .filter(msg_ranked.c.rn == 1)
         .subquery()
     )
@@ -103,6 +127,7 @@ def active_conversations_with_counts_and_last_message(
             Website.name.label("website_name"),
             sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
             last_msg_subq.c.content.label("last_message"),
+            last_msg_subq.c.event_type.label("last_message_event_type"),
             last_msg_subq.c.created_at.label("last_message_at"),
         )
         .outerjoin(Website, Website.id == Conversation.website_id)
@@ -157,7 +182,10 @@ def active_conversations_with_counts_and_last_message(
     except Exception:
         rows_query = rows_query.order_by(Conversation.created_at.desc())
 
-    return rows_query.all()
+    return [
+        (conv, website_name, message_count, _unwrap_last_message(last_message, last_message_event_type), last_message_at)
+        for conv, website_name, message_count, last_message, last_message_event_type, last_message_at in rows_query.all()
+    ]
 
 
 def resolved_conversations_with_counts_and_last_message(
@@ -191,6 +219,7 @@ def resolved_conversations_with_counts_and_last_message(
         db.query(
             Message.conversation_id.label("conversation_id"),
             Message.content.label("content"),
+            Message.event_type.label("event_type"),
             Message.created_at.label("created_at"),
             sa.func.row_number()
             .over(
@@ -203,7 +232,7 @@ def resolved_conversations_with_counts_and_last_message(
     )
 
     last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.created_at)
+        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.event_type, msg_ranked.c.created_at)
         .filter(msg_ranked.c.rn == 1)
         .subquery()
     )
@@ -214,6 +243,7 @@ def resolved_conversations_with_counts_and_last_message(
             Website.name.label("website_name"),
             sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
             last_msg_subq.c.content.label("last_message"),
+            last_msg_subq.c.event_type.label("last_message_event_type"),
             last_msg_subq.c.created_at.label("last_message_at"),
         )
         .outerjoin(Website, Website.id == Conversation.website_id)
@@ -290,7 +320,11 @@ def resolved_conversations_with_counts_and_last_message(
     except Exception:
         rows_query = rows_query.order_by(Conversation.created_at.desc())
 
-    return rows_query.offset(offset).limit(limit).all()
+    return [
+        (conv, website_name, message_count, _unwrap_last_message(last_message, last_message_event_type), last_message_at)
+        for conv, website_name, message_count, last_message, last_message_event_type, last_message_at
+        in rows_query.offset(offset).limit(limit).all()
+    ]
 
 
 def resolved_conversations_count(

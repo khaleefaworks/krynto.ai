@@ -98,12 +98,27 @@ async def lifespan(app: FastAPI):
     start_scheduler()
 
     # Reconcile any bot_only conversations that were left open due to a
-    # process restart (lost asyncio tasks). Resolve them immediately.
+    # process restart (lost asyncio tasks).
+    #
+    # This used to force-resolve every bot_only+OPEN conversation 1 second
+    # after every restart, no matter how recently the visitor was active —
+    # so a visitor sitting mid-flow (e.g. still reading the Careers sub-menu)
+    # at the exact moment of a routine redeploy got their conversation ended
+    # out from under them. Instead, re-arm each one for its *remaining* delay:
+    # compute how much of the visitor_dropped abandonment window has already
+    # elapsed since the conversation's last message, same as
+    # _reconcile_new_chat_reminders() below re-arms PN1's loop rather than
+    # firing it immediately. A conversation that's already well past the
+    # window (task genuinely lost mid-countdown) resolves right away; one the
+    # visitor is still actively in gets a fresh grace period instead of being
+    # cut off by an unrelated backend restart.
     try:
         import asyncio as _asyncio
         from datetime import datetime as _datetime, timezone as _tz
         from app.core.database import SessionLocal as _SL
         from app.models.conversation import Conversation as _Conv, ConversationStatus as _CS
+        from app.models.message import Message as _Msg
+        from app.services.automation_service import AutomationService as _AS
         from app.services.conversation_orchestrator import _close_bot_conversation_after_delay
 
         def _reconcile_bot_conversations() -> None:
@@ -113,16 +128,80 @@ async def lifespan(app: FastAPI):
                     .filter(_Conv.bot_only == True, _Conv.status == _CS.OPEN)  # noqa: E712
                     .all()
                 )
+                now = _datetime.now(_tz.utc)
                 for conv in stale:
+                    last_msg_at = (
+                        _db.query(_Msg.created_at)
+                        .filter(_Msg.conversation_id == conv.id)
+                        .order_by(_Msg.created_at.desc())
+                        .limit(1)
+                        .scalar()
+                    )
+                    last_activity = last_msg_at or conv.created_at
+                    if last_activity is not None and last_activity.tzinfo is None:
+                        last_activity = last_activity.replace(tzinfo=_tz.utc)
+                    elapsed = (now - last_activity).total_seconds() if last_activity else 0
+
+                    configured_delay = _AS(_db).get_delay_seconds(
+                        website_id=int(conv.website_id),
+                        trigger="visitor_dropped",
+                        default_seconds=300,
+                    )
+                    remaining = max(1, int(configured_delay - elapsed))
+
                     _asyncio.get_event_loop().create_task(
                         _close_bot_conversation_after_delay(
                             conversation_id=conv.id,
                             website_id=int(conv.website_id),
-                            delay_seconds=1,
+                            delay_seconds=remaining,
                         )
                     )
 
         _reconcile_bot_conversations()
+    except Exception:
+        pass
+
+    # Same problem, different loop: _repeat_new_chat_notification_until_claimed
+    # (PN1) is also a plain asyncio task with no durable state, so a restart
+    # silently kills the nag-until-claimed reminder for every still-unassigned
+    # conversation it was running for. Re-schedule those here — reuses the same
+    # per-website enable/interval logic the live path uses, no duplicated logic.
+    #
+    # Bounded to conversations created in the last hour: with no cleanup job
+    # for ordinary (non-bot) abandoned conversations, "status=OPEN and
+    # unassigned" alone matches every never-explicitly-resolved chat in the
+    # table's entire history (18k+ on this DB) — an unbounded scan here spun
+    # up thousands of reminder loops synchronously and froze startup. Only
+    # conversations still recent enough to plausibly have had a live reminder
+    # loop running at restart time actually need one resumed.
+    try:
+        from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
+        from app.core.database import SessionLocal as _SL2
+        from app.models.conversation import Conversation as _Conv2, ConversationStatus as _CS2
+        from app.services.conversation_orchestrator import ConversationOrchestrator as _CO2
+
+        def _reconcile_new_chat_reminders() -> None:
+            cutoff = _dt2.now(_tz2.utc) - _td2(hours=1)
+            with _SL2() as _db2:
+                unclaimed = (
+                    _db2.query(_Conv2)
+                    .filter(
+                        _Conv2.status == _CS2.OPEN,
+                        _Conv2.assigned_agent_id.is_(None),
+                        _Conv2.visitor_ended == False,  # noqa: E712
+                        _Conv2.bot_only == False,  # noqa: E712
+                        _Conv2.created_at >= cutoff,
+                    )
+                    .limit(500)
+                    .all()
+                )
+                orchestrator = _CO2(_db2)
+                for conv in unclaimed:
+                    orchestrator._maybe_schedule_new_chat_reminder(
+                        conversation_id=conv.id, website_id=int(conv.website_id)
+                    )
+
+        _reconcile_new_chat_reminders()
     except Exception:
         pass
 

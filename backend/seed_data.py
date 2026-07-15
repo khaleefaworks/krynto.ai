@@ -112,6 +112,18 @@ AUTOMATION_LIBRARY_TEMPLATES = [
             {"id": "e2", "from": "n_wait", "to": "n2"},
         ],
     },
+    # ── Bot auto-resolved ────────────────────────────────────────────────────
+    {
+        "name": "Bot resolved chat",
+        "description": "Agent-only note when a bot-only conversation self-resolves (IVR loop completed, or visitor abandoned mid-flow). Independent of \"Resolved rating\" so a rating popup never fires for bot-only chats. Visitor-side is off by default here but fully editable — enable \"Send to visitor\" on the message node if you want visitors notified too.",
+        "trigger": "bot_conversation_resolved",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "once"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "emit_system_event", "config": {"content": "{agent_name} resolved the chat.", "event_type": "bot_conversation_resolved_message", "send_to_visitor": False}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
     # ── Rating note ──────────────────────────────────────────────────────────
     {
         "name": "Visitor rated",

@@ -60,6 +60,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import UserAvatar from '@/components/UserAvatar'
+import BotAvatarIcon from '@/components/BotAvatarIcon'
 import { formatDistanceToNow } from 'date-fns'
 
 // Reverse backslash-escape sequences added by the markdown serializer
@@ -215,6 +216,23 @@ function isDarkMode(): boolean {
     return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 }
 
+// closed_by values in use: 'agent', 'visitor', 'visitor_ended', 'bot',
+// 'inactivity', 'system_auto'. Anything else falls back to the generic
+// "Inactivity" bucket rather than a misleading label.
+function closedByBadge(closedBy: string | null | undefined): { label: string; className: string } {
+    switch (closedBy) {
+        case 'agent':
+            return { label: 'Agent', className: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' }
+        case 'visitor':
+        case 'visitor_ended':
+            return { label: 'Visitor', className: 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' }
+        case 'bot':
+            return { label: 'Bot', className: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' }
+        default:
+            return { label: 'Inactivity', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400' }
+    }
+}
+
 function getTagPillBackground(color: unknown): string {
     const raw = String(color || '').trim()
     if (!raw) return 'transparent'
@@ -279,6 +297,7 @@ interface ConversationDetails {
     closed_by?: string | null
     visitor_ended?: boolean
     title?: string | null
+    bot_only?: boolean
 }
 
 interface VisitorConversation {
@@ -741,6 +760,10 @@ export default function ConversationsView() {
 
     const isResolvedSelected = Boolean(conversation && (conversation as any).status === 'resolved')
     const isVisitorEnded = Boolean(conversation && (conversation as any).visitor_ended)
+    // Bot-only conversations have no human handoff by design — an agent
+    // replying into one doesn't reach anyone real and just confuses the
+    // automation's own state (e.g. mid-flow "Careers" IVR).
+    const isBotOnlySelected = Boolean(conversation?.bot_only)
 
     const isChatsListRoute = (() => {
         const p = String(location?.pathname || '')
@@ -1658,7 +1681,7 @@ export default function ConversationsView() {
     const handleSendMessage = async (overrideContent?: string): Promise<boolean> => {
         const raw = typeof overrideContent === 'string' ? overrideContent : input
         if (!raw.trim() || !selectedChat) return false
-        if (isResolvedSelected) return false
+        if (isResolvedSelected || isBotOnlySelected) return false
 
         // AV1: block the send and ask the agent to go online first, instead of
         // silently flipping their availability server-side. Reads the store
@@ -1760,7 +1783,7 @@ export default function ConversationsView() {
         if (!confirm) return
 
         if (!selectedChat || !content) return
-        if (isResolvedSelected) return
+        if (isResolvedSelected || isBotOnlySelected) return
 
         try {
             const takeoverResult: any = await takeoverConversation(selectedChat)
@@ -2580,7 +2603,7 @@ export default function ConversationsView() {
                                                 iconClassName="w-9 h-9"
                                                 title={conversationDisplayName(chat as any)}
                                             />
-                                            {(chat as any).assigned_agent_id && (() => {
+                                            {(chat as any).assigned_agent_id ? (() => {
                                                 const agent = (chat as any).assigned_agent as { id: number; name: string | null; avatar_url: string | null } | null | undefined
                                                 const rawUrl = agent?.avatar_url ?? null
                                                 const agentAvatarUrl = rawUrl
@@ -2599,7 +2622,16 @@ export default function ConversationsView() {
                                                         />
                                                     </div>
                                                 )
-                                            })()}
+                                            })() : (chat as any).bot_only ? (
+                                                // No human agent involved — small bot badge stands in for the
+                                                // "who's handling this" corner badge. Swap for an AI avatar
+                                                // seed here once an AI-handled flow exists alongside bot_only.
+                                                <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
+                                                    title="Handled by bot"
+                                                >
+                                                    <BotAvatarIcon className="w-3.5 h-3.5" />
+                                                </div>
+                                            ) : null}
                                         </div>
 
                                         <div className="flex-1 min-w-0">
@@ -2710,13 +2742,22 @@ export default function ConversationsView() {
                                 >
                                     <ChevronLeft className="h-5 w-5" />
                                 </button>
-                                <UserAvatar
-                                    seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
-                                    bgColor={conversation?.visitor_avatar_color}
-                                    className="w-9 h-9 flex-shrink-0"
-                                    iconClassName="w-9 h-9"
-                                    title={conversationDisplayName(conversation as any)}
-                                />
+                                <div className="relative flex-shrink-0">
+                                    <UserAvatar
+                                        seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                        bgColor={conversation?.visitor_avatar_color}
+                                        className="w-9 h-9"
+                                        iconClassName="w-9 h-9"
+                                        title={conversationDisplayName(conversation as any)}
+                                    />
+                                    {isBotOnlySelected && (
+                                        <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
+                                            title="Handled by bot"
+                                        >
+                                            <BotAvatarIcon className="w-3.5 h-3.5" />
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-sm sm:text-base md:text-sm font-semibold text-gray-900 dark:text-white truncate">
                                         {conversationDisplayName(conversation as any)}
@@ -2724,6 +2765,11 @@ export default function ConversationsView() {
                                     {isVisitorEnded && !isResolvedSelected && (
                                         <span className="sm:hidden inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
                                             Visitor ended
+                                        </span>
+                                    )}
+                                    {isBotOnlySelected && (
+                                        <span className="sm:hidden inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200 dark:border-purple-700">
+                                            <Bot className="h-3 w-3" /> Bot-only
                                         </span>
                                     )}
                                     {(() => {
@@ -2759,7 +2805,15 @@ export default function ConversationsView() {
                                         Visitor ended
                                     </span>
                                 )}
-                                {!isResolvedSelected && (
+                                {isBotOnlySelected && (
+                                    <span className="hidden sm:inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200 dark:border-purple-700">
+                                        <Bot className="h-3.5 w-3.5" /> Bot-only
+                                    </span>
+                                )}
+                                {/* Bot-only conversations self-resolve (see
+                                    _close_bot_conversation_after_delay) — no manual Resolve
+                                    action needed or offered. */}
+                                {!isResolvedSelected && !isBotOnlySelected && (
                                     <Button
                                         variant="default"
                                         size="sm"
@@ -3082,8 +3136,12 @@ export default function ConversationsView() {
                                                 {/* System Events */}
                                                 {isSystemEvent ? (
                                                     <div className="flex justify-center">
-                                                        <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300">
-                                                            {msg.content}
+                                                        <div className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
+                                                            <span>{msg.content}</span>
+                                                            <span className="text-gray-400 dark:text-gray-500">&middot;</span>
+                                                            <span className="text-gray-400 dark:text-gray-500">
+                                                                {new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 ) : isBot ? (
@@ -3096,8 +3154,8 @@ export default function ConversationsView() {
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                 </div>
                                                             </div>
-                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
-                                                                <Bot className="h-4 w-4" />
+                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                                                <BotAvatarIcon className="w-6 h-6" />
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3159,7 +3217,7 @@ export default function ConversationsView() {
                         conversationId={selectedChat}
                         onTyping={scheduleAgentTyping}
                         onSend={(content) => handleSendMessage(content)}
-                        disabled={isResolvedSelected || isVisitorEnded}
+                        disabled={isResolvedSelected || isVisitorEnded || isBotOnlySelected}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
                         personalShortcuts={personalShortcuts}
@@ -3224,13 +3282,22 @@ export default function ConversationsView() {
                             >
                                 <PanelRightOpen className="h-4 w-4" />
                             </Button>
-                            <UserAvatar
-                                seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
-                                bgColor={conversation?.visitor_avatar_color}
-                                className="w-10 h-10"
-                                iconClassName="w-10 h-10"
-                                title={conversationDisplayName(conversation as any)}
-                            />
+                            <div className="relative">
+                                <UserAvatar
+                                    seed={getVisitorAvatarSeed(conversation?.visitor_name, conversation?.session_id)}
+                                    bgColor={conversation?.visitor_avatar_color}
+                                    className="w-10 h-10"
+                                    iconClassName="w-10 h-10"
+                                    title={conversationDisplayName(conversation as any)}
+                                />
+                                {isBotOnlySelected && (
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
+                                        title="Handled by bot"
+                                    >
+                                        <BotAvatarIcon className="w-3.5 h-3.5" />
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     ) : (
                         <div className="flex h-full flex-col w-full">
@@ -3295,13 +3362,8 @@ export default function ConversationsView() {
                                 {conversation.closed_by && conversation.status === 'resolved' && (
                                     <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
                                         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
-                                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${conversation.closed_by === 'agent'
-                                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                            : conversation.closed_by === 'visitor'
-                                                ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                                            }`}>
-                                            {conversation.closed_by === 'agent' ? 'Agent' : conversation.closed_by === 'visitor' ? 'Visitor' : 'Inactivity'}
+                                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${closedByBadge(conversation.closed_by).className}`}>
+                                            {closedByBadge(conversation.closed_by).label}
                                         </span>
                                     </div>
                                 )}
@@ -3410,13 +3472,8 @@ export default function ConversationsView() {
                         {conversation.closed_by && conversation.status === 'resolved' && (
                             <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/50">
                                 <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Closed by</p>
-                                <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${conversation.closed_by === 'agent'
-                                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                    : conversation.closed_by === 'visitor'
-                                        ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                                        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                                    }`}>
-                                    {conversation.closed_by === 'agent' ? 'Agent' : conversation.closed_by === 'visitor' ? 'Visitor' : 'Inactivity'}
+                                <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${closedByBadge(conversation.closed_by).className}`}>
+                                    {closedByBadge(conversation.closed_by).label}
                                 </span>
                             </div>
                         )}
