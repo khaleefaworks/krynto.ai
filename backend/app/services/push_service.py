@@ -1,5 +1,6 @@
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
 import requests as _requests
@@ -69,11 +70,10 @@ def send_web_push_to_subscriptions(
         "push_type": str(push_type) if push_type else "new_message",
     }
 
-    count = 0
-    stale_sub_ids: list[tuple[int, str]] = []  # (agent_id, endpoint)
     push_session = _get_push_session()
 
-    for sub in subscriptions:
+    def _send_one(sub: PushSubscription) -> tuple[bool, tuple[int, str] | None]:
+        """Returns (sent_ok, stale_id_or_None)."""
         try:
             webpush(
                 subscription_info={
@@ -87,6 +87,11 @@ def send_web_push_to_subscriptions(
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": settings.VAPID_SUBJECT},
                 requests_session=push_session,
+                # An unreachable push endpoint used to hang this call forever (and,
+                # for callers that invoke it inline instead of via a thread executor,
+                # the whole asyncio event loop with it). Bounded, but still generous
+                # enough for a slow-but-alive push service.
+                timeout=5,
                 # Buffer the push for up to 24 hours so messages survive Android
                 # Doze mode and brief network outages. TTL=0 (the pywebpush default)
                 # tells the push service to drop the message immediately if the
@@ -97,7 +102,7 @@ def send_web_push_to_subscriptions(
                 # discard the message while the phone is idle.
                 headers={"Urgency": "high"},
             )
-            count += 1
+            return True, None
         except Exception as e:
             err_str = str(e)
             # HTTP 410 Gone — push endpoint is no longer valid (browser unsubscribed,
@@ -106,14 +111,30 @@ def send_web_push_to_subscriptions(
                 hasattr(e, "response")
                 and getattr(getattr(e, "response", None), "status_code", None) == 410
             )
-            if is_gone:
-                stale_sub_ids.append((sub.agent_id, sub.endpoint))
             logger.warning(
                 "web_push_send_failed",
                 agent_id=sub.agent_id,
                 status_gone=is_gone,
                 error=err_str[:200],
             )
+            return False, (sub.agent_id, sub.endpoint) if is_gone else None
+
+    # Fan out concurrently instead of one-at-a-time — an agent can accumulate
+    # several stale/slow subscriptions (old browser sessions, rotated FCM
+    # tokens), and sending sequentially meant N subscriptions cost up to N *
+    # timeout seconds for a single "send notification" call. Capped at the
+    # push session's own pool_maxsize=4 so this can't open more concurrent
+    # connections than the adapter is configured to hold.
+    subs_list = list(subscriptions)
+    count = 0
+    stale_sub_ids: list[tuple[int, str]] = []
+    if subs_list:
+        with ThreadPoolExecutor(max_workers=min(4, len(subs_list))) as pool:
+            for sent_ok, stale_id in pool.map(_send_one, subs_list):
+                if sent_ok:
+                    count += 1
+                if stale_id:
+                    stale_sub_ids.append(stale_id)
 
     # Prune stale subscriptions in a dedicated session (safe to call from thread executor).
     if stale_sub_ids:

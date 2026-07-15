@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -97,11 +99,18 @@ async def test_push(
 ):
     subs = push_subs_repo.list_subscriptions_for_agent(db, agent_id=int(current_user.id))
 
-    attempted = send_web_push_to_subscriptions(
-        subscriptions=subs,
-        title=str(payload.title),
-        body=str(payload.body) if payload.body is not None else None,
-        url=str(payload.url) if payload.url is not None else None,
+    # send_web_push_to_subscriptions makes a blocking network call — run it off
+    # the event loop so a slow/unreachable push endpoint can't freeze the whole
+    # server for every other request (it did; see push_service.py's timeout fix).
+    loop = asyncio.get_running_loop()
+    attempted = await loop.run_in_executor(
+        None,
+        lambda: send_web_push_to_subscriptions(
+            subscriptions=subs,
+            title=str(payload.title),
+            body=str(payload.body) if payload.body is not None else None,
+            url=str(payload.url) if payload.url is not None else None,
+        ),
     )
 
     return {
@@ -142,18 +151,21 @@ async def validate_subscriptions(
 
     valid = 0
     stale_endpoints = []
+    loop = asyncio.get_running_loop()
 
     # Validate each subscription
     for sub in subs:
         try:
-            import json as json_lib
-            # Send a small ping to validate the subscription is still active
-            # Use TTL=0 so it's not buffered if device is unreachable
-            send_web_push_to_subscriptions(
-                subscriptions=[sub],
-                title="Push validation",
-                body="",
-                push_type="validation",
+            # Send a small ping to validate the subscription is still active.
+            # Same event-loop-blocking hazard as /test above — offload it.
+            await loop.run_in_executor(
+                None,
+                lambda sub=sub: send_web_push_to_subscriptions(
+                    subscriptions=[sub],
+                    title="Push validation",
+                    body="",
+                    push_type="validation",
+                ),
             )
             valid += 1
             logger.info("push_subscription_valid", agent_id=current_user.id, endpoint=sub.endpoint[:50])
