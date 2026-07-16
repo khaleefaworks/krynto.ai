@@ -695,7 +695,7 @@ async def chat_ws(
             # Bot button click: visitor tapped a button from a bot_prompt_buttons message.
             if message_type == "bot_button_click":
                 btn_automation_id = payload.get("automation_id")
-                btn_button_path = payload.get("button_path")  # preferred: list[int]
+                btn_button_path = payload.get("button_path")  # preferred: list[str] of button ids (AUT1)
                 btn_button_index = payload.get("button_index")  # legacy scalar
 
                 if btn_automation_id is None:
@@ -705,7 +705,7 @@ async def chat_ws(
                     continue
                 # Normalise to a list
                 if btn_button_path is None:
-                    btn_button_path = [int(btn_button_index)]
+                    btn_button_path = [str(btn_button_index)]
 
                 # Resolve conversation
                 btn_conversation_id: int | None = registered_conversation_id
@@ -742,7 +742,7 @@ async def chat_ws(
                     await orchestrator.handle_bot_button_click(
                         conversation_id=btn_conversation_id,
                         automation_id=int(btn_automation_id),
-                        button_path=[int(x) for x in btn_button_path],
+                        button_path=[str(x) for x in btn_button_path],
                         visitor_ws=websocket,
                     )
                 except Exception as e:
@@ -1427,16 +1427,16 @@ async def chat_ws_with_conversation(
 
                 if message_type == "bot_button_click":
                     btn_automation_id = payload.get("automation_id")
-                    btn_button_path = payload.get("button_path")  # preferred: list[int]
+                    btn_button_path = payload.get("button_path")  # preferred: list[str] of button ids (AUT1)
                     btn_button_index = payload.get("button_index")  # legacy scalar
                     if btn_automation_id is not None and (btn_button_path is not None or btn_button_index is not None):
                         if btn_button_path is None:
-                            btn_button_path = [int(btn_button_index)]
+                            btn_button_path = [str(btn_button_index)]
                         try:
                             await orchestrator.handle_bot_button_click(
                                 conversation_id=int(conv.id),
                                 automation_id=int(btn_automation_id),
-                                button_path=[int(x) for x in btn_button_path],
+                                button_path=[str(x) for x in btn_button_path],
                                 visitor_ws=websocket,
                             )
                         except Exception as e:

@@ -178,11 +178,24 @@ async def lifespan(app: FastAPI):
         from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
         from app.core.database import SessionLocal as _SL2
         from app.models.conversation import Conversation as _Conv2, ConversationStatus as _CS2
+        from app.models.message import Message as _Msg2, MessageSenderType as _MST2
         from app.services.conversation_orchestrator import ConversationOrchestrator as _CO2
 
         def _reconcile_new_chat_reminders() -> None:
             cutoff = _dt2.now(_tz2.utc) - _td2(hours=1)
             with _SL2() as _db2:
+                # A reminder loop is only ever started (live path) once the
+                # visitor's first message fires _broadcast_new_chat_to_agents —
+                # so "has at least one visitor message" is exactly the signal
+                # that this conversation actually had one running before the
+                # restart. Without this check, a visitor who merely opened the
+                # widget and never clicked/typed anything also matches
+                # open+unassigned+recent, and gets a reminder loop it never had.
+                _visitor_msg_exists = (
+                    _db2.query(_Msg2.id)
+                    .filter(_Msg2.conversation_id == _Conv2.id, _Msg2.sender_type == _MST2.VISITOR)
+                    .exists()
+                )
                 unclaimed = (
                     _db2.query(_Conv2)
                     .filter(
@@ -191,6 +204,7 @@ async def lifespan(app: FastAPI):
                         _Conv2.visitor_ended == False,  # noqa: E712
                         _Conv2.bot_only == False,  # noqa: E712
                         _Conv2.created_at >= cutoff,
+                        _visitor_msg_exists,
                     )
                     .limit(500)
                     .all()

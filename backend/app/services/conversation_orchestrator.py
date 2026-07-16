@@ -14,8 +14,10 @@ Scope:
 from typing import Optional, Any
 import asyncio
 import json
+import uuid
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.services.conversation_service import ConversationService
 from app.services.automation_service import AutomationService
@@ -311,9 +313,12 @@ def _should_skip_due_to_repeat(
 
 
 def _resolve_button_at_path(
-    top_buttons: list, path: list[int]
+    top_buttons: list, path: list[str]
 ) -> tuple[dict | None, dict | None]:
-    """Walk *path* through nested sub_prompt.buttons to find the target button.
+    """Walk *path* (a list of stable button ids) through nested sub_prompt.buttons
+    to find the target button, matching by **id** rather than array position —
+    so a reorder/insert/delete on the buttons array between send and click never
+    resolves a stale click to the wrong button (AUT1).
 
     Returns ``(button_dict, parent_sub_prompt_dict_or_None)``.
     *parent_sub_prompt_dict* is the sub_prompt config that owns the target button;
@@ -324,11 +329,14 @@ def _resolve_button_at_path(
     current_list: list = top_buttons
     parent_sub: dict | None = None
     btn: dict | None = None
-    for depth, step in enumerate(path):
-        if not isinstance(current_list, list) or step < 0 or step >= len(current_list):
+    for depth, button_id in enumerate(path):
+        if not isinstance(current_list, list):
             return None, None
-        item = current_list[step]
-        if not isinstance(item, dict):
+        item = next(
+            (b for b in current_list if isinstance(b, dict) and b.get("id") == button_id),
+            None,
+        )
+        if item is None:
             return None, None
         btn = item
         if depth < len(path) - 1:
@@ -340,6 +348,38 @@ def _resolve_button_at_path(
             current_list = sub.get("buttons") or []
         # For the last step `parent_sub` stays from the previous iteration
     return btn, parent_sub
+
+
+def _ensure_button_ids(db: Session, automation: Automation) -> None:
+    """Backfill a stable random id on every bot_prompt_buttons button (recursively
+    through sub_prompt.buttons) that predates id-based click resolution.
+
+    New buttons always get an id at creation in the editor; this only heals
+    buttons saved before that existed, the first time this automation is read
+    for a live send or click. Mutates automation.nodes in place and commits
+    only if something was actually missing.
+    """
+    changed = False
+
+    def _walk(buttons: list) -> None:
+        nonlocal changed
+        for b in buttons:
+            if not isinstance(b, dict):
+                continue
+            if not b.get("id"):
+                b["id"] = uuid.uuid4().hex
+                changed = True
+            sub = b.get("sub_prompt")
+            if isinstance(sub, dict):
+                _walk(sub.get("buttons") or [])
+
+    for node in automation.nodes or []:
+        if isinstance(node, dict) and str(node.get("type", "")).lower() == "bot_prompt_buttons":
+            _walk((node.get("config") or {}).get("buttons") or [])
+
+    if changed:
+        flag_modified(automation, "nodes")
+        db.commit()
 
 
 async def _send_delayed_waiting_message_if_unassigned(*, conversation_id: int, website_id: int, delay_seconds: int) -> None:
@@ -1080,15 +1120,20 @@ class ConversationOrchestrator:
         conversation_id: int,
         automation_id: int,
         button_index: int = 0,
-        button_path: list[int] | None = None,
+        button_path: list[str] | None = None,
         visitor_ws: Any | None = None,
     ) -> dict | None:
         """Handle a visitor clicking on a bot prompt button.
 
-        ``button_path`` is the authoritative navigation key — a list of indices
-        that walks through nested sub_prompt.buttons trees.  ``button_index`` is
-        the legacy scalar equivalent; when ``button_path`` is absent it is
-        converted to ``[button_index]``.
+        ``button_path`` is the authoritative navigation key — a list of stable
+        button **ids** (AUT1) that walks through nested sub_prompt.buttons trees,
+        resolved by id match against the live config rather than array position,
+        so a reorder/insert/delete between send and click can't misresolve a
+        stale click. ``button_index`` is the legacy scalar equivalent from
+        before ids existed; when ``button_path`` is absent it is converted to
+        ``[str(button_index)]``, which will simply not match any id and fall
+        into the "no longer available" fallback below — acceptable since no
+        current widget build ever sends a bare ``button_index``.
 
         Behaviour depends on whether the resolved button is a *branch* (has a
         ``sub_prompt`` config) or a *leaf* (no sub_prompt):
@@ -1109,6 +1154,9 @@ class ConversationOrchestrator:
             logger.warning("bot_button_click_no_automation", automation_id=automation_id)
             return None
 
+        # One-time backfill for buttons saved before ids existed (AUT1).
+        _ensure_button_ids(self.db, automation)
+
         # Find the bot_prompt_buttons node in the automation graph
         prompt_node_cfg = None
         for node in (automation.nodes or []):
@@ -1126,13 +1174,35 @@ class ConversationOrchestrator:
             return None
 
         # Resolve path (prefer button_path; fall back to [button_index])
-        path: list[int] = button_path if button_path is not None else [button_index]
+        path: list[str] = button_path if button_path is not None else [str(button_index)]
         button, parent_sub_prompt = _resolve_button_at_path(buttons, path)
         if button is None:
+            # Legitimate case, not just a bug: the button this click refers to
+            # was deleted (or the whole automation edited) between send and
+            # click. Tell the visitor instead of leaving them stuck staring at
+            # disabled buttons with no feedback, and hand control back to free
+            # text via the same automation_complete signal a normal leaf uses.
             logger.warning(
                 "bot_button_click_invalid_path",
                 automation_id=automation_id,
                 button_path=path,
+            )
+            fallback_text = "This option is no longer available — please continue below."
+            saved_fallback = self.conversation_service.add_bot_message(
+                conversation.id, fallback_text, event_type="bot_button_stale"
+            )
+            await ChatService.send_bot_message_to_visitor(
+                conversation.id,
+                {
+                    "type": "bot",
+                    "message": fallback_text,
+                    "message_obj": serialize_message(self.db, saved_fallback),
+                },
+                visitor_ws=visitor_ws,
+            )
+            await ChatService.send_to_visitor(
+                conversation.id,
+                {"type": "automation_complete", "conversation_id": conversation.id, "allow_input": True},
             )
             return None
 
@@ -1305,6 +1375,7 @@ class ConversationOrchestrator:
                     # Per-button flag overrides the sub_prompt-level default.
                     _s_collect = bool(b.get("collect_contact", sub_collect_contact))
                     sub_validated.append({
+                        "id": b.get("id"),
                         "label": b["label"].strip(),
                         "team_id": _stid,
                         "reply": b.get("reply", ""),
@@ -1889,16 +1960,34 @@ class ConversationOrchestrator:
 
         website_id = int(getattr(conversation, "website_id", None) or 0) or None
 
+        # Only fire the flow (typically emit_system_event -> wait -> show_rating_popup)
+        # if the visitor actually engaged — otherwise a chat that was never
+        # replied to (e.g. the welcome message's buttons sitting unclicked)
+        # ends with an incongruous "rate our support" popup for support that
+        # never happened. Ending an untouched chat still marks visitor_ended
+        # above (so "Start new chat" behaves correctly); it just skips the
+        # automation trigger.
+        has_engaged = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.sender_type == MessageSenderType.VISITOR,
+            )
+            .first()
+            is not None
+        )
+
         # Automations handle all messaging (emit_system_event, show_rating_popup, etc.)
         # for this trigger. Nothing is hardcoded here so agents can configure the
         # flow — including wait nodes and agent-only messages — via the automation editor.
-        await self._run_automation_flows(
-            conversation_id=conversation_id,
-            website_id=website_id,
-            trigger="conversation_visitor_ended",
-            log_key="visitor_ended_automation_failed",
-            send_to_visitor=True,
-        )
+        if has_engaged:
+            await self._run_automation_flows(
+                conversation_id=conversation_id,
+                website_id=website_id,
+                trigger="conversation_visitor_ended",
+                log_key="visitor_ended_automation_failed",
+                send_to_visitor=True,
+            )
 
         # Signal the agent dashboard in real-time (UI update only, no message stored).
         if website_id:
@@ -2180,6 +2269,9 @@ class ConversationOrchestrator:
         if not nodes_list:
             return
 
+        # One-time backfill for buttons saved before ids existed (AUT1).
+        _ensure_button_ids(self.db, automation)
+
         # Fetch conversation once for ctx enrichment and team_id scoping.
         _conv_team_id: int | None = None
         _enrich_conv: Conversation | None = None
@@ -2430,6 +2522,7 @@ class ConversationOrchestrator:
                         # contact form for that specific button/path.
                         _collect_contact = bool(b.get("collect_contact", True))
                         validated_buttons.append({
+                            "id": b.get("id"),
                             "label": b["label"].strip(),
                             "team_id": _tid,
                             "reply": b.get("reply", ""),

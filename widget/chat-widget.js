@@ -1058,9 +1058,14 @@
       backBtn.style.display = showBack ? '' : 'none';
     }
     if (endBtn) {
-      // Show end button only in active (non-readonly) thread, and only if this
-      // website hasn't disabled it (CONFIG.showEndChatButton).
-      const showEnd = viewMode === 'thread' && !isReadOnlyThread && !endChatDisabled && CONFIG.showEndChatButton;
+      // Show end button only in active (non-readonly) thread, only once the
+      // visitor has actually engaged (sent a message or committed a leaf
+      // button) — same signal _shouldShowWaitingForAgent() already uses to
+      // distinguish "a real conversation is happening" from "buttons just
+      // rendered, nothing clicked yet". Without this a fresh, untouched chat
+      // offers "End chat", and confirming it fires the same rating-popup
+      // flow as a chat that actually had support in it.
+      const showEnd = viewMode === 'thread' && !isReadOnlyThread && _visitorHasEngaged && !endChatDisabled && CONFIG.showEndChatButton;
       endBtn.style.display = showEnd ? '' : 'none';
     }
   }
@@ -1546,6 +1551,7 @@
       setEndChatDisabled(false);
     }
     _updateWaitingForAgentIndicator();
+    _updateHeaderButtons();
     return true;
   }
 
@@ -1663,6 +1669,10 @@
       updateEmptyState();
       isAtBottom = true;
       smartScroll();
+      // _visitorHasEngaged may have just flipped true while replaying history
+      // (a returning visitor who already sent a message) — refresh the End
+      // chat button so it isn't stuck hidden for the rest of this session.
+      _updateHeaderButtons();
 
       // Restore widget open/minimized state from localStorage.
       // If there are history messages, restore immediately.
@@ -1764,18 +1774,17 @@
       return;
     }
 
-    // Chatbot is about to send a prompt — keep input hidden until button click.
+    // Sent ahead of every bot-authored message (reply, waiting message, next
+    // IVR prompt, ...) purely to drive the "typing" bubble below — it must
+    // never touch input visibility itself. Whatever arrives next already
+    // settles that correctly: a bot_prompt message sets it from its own
+    // allow_input, and a plain bot/ai message restores it unless genuinely
+    // locked (see below). Forcing it hidden here used to fight both of
+    // those — most visibly, a visitor mid-reply watching the box vanish
+    // out from under them the instant any bot message was about to land.
     if (data.type === 'chatbot_pending') {
       clearTimeout(_inputRevealTimer);
       _inputRevealTimer = null;
-      const inputCont = $id('chatassist-input-container');
-      if (inputCont) inputCont.style.display = 'none';
-      // Backend now holds a real delay between this marker and the actual
-      // message (see send_bot_message_to_visitor), so reuse the same
-      // in-thread "Agent is typing" bubble a live human agent gets — makes
-      // bot replies feel like a reply arriving instead of an instant one.
-      // The bot_prompt/ai/bot handlers below clear it the moment the real
-      // message lands.
       setAgentTyping(true);
       setLauncherTyping(true);
       return;
@@ -1915,6 +1924,24 @@
       setAgentTyping(false);
       const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
       appendMessage('ai', data.message, createdAt, null, data.message_obj?.id);
+      // chatbot_pending (sent ahead of every bot-authored message, incl. this
+      // one) unconditionally hides the input box to fake a composing delay —
+      // nothing un-hides it afterward except the bot_offline case below. Any
+      // other bot message (e.g. the "no_agent_assigned_for" waiting message,
+      // or a plain reply) left input stuck hidden with no way to recover
+      // short of a reload. Restore it here unless the thread is read-only or
+      // genuinely meant to stay locked (suppress_waiting/bot_only paths
+      // already persist that via _setInputLocked(), checked by
+      // _isInputLocked()). bot_offline has its own complete handling below
+      // (including a case that intentionally keeps input hidden for the
+      // contact overlay), so it's excluded here to avoid fighting that logic.
+      if (
+        !isReadOnlyThread
+        && !_isInputLocked()
+        && (!data.message_obj || data.message_obj.event_type !== 'bot_offline')
+      ) {
+        showInputContainer();
+      }
       // If this is the offline automation bot message, collect visitor contact info.
       // If localStorage already has name + phone, send them silently to the backend
       // (so the conversation stores them) and skip the overlay. Otherwise show the
@@ -2035,6 +2062,13 @@
         try { $id('chatassist-input')?.focus(); } catch (e) { }
       } else {
         _setInputLocked();
+        // The reply that normally precedes this (chatbot_pending -> message)
+        // now re-reveals input itself unless already locked — since the lock
+        // wasn't set yet at that point, it would have shown briefly. Settle
+        // it back to hidden here so this always lands in the correct final
+        // state regardless of what ran before it.
+        const inputCont = $id('chatassist-input-container');
+        if (inputCont) inputCont.style.display = 'none';
       }
       // Mark that the visitor completed the IVR so bot_offline won't re-open
       // the contact overlay on top of an already-open input.
@@ -2044,6 +2078,7 @@
       // visitor "engaged", not the moment any button (incl. a branch) is clicked.
       _visitorHasEngaged = true;
       _updateWaitingForAgentIndicator();
+      _updateHeaderButtons();
     } else if (data.type === 'conversation_created') {
       // Backend auto-created a conversation in response to our first message (conv_id=0 path).
       // Update our local state without reconnecting the WS.
@@ -2760,13 +2795,16 @@
             appendMessage('visitor', btn.label || 'Option ' + (idx + 1), new Date().toISOString(), null, null);
             isAtBottom = true;
             smartScroll();
-            sendBotButtonClick(automationId, [...buttonPathPrefix, idx]);
+            // Resolve by stable button id, not array position (AUT1) — a
+            // reorder in the editor between send and click must not make a
+            // stale click execute whatever button now sits at this index.
+            sendBotButtonClick(automationId, [...buttonPathPrefix, btn.id]);
           }
 
           if (!btn.is_branch && btn.collect_contact !== false) {
             if (!presenceOnline && !_checkAndSendContactSilently()) {
               // Website definitively offline (real-time WS presence) — block immediately.
-              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              pendingBotButtonClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, btn.id], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
               showContactOverlay();
               return;
             }
@@ -2774,7 +2812,7 @@
               // btn.team_online is a one-time snapshot baked at conversation-creation
               // time — it is stale in both directions (team may have gone offline OR
               // come online since). Always verify the specific team in real time.
-              var _pendingClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, idx], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
+              var _pendingClick = { automationId: automationId, buttonPath: [...buttonPathPrefix, btn.id], label: btn.label || 'Option ' + (idx + 1), _btnEl: btnEl, _allBtns: Array.from(buttonsWrap.querySelectorAll('.chatassist-prompt-btn')) };
               btnEl.disabled = true;
               fetch(
                 CONFIG.apiUrl + '/widget/team-online?website_id=' + encodeURIComponent(CONFIG.websiteId) +

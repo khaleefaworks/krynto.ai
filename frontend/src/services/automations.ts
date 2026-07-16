@@ -53,6 +53,8 @@ export interface BotPromptSubPrompt {
 }
 
 export interface BotPromptButton {
+  /** Stable id minted once at creation (AUT1) — never regenerated on edit. Used to resolve a visitor's click against the button they actually saw, immune to later reorders. Optional only for buttons saved before this existed; the backend backfills it on next use. */
+  id?: string
   label: string
   team_id?: number | null
   reply?: string

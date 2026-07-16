@@ -443,7 +443,7 @@ function ButtonEditor({ buttons, onChange, websiteTeams, depth }: ButtonEditorPr
                     updateSubPrompt(i, {
                       buttons: [
                         ...(btn.sub_prompt.buttons || []),
-                        { label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true },
+                        { id: crypto.randomUUID(), label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true },
                       ],
                     })
                   }
@@ -719,7 +719,7 @@ function NodeConfigPanel({
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Buttons</label>
               <button
-                onClick={() => set({ buttons: [...(cfg.buttons || []), { label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true }] })}
+                onClick={() => set({ buttons: [...(cfg.buttons || []), { id: crypto.randomUUID(), label: '', reply: '', team_id: null, sub_prompt: null, collect_contact: true }] })}
                 className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" /> Add
