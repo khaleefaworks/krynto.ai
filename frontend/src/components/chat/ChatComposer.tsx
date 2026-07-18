@@ -10,7 +10,7 @@ import type { JSONContent } from '@tiptap/core'
 import { API_BASE } from '@/config/endpoints'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Paperclip, Send, Bold, Italic, ListOrdered, Smile, Sparkles, Loader2, X } from 'lucide-react'
+import { Paperclip, Send, Bold, Italic, ListOrdered, Smile, Sparkles, Loader2, X, UserPlus } from 'lucide-react'
 import EmojiPicker, { Theme, type EmojiClickData } from 'emoji-picker-react'
 
 export type ComposerShortcut = {
@@ -20,11 +20,20 @@ export type ComposerShortcut = {
     is_active: boolean
 }
 
+export type SendableForm = {
+    id: number
+    name: string
+}
+
 type ShortcutMatch = {
-    scope: 'personal' | 'website'
+    scope: 'personal' | 'website' | 'action'
     id: number
     shortcut: string
     message: string
+    kind?: 'contact_card'
+    // Set when kind === 'contact_card' — which of the website's forms this
+    // menu entry sends (a website can have any number of forms).
+    formId?: number
 }
 
 type Props = {
@@ -33,6 +42,13 @@ type Props = {
     // send was blocked (e.g. an offline-agent confirmation gate) so it must NOT
     // clear the drafted text. Any other return value (including void) clears as before.
     onSend: (content: string) => void | boolean | Promise<void | boolean>
+    // CC1: parent owns this (mirrors onSend) so it can run the same
+    // join-first / takeover-conflict / offline-gate checks a text send goes
+    // through — sending the card is a conversation action, not a passive read.
+    onSendContactCard?: (formId: number) => void | Promise<void>
+    // Every enabled form for the website — a website can have any number, so
+    // the "#" menu lists all of them and the agent picks which to send.
+    sendableForms?: SendableForm[]
     onTyping?: (value: string) => void
     disabled?: boolean
     placeholder?: string
@@ -50,6 +66,9 @@ export type ChatComposerHandle = {
 
 type ShortcutContext = {
     open: boolean
+    // "/" (or ".") opens the text-shortcut list; "#" opens the separate
+    // conversation-action list (contact card today, room for more later).
+    trigger: 'shortcut' | 'action'
     query: string
     start: number
     end: number
@@ -64,24 +83,6 @@ type UploadedAttachment = {
 
 function isDarkMode(): boolean {
     return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-}
-
-function getShortcutContext(value: string, cursorPos: number): ShortcutContext {
-    const pos = Math.max(0, Math.min(cursorPos, value.length))
-
-    const before = value.slice(0, pos)
-    const lastWs = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\n'), before.lastIndexOf('\t'))
-    const start = lastWs >= 0 ? lastWs + 1 : 0
-
-    const token = value.slice(start, pos)
-    if (!token.startsWith('/') && !token.startsWith('.')) return { open: false, query: '', start: pos, end: pos }
-    if (token.length === 1) return { open: true, query: '', start, end: pos }
-
-    const query = token.slice(1).toLowerCase()
-    // If the token already includes whitespace somehow, do not open.
-    if (/\s/.test(query)) return { open: false, query: '', start: pos, end: pos }
-
-    return { open: true, query, start, end: pos }
 }
 
 function pickShortcutMatches(query: string, personal: ComposerShortcut[], website: ComposerShortcut[]): ShortcutMatch[] {
@@ -102,6 +103,23 @@ function pickShortcutMatches(query: string, personal: ComposerShortcut[], websit
         .map((s) => ({ scope: 'website', id: s.id, shortcut: s.shortcut, message: s.message }))
 
     return [...personalMatches, ...websiteMatches].slice(0, 8)
+}
+
+// CC1: a separate "#" command list, distinct from "/" text shortcuts — one
+// entry per enabled website form, so the agent picks which form to send
+// instead of there being a single fixed "the" contact card.
+function pickActionMatches(query: string, forms: SendableForm[]): ShortcutMatch[] {
+    const q = String(query || '').toLowerCase()
+    return forms
+        .filter((f) => (q ? String(f.name || '').toLowerCase().startsWith(q) : true))
+        .map((f): ShortcutMatch => ({
+            scope: 'action',
+            id: f.id,
+            shortcut: f.name,
+            message: f.name,
+            kind: 'contact_card',
+            formId: f.id,
+        }))
 }
 
 function getFullAttachmentUrl(url: string): string {
@@ -317,6 +335,8 @@ function serializeDocToMarkdown(doc: JSONContent | null | undefined): string {
 const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer({
     conversationId,
     onSend,
+    onSendContactCard,
+    sendableForms,
     onTyping,
     disabled,
     placeholder,
@@ -333,8 +353,33 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
 
     const [plainValue, setPlainValue] = useState('')
     const [attachments, setAttachments] = useState<UploadedAttachment[]>([])
+    const [sendingContactCard, setSendingContactCard] = useState(false)
+    // CC1: staged like an attachment — picking a form from the "#" menu just
+    // marks intent to send; the card only actually goes out when the agent
+    // hits the normal Send action, same as everything else in this composer.
+    // No silent one-click send. `null` means nothing staged.
+    const [stagedFormId, setStagedFormId] = useState<number | null>(null)
 
     const uploadingAttachment = uploadingCount > 0
+
+    const stagedForm = useMemo(
+        () => (sendableForms || []).find((f) => f.id === stagedFormId) || null,
+        [sendableForms, stagedFormId]
+    )
+
+    const commitStagedContactCard = useCallback(async () => {
+        if (!conversationId || sendingContactCard || !onSendContactCard || stagedFormId == null) return
+        const formId = stagedFormId
+        setStagedFormId(null)
+        setSendingContactCard(true)
+        try {
+            await onSendContactCard(formId)
+        } catch (e) {
+            console.error('Failed to send contact card:', e)
+        } finally {
+            setSendingContactCard(false)
+        }
+    }, [conversationId, sendingContactCard, onSendContactCard, stagedFormId])
 
     // Stable refs for values that are captured by the handleKeyDown closure inside useEditor.
     // useEditor creates the editor once and the editorProps closures are stale after first render.
@@ -344,7 +389,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
     const shortcutMatchesRef = useRef<ShortcutMatch[]>([])
     const shortcutMenuIndexRef = useRef(0)
     const sendNowRef = useRef<() => void>(() => { })
-    const applyPickedShortcutRef = useRef<(msg: string) => void>(() => { })
+    const applyPickedShortcutRef = useRef<(picked: ShortcutMatch) => void>(() => { })
 
     const editor = useEditor({
         extensions: [
@@ -426,7 +471,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                         e.preventDefault()
                         const picked = shortcutMatchesRef.current[shortcutMenuIndexRef.current] || shortcutMatchesRef.current[0]
                         if (picked) {
-                            applyPickedShortcutRef.current(picked.message)
+                            applyPickedShortcutRef.current(picked)
                             setShortcutMenuIndex(0)
                         }
                         return true
@@ -481,8 +526,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
         return !t
     }, [plainValue])
 
-    const shortcutCtx = useMemo(() => {
-        if (!editor) return { open: false, query: '', start: 0, end: 0 }
+    const shortcutCtx = useMemo((): ShortcutContext => {
+        if (!editor) return { open: false, trigger: 'shortcut', query: '', start: 0, end: 0 }
 
         const from = editor.state.selection.from
         const $from = editor.state.selection.$from
@@ -493,18 +538,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
         const startInBlock = lastWs >= 0 ? lastWs + 1 : 0
         const token = before.slice(startInBlock)
 
-        if (!token.startsWith('/') && !token.startsWith('.')) return { open: false, query: '', start: from, end: from }
-        if (token.length === 1) return { open: true, query: '', start: from - token.length, end: from }
+        const isShortcutTrigger = token.startsWith('/') || token.startsWith('.')
+        const isActionTrigger = token.startsWith('#')
+        if (!isShortcutTrigger && !isActionTrigger) {
+            return { open: false, trigger: 'shortcut', query: '', start: from, end: from }
+        }
+        const trigger: ShortcutContext['trigger'] = isActionTrigger ? 'action' : 'shortcut'
+        if (token.length === 1) return { open: true, trigger, query: '', start: from - token.length, end: from }
 
         const query = token.slice(1).toLowerCase()
-        if (/\s/.test(query)) return { open: false, query: '', start: from, end: from }
-        return { open: true, query, start: from - token.length, end: from }
+        if (/\s/.test(query)) return { open: false, trigger, query: '', start: from, end: from }
+        return { open: true, trigger, query, start: from - token.length, end: from }
     }, [editor, plainValue, selectionVersion])
     const shortcutMatches = useMemo(
-        () => (shortcutCtx.open ? pickShortcutMatches(shortcutCtx.query, personalShortcuts, websiteShortcuts) : []),
-        [shortcutCtx.open, shortcutCtx.query, personalShortcuts, websiteShortcuts]
+        () =>
+            shortcutCtx.open && shortcutCtx.trigger === 'shortcut'
+                ? pickShortcutMatches(shortcutCtx.query, personalShortcuts, websiteShortcuts)
+                : [],
+        [shortcutCtx.open, shortcutCtx.trigger, shortcutCtx.query, personalShortcuts, websiteShortcuts]
     )
-    const shortcutMenuOpen = shortcutCtx.open && shortcutMatches.length > 0
+    const actionMatches = useMemo(
+        () =>
+            shortcutCtx.open && shortcutCtx.trigger === 'action' && onSendContactCard
+                ? pickActionMatches(shortcutCtx.query, sendableForms || [])
+                : [],
+        [shortcutCtx.open, shortcutCtx.trigger, shortcutCtx.query, onSendContactCard, sendableForms]
+    )
+    // Whichever list applies to the currently-open trigger — keyboard nav and
+    // rendering both just work off this one array regardless of which it is.
+    const activeMatches = shortcutCtx.trigger === 'action' ? actionMatches : shortcutMatches
+    const shortcutMenuOpen = shortcutCtx.open && activeMatches.length > 0
 
     const focusEditor = useCallback(() => {
         requestAnimationFrame(() => editor?.commands.focus())
@@ -524,12 +587,29 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
         if (editor) editor.setEditable(!disabled)
     }, [editor, disabled])
 
+    // CC1: never let a staged card bleed into a different conversation after
+    // switching chats — this component doesn't remount on conversationId
+    // change, so without this a card staged for chat A could get sent to
+    // chat B if the agent switches before hitting Send.
+    useEffect(() => {
+        setStagedFormId(null)
+    }, [conversationId])
+
     const applyPickedShortcut = useCallback(
-        (message: string) => {
+        (picked: ShortcutMatch) => {
             if (!editor) return
             const from = shortcutCtx.start
             const to = shortcutCtx.end
-            editor.chain().focus().deleteRange({ from, to }).insertContent(parseShortcutMarkdown(message)).run()
+            // Always clear the typed "/query" token first, same for every kind.
+            editor.chain().focus().deleteRange({ from, to }).run()
+            if (picked.kind === 'contact_card' && picked.formId != null) {
+                // Stage it — the actual send still goes through the normal
+                // Send button, same as picking a text shortcut doesn't send
+                // by itself either.
+                setStagedFormId(picked.formId)
+                return
+            }
+            editor.chain().focus().insertContent(parseShortcutMarkdown(picked.message)).run()
         },
         [editor, shortcutCtx.end, shortcutCtx.start]
     )
@@ -564,6 +644,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
         if (!editor) return
         if (disabled) return
 
+        // CC1: a staged contact card takes priority over — and is independent
+        // of — whatever text is drafted. It sends on its own; the draft (if
+        // any) is left untouched so nothing typed gets silently discarded.
+        if (stagedFormId != null) {
+            commitStagedContactCard()
+            return
+        }
+
         const md = String(getMarkdown() || '').trim()
         const attachmentsMd = buildAttachmentsMarkdown().trim()
         const combined = [md, attachmentsMd].filter(Boolean).join('\n\n').trim()
@@ -577,11 +665,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
             if (ok === false) return
             clearComposer()
         })
-    }, [buildAttachmentsMarkdown, clearComposer, conversationId, disabled, editor, getMarkdown, onSend])
+    }, [buildAttachmentsMarkdown, clearComposer, commitStagedContactCard, conversationId, disabled, editor, getMarkdown, onSend, stagedFormId])
 
     // Keep refs in sync every render so handleKeyDown inside useEditor always reads fresh values.
     shortcutMenuOpenRef.current = shortcutMenuOpen
-    shortcutMatchesRef.current = shortcutMatches
+    shortcutMatchesRef.current = activeMatches
     shortcutMenuIndexRef.current = shortcutMenuIndex
     sendNowRef.current = sendNow
     applyPickedShortcutRef.current = applyPickedShortcut
@@ -642,6 +730,17 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
         focusEditor()
     }, [editor, focusEditor, shortcutCtx])
 
+    // CC1: same idea as openShortcuts, just for the "#" action list.
+    const openActions = useCallback(() => {
+        if (!editor) return
+        const ctx = shortcutCtx
+        if (!ctx.open) {
+            editor.chain().focus().insertContent('#').run()
+            return
+        }
+        focusEditor()
+    }, [editor, focusEditor, shortcutCtx])
+
     const currentTheme = isDarkMode() ? Theme.DARK : Theme.LIGHT
 
     return (
@@ -674,30 +773,61 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                 </div>
             ) : null}
 
+            {stagedFormId != null ? (
+                <div className="flex flex-wrap gap-2 mb-2">
+                    <div className="flex items-center gap-2 max-w-full px-2 py-1 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
+                        <UserPlus className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                        <span className="text-xs text-blue-700 dark:text-blue-300">
+                            {stagedForm ? stagedForm.name : 'Form'} — click Send
+                        </span>
+                        <button
+                            type="button"
+                            className="text-blue-500 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-100"
+                            title="Cancel"
+                            onClick={() => setStagedFormId(null)}
+                            disabled={disabled || sendingContactCard}
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+                </div>
+            ) : null}
+
             <div className="relative">
                 {shortcutMenuOpen && (
                     <div className="absolute bottom-full left-0 mb-2 w-full max-w-lg rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden z-50">
-                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Shortcuts</div>
+                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                            {shortcutCtx.trigger === 'action' ? 'Forms' : 'Shortcuts'}
+                        </div>
                         <div className="max-h-64 overflow-auto">
-                            {shortcutMatches.map((s, idx) => (
+                            {activeMatches.map((s, idx) => (
                                 <button
                                     key={`${s.scope}-${s.id}`}
                                     type="button"
                                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${idx === shortcutMenuIndex ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                                     onMouseEnter={() => setShortcutMenuIndex(idx)}
                                     onClick={() => {
-                                        applyPickedShortcut(s.message)
+                                        applyPickedShortcut(s)
                                         setShortcutMenuIndex(0)
                                         focusEditor()
                                     }}
                                 >
-                                    <div className="flex items-center gap-2">
-                                        <div className="font-mono text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
-                                        <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-                                            {s.scope === 'website' ? 'Website' : 'Personal'}
+                                    {s.kind === 'contact_card' ? (
+                                        <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                                            <UserPlus className="h-3.5 w-3.5 flex-shrink-0" />
+                                            <span className="font-medium">{s.message}</span>
                                         </div>
-                                    </div>
-                                    <div className="text-gray-600 dark:text-gray-400 truncate">{s.message}</div>
+                                    ) : (
+                                        <>
+                                            <div className="flex items-center gap-2">
+                                                <div className="font-mono text-gray-900 dark:text-gray-100">/{s.shortcut}</div>
+                                                <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                                                    {s.scope === 'website' ? 'Website' : 'Personal'}
+                                                </div>
+                                            </div>
+                                            <div className="text-gray-600 dark:text-gray-400 truncate">{s.message}</div>
+                                        </>
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -754,6 +884,24 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                                     <Paperclip className="h-4 w-4" />
                                 )}
                             </Button>
+
+                            {onSendContactCard && (sendableForms || []).length > 0 && (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className={stagedFormId != null ? 'text-blue-600 dark:text-blue-400' : 'dark:text-gray-400'}
+                                    title="Forms (#)"
+                                    disabled={!editor || disabled}
+                                    onClick={openActions}
+                                >
+                                    {sendingContactCard ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <UserPlus className="h-4 w-4" />
+                                    )}
+                                </Button>
+                            )}
 
                             <Popover>
                                 <PopoverTrigger asChild>
@@ -814,7 +962,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                         <Button
                             type="button"
                             onClick={sendNow}
-                            disabled={(isEmpty && attachments.length === 0) || disabled || !conversationId || !editor || uploadingAttachment}
+                            disabled={(isEmpty && attachments.length === 0 && stagedFormId == null) || disabled || !conversationId || !editor || uploadingAttachment || sendingContactCard}
                             className="bg-blue-600 hover:bg-blue-700 rounded-full h-8 px-2 sm:px-3"
                             title="Send"
                         >

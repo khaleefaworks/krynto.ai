@@ -34,6 +34,7 @@ type MessageState = {
   addMessages: (m: Message[]) => void
   addMessage: (m: Message) => void
   reconcileOptimisticMessage: (tempId: string, confirmed: Message) => void
+  patchMessage: (id: number | string, patch: Partial<Message>) => void
   setMessages: (messages: Message[]) => void
   reset: () => void
 }
@@ -87,6 +88,15 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return { messages: sortMessages(next) }
       }
       return { messages: sortMessages([...state.messages, confirmed]) }
+    }),
+
+  patchMessage: (id, patch) =>
+    set((state) => {
+      const idx = state.messages.findIndex((m: any) => String(m?.id) === String(id))
+      if (idx < 0) return state
+      const next = [...state.messages]
+      next[idx] = { ...next[idx], ...patch }
+      return { messages: next }
     }),
 
   setMessages: (messages) => set({ messages: sortMessages(messages) }),

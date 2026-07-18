@@ -12,6 +12,11 @@
   // icon instead of re-inlining this SVG at each call site.
   const BOT_AVATAR_SVG = '<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect fill="#eff3f9" height="29" rx="4" width="34" x="7" y="15"/><path d="m11 38v-23c-2.209 0-4 1.791-4 4v21c0 2.209 1.791 4 4 4h26c2.209 0 4-1.791 4-4h-28c-1.105 0-2-.895-2-2z" fill="#cfe0f3"/><circle cx="18" cy="25" fill="#afb4c2" r="2"/><circle cx="30" cy="25" fill="#afb4c2" r="2"/><path d="m45 36h-4v-13h4c1.105 0 2 .895 2 2v9c0 1.105-.895 2-2 2z" fill="#8c94af"/><path d="m3 36h4v-13h-4c-1.105 0-2 .895-2 2v9c0 1.105.895 2 2 2z" fill="#8c94af"/><path d="m45 32h-4v4h4c1.105 0 2-.895 2-2v-4c0 1.105-.895 2-2 2z" fill="#6f7792"/><path d="m1 30v4c0 1.105.895 2 2 2h4v-4h-4c-1.105 0-2-.895-2-2z" fill="#6f7792"/><circle cx="24" cy="6" fill="#ff3b65" r="3"/><path d="m25.5 7c-1.381 0-2.5-1.119-2.5-2.5 0-.54.175-1.037.467-1.446-1.402.252-2.467 1.472-2.467 2.946 0 1.657 1.343 3 3 3 1.474 0 2.694-1.065 2.946-2.467-.409.291-.906.467-1.446.467z" fill="#d82b50" opacity=".75"/><g fill="#08105e"><path d="m21 25c0-1.654-1.346-3-3-3s-3 1.346-3 3 1.346 3 3 3 3-1.346 3-3zm-3 1c-.551 0-1-.448-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z"/><path d="m30 22c-1.654 0-3 1.346-3 3s1.346 3 3 3 3-1.346 3-3-1.346-3-3-3zm0 4c-.551 0-1-.448-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z"/><path d="m28.543 33.91c-2.815 1.447-6.271 1.447-9.086 0-.492-.253-1.094-.059-1.347.433s-.059 1.094.433 1.347c1.669.857 3.556 1.311 5.457 1.311s3.788-.453 5.457-1.311c.491-.253.685-.855.433-1.347s-.855-.686-1.347-.433z"/><path d="m45 22h-3v-3c0-2.757-2.243-5-5-5h-12v-4.142c1.72-.447 3-2 3-3.858 0-2.206-1.794-4-4-4s-4 1.794-4 4c0 1.858 1.28 3.411 3 3.858v4.142h-12c-2.757 0-5 2.243-5 5v3h-3c-1.654 0-3 1.346-3 3v9c0 1.654 1.346 3 3 3h3v3c0 2.757 2.243 5 5 5h26c2.757 0 5-2.243 5-5v-3h3c1.654 0 3-1.346 3-3v-9c0-1.654-1.346-3-3-3zm-23-16c0-1.103.897-2 2-2s2 .897 2 2-.897 2-2 2-2-.897-2-2zm-19 29c-.551 0-1-.448-1-1v-9c0-.551.449-1 1-1h3v11zm37 5c0 1.654-1.346 3-3 3h-26c-1.654 0-3-1.346-3-3v-21c0-1.654 1.346-3 3-3h26c1.654 0 3 1.346 3 3zm6-6c0 .552-.449 1-1 1h-3v-11h3c.551 0 1 .449 1 1z"/></g></svg>';
 
+  // Same paper-plane glyph as #chatassist-send, reused on the contact-card
+  // and offline-overlay submit buttons so every "send" affordance in the
+  // widget looks like the same action.
+  const SEND_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+
   // --- Configuration & State ---
   const globalConfig = window._aichatassist || {};
   const scriptElement = document.currentScript || document.querySelector('script[src*="chat-widget.js"]');
@@ -169,6 +174,10 @@
   // functions (hideRatingOverlay, WS handlers) to minimize the widget without
   // causing a ReferenceError — closeWidget is a nested function in createWidget.
   let _closeWidgetFn = null;
+  // The website's designated contact-card form (CC1), if any — used both for
+  // the live-chat agent-triggered card and to extend the offline gate with
+  // extra fields beyond the 3 hardcoded ones. null if none configured.
+  let _contactCardForm = null;
 
   // ── Input-lock persistence ──────────────────────────────────────────────────
   // When automation_complete fires with allow_input=false (terminal informational
@@ -1032,6 +1041,70 @@
     return { active: null, history: [], total: 0, show_conversation_history: false };
   }
 
+  // CC1: fetch the website's contact-card form, if one is configured. Best
+  // effort — a failure just means neither the live-chat card nor the offline
+  // gate's extra fields are available this session, same as if none exists.
+  async function _loadContactCardForm() {
+    try {
+      const res = await fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/forms/contact-card`);
+      if (res.ok) {
+        const data = await res.json();
+        _contactCardForm = data || null;
+      }
+    } catch (e) {
+      _contactCardForm = null;
+    }
+  }
+
+  // The 3 hardcoded offline-gate inputs (name/phone/email) are a separate
+  // markup path from the contact-card form's own fields, but a website's
+  // form can still define a field literally named "name"/"phone"/"email" —
+  // in that case its `required` flag should govern the matching hardcoded
+  // input instead of being silently discarded (that field is excluded from
+  // the extra-fields list precisely because it's assumed to *be* the
+  // hardcoded one). Falls back to the historical defaults — name and phone
+  // required, email optional — when no contact-card form is configured, or
+  // it doesn't define that particular field.
+  function _hardcodedFieldRequired(fieldName, defaultRequired) {
+    const fields = (_contactCardForm && _contactCardForm.fields) || [];
+    const match = fields.filter(function (f) { return f && f.name === fieldName; })[0];
+    return match ? !!match.required : defaultRequired;
+  }
+
+  // Re-applies required-ness (data-required attribute + placeholder text,
+  // consulted by submitContactAndSendPending's validation) to the 3
+  // hardcoded fields from the freshly-fetched _contactCardForm. Safe to call
+  // repeatedly — unlike enhancePhoneField, this never rebuilds the country
+  // picker, only updates its placeholder if it's already been built.
+  function _applyHardcodedFieldRequiredness() {
+    const nameEl = $id('chatassist-contact-name');
+    const phoneEl = $id('chatassist-contact-phone');
+    const emailEl = $id('chatassist-contact-email');
+
+    const nameRequired = _hardcodedFieldRequired('name', true);
+    const phoneRequired = _hardcodedFieldRequired('phone', true);
+    const emailRequired = _hardcodedFieldRequired('email', false);
+
+    if (nameEl) {
+      nameEl.setAttribute('data-required', nameRequired ? '1' : '0');
+      nameEl.placeholder = 'Your name' + (nameRequired ? ' *' : ' (optional)');
+    }
+    if (emailEl) {
+      emailEl.setAttribute('data-required', emailRequired ? '1' : '0');
+      emailEl.placeholder = 'Your email' + (emailRequired ? ' *' : ' (optional)');
+    }
+    if (phoneEl) {
+      phoneEl.setAttribute('data-required', phoneRequired ? '1' : '0');
+      const select = phoneEl.__phoneCountrySelect;
+      const lp = window.libphonenumber;
+      if (select && lp) {
+        _applyPhonePlaceholder(lp, phoneEl, select.value, phoneRequired);
+      } else {
+        phoneEl.placeholder = 'Your phone number' + (phoneRequired ? ' *' : ' (optional)');
+      }
+    }
+  }
+
   // --- View Management ---
 
   function _closeWsCleanly() {
@@ -1600,6 +1673,7 @@
       // carrying over state from a previous conversation in the same page session.
       _agentJoinedThisConv = false;
       _visitorHasEngaged = false;
+      _pendingContactCards = {};
       _conversationBotOnly = Boolean(data.bot_only);
       data.messages.forEach(m => {
         const senderType = m.sender_type || m.sender || 'system';
@@ -1617,6 +1691,21 @@
         if (actor === 'visitor') {
           _visitorHasEngaged = true;
           appendMessage('visitor', m.content, m.created_at, null, m.id);
+        } else if (eventType === 'contact_card') {
+          // CC1: agent-triggered — sender_type is 'agent', so this must be
+          // checked before the plain actor==='agent' branch below or it'd
+          // render as a text bubble instead of the interactive card.
+          _agentJoinedThisConv = true;
+          var ccRawSource = m.raw_content || m.content;
+          var ccData = null;
+          try { ccData = JSON.parse(ccRawSource); } catch (e) { /* plain text fallback */ }
+          var ccDisplayText = (ccData && ccData.message) ? ccData.message : m.content;
+          var ccFields = (ccData && Array.isArray(ccData.fields)) ? ccData.fields : [];
+          var ccFormId = ccData && ccData.form_id;
+          var ccSubmitLabel = ccData && ccData.submit_label;
+          if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
+          if (m.sender_name) updateAgentName(m.sender_name);
+          appendContactCard(ccDisplayText, m.created_at, ccFormId, ccFields, ccSubmitLabel, m.id, m.contact_card_state, { avatarUrl: m.sender_avatar_url, name: m.sender_name });
         } else if (actor === 'agent') {
           _agentJoinedThisConv = true;
           if (m.sender_avatar_url) updateAgentAvatar(m.sender_avatar_url);
@@ -1915,6 +2004,21 @@
       smartScroll();
       // Restore widget state after bot prompt arrives (new sessions).
       _restoreWidgetState();
+      return;
+    }
+
+    // CC1: agent-triggered contact card, live.
+    if (data.type === 'contact_card') {
+      setAgentTyping(false);
+      const createdAt = data.created_at || (data.message_obj && data.message_obj.created_at);
+      const fields = Array.isArray(data.fields) ? data.fields : [];
+      if (data.agent_avatar) updateAgentAvatar(data.agent_avatar);
+      if (data.agent_name) updateAgentName(data.agent_name);
+      appendContactCard(data.message, createdAt, data.form_id, fields, data.submit_label, data.message_obj?.id, data.message_obj?.contact_card_state, { avatarUrl: data.agent_avatar, name: data.agent_name });
+      notifyNewMessage(data.agent_name || activeAgentName, data.agent_avatar || activeAgentAvatarUrl, data.message);
+      if (isWidgetOpen() && !document.hidden && isAtBottom) markRead();
+      showNewMsgIndicator();
+      smartScroll();
       return;
     }
 
@@ -2284,17 +2388,30 @@
   function setUploadingAttachmentsCount(next) {
     uploadingAttachmentsCount = Math.max(0, Number(next) || 0);
     const attachBtn = $id('chatassist-attach');
-    const sendBtn = $id('chatassist-send');
     if (attachBtn) {
       attachBtn.classList.toggle('chatassist-attach-uploading', uploadingAttachmentsCount > 0);
       attachBtn.setAttribute('aria-busy', uploadingAttachmentsCount > 0 ? 'true' : 'false');
     }
-    if (sendBtn) {
-      sendBtn.disabled = uploadingAttachmentsCount > 0;
-    }
+    updateSendButtonState();
+  }
+
+  // Keeps the composer's send button in sync with whether there's anything
+  // to send — disabled/dim while empty (handleUserMessage already no-ops on
+  // empty input; this just makes that visible), and swaps in a "ready" class
+  // for the icon-rotate animation once there's text or an attachment.
+  function updateSendButtonState() {
+    const sendBtn = $id('chatassist-send');
+    if (!sendBtn) return;
+    const inputEl = $id('chatassist-input');
+    const hasText = !!(inputEl && inputEl.value && inputEl.value.trim().length > 0);
+    const hasAttachments = draftAttachments.length > 0;
+    const uploading = uploadingAttachmentsCount > 0;
+    sendBtn.disabled = uploading || (!hasText && !hasAttachments);
+    sendBtn.classList.toggle('chatassist-send-ready', !uploading && (hasText || hasAttachments));
   }
 
   function renderAttachmentChips() {
+    updateSendButtonState();
     const wrap = $id('chatassist-attachments');
     if (!wrap) return;
     wrap.innerHTML = '';
@@ -2859,6 +2976,681 @@
     }
   }
 
+  // CC1: agent-triggered contact card + the offline gate's extra-fields
+  // extension both render the same website_forms field shape (text/email/
+  // phone/textarea/select). This renders it as an in-thread card — never a
+  // blocking overlay — reusing the .chatassist-contact-form input styling
+  // already built for the offline gate.
+  //
+  // CC1: currently-rendered cards still awaiting a fill, by message id — a
+  // brand new card arriving live means the agent resent, so any of these are
+  // now superseded (mirrors the server's own "newer card exists" rule,
+  // applied instantly instead of waiting for a reload).
+  var _pendingContactCards = {};
+
+  function _expireContactCard(messageId) {
+    var entry = _pendingContactCards[messageId];
+    if (!entry) return;
+    delete _pendingContactCards[messageId];
+    Object.keys(entry.inputs).forEach(function (k) { entry.inputs[k].disabled = true; });
+    entry.submitBtn.style.display = 'none';
+    entry.statusEl.className = 'chatassist-contact-card-expired';
+    entry.statusEl.textContent = 'This form has expired. Ask the agent to resend it.';
+  }
+
+  // ─── International phone support ────────────────────────────────────────
+  // Lazy-loads libphonenumber-js and countries-and-timezones (both vendored
+  // alongside this file) so per-country validation/formatting and default-
+  // country detection stay maintainer-updated instead of hand-rolled tables.
+  // Only fetched once, and only when a phone field is actually about to
+  // render — most visitors never touch one. Shared by both phone entry
+  // points (the offline-gate overlay and in-thread contact-card forms) so
+  // they can't drift the way the avatar badges did.
+
+  function _loadVendoredScript(filename) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var src = scriptElement && scriptElement.src ? scriptElement.src : '';
+        var url = src ? src.replace(/chat-widget\.js(\?.*)?$/, filename) : null;
+        if (!url) { reject(new Error('no widget script src')); return; }
+        var s = document.createElement('script');
+        s.src = url;
+        s.async = true;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error('failed to load ' + filename)); };
+        document.head.appendChild(s);
+      } catch (e) { reject(e); }
+    });
+  }
+
+  var _phoneLibPromise = null;
+  function loadPhoneNumberLib() {
+    if (window.libphonenumber) return Promise.resolve(window.libphonenumber);
+    if (_phoneLibPromise) return _phoneLibPromise;
+    _phoneLibPromise = _loadVendoredScript('libphonenumber-min.js').then(function () { return window.libphonenumber; });
+    return _phoneLibPromise;
+  }
+
+  var _tzLibPromise = null;
+  function loadTimezoneCountryLib() {
+    if (window.ct) return Promise.resolve(window.ct);
+    if (_tzLibPromise) return _tzLibPromise;
+    _tzLibPromise = _loadVendoredScript('countries-and-timezones.min.js').then(function () { return window.ct; });
+    return _tzLibPromise;
+  }
+
+  function _phoneFlagEmoji(iso2) {
+    if (!iso2 || iso2.length !== 2) return '';
+    var base = 127397; // regional-indicator offset from the ASCII letter codepoint
+    return String.fromCodePoint(iso2.charCodeAt(0) + base, iso2.charCodeAt(1) + base);
+  }
+
+  var _phoneCountryNamer = null;
+  function _phoneCountryName(iso2) {
+    try {
+      if (!_phoneCountryNamer && typeof Intl !== 'undefined' && Intl.DisplayNames) {
+        _phoneCountryNamer = new Intl.DisplayNames(['en'], { type: 'region' });
+      }
+      return (_phoneCountryNamer && _phoneCountryNamer.of(iso2)) || iso2;
+    } catch (e) { return iso2; }
+  }
+
+  // One example national-significant-number per country (from
+  // libphonenumber-js's examples.mobile.json, MIT license — see
+  // LICENSE-libphonenumber-js.txt) — fed through AsYouType below to build a
+  // per-country placeholder pattern like "XXXXX XXXXX" (IN) or
+  // "(XXX) XXX-XXXX" (US). Inlined rather than lazy-loaded as a 4th vendored
+  // file since it's tiny (~4KB) and always needed alongside the phone lib.
+  var PHONE_EXAMPLE_DIGITS = {"AC":"40123","AD":"312345","AE":"501234567","AF":"701234567","AG":"2684641234","AI":"2642351234","AL":"672123456","AM":"77123456","AO":"923123456","AR":"91123456789","AS":"6847331234","AT":"664123456","AU":"412345678","AW":"5601234","AX":"412345678","AZ":"401234567","BA":"61123456","BB":"2462501234","BD":"1812345678","BE":"450001234","BF":"70123456","BG":"43012345","BH":"36001234","BI":"79561234","BJ":"0195123456","BL":"690001234","BM":"4413701234","BN":"7123456","BO":"71234567","BQ":"3181234","BR":"11961234567","BS":"2423591234","BT":"17123456","BW":"71123456","BY":"294911911","BZ":"6221234","CA":"5062345678","CC":"412345678","CD":"991234567","CF":"70012345","CG":"061234567","CH":"781234567","CI":"0123456789","CK":"71234","CL":"221234567","CM":"671234567","CN":"13123456789","CO":"3211234567","CR":"83123456","CU":"51234567","CV":"9911234","CW":"95181234","CX":"412345678","CY":"96123456","CZ":"601123456","DE":"15123456789","DJ":"77831001","DK":"34412345","DM":"7672251234","DO":"8092345678","DZ":"551234567","EC":"991234567","EE":"51234567","EG":"1001234567","EH":"650123456","ER":"7123456","ES":"612345678","ET":"911234567","FI":"412345678","FJ":"7012345","FK":"51234","FM":"3501234","FO":"211234","FR":"612345678","GA":"06031234","GB":"7400123456","GD":"4734031234","GE":"555123456","GF":"694201234","GG":"7781123456","GH":"231234567","GI":"57123456","GL":"221234","GM":"3012345","GN":"601123456","GP":"690001234","GQ":"222123456","GR":"6912345678","GT":"51234567","GU":"6713001234","GW":"955012345","GY":"6091234","HK":"51234567","HN":"91234567","HR":"921234567","HT":"34101234","HU":"201234567","ID":"812345678","IE":"850123456","IL":"502345678","IM":"7924123456","IN":"8123456789","IO":"3801234","IQ":"7912345678","IR":"9123456789","IS":"6111234","IT":"3123456789","JE":"7797712345","JM":"8762101234","JO":"790123456","JP":"9012345678","KE":"712123456","KG":"700123456","KH":"91234567","KI":"72001234","KM":"3212345","KN":"8697652917","KP":"1921234567","KR":"1020000000","KW":"50012345","KY":"3453231234","KZ":"7710009998","LA":"2023123456","LB":"71123456","LC":"7582845678","LI":"660234567","LK":"712345678","LR":"770123456","LS":"50123456","LT":"61234567","LU":"628123456","LV":"21234567","LY":"912345678","MA":"650123456","MC":"612345678","MD":"62112345","ME":"60123456","MF":"690001234","MG":"321234567","MH":"2351234","MK":"72345678","ML":"65012345","MM":"92123456","MN":"88123456","MO":"66123456","MP":"6702345678","MQ":"696201234","MR":"22123456","MS":"6644923456","MT":"96961234","MU":"52512345","MV":"7712345","MW":"991234567","MX":"2221234567","MY":"123456789","MZ":"821234567","NA":"811234567","NC":"751234","NE":"93123456","NF":"381234","NG":"8021234567","NI":"81234567","NL":"612345678","NO":"40612345","NP":"9841234567","NR":"5551234","NU":"8884012","NZ":"211234567","OM":"92123456","PA":"61234567","PE":"912345678","PF":"87123456","PG":"70123456","PH":"9051234567","PK":"3012345678","PL":"512345678","PM":"551234","PR":"7872345678","PS":"599123456","PT":"912345678","PW":"6201234","PY":"961456789","QA":"33123456","RE":"692123456","RO":"712034567","RS":"601234567","RU":"9123456789","RW":"720123456","SA":"512345678","SB":"7421234","SC":"2510123","SD":"911231234","SE":"701234567","SG":"81234567","SH":"51234","SI":"31234567","SJ":"41234567","SK":"912123456","SL":"25123456","SM":"66661212","SN":"701234567","SO":"71123456","SR":"7412345","SS":"977123456","ST":"9812345","SV":"70123456","SX":"7215205678","SY":"944567890","SZ":"76123456","TA":"8999","TC":"6492311234","TD":"63012345","TG":"90112345","TH":"812345678","TJ":"917123456","TK":"7290","TL":"77212345","TM":"66123456","TN":"20123456","TO":"7715123","TR":"5012345678","TT":"8682911234","TV":"901234","TW":"912345678","TZ":"621234567","UA":"501234567","UG":"712345678","US":"2015550123","UY":"94231234","UZ":"912345678","VA":"3123456789","VC":"7844301234","VE":"4121234567","VG":"2843001234","VI":"3406421234","VN":"912345678","VU":"5912345","WF":"821234","WS":"7212345","XK":"43201234","YE":"712345678","YT":"639012345","ZA":"711234567","ZM":"955123456","ZW":"712345678"};
+
+  // Builds a placeholder like "XXXXX XXXXX" (IN) or "(XXX) XXX-XXXX" (US) —
+  // AsYouType formats the example digits exactly the way a real typed
+  // number would group/punctuate for that country, then every digit is
+  // swapped for a generic "0" so it reads as a pattern, not a real number.
+  function _phonePlaceholder(lp, iso) {
+    try {
+      var raw = PHONE_EXAMPLE_DIGITS[iso];
+      if (!raw) return '';
+      return new lp.AsYouType(iso).input(raw).replace(/[0-9]/g, '0');
+    } catch (e) { return ''; }
+  }
+
+  function _applyPhonePlaceholder(lp, inputEl, iso, required) {
+    var pattern = _phonePlaceholder(lp, iso);
+    if (pattern) inputEl.placeholder = pattern + (required ? ' *' : '');
+  }
+
+  // Per-country digit cap for live typing — India should stop at 10, not
+  // the generic 15-digit E.164 safety net every country was sharing before.
+  // The example number's length is a reasonable proxy for "how long a real
+  // number in this country is" without needing a full length-metadata table.
+  var DEFAULT_PHONE_MAX_LENGTH = 15;
+  function _phoneMaxLength(iso) {
+    var raw = iso && PHONE_EXAMPLE_DIGITS[iso];
+    return raw ? raw.length : DEFAULT_PHONE_MAX_LENGTH;
+  }
+
+  var DEFAULT_PHONE_COUNTRY = 'IN';
+  // Timezone is a much stronger real-location signal than browser language
+  // (a visitor in India commonly has an en-US-language browser, but their
+  // OS timezone is still Asia/Kolkata) — try it first, then fall back to
+  // language, then India.
+  function _detectDefaultPhoneCountry(lp, ct) {
+    try {
+      if (ct) {
+        var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        var byTz = tz && ct.getCountryForTimezone(tz);
+        if (byTz && byTz.id && lp.getCountries().indexOf(byTz.id) !== -1) return byTz.id;
+      }
+    } catch (e) { }
+    try {
+      var langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language];
+      for (var i = 0; i < langs.length; i++) {
+        var lang = langs[i];
+        var region = null;
+        try { region = new Intl.Locale(lang).maximize().region; } catch (e) {
+          var m = /-([A-Z]{2})$/.exec(lang || '');
+          region = m ? m[1] : null;
+        }
+        if (region && lp.getCountries().indexOf(region) !== -1) return region;
+      }
+    } catch (e) { }
+    return DEFAULT_PHONE_COUNTRY;
+  }
+
+  function _phoneCountryStorageKey() {
+    return 'ai_chatassist_phone_country_' + CONFIG.websiteId;
+  }
+
+  // Builds a searchable country-code combobox: a compact trigger button
+  // (flag + dial code) plus a floating search+list panel — a native
+  // <select> with 240+ options isn't browsable. The panel is (by the
+  // caller) appended into `panelHost` — #chatassist-widget, not `wrap` —
+  // and positioned with `fixed` coordinates so it isn't clipped by the
+  // form's scroll container, the same way a native <select>'s dropdown
+  // escapes page overflow. `panelHost` is also #chatassist-widget's own
+  // `transform` (the open/close animation) making it the fixed-position
+  // containing block for the panel, per spec — positionPanel() below
+  // accounts for that by measuring `panelHost`, not the viewport.
+  //
+  // Returns the actual state-holding <select> (real change events, real
+  // .value) so callers can keep treating it like a native select; the
+  // visible trigger+panel just drive it programmatically. `select._uiRoot`
+  // is the element callers should insert into the DOM.
+  function _buildPhoneCountrySelect(lp, selectedIso, panelHost) {
+    const select = document.createElement('select');
+    select.className = 'chatassist-phone-country-native';
+    select.setAttribute('aria-hidden', 'true');
+    select.tabIndex = -1;
+
+    const countries = lp.getCountries().slice().sort(function (a, b) {
+      return _phoneCountryName(a).localeCompare(_phoneCountryName(b));
+    });
+    const meta = {};
+    countries.forEach(function (iso) {
+      const opt = document.createElement('option');
+      opt.value = iso;
+      select.appendChild(opt);
+      meta[iso] = { name: _phoneCountryName(iso), dial: lp.getCountryCallingCode(iso) };
+    });
+    select.value = selectedIso;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'chatassist-phone-country';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'chatassist-phone-country-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+
+    const panel = document.createElement('div');
+    panel.className = 'chatassist-phone-country-panel';
+    panel.style.display = 'none';
+    panel.setAttribute('role', 'listbox');
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.className = 'chatassist-phone-country-search';
+    search.placeholder = 'Search country or code';
+    search.autocomplete = 'off';
+
+    const list = document.createElement('div');
+    list.className = 'chatassist-phone-country-list';
+
+    function renderTrigger() {
+      const m = meta[select.value];
+      trigger.innerHTML = '';
+      const flag = document.createElement('span');
+      flag.textContent = _phoneFlagEmoji(select.value);
+      const code = document.createElement('span');
+      code.className = 'chatassist-phone-country-code';
+      code.textContent = '+' + (m ? m.dial : '');
+      trigger.appendChild(flag);
+      trigger.appendChild(code);
+    }
+
+    let activeIndex = -1;
+
+    // Moves the keyboard-highlighted option to `idx` (clamped to the current
+    // list), updates its visual state, and scrolls it into view. Separate
+    // from `.selected` (the country the field is actually set to) — the two
+    // usually differ while arrowing around.
+    function setActive(idx) {
+      const opts = list.querySelectorAll('.chatassist-phone-country-option');
+      if (!opts.length) { activeIndex = -1; return; }
+      activeIndex = Math.max(0, Math.min(idx, opts.length - 1));
+      opts.forEach(function (o, i) {
+        const isActive = i === activeIndex;
+        o.classList.toggle('active', isActive);
+        o.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+      const activeEl = opts[activeIndex];
+      if (activeEl && activeEl.scrollIntoView) activeEl.scrollIntoView({ block: 'nearest' });
+    }
+
+    function renderList(filter) {
+      list.innerHTML = '';
+      // "+1" is how visitors think of a dial code, but m.dial is stored as
+      // bare digits ("1") — include a "+"-prefixed variant in the haystack
+      // so both "+1" and "1" match instead of "+1" finding nothing.
+      const q = (filter || '').trim().toLowerCase();
+      let shown = 0;
+      countries.forEach(function (iso) {
+        const m = meta[iso];
+        const hay = (m.name + ' ' + iso + ' ' + m.dial + ' +' + m.dial).toLowerCase();
+        if (q && hay.indexOf(q) === -1) return;
+        const optIndex = shown;
+        shown++;
+        const opt = document.createElement('div');
+        opt.className = 'chatassist-phone-country-option' + (iso === select.value ? ' selected' : '');
+        opt.setAttribute('role', 'option');
+        const optFlag = document.createElement('span');
+        optFlag.className = 'chatassist-phone-country-option-flag';
+        optFlag.textContent = _phoneFlagEmoji(iso);
+        const optName = document.createElement('span');
+        optName.className = 'chatassist-phone-country-option-name';
+        optName.textContent = m.name;
+        const optDial = document.createElement('span');
+        optDial.className = 'chatassist-phone-country-option-dial';
+        optDial.textContent = '+' + m.dial;
+        opt.appendChild(optFlag);
+        opt.appendChild(optName);
+        opt.appendChild(optDial);
+        opt.addEventListener('mouseenter', function () { setActive(optIndex); });
+        opt.addEventListener('click', function () {
+          select.value = iso;
+          select.dispatchEvent(new Event('change'));
+          renderTrigger();
+          closePanel();
+        });
+        list.appendChild(opt);
+      });
+      if (!shown) {
+        activeIndex = -1;
+        const empty = document.createElement('div');
+        empty.className = 'chatassist-phone-country-empty';
+        empty.textContent = 'No matches';
+        list.appendChild(empty);
+      } else {
+        // Keyboard nav always starts from the top match — lets Enter select
+        // immediately after typing, without requiring an ArrowDown first.
+        setActive(0);
+      }
+    }
+
+    function positionPanel() {
+      // NOTE: `offsetParent` is unusable here — per spec it's always null
+      // for position:fixed elements, regardless of a transformed ancestor
+      // establishing the actual containing block. So `panelHost` (passed
+      // in by the caller, who knows exactly what the panel was appended
+      // into) is measured directly instead of trying to auto-detect it.
+      //
+      // Flip/clamp math below is done in viewport coordinates (r, vw, vh —
+      // independent of panelHost), then converted to panelHost-relative
+      // units only for the final style assignment. Assumes the list is
+      // already populated (renderList must run before this, in openPanel)
+      // so panel.getBoundingClientRect().height reflects real content, not
+      // an empty shell.
+      const r = trigger.getBoundingClientRect();
+      const base = panelHost ? panelHost.getBoundingClientRect() : { left: 0, top: 0 };
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const panelWidth = Math.max(r.width, 220);
+      const panelHeight = panel.getBoundingClientRect().height || 260;
+
+      const spaceBelow = vh - r.bottom;
+      const openUpward = spaceBelow < panelHeight + 8 && r.top > spaceBelow;
+      const top = openUpward ? Math.max(8, r.top - panelHeight - 4) : (r.bottom + 4);
+
+      let left = r.left;
+      const maxLeft = vw - panelWidth - 8;
+      if (left > maxLeft) left = Math.max(8, maxLeft);
+
+      panel.style.left = Math.round(left - base.left) + 'px';
+      panel.style.top = Math.round(top - base.top) + 'px';
+      panel.style.minWidth = Math.round(panelWidth) + 'px';
+    }
+
+    function onOutsideClick(e) {
+      // e.target alone isn't reliable here: this listener sits on `document`,
+      // outside the widget's shadow root, so any event originating *inside*
+      // the shadow tree gets retargeted — e.target becomes the shadow host,
+      // not the actual search input/option that was clicked. That made every
+      // click inside the panel look like an "outside" click and close it
+      // before the option's own click handler ever ran. composedPath() isn't
+      // retargeted, so it's the reliable way to check containment across a
+      // shadow boundary.
+      const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+      if (path.indexOf(wrap) === -1 && path.indexOf(panel) === -1) closePanel();
+    }
+    function onReposition() { if (panel.style.display !== 'none') positionPanel(); }
+
+    function openPanel() {
+      // display must flip, and the list must be populated, before
+      // positioning: positionPanel measures panel.getBoundingClientRect()
+      // to decide whether to flip upward, which needs real content height
+      // (an empty, display:none panel measures as ~0).
+      panel.style.display = 'block';
+      search.value = '';
+      renderList('');
+      positionPanel();
+      setTimeout(function () { search.focus(); }, 0);
+      document.addEventListener('mousedown', onOutsideClick, true);
+      window.addEventListener('scroll', onReposition, true);
+      window.addEventListener('resize', onReposition, true);
+    }
+    function closePanel() {
+      panel.style.display = 'none';
+      document.removeEventListener('mousedown', onOutsideClick, true);
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition, true);
+    }
+
+    trigger.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (panel.style.display === 'none') openPanel(); else closePanel();
+    });
+    search.addEventListener('input', function () { renderList(search.value); });
+    search.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { closePanel(); trigger.focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIndex + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIndex - 1); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        const opts = list.querySelectorAll('.chatassist-phone-country-option');
+        const target = opts[activeIndex] || opts[0];
+        if (target) target.dispatchEvent(new Event('click'));
+      }
+    });
+
+    panel.appendChild(search);
+    panel.appendChild(list);
+    wrap.appendChild(trigger);
+    wrap.appendChild(select);
+    renderTrigger();
+
+    select._uiRoot = wrap;
+    select._uiPanel = panel;
+    return select;
+  }
+
+  // Inserts a country-code combobox before `inputEl` inside `wrapEl` once
+  // the phone library loads (progressive enhancement — the plain digit
+  // input works immediately, the combobox fades in a moment later).
+  // `prefillValue`, if given, is either a legacy bare-digit number (assumed
+  // India) or an E.164 "+<code><digits>" string to split back into
+  // (country, national number) — e.g. from a previous visit's localStorage.
+  // `required` only affects the placeholder's trailing " *" hint.
+  function enhancePhoneField(wrapEl, inputEl, prefillValue, required) {
+    inputEl.addEventListener('input', function () {
+      // Re-read the max on every keystroke (not captured once at setup) so
+      // it tracks whichever country is currently selected — before the
+      // combobox exists yet, __phoneCountrySelect is undefined and this
+      // falls back to the generic 15-digit E.164 cap.
+      const iso = inputEl.__phoneCountrySelect && inputEl.__phoneCountrySelect.value;
+      this.value = this.value.replace(/[^\d]/g, '').slice(0, _phoneMaxLength(iso));
+    });
+    Promise.all([loadPhoneNumberLib(), loadTimezoneCountryLib().catch(function () { return null; })]).then(function (libs) {
+      const lp = libs[0];
+      const ct = libs[1];
+      if (!lp || inputEl.disabled) return;
+      let iso = null;
+      if (prefillValue && String(prefillValue).trim().charAt(0) === '+') {
+        const parsed = lp.parsePhoneNumberFromString(String(prefillValue).trim());
+        if (parsed) { iso = parsed.country; inputEl.value = parsed.nationalNumber; }
+      }
+      if (!iso) {
+        try {
+          const saved = localStorage.getItem(_phoneCountryStorageKey());
+          if (saved && lp.getCountries().indexOf(saved) !== -1) iso = saved;
+        } catch (e) { }
+      }
+      if (!iso) iso = _detectDefaultPhoneCountry(lp, ct);
+      const maxLen = _phoneMaxLength(iso);
+      if (!inputEl.value && prefillValue && String(prefillValue).trim().charAt(0) !== '+') {
+        inputEl.value = String(prefillValue).replace(/\D/g, '').slice(0, maxLen);
+      }
+      // Whatever's already there (typed before the lib/country resolved,
+      // still under the generic 15-digit cap) gets trimmed to this
+      // country's actual length too.
+      if (inputEl.value.length > maxLen) inputEl.value = inputEl.value.slice(0, maxLen);
+      _applyPhonePlaceholder(lp, inputEl, iso, required);
+      // Appended into #chatassist-widget (not bare __shadow) so the panel
+      // still inherits the .chatassist-theme-dark ancestor class used by
+      // the dark-mode overrides below.
+      const _panelHost = $id('chatassist-widget') || __shadow;
+      const select = _buildPhoneCountrySelect(lp, iso, _panelHost);
+      select.addEventListener('change', function () {
+        try { localStorage.setItem(_phoneCountryStorageKey(), select.value); } catch (e) { }
+        _applyPhonePlaceholder(lp, inputEl, select.value, required);
+        const newMax = _phoneMaxLength(select.value);
+        if (inputEl.value.length > newMax) inputEl.value = inputEl.value.slice(0, newMax);
+      });
+      if (_panelHost) _panelHost.appendChild(select._uiPanel);
+      wrapEl.insertBefore(select._uiRoot, inputEl);
+      inputEl.__phoneCountrySelect = select;
+    }).catch(function () {
+      // Offline/blocked — the plain digit input still works, validated as a
+      // bare 10-digit India number at submit time (see validatePhoneValue).
+    });
+  }
+
+  // Returns an error message string, or null if `value` is a valid phone
+  // number. Falls back to the legacy exact-10-digit India rule if the
+  // library hasn't finished loading yet (rare — only right after the field
+  // first renders).
+  function validatePhoneValue(inputEl, value) {
+    const select = inputEl.__phoneCountrySelect;
+    const lp = window.libphonenumber;
+    if (select && lp) {
+      return lp.isValidPhoneNumber(value, select.value) ? null : 'Please enter a valid phone number.';
+    }
+    return value.replace(/\D/g, '').length === 10 ? null : 'Please enter a valid 10-digit phone number.';
+  }
+
+  // Composes the value actually sent to the backend: E.164 when the country
+  // library is available, otherwise the raw digits (backend assumes India
+  // for bare digit strings — see DEFAULT_PHONE_REGION in forms.py).
+  function composePhoneValue(inputEl, value) {
+    const select = inputEl.__phoneCountrySelect;
+    const lp = window.libphonenumber;
+    if (select && lp) {
+      const parsed = lp.parsePhoneNumberFromString(value, select.value);
+      if (parsed) return parsed.number;
+    }
+    return value;
+  }
+
+  function appendContactCard(content, createdAtIso, formId, fields, submitLabel, messageId, cardState, meta) {
+    const container = $id('chatassist-messages');
+    if (!container) return;
+
+    const emptyEl = $id('chatassist-empty-state');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const state = cardState || { status: 'pending' };
+
+    try {
+      const msgDate = createdAtIso ? new Date(createdAtIso) : new Date();
+      const dateKey = msgDate.toDateString();
+      if (dateKey !== lastAppendedDateStr) {
+        lastAppendedDateStr = dateKey;
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        let label = msgDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        if (msgDate.toDateString() === today.toDateString()) label = 'Today';
+        else if (msgDate.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+        const sep = document.createElement('div');
+        sep.className = 'chatassist-date-separator';
+        sep.innerHTML = '<span>' + label + '</span>';
+        container.appendChild(sep);
+      }
+    } catch (e) { }
+
+    if (state.status === 'pending') {
+      // A new fillable card supersedes any still-pending ones in this session.
+      Object.keys(_pendingContactCards).forEach(_expireContactCard);
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'chatassist-message chatassist-message-agent';
+
+    const row = document.createElement('div');
+    row.className = 'chatassist-message-row chatassist-message-row-left';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'chatassist-message-avatar chatassist-message-avatar-agent';
+    const avatarUrl = getFullAssetUrl(meta && meta.avatarUrl || activeAgentAvatarUrl);
+    const avatarName = (meta && meta.name) || activeAgentName || 'Agent';
+    if (avatarUrl) {
+      avatar.innerHTML = '<img class="chatassist-message-avatar-img" src="' + avatarUrl + '" alt="' + avatarName + '">';
+    } else {
+      avatar.textContent = (avatarName.trim().split(/\s+/).slice(0, 2).map(function (p) { return p[0]; }).join('') || 'AG').toUpperCase();
+    }
+
+    const contentWrap = document.createElement('div');
+    contentWrap.className = 'chatassist-message-content';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'chatassist-message-bubble';
+    renderMarkdownInto(bubble, unescapeMarkdown(content));
+
+    const timestamp = document.createElement('div');
+    timestamp.className = 'chatassist-message-timestamp';
+    timestamp.textContent = formatTimestamp(createdAtIso ? new Date(createdAtIso) : new Date());
+
+    contentWrap.appendChild(bubble);
+    contentWrap.appendChild(timestamp);
+
+    if (Array.isArray(fields) && fields.length > 0) {
+      const form = document.createElement('div');
+      form.className = 'chatassist-contact-form chatassist-contact-card';
+
+      const inputs = {};
+      fields.forEach(function (field) {
+        var inputEl;
+        var appendTarget;
+        if (field.field_type === 'textarea') {
+          inputEl = document.createElement('textarea');
+          inputEl.rows = 2;
+          appendTarget = inputEl;
+        } else if (field.field_type === 'select') {
+          inputEl = document.createElement('select');
+          (field.options || []).forEach(function (opt) {
+            const o = document.createElement('option');
+            o.value = opt;
+            o.textContent = opt;
+            inputEl.appendChild(o);
+          });
+          appendTarget = inputEl;
+        } else if (field.field_type === 'phone') {
+          inputEl = document.createElement('input');
+          inputEl.type = 'tel';
+          const wrap = document.createElement('div');
+          wrap.className = 'chatassist-phone-field';
+          wrap.appendChild(inputEl);
+          appendTarget = wrap;
+        } else {
+          inputEl = document.createElement('input');
+          inputEl.type = field.field_type === 'email' ? 'email' : 'text';
+          appendTarget = inputEl;
+        }
+        inputEl.placeholder = (field.label || field.name || '') + (field.required ? ' *' : '');
+        var prefillValue = null;
+        if (state.status === 'filled' && state.data && state.data[field.name] != null) {
+          prefillValue = state.data[field.name];
+          inputEl.value = prefillValue;
+        }
+        if (field.field_type === 'phone') {
+          enhancePhoneField(appendTarget, inputEl, prefillValue, field.required);
+        }
+        inputs[field.name] = inputEl;
+        form.appendChild(appendTarget);
+      });
+
+      const statusEl = document.createElement('div');
+      statusEl.className = 'chatassist-contact-card-status';
+
+      const submitBtn = document.createElement('button');
+      submitBtn.type = 'button';
+      submitBtn.className = 'chatassist-contact-card-submit';
+      const submitBtnLabel = document.createElement('span');
+      submitBtnLabel.className = 'chatassist-contact-card-submit-label';
+      submitBtnLabel.textContent = submitLabel || 'Send';
+      const submitBtnIcon = document.createElement('span');
+      submitBtnIcon.className = 'chatassist-contact-card-submit-icon';
+      submitBtnIcon.innerHTML = SEND_ICON_SVG;
+      submitBtn.appendChild(submitBtnLabel);
+      submitBtn.appendChild(submitBtnIcon);
+
+      if (state.status === 'filled') {
+        Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+        submitBtn.style.display = 'none';
+        statusEl.textContent = 'Submitted — thank you!';
+      } else if (state.status === 'expired') {
+        Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+        submitBtn.style.display = 'none';
+        statusEl.className = 'chatassist-contact-card-expired';
+        statusEl.textContent = 'This form has expired. Ask the agent to resend it.';
+      } else {
+        _pendingContactCards[messageId] = { inputs: inputs, submitBtn: submitBtn, statusEl: statusEl };
+        submitBtn.addEventListener('click', function () {
+          const data = {};
+          for (var i = 0; i < fields.length; i++) {
+            var field = fields[i];
+            var el = inputs[field.name];
+            var value = (el.value || '').trim();
+            if (field.required && !value) {
+              statusEl.textContent = 'Please fill "' + (field.label || field.name) + '".';
+              el.focus();
+              return;
+            }
+            if (field.field_type === 'email' && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+              statusEl.textContent = 'Please enter a valid email address.';
+              el.focus();
+              return;
+            }
+            if (field.field_type === 'phone' && value) {
+              const phoneErr = validatePhoneValue(el, value);
+              if (phoneErr) {
+                statusEl.textContent = phoneErr;
+                el.focus();
+                return;
+              }
+              value = composePhoneValue(el, value);
+            }
+            if (value) data[field.name] = value;
+          }
+          submitBtn.disabled = true;
+          // Fires immediately on click, independent of network latency — the
+          // icon slides out to the right as its own little "sent!" cue while
+          // the real request is still in flight (see .chatassist-sending in
+          // chat-widget.css).
+          submitBtn.classList.add('chatassist-sending');
+          statusEl.textContent = 'Sending…';
+          fetch(CONFIG.apiUrl + '/websites/' + encodeURIComponent(CONFIG.websiteId) + '/forms/' + encodeURIComponent(formId) + '/submissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: data, conversation_id: CONFIG.conversationId || undefined, session_id: CONFIG.sessionId, message_id: messageId }),
+          })
+            .then(function (r) {
+              if (r.status === 409) throw new Error('expired');
+              if (!r.ok) throw new Error('submit failed');
+              return r.json();
+            })
+            .then(function () {
+              delete _pendingContactCards[messageId];
+              Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+              submitBtn.style.display = 'none';
+              statusEl.textContent = 'Submitted — thank you!';
+            })
+            .catch(function (err) {
+              if (err && err.message === 'expired') {
+                _expireContactCard(messageId);
+                return;
+              }
+              submitBtn.disabled = false;
+              submitBtn.classList.remove('chatassist-sending');
+              statusEl.textContent = 'Something went wrong. Please try again.';
+            });
+        });
+      }
+
+      form.appendChild(submitBtn);
+      form.appendChild(statusEl);
+      contentWrap.appendChild(form);
+    }
+
+    row.appendChild(avatar);
+    row.appendChild(contentWrap);
+    messageDiv.appendChild(row);
+    container.appendChild(messageDiv);
+
+    isAtBottom = true;
+    smartScroll();
+  }
+
   function sendBotButtonClick(automationId, buttonPath) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       showToast('Not connected. Please wait...');
@@ -3017,6 +3809,66 @@
       }
     } catch (e) { }
 
+    // CC1: the offline gate's extra-fields extension. The 3 hardcoded fields
+    // above are untouched — this only appends whatever additional fields the
+    // website's contact-card form defines beyond ones literally *named*
+    // name/email/phone (matched by name, not field_type — a differently
+    // named field that happens to also be an email/phone type, e.g.
+    // "emails", is its own distinct field with its own required flag, not an
+    // alias for the always-optional hardcoded email input).
+    try {
+      const extraWrap = $id('chatassist-contact-form-extra');
+      if (extraWrap) {
+        extraWrap.innerHTML = '';
+        // Re-fetch on every open, not just once at page load — the
+        // contact-card form (required flags, field list) can change while a
+        // visitor sits on the page, and this overlay can show long after init.
+        _loadContactCardForm().then(function () {
+          if (!extraWrap.isConnected) return;
+          extraWrap.innerHTML = '';
+          _applyHardcodedFieldRequiredness();
+          const extraFields = ((_contactCardForm && _contactCardForm.fields) || []).filter(function (f) {
+            return f && f.name !== 'name' && f.name !== 'email' && f.name !== 'phone';
+          });
+          extraFields.forEach(function (field) {
+            var inputEl;
+            var appendTarget;
+            if (field.field_type === 'textarea') {
+              inputEl = document.createElement('textarea');
+              inputEl.rows = 2;
+              appendTarget = inputEl;
+            } else if (field.field_type === 'select') {
+              inputEl = document.createElement('select');
+              (field.options || []).forEach(function (opt) {
+                const o = document.createElement('option');
+                o.value = opt;
+                o.textContent = opt;
+                inputEl.appendChild(o);
+              });
+              appendTarget = inputEl;
+            } else if (field.field_type === 'phone') {
+              inputEl = document.createElement('input');
+              inputEl.type = 'tel';
+              appendTarget = document.createElement('div');
+              appendTarget.className = 'chatassist-phone-field';
+              appendTarget.appendChild(inputEl);
+            } else {
+              inputEl = document.createElement('input');
+              inputEl.type = field.field_type === 'email' ? 'email' : 'text';
+              appendTarget = inputEl;
+            }
+            inputEl.id = 'chatassist-contact-extra-' + field.name;
+            inputEl.setAttribute('data-extra-field', field.name);
+            inputEl.setAttribute('data-extra-field-type', field.field_type || 'text');
+            inputEl.setAttribute('data-extra-required', field.required ? '1' : '');
+            inputEl.placeholder = (field.label || field.name) + (field.required ? ' *' : '');
+            if (field.field_type === 'phone') enhancePhoneField(appendTarget, inputEl, null, field.required);
+            extraWrap.appendChild(appendTarget);
+          });
+        });
+      }
+    } catch (e) { }
+
     el.style.display = 'flex';
     el.classList.add('chatassist-contact-overlay-visible');
     // Reset touched state each time the form opens so applyPresence() can
@@ -3077,30 +3929,85 @@
   }
 
   function submitContactAndSendPending() {
-    const name = $id('chatassist-contact-name')?.value.trim();
-    const phone = $id('chatassist-contact-phone')?.value.trim();
-    const email = $id('chatassist-contact-email')?.value.trim();
-    if (!name) {
+    const nameEl = $id('chatassist-contact-name');
+    const name = nameEl?.value.trim();
+    const phoneEl = $id('chatassist-contact-phone');
+    const phoneRaw = phoneEl?.value.trim();
+    const emailEl = $id('chatassist-contact-email');
+    const email = emailEl?.value.trim();
+
+    // Required-ness follows the contact-card form's own field config when it
+    // defines a field literally named name/phone/email (see
+    // _applyHardcodedFieldRequiredness) — absent that attribute (form not
+    // loaded yet, or no contact-card form configured), fall back to the
+    // historical defaults: name and phone required, email optional.
+    const nameRequired = nameEl?.getAttribute('data-required') !== '0';
+    const phoneRequired = phoneEl?.getAttribute('data-required') !== '0';
+    const emailRequired = emailEl?.getAttribute('data-required') === '1';
+
+    if (nameRequired && !name) {
       showToast('Please enter your name.');
-      $id('chatassist-contact-name')?.focus();
+      nameEl?.focus();
       return;
     }
-    if (!phone) {
+    if (phoneRequired && !phoneRaw) {
       showToast('Please enter your phone number.');
-      $id('chatassist-contact-phone')?.focus();
+      phoneEl?.focus();
       return;
     }
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (phoneDigits.length !== 10) {
-      showToast('Please enter a valid 10-digit phone number.');
-      $id('chatassist-contact-phone')?.focus();
+    let phone = '';
+    if (phoneRaw) {
+      const phoneErr = validatePhoneValue(phoneEl, phoneRaw);
+      if (phoneErr) {
+        showToast(phoneErr);
+        phoneEl?.focus();
+        return;
+      }
+      phone = composePhoneValue(phoneEl, phoneRaw);
+    }
+    if (emailRequired && !email) {
+      showToast('Please enter your email.');
+      emailEl?.focus();
       return;
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       showToast('Please enter a valid email address.');
-      $id('chatassist-contact-email')?.focus();
+      emailEl?.focus();
       return;
     }
+
+    // CC1: validate + collect the offline gate's extra fields, if any are configured.
+    const extraData = {};
+    const extraWrap = $id('chatassist-contact-form-extra');
+    if (extraWrap) {
+      const extraEls = Array.from(extraWrap.querySelectorAll('[data-extra-field]'));
+      for (var i = 0; i < extraEls.length; i++) {
+        var extraEl = extraEls[i];
+        var extraValue = (extraEl.value || '').trim();
+        var extraFieldType = extraEl.getAttribute('data-extra-field-type');
+        if (extraEl.getAttribute('data-extra-required') === '1' && !extraValue) {
+          showToast('Please fill "' + (extraEl.placeholder || extraEl.getAttribute('data-extra-field')) + '".');
+          extraEl.focus();
+          return;
+        }
+        if (extraValue && extraFieldType === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraValue)) {
+          showToast('Please enter a valid email address.');
+          extraEl.focus();
+          return;
+        }
+        if (extraValue && extraFieldType === 'phone') {
+          var extraPhoneErr = validatePhoneValue(extraEl, extraValue);
+          if (extraPhoneErr) {
+            showToast(extraPhoneErr);
+            extraEl.focus();
+            return;
+          }
+          extraValue = composePhoneValue(extraEl, extraValue);
+        }
+        if (extraValue) extraData[extraEl.getAttribute('data-extra-field')] = extraValue;
+      }
+    }
+
     const visitorName = name;
     const visitorPhone = phone;
     const visitorEmail = email;
@@ -3145,6 +4052,33 @@
       // The offline automation message told the visitor they can leave additional
       // details — open the input now so they actually can.
       showInputContainer();
+    }
+
+    // CC1: submit to the same contact-card form so the extra fields (if any)
+    // land in the "Form submissions" panel too. Must include name/email/phone
+    // from the hardcoded fields as well — the form's own required-field
+    // validation runs against its full field list, and those are typically
+    // required there even though this overlay collects them separately.
+    if (_contactCardForm && _contactCardForm.id) {
+      // Matched by name (not field_type) to mirror the extraFields filter
+      // above — a field named e.g. "emails" already has its own collected
+      // value in extraData and must not be clobbered by the hardcoded
+      // (always-optional) email input just because both happen to be type "email".
+      const fullData = Object.assign({}, extraData);
+      (_contactCardForm.fields || []).forEach(function (field) {
+        if (field.name === 'name' && visitorName) fullData.name = visitorName;
+        else if (field.name === 'phone' && visitorPhone) fullData.phone = visitorPhone;
+        else if (field.name === 'email' && visitorEmail) fullData.email = visitorEmail;
+      });
+      fetch(`${CONFIG.apiUrl}/websites/${CONFIG.websiteId}/forms/${_contactCardForm.id}/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: fullData,
+          conversation_id: CONFIG.conversationId || undefined,
+          session_id: CONFIG.sessionId,
+        }),
+      }).catch(function () { /* best-effort — offline gate's own send already succeeded */ });
     }
 
     // If a bot button click was deferred waiting for contact, fire it now.
@@ -3213,11 +4147,14 @@
             <div id="chatassist-contact-msg-preview" class="chatassist-contact-msg-preview" style="display:none;"></div>
             <div class="chatassist-contact-form">
               <input type="text" id="chatassist-contact-name" placeholder="Your name *" autocomplete="name" />
-              <input type="tel" id="chatassist-contact-phone" placeholder="Your phone number *" autocomplete="tel" maxlength="10" />
+              <div id="chatassist-contact-phone-wrap" class="chatassist-phone-field">
+                <input type="tel" id="chatassist-contact-phone" placeholder="Your phone number *" autocomplete="tel" maxlength="15" />
+              </div>
               <input type="email" id="chatassist-contact-email" placeholder="Your email (optional)" autocomplete="email" />
             </div>
+            <div id="chatassist-contact-form-extra" class="chatassist-contact-form"></div>
             <div class="chatassist-contact-overlay-actions">
-              <button id="chatassist-contact-overlay-submit" class="chatassist-contact-overlay-submit">Send message</button>
+              <button id="chatassist-contact-overlay-submit" class="chatassist-contact-overlay-submit"><span>Send message</span>${SEND_ICON_SVG}</button>
             </div>
           </div>
         </div>
@@ -3313,7 +4250,7 @@
               </button>
             ` : ``}
             <textarea id="chatassist-input" placeholder="Type your message..." rows="1" autocomplete="off"></textarea>
-            <button id="chatassist-send" aria-label="Send message"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+            <button id="chatassist-send" aria-label="Send message">${SEND_ICON_SVG}</button>
             </div>
           </div>
           <div id="chatassist-branding">${CONFIG.brandingText}</div>
@@ -3484,9 +4421,6 @@
 
     $id('chatassist-contact-overlay-close').addEventListener('click', () => hideContactOverlay(true));
     $id('chatassist-contact-overlay-submit').addEventListener('click', submitContactAndSendPending);
-    $id('chatassist-contact-phone').addEventListener('input', function () {
-      this.value = this.value.replace(/\D/g, '').slice(0, 10);
-    });
     $id('chatassist-send').addEventListener('click', handleUserMessage);
 
     // Popup notification buttons
@@ -3542,6 +4476,7 @@
 
     input.addEventListener('input', () => {
       autoResizeInput();
+      updateSendButtonState();
       // Persist draft for the current conversation so it survives navigation
       if (!isReadOnlyThread) saveDraft(input.value || '');
       const value = input.value || '';
@@ -3601,8 +4536,8 @@
       const phone = localStorage.getItem(`ai_chatassist_contact_phone_${CONFIG.websiteId}`);
       const email = localStorage.getItem(`ai_chatassist_contact_email_${CONFIG.websiteId}`);
       if (name) $id('chatassist-contact-name').value = name;
-      if (phone) $id('chatassist-contact-phone').value = phone;
       if (email) $id('chatassist-contact-email').value = email;
+      enhancePhoneField($id('chatassist-contact-phone-wrap'), $id('chatassist-contact-phone'), phone, true);
     } catch (e) { }
 
     refreshHeaderIcon();
@@ -3616,6 +4551,7 @@
   function autoResizeInput() {
     const input = $id('chatassist-input');
     if (!input) return;
+    updateSendButtonState();
     // Bail when the chat window is hidden: scrollHeight is 0 inside display:none,
     // which would set inline height:0px and cause the cursor to render at the top
     // corner of the textarea the next time the window is opened.
@@ -3806,7 +4742,8 @@
 .chatassist-prompt-btn:active:not(:disabled) { background: ${CONFIG.primaryColor} !important; border-color: ${CONFIG.primaryColor} !important; color: #fff !important; }
 .chatassist-prompt-btn-selected { background: ${CONFIG.primaryColor} !important; color: #fff !important; border-color: ${CONFIG.primaryColor} !important; }
 .chatassist-conv-new-btn { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
-.chatassist-conv-new-btn:hover { background: ${CONFIG.primaryColor} !important; color: #fff !important; }`;
+.chatassist-conv-new-btn:hover { background: ${CONFIG.primaryColor} !important; color: #fff !important; }
+.chatassist-contact-card-submit { background: ${CONFIG.primaryColor} !important; }`;
     } catch (e) { }
   }
 
@@ -3903,6 +4840,9 @@
           }
         }
       }
+
+      // CC1: best-effort, non-blocking — don't hold up first paint on it.
+      _loadContactCardForm();
 
       // Fetch the conversation list to decide which view to show first.
       const listData = await fetchConversationList();

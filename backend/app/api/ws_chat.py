@@ -951,6 +951,20 @@ async def chat_ws(
                                 changed = True
                             if changed:
                                 db.commit()
+                                try:
+                                    from app.services.lead_integration_service import enqueue_lead
+
+                                    enqueue_lead(
+                                        db,
+                                        website_id=website_id,
+                                        conversation_id=conv.id,
+                                        source="offline_gate",
+                                        name=conv.visitor_name,
+                                        email=conv.visitor_email,
+                                        phone=conv.visitor_phone,
+                                    )
+                                except Exception:
+                                    pass
                     except Exception:
                         try:
                             db.rollback()
@@ -1464,6 +1478,20 @@ async def chat_ws_with_conversation(
                                     changed = True
                                 if changed:
                                     db.commit()
+                                    try:
+                                        from app.services.lead_integration_service import enqueue_lead
+
+                                        enqueue_lead(
+                                            db,
+                                            website_id=website_id,
+                                            conversation_id=fresh_conv.id,
+                                            source="offline_gate",
+                                            name=fresh_conv.visitor_name,
+                                            email=fresh_conv.visitor_email,
+                                            phone=fresh_conv.visitor_phone,
+                                        )
+                                    except Exception:
+                                        pass
                         except Exception:
                             try:
                                 db.rollback()

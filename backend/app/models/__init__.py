@@ -29,6 +29,8 @@ from app.models.user_login_session import UserLoginSession
 from app.models.agent_status_log import AgentStatusLog
 from app.models.notification_event import NotificationEvent, NotificationEventStatus, NotificationEventDeliveryMethod
 from app.models.backup import Backup, BackupStatus, BackupTrigger
+from app.models.website_integration import WebsiteIntegration, WebsiteIntegrationType
+from app.models.lead_integration_delivery import LeadIntegrationDelivery, LeadDeliveryStatus
 
 __all__ = [
     "Website",
@@ -68,4 +70,8 @@ __all__ = [
     "Backup",
     "BackupStatus",
     "BackupTrigger",
+    "WebsiteIntegration",
+    "WebsiteIntegrationType",
+    "LeadIntegrationDelivery",
+    "LeadDeliveryStatus",
 ]

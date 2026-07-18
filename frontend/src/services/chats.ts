@@ -102,6 +102,19 @@ export async function takeoverConversation(conversationId: number): Promise<{ su
   })
 }
 
+export async function sendContactCard(chatId: string | number, formId: number): Promise<{ success: boolean; message_id?: number; message_obj?: any }> {
+  const token = useAppStore.getState().token
+
+  return apiRequest(`/chats/${chatId}/send-contact-card`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ form_id: formId }),
+  })
+}
+
 export async function closeConversation(chatId: number): Promise<{ success: boolean; message: string }> {
   const token = useAppStore.getState().token
 

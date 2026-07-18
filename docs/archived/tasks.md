@@ -249,3 +249,15 @@ Last updated: 2026-01-12
 | Fix | Detail |
 |-----|--------|
 | **Install App sidebar button** | `usePwaInstall` hook wraps `beforeinstallprompt`. Download icon appears in desktop sidebar bottom actions and mobile sidebar footer. Hidden when already in standalone mode or browser doesn't support PWA install. |
+
+---
+
+## Descoped — Won't Fix (2026-07-16)
+
+Not completed — deliberately decided against. Kept here (not deleted) so the original write-up and reasoning aren't lost if revisited later.
+
+| # | Title | Description | Priority | Why descoped |
+|---|-------|-------------|----------|---------------|
+| SEC3 | **Separate session identifier from session credential** | The actual structural fix. Generate a second random secret alongside `session_id` at first connect, store both in the widget's localStorage entry, and require *both* (not just session_id) to open a WS or read history. Never return the secret in any agent-facing API response. `session_id` is trusted as the sole credential across 2 WS routes and 5 REST routes today — a real fix means threading the secret through all of them at once, plus a soft-migration path so no currently-connected live visitor gets locked out (issue a secret transparently on first connect if one's missing, only start hard-rejecting once one has actually been issued). Real auth-model change — scope as its own piece of work. | Medium | Decided not needed. |
+| SEC5 | **Add session idle-expiry** | Connect/read rate-limiting shipped 2026-07-09 (IP-keyed, fails open if Redis is down). Remaining: a leaked/idle session_id never expires. Note: the "24h inactivity auto-close" precedent originally cited here is dead code — `_run_auto_close`/`_run_auto_resolve_visitor_ended` in `auto_close_scheduler.py` are never registered with the live APScheduler instance (only two unrelated notification jobs are), and even if they were, they resolve the *conversation*, not the session_id, so it would keep granting history access regardless. Building this would mean designing fresh expiry semantics, not reviving that job. | Low | Explicitly declined — no expiry wanted. |
+| SEC6 | **Fix silent-skip session checks + unauthenticated rating read** | Surfaced while investigating SEC1-5, not yet fixed. `POST /ratings/submit` and the forms-submission route (`backend/app/api/forms.py`) only cross-check `session_id` against the conversation *if the field is supplied at all* — omitting it skips the check entirely, worse than blind trust. Separately, `GET /widget/conversations/{conversation_id}/rating` (`widget.py`) has no session_id/website check whatsoever — any conversation's rating is readable by ID alone. | Medium | Decided not needed. |

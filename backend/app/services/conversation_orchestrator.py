@@ -600,6 +600,20 @@ class ConversationOrchestrator:
                     changed = True
                 if changed:
                     self.db.commit()
+                    try:
+                        from app.services.lead_integration_service import enqueue_lead
+
+                        enqueue_lead(
+                            self.db,
+                            website_id=website_id,
+                            conversation_id=conversation.id,
+                            source="offline_gate",
+                            name=conversation.visitor_name,
+                            email=conversation.visitor_email,
+                            phone=conversation.visitor_phone,
+                        )
+                    except Exception:
+                        pass
             except Exception:
                 try:
                     self.db.rollback()
@@ -1869,6 +1883,104 @@ class ConversationOrchestrator:
             "agent_is_available": bool(getattr(agent, "is_available", False)),
             "availability_changed": availability_changed,
         }
+
+    async def handle_agent_send_contact_card(
+        self, *, conversation_id: int, agent_id: int, form_id: int
+    ) -> dict:
+        """Agent-triggered CC1 contact card: push the given website form into
+        the live thread as an interactive card. A website can have any number
+        of forms — the agent picks which one from the composer's "#" menu.
+
+        Mirrors handle_agent_message's shape (same guards, same broadcast
+        pattern) but the content is enriched JSON (like bot_prompt_buttons)
+        instead of plain text, so the widget can render real form fields.
+        """
+        conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
+        if not conversation:
+            return {"error": "Conversation not found"}
+
+        if conversation.status == ConversationStatus.RESOLVED:
+            return {"error": "Conversation is closed"}
+
+        if conversation.assigned_agent_id != agent_id:
+            return {"error": "Conversation is assigned to another agent"}
+
+        agent = self.db.query(User).filter(User.id == agent_id).first()
+        if not agent or not agent.is_active:
+            return {"error": "User not found or inactive"}
+
+        from app.models.website_form import WebsiteForm
+
+        form = (
+            self.db.query(WebsiteForm)
+            .filter(
+                WebsiteForm.id == form_id,
+                WebsiteForm.website_id == conversation.website_id,
+                WebsiteForm.enabled.is_(True),
+            )
+            .first()
+        )
+        if not form:
+            return {"error": "Form not found or not enabled for this website"}
+
+        agent_name = agent.name if agent and agent.name else "Support Agent"
+        display_message = f'{agent_name} requested you to fill the form:'
+        enriched = json.dumps({
+            "message": display_message,
+            "form_id": form.id,
+            "form_name": form.name,
+            "fields": form.fields,
+            "submit_label": form.submit_label,
+        })
+
+        saved = self.conversation_service.add_agent_message(
+            conversation_id=conversation_id,
+            agent_id=agent_id,
+            agent_email=agent.email,
+            content=enriched,
+            event_type="contact_card",
+        )
+        if not saved:
+            return {"error": "Unable to add message"}
+
+        message_obj = serialize_message(self.db, saved)
+
+        await ChatService.send_to_visitor(
+            conversation_id,
+            {
+                "type": "contact_card",
+                "conversation_id": conversation_id,
+                "message": display_message,
+                "form_id": form.id,
+                "fields": form.fields,
+                "submit_label": form.submit_label,
+                "message_obj": message_obj,
+                # CC1 fix: the widget rendered every contact card with a
+                # generic bot avatar regardless of sender — this is always
+                # agent-triggered, so it must show the real agent.
+                "agent_name": agent_name,
+                "agent_avatar": agent.avatar_url if agent else None,
+            },
+        )
+
+        await self.agent_service.broadcast_to_active_agents(
+            website_id=int(conversation.website_id),
+            message_data={
+                "type": "agent_message",
+                "conversation_id": conversation_id,
+                "website_id": int(conversation.website_id),
+                "message": display_message,
+                "message_obj": message_obj,
+                "agent_name": agent_name,
+                "agent_avatar": agent.avatar_url if agent else None,
+                "agent_id": agent_id,
+            },
+            include_global=True,
+            exclude_agent_id=agent_id,
+            conversation_team_id=getattr(conversation, "team_id", None),
+        )
+
+        return {"success": True, "message_id": getattr(saved, "id", None), "message_obj": message_obj}
 
     async def close_conversation(
         self,

@@ -25,6 +25,7 @@ interface WebsiteForm {
     fields: FormField[]
     submit_label: string
     enabled: boolean
+    is_contact_card: boolean
     created_at: string
     updated_at: string | null
 }
@@ -69,6 +70,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
     const [slugTouched, setSlugTouched] = useState(false)
     const [formSubmitLabel, setFormSubmitLabel] = useState('Send')
     const [formEnabled, setFormEnabled] = useState(true)
+    const [formIsContactCard, setFormIsContactCard] = useState(false)
     const [formFields, setFormFields] = useState<FormField[]>([{ ...EMPTY_FIELD }])
     const [saving, setSaving] = useState(false)
     const [deleting, setDeleting] = useState(false)
@@ -103,6 +105,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
         setSlugTouched(false)
         setFormSubmitLabel('Send')
         setFormEnabled(true)
+        setFormIsContactCard(false)
         setFormFields([{ ...EMPTY_FIELD }])
         setError(null)
         setPanel({ kind: 'create' })
@@ -114,6 +117,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
         setSlugTouched(true)
         setFormSubmitLabel(item.submit_label)
         setFormEnabled(item.enabled)
+        setFormIsContactCard(!!item.is_contact_card)
         setFormFields(
             item.fields && item.fields.length > 0
                 ? item.fields.map((f: any) => ({
@@ -200,6 +204,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
             slug: formSlug.trim(),
             submit_label: formSubmitLabel.trim() || 'Send',
             enabled: formEnabled,
+            is_contact_card: formIsContactCard,
             fields: validFields.map(f => {
                 const fname = (f.name || '').toString().trim()
                 const flabel = (f.label || '').toString().trim()
@@ -328,7 +333,14 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
                                         onClick={() => openEdit(f)}
                                         className="cursor-pointer bg-white dark:bg-gray-800/30 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                                     >
-                                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{f.name}</td>
+                                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                                            {f.name}
+                                            {f.is_contact_card && (
+                                                <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.5 rounded">
+                                                    Offline extra fields
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3">
                                             <code className="text-xs text-gray-500 dark:text-gray-400">{f.slug}</code>
                                         </td>
@@ -419,6 +431,17 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
                                     <Switch checked={formEnabled} onCheckedChange={setFormEnabled} />
                                     <span className="text-sm text-gray-700 dark:text-gray-300">Enabled</span>
                                 </div>
+                            </div>
+
+                            {/* Contact card: this form doubles as the offline gate's extra
+                                fields. Only one form per website can be it — turning this on
+                                turns it off elsewhere. Any enabled form (this one included) can
+                                still be sent during live chat via the composer's "#" menu. */}
+                            <div className="flex items-center gap-2">
+                                <Switch checked={formIsContactCard} onCheckedChange={setFormIsContactCard} />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                    Use as offline form's extra fields
+                                </span>
                             </div>
 
                             {/* Fields */}

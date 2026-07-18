@@ -42,6 +42,7 @@ def create_form(
     fields: list,
     submit_label: str = "Send",
     enabled: bool = True,
+    is_contact_card: bool = False,
 ) -> WebsiteForm:
     form = WebsiteForm(
         website_id=website_id,
@@ -50,6 +51,7 @@ def create_form(
         fields=fields,
         submit_label=submit_label,
         enabled=enabled,
+        is_contact_card=is_contact_card,
     )
     db.add(form)
     db.commit()
@@ -81,17 +83,23 @@ def create_submission(
     data: dict,
     conversation_id: int | None = None,
     session_id: str | None = None,
+    message_id: int | None = None,
 ) -> WebsiteFormSubmission:
     sub = WebsiteFormSubmission(
         form_id=form_id,
         conversation_id=conversation_id,
         session_id=session_id,
+        message_id=message_id,
         data=data,
     )
     db.add(sub)
     db.commit()
     db.refresh(sub)
     return sub
+
+
+def get_submission_by_message_id(db: Session, message_id: int) -> Optional[WebsiteFormSubmission]:
+    return db.query(WebsiteFormSubmission).filter(WebsiteFormSubmission.message_id == message_id).first()
 
 
 def get_submissions(db: Session, form_id: int, limit: int = 100, offset: int = 0) -> list[WebsiteFormSubmission]:

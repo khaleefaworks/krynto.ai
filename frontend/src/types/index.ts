@@ -66,4 +66,12 @@ export interface Message {
   sender_avatar_url?: string | null
   content: string
   created_at?: string
+  // CC1: enriched JSON for bot_prompt_buttons/contact_card messages (form
+  // fields, buttons, etc.) — `content` is just the display text.
+  raw_content?: string
+  contact_card_state?: {
+    status: 'pending' | 'filled' | 'expired'
+    data?: Record<string, string>
+    reason?: string
+  }
 }

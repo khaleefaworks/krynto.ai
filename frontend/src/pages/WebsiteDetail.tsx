@@ -14,6 +14,7 @@ import WebsiteShortcutsTab from './WebsiteShortcutsTab'
 import WebsiteTagsTab from './WebsiteTagsTab'
 import WebsiteTeamsTab from './WebsiteTeamsTab'
 import WebsiteFormsTab from './WebsiteFormsTab'
+import WebsiteIntegrationsTab from './WebsiteIntegrationsTab'
 import WebsiteWidgetTab from './WebsiteWidgetTab'
 
 interface Website {
@@ -111,7 +112,7 @@ const coerceOfficeHours = (raw: any): OfficeHoursConfig => {
   }
 }
 
-type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'forms' | 'danger'
+type TabType = 'installation' | 'settings' | 'widget' | 'automations' | 'teams' | 'shortcuts' | 'tags' | 'forms' | 'integrations' | 'danger'
 
 export default function WebsiteDetail() {
   const { id } = useParams<{ id: string }>()
@@ -471,9 +472,12 @@ export default function WebsiteDetail() {
       {!isNew && activeTab === 'forms' && isAdmin(user) && websiteId && (
         <WebsiteFormsTab websiteId={websiteId} />
       )}
+      {!isNew && activeTab === 'integrations' && isAdmin(user) && websiteId && (
+        <WebsiteIntegrationsTab websiteId={websiteId} />
+      )}
 
       {/* Scrollable content (hidden when full-height tabs are active) */}
-      {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && activeTab !== 'forms' && (
+      {activeTab !== 'shortcuts' && activeTab !== 'tags' && activeTab !== 'teams' && activeTab !== 'forms' && activeTab !== 'integrations' && (
         <div className="flex-1 overflow-auto">
           <div className="px-6 py-6 space-y-6">
             {error && (

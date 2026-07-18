@@ -462,36 +462,41 @@ class ConversationService:
         conversation_id: int,
         agent_id: int,
         agent_email: str,
-        content: str
+        content: str,
+        *,
+        event_type: str | None = None,
     ) -> Optional[Message]:
         """
         Add agent message to conversation.
-        
+
         Args:
             conversation_id: Conversation ID
             agent_id: Agent user ID
             agent_email: Agent email
             content: Message content
-            
+            event_type: Optional subtype (e.g. "contact_card") for enriched,
+                non-plain-text agent messages. Plain chat replies leave this None.
+
         Returns:
             Created Message or None if conversation resolved
         """
         conversation = self.db.query(Conversation).filter_by(id=conversation_id).first()
-        
+
         if not conversation:
             logger.error("agent_message_failed_conversation_not_found", conversation_id=conversation_id)
             return None
-        
+
         if conversation.status == ConversationStatus.RESOLVED:
             logger.warning("agent_message_rejected_conversation_resolved", conversation_id=conversation_id)
             return None
-        
+
         # Add message
         message = Message(
             conversation_id=conversation_id,
             sender_type=MessageSenderType.AGENT,
             sender=agent_email,
-            content=content
+            content=content,
+            event_type=event_type,
         )
         
         self.db.add(message)

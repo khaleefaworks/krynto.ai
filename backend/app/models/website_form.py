@@ -21,5 +21,10 @@ class WebsiteForm(Base, TimestampMixin):
     fields = Column(JSON, nullable=False, default=list)  # Ordered field descriptors
     submit_label = Column(String(80), nullable=False, server_default="Send")
     enabled = Column(Boolean, nullable=False, server_default="true")
+    # The one form (per website) usable as the live-chat "contact card" (agent-
+    # triggered) and as the offline gate's extra-fields extension. Only one
+    # true per website — enforced in the API layer, not a DB constraint, since
+    # it's a simple admin toggle rather than a hard invariant worth an index.
+    is_contact_card = Column(Boolean, nullable=False, server_default="false")
 
     website = relationship("Website")

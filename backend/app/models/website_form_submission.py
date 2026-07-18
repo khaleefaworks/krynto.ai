@@ -17,6 +17,10 @@ class WebsiteFormSubmission(Base, TimestampMixin):
     form_id = Column(Integer, ForeignKey("website_forms.id", ondelete="CASCADE"), nullable=False, index=True)
     conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
     session_id = Column(String(255), nullable=True)
+    # Set when this submission fills a specific agent-sent contact-card message
+    # (CC1) — lets that exact card render "filled" on reload instead of blank.
+    # Null for the freestanding offline-gate submission, which isn't tied to one.
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
     data = Column(JSON, nullable=False, default=dict)  # {field_name: value}
 
     form = relationship("WebsiteForm")

@@ -1,7 +1,65 @@
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Tuple, Dict
+
+# CC1: fixed backstop so a contact card doesn't stay fillable forever in a
+# conversation nobody ever resolves. ponytail: hardcoded, make per-website
+# configurable if a tenant ever asks for a different window.
+CONTACT_CARD_TTL_HOURS = 24
+
+
+def contact_card_state(db, msg: Any) -> Dict[str, Any]:
+    """Single source of truth for whether an agent-sent contact-card message
+    is still fillable — used by both the widget's history load and the agent
+    dashboard's, and by submit_form's own enforcement, so the display and the
+    actual accept/reject decision can never drift apart.
+
+    A card is "expired" once a newer contact-card message exists in the same
+    conversation (sending a new one supersedes the old — the only way to get
+    a fillable card again), the conversation is resolved, or it's older than
+    CONTACT_CARD_TTL_HOURS. Otherwise "pending", or "filled" if a submission
+    already exists for this exact message.
+    """
+    from app.models.website_form_submission import WebsiteFormSubmission
+    from app.models.message import Message
+    from app.models.conversation import Conversation, ConversationStatus
+
+    msg_id = getattr(msg, "id", None)
+    conversation_id = getattr(msg, "conversation_id", None)
+
+    submission = (
+        db.query(WebsiteFormSubmission)
+        .filter(WebsiteFormSubmission.message_id == msg_id)
+        .first()
+    )
+    if submission:
+        return {"status": "filled", "data": submission.data}
+
+    newer_exists = (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.event_type == "contact_card",
+            Message.id > msg_id,
+        )
+        .first()
+        is not None
+    )
+    if newer_exists:
+        return {"status": "expired", "reason": "superseded"}
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if conversation is not None and conversation.status == ConversationStatus.RESOLVED:
+        return {"status": "expired", "reason": "resolved"}
+
+    created_at = getattr(msg, "created_at", None)
+    if created_at is not None:
+        aware = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - aware > timedelta(hours=CONTACT_CARD_TTL_HOURS):
+            return {"status": "expired", "reason": "ttl"}
+
+    return {"status": "pending"}
 
 
 def resolve_sender_user(db, sender: str | None):
@@ -124,7 +182,7 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
     # content so the widget can re-parse buttons from history on page reload.
     raw_content = getattr(msg, "content", None)
     display_content = raw_content
-    if event_type == "bot_prompt_buttons" and raw_content:
+    if event_type in ("bot_prompt_buttons", "contact_card") and raw_content:
         try:
             import json as _json
             parsed = _json.loads(raw_content)
@@ -147,10 +205,13 @@ def serialize_message(db, msg: Any) -> Dict[str, Any]:
         "created_at": created_at_iso,
     }
 
-    # Include raw enriched JSON for bot_prompt_buttons so the widget can
-    # re-parse buttons when rendering history on page reload/navigation.
-    if event_type == "bot_prompt_buttons" and raw_content and raw_content != display_content:
+    # Include raw enriched JSON for bot_prompt_buttons/contact_card so the widget
+    # can re-parse them when rendering history on page reload/navigation.
+    if event_type in ("bot_prompt_buttons", "contact_card") and raw_content and raw_content != display_content:
         result["raw_content"] = raw_content
+
+    if event_type == "contact_card":
+        result["contact_card_state"] = contact_card_state(db, msg)
 
     if event_type == "conversation_resolved":
         try:

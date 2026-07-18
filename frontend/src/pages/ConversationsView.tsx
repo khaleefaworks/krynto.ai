@@ -3,7 +3,7 @@ import { Link, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { useMessageStore } from '@/store/messages'
 import { fetchActiveChats as fetchChatsApi } from '@/services/chats'
-import { joinChat, closeConversation, takeoverConversation, markChatRead, fetchChatReadState } from '@/services/chats'
+import { joinChat, closeConversation, takeoverConversation, markChatRead, fetchChatReadState, sendContactCard } from '@/services/chats'
 import { updateAvailability } from '@/services/auth'
 import { fetchChatMessages } from '@/services/messages'
 import {
@@ -56,12 +56,27 @@ import {
     CheckCircle2,
     AlertCircle,
     AlertTriangle,
+    UserPlus,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorDetailsPanel from '@/components/VisitorDetailsPanel'
 import UserAvatar from '@/components/UserAvatar'
 import BotAvatarIcon from '@/components/BotAvatarIcon'
 import { formatDistanceToNow } from 'date-fns'
+
+// A leading "#" (1-6 of them, followed by whitespace or end-of-line) is
+// valid — and often empty — CommonMark ATX heading syntax. The composer's
+// escapeMarkdownText never escapes "#" when an agent types it as plain text
+// (Heading is disabled in the editor, so nothing flags it as needing escaping
+// at compose time), and unescapeMarkdown's own char class below doesn't cover
+// "#" either. Left alone, a message that's just "#" (or "# ") renders as an
+// empty, invisible <h1> in ReactMarkdown/remark-gfm instead of the literal
+// character that was typed. Re-escaping it at render time (here, and again in
+// escapeVisitorMarkdown below) guards both already-escaped and never-escaped
+// content the same way, regardless of where it came from.
+function escapeBareAtxHeading(s: string): string {
+    return s.replace(/^([ \t]{0,3}#{1,6})(?=[ \t]|$)/gm, '\\$1')
+}
 
 // Reverse backslash-escape sequences added by the markdown serializer
 // (e.g. \* → *, \\ → \). Matches what the widget's unescapeMarkdown does.
@@ -70,11 +85,44 @@ import { formatDistanceToNow } from 'date-fns'
 // closing * delimiters to be right-flanking (not preceded by whitespace),
 // otherwise ReactMarkdown falls back to rendering them as raw asterisks.
 function unescapeMarkdown(s: string | null | undefined): string {
-    return String(s || '')
-        .replace(/\\([\\`*_[\]()/])/g, '$1')
-        .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
-        .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
-        .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*')
+    return escapeBareAtxHeading(
+        String(s || '')
+            .replace(/\\([\\`*_[\]()/])/g, '$1')
+            .replace(/\*\*\*([^*\n]*[^\s*\n])\s+\*\*\*/g, '***$1***')
+            .replace(/\*\*([^*\n]*[^\s*\n])\s+\*\*/g, '**$1**')
+            .replace(/\*([^*\n]*[^\s*\n])\s+\*/g, '*$1*')
+    )
+}
+
+// Visitor-authored text is never intentional markdown (unlike agent/bot
+// content, which comes from the rich composer and is meant to render as
+// such) — only backslash-escape it so literal backslashes survive, plus
+// guard against a leading "#" the same way unescapeMarkdown does above.
+function escapeVisitorMarkdown(s: string | null | undefined): string {
+    return escapeBareAtxHeading(String(s || '').replace(/\\/g, '\\\\'))
+}
+
+// CC1: a newly-sent contact card supersedes any older still-pending one in
+// the same conversation — mirrors the widget's client-side
+// _pendingContactCards supersede rule. contact_card_state is otherwise only
+// computed server-side at message-serialize time, so without this the
+// sending agent (and any spectating agent watching the same conversation)
+// only sees the older card flip to "expired" after a full reload.
+function supersedeOlderContactCards(newMessage: any) {
+    if (!newMessage || newMessage.event_type !== 'contact_card') return
+    const newId = Number(newMessage.id)
+    if (!Number.isFinite(newId)) return
+    const { messages, patchMessage } = useMessageStore.getState()
+    messages.forEach((m: any) => {
+        if (
+            m?.event_type === 'contact_card' &&
+            m?.conversation_id === newMessage.conversation_id &&
+            Number(m?.id) < newId &&
+            m?.contact_card_state?.status === 'pending'
+        ) {
+            patchMessage(m.id, { contact_card_state: { status: 'expired', reason: 'superseded' } })
+        }
+    })
 }
 
 // Strip markdown syntax for plain-text previews (chat list last message).
@@ -276,6 +324,48 @@ function TagIcon({ className }: { className?: string }) {
     )
 }
 
+/** Corner badge for a visitor avatar showing who's handling the conversation.
+ * bot_only always wins over a stale/leftover assigned_agent_id — no human
+ * agent is actively handling the conversation once it's bot-only (same
+ * precedence the "Mine"/"Unassigned" counts use). */
+function HandlerBadge({
+    botOnly,
+    assignedAgentId,
+    agent,
+}: {
+    botOnly?: boolean
+    assignedAgentId?: number | null
+    agent?: { id: number; name: string | null; avatar_url: string | null } | null
+}) {
+    if (botOnly) {
+        return (
+            <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
+                title="Handled by bot"
+            >
+                <BotAvatarIcon className="w-3.5 h-3.5" />
+            </div>
+        )
+    }
+    if (assignedAgentId) {
+        const rawUrl = agent?.avatar_url ?? null
+        const agentAvatarUrl = rawUrl ? (String(rawUrl).startsWith('http') ? rawUrl : `${API_BASE}${rawUrl}`) : null
+        return (
+            <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
+                title={agent?.name || `Agent #${assignedAgentId}`}
+            >
+                <UserAvatar
+                    seed={String(assignedAgentId)}
+                    imageUrl={agentAvatarUrl}
+                    className="w-4 h-4"
+                    iconClassName="w-4 h-4"
+                    title={agent?.name ?? undefined}
+                />
+            </div>
+        )
+    }
+    return null
+}
+
 interface ConversationDetails {
     id: number
     short_id?: string
@@ -298,6 +388,8 @@ interface ConversationDetails {
     visitor_ended?: boolean
     title?: string | null
     bot_only?: boolean
+    assigned_agent_id?: number | null
+    assigned_agent?: { id: number; name: string | null; avatar_url: string | null } | null
 }
 
 interface VisitorConversation {
@@ -337,7 +429,7 @@ export default function ConversationsView() {
         lastProcessedChatEventsVersion,
         setLastProcessedChatEventsVersion,
     } = useAppStore()
-    const { messages, addMessage, addMessages, reconcileOptimisticMessage, reset } = useMessageStore()
+    const { messages, addMessage, addMessages, reconcileOptimisticMessage, patchMessage, reset } = useMessageStore()
 
     const activeChatsRef = useRef(activeChats)
     useEffect(() => {
@@ -421,6 +513,13 @@ export default function ConversationsView() {
     const [websiteShortcutsByWebsiteId, setWebsiteShortcutsByWebsiteId] = useState<Record<number, WebsiteShortcut[]>>({})
     const websiteShortcutsTokenRef = useRef(0)
 
+    // CC1: every enabled form for each website — a website can have any
+    // number, so the composer's "#" menu lists all of them. Missing entries
+    // mean "not fetched yet" (button stays hidden, same as an unresolved
+    // /shortcut query showing nothing rather than erroring).
+    const [formsByWebsiteId, setFormsByWebsiteId] = useState<Record<number, { id: number; name: string }[]>>({})
+    const formsTokenRef = useRef(0)
+
     const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<number | null>(null)
 
     // Takeover confirmation (Smartsupp-like)
@@ -432,6 +531,14 @@ export default function ConversationsView() {
     const [pendingOfflineMessage, setPendingOfflineMessage] = useState<string | null>(null)
     const [goingOnline, setGoingOnline] = useState(false)
     const composerRef = useRef<ChatComposerHandle>(null)
+
+    // CC1: sending the contact card is a conversation action like sending a
+    // message — it must go through the same join-first / takeover-conflict /
+    // offline-gate checks as handleSendMessage, just with a form id instead
+    // of text content to stash and resend. Non-null tells
+    // confirmTakeoverAndSend/confirmGoOnlineAndSend to resume with the
+    // contact-card path (and which form) instead of the text-send path.
+    const [pendingContactCardFormId, setPendingContactCardFormId] = useState<number | null>(null)
 
     // Conversation details state
     const [conversation, setConversation] = useState<ConversationDetails | null>(null)
@@ -617,6 +724,25 @@ export default function ConversationsView() {
                 }
             })()
     }, [selectedWebsiteId])
+
+    // CC1: same fetch-on-website-change pattern as shortcuts above. Skips
+    // re-fetching a website already resolved (including "confirmed none").
+    useEffect(() => {
+        if (!selectedWebsiteId) return
+        if (Object.prototype.hasOwnProperty.call(formsByWebsiteId, selectedWebsiteId)) return
+
+        const token = ++formsTokenRef.current
+            ; (async () => {
+                try {
+                    const data = await apiRequest<{ id: number; name: string }[]>(`/websites/${selectedWebsiteId}/forms/for-agent`)
+                    if (token !== formsTokenRef.current) return
+                    setFormsByWebsiteId((prev) => ({ ...prev, [selectedWebsiteId]: data || [] }))
+                } catch {
+                    if (token !== formsTokenRef.current) return
+                    setFormsByWebsiteId((prev) => ({ ...prev, [selectedWebsiteId]: [] }))
+                }
+            })()
+    }, [selectedWebsiteId, formsByWebsiteId])
 
     const stopAgentTyping = useCallback((conversationId?: number | null) => {
         const id = conversationId ?? lastTypingConversationIdRef.current
@@ -1062,6 +1188,19 @@ export default function ConversationsView() {
                     incrementUnreadForConversation(dataConversationId, delta)
                 }
                 scheduleUnreadRefresh()
+            } else if (data.type === 'contact_card_submitted' && dataConversationId) {
+                // CC1: keeps the chat list's visitor name current even when
+                // this conversation isn't the one currently open.
+                const visitorName = (data as any)?.visitor_name
+                if (visitorName) {
+                    const latest = activeChatsRef.current
+                    const idx = latest.findIndex(c => c.id === dataConversationId)
+                    if (idx >= 0 && latest[idx].visitor_name !== visitorName) {
+                        const next = [...latest]
+                        next[idx] = { ...next[idx], visitor_name: visitorName }
+                        setActiveChats(next)
+                    }
+                }
             }
         })
 
@@ -1200,6 +1339,32 @@ export default function ConversationsView() {
                 if (typeof ratingVal === 'number') {
                     setConversationRating({ rating: ratingVal })
                 }
+            } else if (data.type === 'contact_card_submitted' && dataConversationId === selectedChat) {
+                // CC1: flips the specific card to "filled" and refreshes the
+                // sidebar/header live — submit_form is a REST call from the
+                // widget, so without this the agent only sees it on reload.
+                const msgId = (data as any)?.message_id
+                const submittedData = (data as any)?.data
+                if (msgId != null) {
+                    patchMessage(msgId, { contact_card_state: { status: 'filled', data: submittedData } })
+                }
+                const visitorName = (data as any)?.visitor_name
+                const visitorEmail = (data as any)?.visitor_email
+                const visitorPhone = (data as any)?.visitor_phone
+                setConversation(prev => prev ? {
+                    ...prev,
+                    visitor_name: visitorName ?? prev.visitor_name,
+                    visitor_email: visitorEmail ?? prev.visitor_email,
+                    visitor_phone: visitorPhone ?? prev.visitor_phone,
+                } as any : prev)
+                // CC1: the visitor-details panel's "Form submissions" list is
+                // fetched once when the conversation is opened and otherwise
+                // never refreshed — without this, a new submission (or a
+                // field the form gained after that fetch, e.g. "location")
+                // only shows up after switching conversations or reloading.
+                apiRequest<any[]>(`/chats/${dataConversationId}/form-submissions`)
+                    .then((subs) => setFormSubmissions(Array.isArray(subs) ? subs : []))
+                    .catch(() => { })
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
@@ -1250,6 +1415,7 @@ export default function ConversationsView() {
                 const dto = (data as any)?.message_obj
                 if (dto && typeof dto === 'object') {
                     addMessage(dto)
+                    supersedeOlderContactCards(dto)
                     const content = String((dto as any)?.content ?? '').trim()
                     const ts = (dto as any)?.timestamp || (dto as any)?.created_at || new Date().toISOString()
                     if (content) {
@@ -1773,7 +1939,99 @@ export default function ConversationsView() {
         }
     }
 
+    // CC1: same join-first / takeover-conflict / offline-gate rules as
+    // handleSendMessage above — sending the contact card is a conversation
+    // action, not a passive read, so it must claim the conversation exactly
+    // like a first reply does instead of 400ing when nobody's joined yet.
+    const handleSendContactCard = async (formId: number): Promise<void> => {
+        if (!selectedChat) return
+        if (isResolvedSelected || isBotOnlySelected) return
+
+        const currentUserForGate = useAppStore.getState().user
+        if (currentUserForGate && currentUserForGate.is_available === false) {
+            setPendingContactCardFormId(formId)
+            setShowOfflineConfirm(true)
+            return
+        }
+
+        try {
+            const chatData = getChatById(selectedChat)
+            const alreadyJoinedByMe = chatData?.assigned_agent_id === user?.id
+
+            if (!joinedRef.current && !alreadyJoinedByMe) {
+                try {
+                    const joinResult: any = await joinChat(selectedChat.toString())
+                    joinedRef.current = true
+
+                    if (joinResult?.availability_changed && joinResult?.agent_is_available === true) {
+                        const current = useAppStore.getState().user
+                        if (current && current.is_available === false) {
+                            setUser({ ...current, is_available: true })
+                        }
+                    }
+
+                    if (joinResult?.message_obj) {
+                        addMessage(joinResult.message_obj)
+                    } else {
+                        loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                    }
+                } catch (e: any) {
+                    const msg = String(e?.message || '')
+                    if (msg.toLowerCase().includes('already assigned') || msg.toLowerCase().includes('already')) {
+                        setPendingContactCardFormId(formId)
+                        setShowTakeoverConfirm(true)
+                        return
+                    }
+                    throw e
+                }
+            }
+
+            const sendResult: any = await sendContactCard(selectedChat, formId)
+            // The backend broadcast excludes the sending agent (same pattern
+            // as a regular message, which gets its own confirmation via the
+            // agent WS's message_sent event) — but this is a REST call, so
+            // there's no equivalent push back to *this* dashboard. Add it
+            // client-side, same as the join/takeover results just above.
+            if (sendResult?.message_obj) {
+                addMessage(sendResult.message_obj)
+                supersedeOlderContactCards(sendResult.message_obj)
+            }
+        } catch (error) {
+            console.error('Failed to send contact card:', error)
+        }
+    }
+
     const confirmTakeoverAndSend = async (confirm: boolean) => {
+        if (pendingContactCardFormId != null) {
+            const formId = pendingContactCardFormId
+            setShowTakeoverConfirm(false)
+            setPendingContactCardFormId(null)
+            if (!confirm || !selectedChat) return
+            if (isResolvedSelected || isBotOnlySelected) return
+            try {
+                const takeoverResult: any = await takeoverConversation(selectedChat)
+                joinedRef.current = true
+                if (takeoverResult?.availability_changed && takeoverResult?.agent_is_available === true) {
+                    const current = useAppStore.getState().user
+                    if (current && current.is_available === false) {
+                        setUser({ ...current, is_available: true })
+                    }
+                }
+                if (takeoverResult?.message_obj) {
+                    addMessage(takeoverResult.message_obj)
+                } else {
+                    loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                }
+                const sendResult: any = await sendContactCard(selectedChat, formId)
+                if (sendResult?.message_obj) {
+                    addMessage(sendResult.message_obj)
+                }
+            } catch (error) {
+                console.error('Failed to takeover and send contact card:', error)
+            }
+            return
+        }
+
         const content = pendingSendMessage
         setShowTakeoverConfirm(false)
         setPendingSendMessage(null)
@@ -1830,14 +2088,16 @@ export default function ConversationsView() {
     // AV1: agent confirmed (or cancelled) going online from the offline-warning popup.
     const confirmGoOnlineAndSend = async (confirm: boolean) => {
         const content = pendingOfflineMessage
+        const wasContactCardFormId = pendingContactCardFormId
         setShowOfflineConfirm(false)
         setPendingOfflineMessage(null)
+        setPendingContactCardFormId(null)
 
         // On cancel, do nothing to the composer — it never cleared its draft
         // since handleSendMessage returned false before this modal opened.
         if (!confirm) return
 
-        if (!content) return
+        if (!content && wasContactCardFormId == null) return
 
         setGoingOnline(true)
         try {
@@ -1848,8 +2108,12 @@ export default function ConversationsView() {
             }
             // Re-run the send now that the agent is online; the top-of-function
             // offline check will pass since is_available is now true.
-            const sent = await handleSendMessage(content)
-            if (sent) composerRef.current?.clear()
+            if (wasContactCardFormId != null) {
+                await handleSendContactCard(wasContactCardFormId)
+            } else if (content) {
+                const sent = await handleSendMessage(content)
+                if (sent) composerRef.current?.clear()
+            }
         } catch (error) {
             console.error('Failed to go online:', error)
         } finally {
@@ -2123,7 +2387,9 @@ export default function ConversationsView() {
                             Another agent has already joined the chat
                         </h3>
                         <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                            If you send the message, you'll join the chat. Are you sure you want to send the message?
+                            {pendingContactCardFormId != null
+                                ? "If you send the contact card, you'll join the chat. Are you sure you want to send it?"
+                                : "If you send the message, you'll join the chat. Are you sure you want to send the message?"}
                         </p>
 
                         <div className="mt-6 flex justify-end gap-2">
@@ -2147,7 +2413,9 @@ export default function ConversationsView() {
                             <h3 className="text-base font-semibold text-gray-900 dark:text-white">You're offline</h3>
                         </div>
                         <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                            Please go online to join or reply to this chat. Your message won't be sent until you're available.
+                            {pendingContactCardFormId != null
+                                ? "Please go online to join this chat. The contact card won't be sent until you're available."
+                                : "Please go online to join or reply to this chat. Your message won't be sent until you're available."}
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
@@ -2603,35 +2871,11 @@ export default function ConversationsView() {
                                                 iconClassName="w-9 h-9"
                                                 title={conversationDisplayName(chat as any)}
                                             />
-                                            {(chat as any).assigned_agent_id ? (() => {
-                                                const agent = (chat as any).assigned_agent as { id: number; name: string | null; avatar_url: string | null } | null | undefined
-                                                const rawUrl = agent?.avatar_url ?? null
-                                                const agentAvatarUrl = rawUrl
-                                                    ? (String(rawUrl).startsWith('http') ? rawUrl : `${API_BASE}${rawUrl}`)
-                                                    : null
-                                                return (
-                                                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden"
-                                                        title={agent?.name || `Agent #${(chat as any).assigned_agent_id}`}
-                                                    >
-                                                        <UserAvatar
-                                                            seed={String((chat as any).assigned_agent_id)}
-                                                            imageUrl={agentAvatarUrl}
-                                                            className="w-4 h-4"
-                                                            iconClassName="w-4 h-4"
-                                                            title={agent?.name ?? undefined}
-                                                        />
-                                                    </div>
-                                                )
-                                            })() : (chat as any).bot_only ? (
-                                                // No human agent involved — small bot badge stands in for the
-                                                // "who's handling this" corner badge. Swap for an AI avatar
-                                                // seed here once an AI-handled flow exists alongside bot_only.
-                                                <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
-                                                    title="Handled by bot"
-                                                >
-                                                    <BotAvatarIcon className="w-3.5 h-3.5" />
-                                                </div>
-                                            ) : null}
+                                            <HandlerBadge
+                                                botOnly={(chat as any).bot_only}
+                                                assignedAgentId={(chat as any).assigned_agent_id}
+                                                agent={(chat as any).assigned_agent}
+                                            />
                                         </div>
 
                                         <div className="flex-1 min-w-0">
@@ -2750,13 +2994,11 @@ export default function ConversationsView() {
                                         iconClassName="w-9 h-9"
                                         title={conversationDisplayName(conversation as any)}
                                     />
-                                    {isBotOnlySelected && (
-                                        <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
-                                            title="Handled by bot"
-                                        >
-                                            <BotAvatarIcon className="w-3.5 h-3.5" />
-                                        </div>
-                                    )}
+                                    <HandlerBadge
+                                        botOnly={isBotOnlySelected}
+                                        assignedAgentId={(conversation as any)?.assigned_agent_id}
+                                        agent={(conversation as any)?.assigned_agent}
+                                    />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-sm sm:text-base md:text-sm font-semibold text-gray-900 dark:text-white truncate">
@@ -3098,6 +3340,9 @@ export default function ConversationsView() {
                                             || (senderType === 'system' && (eventType === 'bot' || (eventType && eventType.startsWith('automation'))))
                                         const isAgent = actor === 'agent' || senderType === 'agent'
                                         const isVisitor = !isAgent && !isBot && !isSystemEvent && (senderType === 'visitor' || actor === 'visitor')
+                                        // CC1: sender_type is 'agent', so this must be checked before the
+                                        // generic isAgent bubble below or it'd render as plain text.
+                                        const isContactCard = eventType === 'contact_card'
                                         const msgTimestamp = (msg as any).timestamp || msg.created_at
                                         const showTimestamp = index === 0 ||
                                             (new Date(msgTimestamp).getTime() - new Date((sortedMessages[index - 1] as any).timestamp || (sortedMessages[index - 1] as any).created_at).getTime() > 300000)
@@ -3144,6 +3389,65 @@ export default function ConversationsView() {
                                                             </span>
                                                         </div>
                                                     </div>
+                                                ) : isContactCard ? (
+                                                    (() => {
+                                                        let cardData: any = null
+                                                        try { cardData = JSON.parse((msg as any).raw_content || msg.content) } catch { /* plain text fallback */ }
+                                                        const displayText = (cardData && cardData.message) || msg.content
+                                                        const fields: any[] = (cardData && Array.isArray(cardData.fields)) ? cardData.fields : []
+                                                        const ccState = (msg as any).contact_card_state || { status: 'pending' }
+                                                        const avatarUrl = (msg as any).sender_avatar_url
+                                                        const senderName = (msg as any).sender_name
+                                                        return (
+                                                            <div className="flex justify-end">
+                                                                <div className="flex items-end gap-2 max-w-[70%] min-w-0">
+                                                                    <div className="min-w-0">
+                                                                        <div className="bg-blue-600 text-white rounded-2xl px-4 py-2 shadow-sm">
+                                                                            <MarkdownMessage content={unescapeMarkdown(displayText)} className="text-sm" />
+                                                                        </div>
+                                                                        <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-3">
+                                                                            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                                                                                <UserPlus className="h-3.5 w-3.5" />
+                                                                                {cardData?.form_name || 'Form'}
+                                                                            </div>
+                                                                            {ccState.status === 'filled' ? (
+                                                                                <div className="space-y-1">
+                                                                                    {fields.map((f: any) => (
+                                                                                        <div key={f.name} className="flex justify-between gap-3 text-xs py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
+                                                                                            <span className="text-gray-500 dark:text-gray-400">{f.label || f.name}</span>
+                                                                                            <span className="font-medium text-gray-900 dark:text-gray-100 text-right break-words">{ccState.data?.[f.name] || '—'}</span>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ) : ccState.status === 'expired' ? (
+                                                                                <div className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 rounded-lg px-2 py-1.5">
+                                                                                    Expired — visitor didn't fill this in time.
+                                                                                </div>
+                                                                            ) : (
+                                                                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                                                    Waiting for the visitor to fill this in…
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 mt-1 text-xs text-gray-500 dark:text-gray-400 justify-end">
+                                                                            <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    {avatarUrl ? (
+                                                                        <img
+                                                                            src={String(avatarUrl).startsWith('http') ? avatarUrl : `${API_BASE}${avatarUrl}`}
+                                                                            alt={senderName || 'Agent'}
+                                                                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                                                                            {(senderName || 'AG').trim().split(/\s+/).slice(0, 2).map((p: string) => p[0]).join('').toUpperCase()}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })()
                                                 ) : isBot ? (
                                                     // Bot/automation/system messages render on the agent side with a robot avatar.
                                                     <div className="flex justify-end">
@@ -3172,7 +3476,7 @@ export default function ConversationsView() {
                                                                 />
                                                             )}
                                                             <div className={`group relative min-w-0 ${isAgent ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'} rounded-2xl px-4 py-2 shadow-sm`}>
-                                                                <MarkdownMessage content={isVisitor ? String(msg.content || '').replace(/\\/g, '\\\\') : unescapeMarkdown(msg.content)} className="text-sm" />
+                                                                <MarkdownMessage content={isVisitor ? escapeVisitorMarkdown(msg.content) : unescapeMarkdown(msg.content)} className="text-sm" />
                                                                 <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                                                     <span>{new Date(msgTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                                     {isAgent && (
@@ -3217,6 +3521,8 @@ export default function ConversationsView() {
                         conversationId={selectedChat}
                         onTyping={scheduleAgentTyping}
                         onSend={(content) => handleSendMessage(content)}
+                        onSendContactCard={selectedWebsiteId && (formsByWebsiteId[selectedWebsiteId] || []).length > 0 ? handleSendContactCard : undefined}
+                        sendableForms={selectedWebsiteId ? formsByWebsiteId[selectedWebsiteId] : undefined}
                         disabled={isResolvedSelected || isVisitorEnded || isBotOnlySelected}
                         placeholder="Reply to live chat"
                         statusText={visitorTyping ? 'Visitor is typing…' : spectatorAgentTyping ? `${spectatorAgentTyping} is typing…` : ''}
@@ -3290,13 +3596,11 @@ export default function ConversationsView() {
                                     iconClassName="w-10 h-10"
                                     title={conversationDisplayName(conversation as any)}
                                 />
-                                {isBotOnlySelected && (
-                                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden"
-                                        title="Handled by bot"
-                                    >
-                                        <BotAvatarIcon className="w-3.5 h-3.5" />
-                                    </div>
-                                )}
+                                <HandlerBadge
+                                    botOnly={isBotOnlySelected}
+                                    assignedAgentId={(conversation as any)?.assigned_agent_id}
+                                    agent={(conversation as any)?.assigned_agent}
+                                />
                             </div>
                         </div>
                     ) : (

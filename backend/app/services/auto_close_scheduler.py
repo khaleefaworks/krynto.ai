@@ -225,6 +225,25 @@ def start_scheduler() -> None:
     except Exception as e:
         logger.warning("scheduled_backup_job_registration_failed", error=str(e))
 
+    # Lead integration: retry pushes to Frappe (or future integration types)
+    # that failed on their first (immediate) attempt. Same backoff schedule
+    # and reasoning as the notification retry job above.
+    try:
+        from app.services.lead_integration_service import retry_failed_lead_deliveries
+
+        _scheduler.add_job(
+            retry_failed_lead_deliveries,
+            "interval",
+            minutes=5,
+            id="lead_delivery_retry_job",
+            name="Retry failed lead-integration deliveries with exponential backoff",
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info("lead_delivery_retry_job_registered")
+    except Exception as e:
+        logger.warning("lead_delivery_retry_job_registration_failed", error=str(e))
+
     _scheduler.start()
     logger.info("auto_close_scheduler_started")
 

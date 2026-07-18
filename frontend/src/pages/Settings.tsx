@@ -16,6 +16,7 @@ import {
   Building2,
   Bell,
   FileText,
+  Plug,
 } from "lucide-react"
 
 
@@ -93,6 +94,9 @@ export default function Settings() {
                 </Link>
                 <Link to={`/dashboard/settings/websites/${websiteId}?tab=forms`} className={mobileTabClass(activeTab === 'forms')}>
                   <FileText className="h-4 w-4" />Forms
+                </Link>
+                <Link to={`/dashboard/settings/websites/${websiteId}?tab=integrations`} className={mobileTabClass(activeTab === 'integrations')}>
+                  <Plug className="h-4 w-4" />Integrations
                 </Link>
               </>
             )}
@@ -203,6 +207,13 @@ export default function Settings() {
                   >
                     <FileText className="h-4 w-4 shrink-0" />
                     Forms
+                  </Link>
+                  <Link
+                    to={`/dashboard/settings/websites/${websiteId}?tab=integrations`}
+                    className={tabLinkClass(activeTab === "integrations")}
+                  >
+                    <Plug className="h-4 w-4 shrink-0" />
+                    Integrations
                   </Link>
                 </>
               )}

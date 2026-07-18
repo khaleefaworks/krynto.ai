@@ -185,6 +185,37 @@ async def join_chat(
     }
 
 
+class SendContactCardRequest(BaseModel):
+    form_id: int
+
+
+@router.post("/{chat_id}/send-contact-card")
+async def send_contact_card(
+    chat_id: str,
+    body: SendContactCardRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """CC1: agent-triggered contact-info card in the live thread, built from
+    an agent-chosen website form (any enabled form, not just a single
+    designated one)."""
+    orchestrator = ConversationOrchestrator(db)
+
+    conv = _resolve_conversation(db, chat_id)
+    _ensure_conversation_visible(db, current_user=current_user, conv=conv)
+
+    result = await orchestrator.handle_agent_send_contact_card(
+        conversation_id=conv.id,
+        agent_id=current_user.id,
+        form_id=body.form_id,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {"success": True, "message_id": result.get("message_id"), "message_obj": result.get("message_obj")}
+
+
 @router.get("/active")
 def get_active_chats(
     website_id: Optional[int] = None,
@@ -496,6 +527,7 @@ def get_resolved_conversations(
                 "last_message_at": _utc_iso(last_message_at),
                 "created_at": _utc_iso(conv.created_at),
                 "closed_at": _utc_iso(getattr(conv, "resolved_at", None)),
+                "bot_only": bool(getattr(conv, "bot_only", False)),
                 "tags": _safe_serialize_conversation_tags(conv),
             }
         )
