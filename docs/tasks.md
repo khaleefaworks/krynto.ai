@@ -10,17 +10,13 @@
 
 ## Integrations
 
-**Partially delivered 2026-07-18** (commit `5fb6da9`): the "contact captured" slice of INT1 — a website can register any number of generic outbound webhooks (deliberately not Frappe-specific; works with a Frappe Server Script, Zapier, n8n, or any custom endpoint), fired on every captured lead (offline-gate submission or live-chat contact card) with retry/backoff and a full delivery audit trail (`website_integrations` / `lead_integration_deliveries`). No HMAC signature header — a plain `secret` field rides along in the JSON body instead, since most no-code/sandboxed receivers can't compute a signature but can do a string comparison (verified live against a real Frappe Server Script: correct secret → lead created, wrong secret → 401, nothing created). See `backend/tests/test_lead_integration.py`.
+**Closed 2026-07-18** (see `docs/archived/tasks.md`): INT1 lead-capture webhook slice (generic outbound webhooks, retry/backoff, delivery audit trail) + gap-fill (manual lead resend/status, per-form routing, `lead_delivered` automation trigger). Remaining originally-listed items (other-event webhooks, native Slack, Shopify, Dialogflow/Rasa/Lex) explicitly descoped, not deferred.
 
-**Extended 2026-07-18**: gap-fill on that same slice, found while dogfooding it — (1) agents can now manually push a conversation's current visitor_name/email/phone to integrations from the chat page (column 4) or the Contacts page drawer, for contact info a visitor typed in chat rather than filled into a contact-card form (`POST /conversations/{id}/leads`), gated on the website actually having an enabled integration; (2) per-delivery status is visible live (not sent/pending/sent/partial/failed) with a force-resend action per delivery, independent of the automatic 5-attempt backoff retry; (3) `WebsiteIntegration.form_id` (nullable) lets a webhook be scoped to one specific form instead of firing for every lead on the website — unscoped (null) integrations still fire for everything, including the offline gate which has no form; (4) a new `lead_delivered` automation trigger fires only on confirmed webhook success (never on capture, never on a failed push), form-agnostic by construction (keyed off the delivery, not the form) so N forms need no special-casing — wired to `tag_conversation`, reusing whatever tag name/row a website already has (e.g. website 2's existing manually-applied "leads created" tag, verified live to get reused by exact-name match rather than duplicated) rather than a new hardcoded tag. Seeded by default for every website (new and existing, `AutomationService.ensure_default_automations_for_website`) as `tag_conversation("leads created")`, since it just automates what agents already did by hand. See `backend/tests/test_lead_delivery_extras.py`.
-
-| # | Title | Description | Priority |
-|---|-------|-------------|----------|
-| INT1 | **Remaining third-party integrations** | Lead-capture webhooks are done (see above) — that covered only the "contact captured" event. Still open, per the original competitor-baseline scoping: webhooks for other events (new conversation, resolved); native Slack integration (handle conversations from Slack); Shopify (order history surfaced in-panel); Dialogflow/Rasa/Lex hookups for bot handoff to agents. Check what Chatwoot/Crisp/Intercom/Tidio ship as a baseline before scoping further. | Medium |
+No open items in this section right now.
 
 ## Analytics
 
-**Fixed 2026-07-10**: REP1 (full audit — ratings_summary multi-tenant leak, IST timezone boundary bug in `_date_range`/`_avail_day_bounds`, inconsistent date-field usage across metrics, falsy-zero display bug, export column fixes, download-modal filter scoping/multi-select, inverted KPI color coding, and the Availability tab's missing Chat Arrivals / Missed Chats sections). See `backend/tests/test_analytics.py`.
+**Fixed 2026-07-10** (see `docs/archived/tasks.md`): REP1 — full audit (multi-tenant leak, IST timezone bugs, export/filter fixes, inverted KPI color coding, missing Availability sections).
 
 No open items in this section right now.
 
@@ -32,13 +28,13 @@ No open items in this section right now.
 
 ## Automations
 
-**Fixed 2026-07-16** (commit `a2d0531`): AUT1 (bot button clicks now resolve by a stable per-button id, minted at creation and self-healed on buttons saved before it existed, instead of array position — immune to reorders between send and click; a deleted-button click gets a graceful "no longer available" message instead of a silent no-op). Same commit also fixed two bugs found while validating it: a never-engaged conversation could still show "End chat" and trigger the rating-popup flow, and the "new chat unclaimed" reminder loop could resume for it after a restart; and the bot-typing `chatbot_pending` marker was hiding the message input for every bot message (including mid-conversation ones), with no reliable way back short of a reload. See `backend/tests/test_bot_button_id_resolution.py` and `backend/tests/test_new_chat_reminder_reconciliation.py`.
+**Fixed 2026-07-16** (commit `a2d0531`, see `docs/archived/tasks.md`): AUT1 — bot button clicks resolve by a stable per-button id instead of array position, plus two related bugs found while validating it (stale "End chat"/rating-popup flow on never-engaged conversations, bot-typing marker hiding the message input).
 
 No open items in this section right now.
 
 ## Visitor Contact Capture
 
-**Fixed 2026-07-18** (commit `5fb6da9`): CC1 — agent-triggered inline contact card, sent from the composer's "#" menu (any enabled website form, not just one fixed card) as an enriched `contact_card` event_type message, mirroring the `bot_prompt_buttons` "JSON content decoded by message_presenter.py, rendered as a real interactive widget" pattern. Tracks pending/filled/expired state (superseded by a newer card, conversation resolved, or a 24h TTL) with live updates on both the widget and agent dashboard — no reload needed. Also extended the offline gate to support the same form's extra fields beyond the 3 hardcoded ones, with per-field required-ness and type (text/email/phone/textarea/select) honored from the form config, plus a shared international phone input (searchable country picker, per-country validation/formatting, timezone-based default-country detection) used by both. The optional "detected phone/email — apply?" suggestion-chip follow-up was not built. See `backend/tests/test_contact_card_lifecycle.py`.
+**Fixed 2026-07-18** (commit `5fb6da9`, see `docs/archived/tasks.md`): CC1 — agent-triggered inline contact card from the composer, live pending/filled/expired state, offline-gate extra fields with per-field type/required-ness, shared international phone input.
 
 No open items in this section right now.
 
@@ -46,7 +42,7 @@ No open items in this section right now.
 
 Found 2026-07-06: an agent can copy a visitor's `session_id` (visible as a full, untruncated tooltip + searchable text in `CustomersVisitors.tsx`) into their own browser's `ai_chatassist_session_id_{websiteId}` localStorage key and gain full read/write access to that visitor's conversation. Root cause: `session_id` is used as both the public identifier *and* the sole bearer credential for a conversation — classic identifier/secret conflation.
 
-**Fixed 2026-07-09** (commit `72bc834`): SEC1 (expanded in scope beyond the original write-up — `chat_ws_with_conversation` wasn't just missing the domain lock, its history-send was completely unconditional on session ownership, so anyone who knew `website_id` + a small sequential `conversation_id` could read the full transcript regardless of `session_id`; both the domain lock and an ownership gate are now in place), SEC2, SEC4, and the connect/read-rate-limiting half of SEC5. Verified via real (not just syntax-checked) tests: mismatched session → rejected before any data sent, matching session → still works normally.
+**Fixed 2026-07-09** (commit `72bc834`, see `docs/archived/tasks.md`): SEC1 (domain lock + ownership gate on `chat_ws_with_conversation`, which previously sent full transcript history unconditionally), SEC2, SEC4, and the connect/read-rate-limiting half of SEC5.
 
 **Descoped 2026-07-16** (see `docs/archived/tasks.md`): SEC3 (separate session credential), SEC5's remaining idle-expiry piece, and SEC6 (silent-skip session checks + unauthenticated rating read) — all explicitly decided against, not deferred.
 
@@ -56,14 +52,14 @@ Found 2026-07-06: an agent can copy a visitor's `session_id` (visible as a full,
 
 ## Super Admin
 
-**Closed 2026-07-16**: SA2 (Backup & Restore) — `pg_dump` + uploads backup to local disk, restore procedure, SYSTEM_MANAGER-gated, scheduled every 2h via the existing `AsyncIOScheduler` plus on-demand trigger, `SuperAdminBackups.tsx` UI. S3 offsite storage and at-rest encryption were considered and explicitly descoped — not wanted for this deployment.
+**Closed 2026-07-16** (see `docs/archived/tasks.md`): SA2 — Backup & Restore (`pg_dump` + uploads, restore procedure, scheduled + on-demand, `SuperAdminBackups.tsx` UI). S3 offsite storage and at-rest encryption explicitly descoped.
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| SA1 | **Flesh out the Super Admin (platform) dashboard** | `SuperAdminHome.tsx` is still a stub ("Organization management pages will live under /superadmin/*"), and `SuperAdminStats`/`SuperAdminOrgs` only show raw counts and a bare org list — no drill-down actions beyond org detail. Org suspend/reactivate (`is_active` toggle) already exists, but only from the org *detail* page (predates this branch, from Phase 4) — not from the list as originally asked. Still missing: plan/billing visibility, system health (WS connection counts, queue/job status, error rates), recent-signups/activity feed, and impersonation or support-login for debugging a tenant's issue. Scope out which of these are must-have vs. nice-to-have before building. | Medium |
+| SA1 | **Flesh out the Super Admin (platform) dashboard** | `SuperAdminHome.tsx` is still a stub ("Organization management pages will live under /superadmin/*"), and `SuperAdminStats`/`SuperAdminOrgs` only show raw counts and a bare org list — no drill-down actions beyond org detail. Org suspend/reactivate (`is_active` toggle) already exists, but only from the org *detail* page (predates this branch, from Phase 4) — not from the list as originally asked. Still missing: plan/billing visibility, system health (WS connection counts, queue/job status, error rates), recent-signups/activity feed, and impersonation or support-login for debugging a tenant's issue. Scope out which of these are must-have vs. nice-to-have before building. **Scoped 2026-07-18 — see `docs/SA1_AU3_PLAN.md`** for current-state findings (what's dead code, what's cheap to surface vs a real new build) and a prioritized cheap-wins-vs-bigger-builds breakdown. | Medium |
 
 ## Audit Trail
 
 | # | Title | Description | Priority |
 |---|-------|-------------|----------|
-| AU3 | **Change History / Audit Log** | No change-history mechanism exists. Implement an `audit_logs` table: `id, table_name, record_id, action (create/update/delete), performed_by_user_id, performed_at, old_values (JSONB), new_values (JSONB)`. Register SQLAlchemy `before_flush` event listener on `Base` to diff dirty instances automatically. Surface per-record history in the UI for key entities (conversations, users, automations, websites). Scope: track mutations on `users`, `websites`, `organizations`, `automations`, `website_teams`, `agent_website_assignments`. Read-heavy tables (messages, events) are excluded. | Low |
+| AU3 | **Change History / Audit Log** | No change-history mechanism exists. Implement an `audit_logs` table: `id, table_name, record_id, action (create/update/delete), performed_by_user_id, performed_at, old_values (JSONB), new_values (JSONB)`. Register SQLAlchemy `before_flush` event listener on `Base` to diff dirty instances automatically. Surface per-record history in the UI for key entities (conversations, users, automations, websites). Scope: track mutations on `users`, `websites`, `organizations`, `automations`, `website_teams`, `agent_website_assignments`. Read-heavy tables (messages, events) are excluded. **Scoped 2026-07-18 — see `docs/SA1_AU3_PLAN.md`** for current-state findings (confirmed zero tracking exists anywhere, including in the security-critical paths — login lockouts and role changes are completely silent today) and a phased plan: a small event-based `security_events` log first (covers "at least security"), the heavier generic before_flush diffing above deferred to a later phase. | Low |

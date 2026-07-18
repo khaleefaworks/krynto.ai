@@ -2,6 +2,40 @@
 
 ---
 
+## Completed (July 2026 — Integrations, Analytics, Automations, Contact Capture, Security, Super Admin)
+
+### Integrations (INT1)
+
+**Partially delivered 2026-07-18** (commit `5fb6da9`): the "contact captured" slice of INT1 — a website can register any number of generic outbound webhooks (deliberately not Frappe-specific; works with a Frappe Server Script, Zapier, n8n, or any custom endpoint), fired on every captured lead (offline-gate submission or live-chat contact card) with retry/backoff and a full delivery audit trail (`website_integrations` / `lead_integration_deliveries`). No HMAC signature header — a plain `secret` field rides along in the JSON body instead, since most no-code/sandboxed receivers can't compute a signature but can do a string comparison (verified live against a real Frappe Server Script: correct secret → lead created, wrong secret → 401, nothing created). See `backend/tests/test_lead_integration.py`.
+
+**Extended 2026-07-18**: gap-fill on that same slice, found while dogfooding it — (1) agents can now manually push a conversation's current visitor_name/email/phone to integrations from the chat page (column 4) or the Contacts page drawer, for contact info a visitor typed in chat rather than filled into a contact-card form (`POST /conversations/{id}/leads`), gated on the website actually having an enabled integration; (2) per-delivery status is visible live (not sent/pending/sent/partial/failed) with a force-resend action per delivery, independent of the automatic 5-attempt backoff retry; (3) `WebsiteIntegration.form_id` (nullable) lets a webhook be scoped to one specific form instead of firing for every lead on the website — unscoped (null) integrations still fire for everything, including the offline gate which has no form; (4) a new `lead_delivered` automation trigger fires only on confirmed webhook success (never on capture, never on a failed push), form-agnostic by construction (keyed off the delivery, not the form) so N forms need no special-casing — wired to `tag_conversation`, reusing whatever tag name/row a website already has (e.g. website 2's existing manually-applied "leads created" tag, verified live to get reused by exact-name match rather than duplicated) rather than a new hardcoded tag. Seeded by default for every website (new and existing, `AutomationService.ensure_default_automations_for_website`) as `tag_conversation("leads created")`, since it just automates what agents already did by hand. See `backend/tests/test_lead_delivery_extras.py`.
+
+**Closed 2026-07-18**: the delivered lead-capture webhook slice (+ the gap-fill above — manual send/resend, per-form routing, live delivery status, the `lead_delivered` automation trigger) is considered sufficient scope for INT1. The remaining originally-listed items — webhooks for other events (new conversation, resolved), native Slack integration, Shopify order history, Dialogflow/Rasa/Lex bot-handoff — are descoped, not deferred; revisit as fresh, separately-scoped items if/when there's real demand for any one of them.
+
+### Analytics (REP1)
+
+**Fixed 2026-07-10**: REP1 (full audit — ratings_summary multi-tenant leak, IST timezone boundary bug in `_date_range`/`_avail_day_bounds`, inconsistent date-field usage across metrics, falsy-zero display bug, export column fixes, download-modal filter scoping/multi-select, inverted KPI color coding, and the Availability tab's missing Chat Arrivals / Missed Chats sections). See `backend/tests/test_analytics.py`.
+
+### Automations (AUT1)
+
+**Fixed 2026-07-16** (commit `a2d0531`): AUT1 (bot button clicks now resolve by a stable per-button id, minted at creation and self-healed on buttons saved before it existed, instead of array position — immune to reorders between send and click; a deleted-button click gets a graceful "no longer available" message instead of a silent no-op). Same commit also fixed two bugs found while validating it: a never-engaged conversation could still show "End chat" and trigger the rating-popup flow, and the "new chat unclaimed" reminder loop could resume for it after a restart; and the bot-typing `chatbot_pending` marker was hiding the message input for every bot message (including mid-conversation ones), with no reliable way back short of a reload. See `backend/tests/test_bot_button_id_resolution.py` and `backend/tests/test_new_chat_reminder_reconciliation.py`.
+
+### Visitor Contact Capture (CC1)
+
+**Fixed 2026-07-18** (commit `5fb6da9`): CC1 — agent-triggered inline contact card, sent from the composer's "#" menu (any enabled website form, not just one fixed card) as an enriched `contact_card` event_type message, mirroring the `bot_prompt_buttons` "JSON content decoded by message_presenter.py, rendered as a real interactive widget" pattern. Tracks pending/filled/expired state (superseded by a newer card, conversation resolved, or a 24h TTL) with live updates on both the widget and agent dashboard — no reload needed. Also extended the offline gate to support the same form's extra fields beyond the 3 hardcoded ones, with per-field required-ness and type (text/email/phone/textarea/select) honored from the form config, plus a shared international phone input (searchable country picker, per-country validation/formatting, timezone-based default-country detection) used by both. The optional "detected phone/email — apply?" suggestion-chip follow-up was not built. See `backend/tests/test_contact_card_lifecycle.py`.
+
+### Security (SEC1, SEC2, SEC4)
+
+Found 2026-07-06: an agent can copy a visitor's `session_id` (visible as a full, untruncated tooltip + searchable text in `CustomersVisitors.tsx`) into their own browser's `ai_chatassist_session_id_{websiteId}` localStorage key and gain full read/write access to that visitor's conversation. Root cause: `session_id` is used as both the public identifier *and* the sole bearer credential for a conversation — classic identifier/secret conflation.
+
+**Fixed 2026-07-09** (commit `72bc834`): SEC1 (expanded in scope beyond the original write-up — `chat_ws_with_conversation` wasn't just missing the domain lock, its history-send was completely unconditional on session ownership, so anyone who knew `website_id` + a small sequential `conversation_id` could read the full transcript regardless of `session_id`; both the domain lock and an ownership gate are now in place), SEC2, SEC4, and the connect/read-rate-limiting half of SEC5. Verified via real (not just syntax-checked) tests: mismatched session → rejected before any data sent, matching session → still works normally.
+
+### Super Admin (SA2)
+
+**Closed 2026-07-16**: SA2 (Backup & Restore) — `pg_dump` + uploads backup to local disk, restore procedure, SYSTEM_MANAGER-gated, scheduled every 2h via the existing `AsyncIOScheduler` plus on-demand trigger, `SuperAdminBackups.tsx` UI. S3 offsite storage and at-rest encryption were considered and explicitly descoped — not wanted for this deployment.
+
+---
+
 ## Completed (July 2026 batch)
 
 ### Push Notifications & Widget
