@@ -31,6 +31,7 @@ from app.models.notification_event import NotificationEvent, NotificationEventSt
 from app.models.backup import Backup, BackupStatus, BackupTrigger
 from app.models.website_integration import WebsiteIntegration, WebsiteIntegrationType
 from app.models.lead_integration_delivery import LeadIntegrationDelivery, LeadDeliveryStatus
+from app.models.security_event import SecurityEvent
 
 __all__ = [
     "Website",
@@ -74,4 +75,5 @@ __all__ = [
     "WebsiteIntegrationType",
     "LeadIntegrationDelivery",
     "LeadDeliveryStatus",
+    "SecurityEvent",
 ]

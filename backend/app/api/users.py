@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
@@ -17,7 +17,12 @@ from app.services.presence_service import PresenceService
 from app.services.agent_service import AgentService
 from app.services.agent_resolver import is_agent_eligible
 from app.repos import users as users_repo
+from app.repos import security_events as security_events_repo
 from app.models.agent_status_log import AgentStatusLog
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -406,6 +411,7 @@ class StatusUpdateRequest(BaseModel):
 def update_user_status(
     user_id: int,
     payload: StatusUpdateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin)  # Only admins can update user status
 ):
@@ -448,7 +454,16 @@ def update_user_status(
     user.is_active = payload.is_active
     db.commit()
     db.refresh(user)
-    
+
+    security_events_repo.log_security_event(
+        db,
+        event_type="user_activated" if payload.is_active else "user_deactivated",
+        actor_user_id=_admin.id,
+        target_user_id=user.id,
+        organization_id=user.organization_id,
+        ip_address=_client_ip(request),
+    )
+
     return {
         "message": "User status updated successfully",
         "user": {
@@ -561,7 +576,16 @@ def update_user_role(
     user.role = payload.role
     db.commit()
     db.refresh(user)
-    
+
+    security_events_repo.log_security_event(
+        db,
+        event_type="role_changed",
+        actor_user_id=current_admin.id,
+        target_user_id=user.id,
+        organization_id=user.organization_id,
+        metadata={"old_role": old_role, "new_role": payload.role.value},
+    )
+
     return {
         "message": f"User role updated from {old_role} to {payload.role.value}",
         "user": {
@@ -784,6 +808,7 @@ class SelfPasswordChangeRequest(BaseModel):
 @router.patch("/me/password")
 def change_my_password(
     payload: SelfPasswordChangeRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
@@ -801,6 +826,16 @@ def change_my_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     db.add(current_user)
     db.commit()
+
+    security_events_repo.log_security_event(
+        db,
+        event_type="password_changed",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        organization_id=current_user.organization_id,
+        ip_address=_client_ip(request),
+    )
+
     return {"message": "Password changed successfully"}
 
 
@@ -812,6 +847,7 @@ class PasswordChangeRequest(BaseModel):
 def change_user_password(
     user_id: int,
     payload: PasswordChangeRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(require_admin),
 ):
@@ -842,4 +878,14 @@ def change_user_password(
     user.password_hash = get_password_hash(payload.new_password)
     user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
+
+    security_events_repo.log_security_event(
+        db,
+        event_type="password_changed",
+        actor_user_id=current_admin.id,
+        target_user_id=user.id,
+        organization_id=user.organization_id,
+        ip_address=_client_ip(request),
+    )
+
     return {"message": "Password updated successfully"}

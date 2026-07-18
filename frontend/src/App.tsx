@@ -35,6 +35,8 @@ import SuperAdminOrgs from './pages/SuperAdminOrgs'
 import SuperAdminOrgDetail from './pages/SuperAdminOrgDetail'
 import SuperAdminStats from './pages/SuperAdminStats'
 import SuperAdminBackups from './pages/SuperAdminBackups'
+import SuperAdminUsers from './pages/SuperAdminUsers'
+import SuperAdminSecurityLog from './pages/SuperAdminSecurityLog'
 import Logo from './components/Logo'
 import { connectAgentSocket, addMessageHandler, disconnectAgentSocket } from './services/agentSocket'
 import { ensurePushSubscription, isPushSupported } from './services/push'
@@ -615,6 +617,8 @@ function App() {
                   <Route path="organizations/:id" element={<SuperAdminOrgDetail />} />
                   <Route path="stats" element={<SuperAdminStats />} />
                   <Route path="backups" element={<SuperAdminBackups />} />
+                  <Route path="users" element={<SuperAdminUsers />} />
+                  <Route path="security" element={<SuperAdminSecurityLog />} />
                   <Route index element={<Navigate to="/superadmin/organizations" replace />} />
                 </Route>
                 <Route

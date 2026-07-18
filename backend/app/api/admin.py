@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.models.organization import Organization
 from app.models.user import User, UserRole
 from app.models.website import Website
 from app.models.conversation import Conversation
+from app.repos import security_events as security_events_repo
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -56,6 +58,39 @@ class PlatformStats(BaseModel):
     total_users: int
     total_websites: int
     total_conversations: int
+
+
+class SecurityEventResponse(BaseModel):
+    id: int
+    event_type: str
+    actor_user_id: Optional[int] = None
+    actor_email: Optional[str] = None
+    target_user_id: Optional[int] = None
+    target_email: Optional[str] = None
+    organization_id: Optional[int] = None
+    organization_name: Optional[str] = None
+    ip_address: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+
+
+class SecurityEventListResponse(BaseModel):
+    items: List[SecurityEventResponse]
+    total: int
+
+
+class SchedulerJobInfo(BaseModel):
+    id: str
+    name: str
+    next_run_time: Optional[str] = None
+
+
+class SystemHealthResponse(BaseModel):
+    db: str
+    redis: str
+    active_agent_connections: int
+    live_visitor_count: int
+    scheduler_jobs: List[SchedulerJobInfo]
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +171,7 @@ def get_organization(
 def update_organization(
     org_id: int,
     body: OrgUpdateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _admin: User = Depends(require_administrator),
 ):
@@ -143,6 +179,10 @@ def update_organization(
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
         raise HTTPException(status_code=404, detail="Organisation not found")
+
+    old_is_active = org.is_active
+    old_plan = org.plan
+
     if body.plan is not None:
         if body.plan not in ("free", "pro", "enterprise"):
             raise HTTPException(status_code=422, detail="Invalid plan value")
@@ -156,6 +196,26 @@ def update_organization(
         org.name = name
     db.commit()
     db.refresh(org)
+
+    ip = request.client.host if request.client else None
+    if body.is_active is not None and body.is_active != old_is_active:
+        security_events_repo.log_security_event(
+            db,
+            event_type="org_reactivated" if body.is_active else "org_suspended",
+            actor_user_id=_admin.id,
+            organization_id=org.id,
+            ip_address=ip,
+        )
+    if body.plan is not None and body.plan != old_plan:
+        security_events_repo.log_security_event(
+            db,
+            event_type="org_plan_changed",
+            actor_user_id=_admin.id,
+            organization_id=org.id,
+            ip_address=ip,
+            metadata={"old_plan": old_plan, "new_plan": body.plan},
+        )
+
     return _build_org_stats(db, org)
 
 
@@ -207,4 +267,132 @@ def platform_stats(
         total_users=total_users,
         total_websites=total_websites,
         total_conversations=total_conversations,
+    )
+
+
+@router.get("/security-events", response_model=SecurityEventListResponse)
+def list_security_events(
+    organization_id: Optional[int] = None,
+    event_type: Optional[str] = None,
+    actor_user_id: Optional[int] = None,
+    target_user_id: Optional[int] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_administrator),
+):
+    """Filterable security/activity event log. SYSTEM_MANAGER only."""
+    limit = max(1, min(limit, 200))
+    if date_from is None and date_to is None:
+        date_from = datetime.now(timezone.utc) - timedelta(days=30)
+
+    rows, total = security_events_repo.list_events(
+        db,
+        organization_id=organization_id,
+        event_type=event_type,
+        actor_user_id=actor_user_id,
+        target_user_id=target_user_id,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
+
+    user_ids = {r.actor_user_id for r in rows if r.actor_user_id} | {
+        r.target_user_id for r in rows if r.target_user_id
+    }
+    org_ids = {r.organization_id for r in rows if r.organization_id}
+    users_by_id = (
+        {u.id: u.email for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+        if user_ids
+        else {}
+    )
+    orgs_by_id = (
+        {o.id: o.name for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all()}
+        if org_ids
+        else {}
+    )
+
+    items = [
+        SecurityEventResponse(
+            id=r.id,
+            event_type=r.event_type,
+            actor_user_id=r.actor_user_id,
+            actor_email=users_by_id.get(r.actor_user_id),
+            target_user_id=r.target_user_id,
+            target_email=users_by_id.get(r.target_user_id),
+            organization_id=r.organization_id,
+            organization_name=orgs_by_id.get(r.organization_id),
+            ip_address=r.ip_address,
+            metadata=r.event_metadata,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        )
+        for r in rows
+    ]
+    return SecurityEventListResponse(items=items, total=total)
+
+
+@router.get("/system-health", response_model=SystemHealthResponse)
+async def system_health(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_administrator),
+):
+    """Live platform system-health snapshot. SYSTEM_MANAGER only.
+
+    Duplicates the DB/Redis checks from /health/ready (that endpoint is an
+    unauthenticated k8s-style probe and stays that way) plus in-memory
+    connection counts and scheduler job status not surfaced anywhere else.
+    """
+    from sqlalchemy import text as sa_text
+
+    from app.core.config import settings
+    from app.core.database import engine
+    from app.services.agent_service import AgentService
+    from app.services.presence_service import PresenceService
+    from app.services.auto_close_scheduler import get_scheduler
+
+    db_status = "ok"
+    try:
+        with engine.connect() as conn:
+            conn.execute(sa_text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+
+    redis_url = (getattr(settings, "REDIS_URL", "") or "").strip()
+    redis_status = "disabled"
+    if redis_url:
+        try:
+            import redis.asyncio as redis_asyncio
+
+            client = redis_asyncio.from_url(redis_url, decode_responses=True)
+            try:
+                redis_status = "ok" if await client.ping() else "error"
+            finally:
+                await client.aclose()
+        except Exception:
+            redis_status = "error"
+
+    active_agents = len(AgentService.connected_agent_ids())
+    live_visitors = await PresenceService.total_connections()
+
+    scheduler = get_scheduler()
+    jobs: List[SchedulerJobInfo] = []
+    if scheduler is not None:
+        for job in scheduler.get_jobs():
+            jobs.append(
+                SchedulerJobInfo(
+                    id=job.id,
+                    name=job.name,
+                    next_run_time=job.next_run_time.isoformat() if job.next_run_time else None,
+                )
+            )
+
+    return SystemHealthResponse(
+        db=db_status,
+        redis=redis_status,
+        active_agent_connections=active_agents,
+        live_visitor_count=live_visitors,
+        scheduler_jobs=jobs,
     )

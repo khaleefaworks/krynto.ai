@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/appStore'
 import { clearToken, apiRequest } from '@/services/api'
 import { unsubscribeFromPush } from '@/services/push'
 import Logo from '@/components/Logo'
-import { Building2, BarChart3, Archive, LogOut } from 'lucide-react'
+import { Building2, BarChart3, Archive, LogOut, Users, ShieldAlert } from 'lucide-react'
 import NotificationToasts from '@/components/NotificationToasts'
 
 export default function SuperAdminLayout() {
@@ -65,6 +65,30 @@ export default function SuperAdminLayout() {
                     >
                         <Archive size={16} />
                         Backups
+                    </NavLink>
+                    <NavLink
+                        to="/superadmin/users"
+                        className={({ isActive }) =>
+                            `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${isActive
+                                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-gray-700'
+                            }`
+                        }
+                    >
+                        <Users size={16} />
+                        Users
+                    </NavLink>
+                    <NavLink
+                        to="/superadmin/security"
+                        className={({ isActive }) =>
+                            `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${isActive
+                                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-gray-700'
+                            }`
+                        }
+                    >
+                        <ShieldAlert size={16} />
+                        Activity Log
                     </NavLink>
                 </nav>
 

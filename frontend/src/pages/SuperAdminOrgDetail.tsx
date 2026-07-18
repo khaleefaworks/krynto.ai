@@ -1,22 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { apiRequest } from '@/services/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Users, Globe, MessageSquare } from 'lucide-react'
-
-interface OrgStats {
-    id: number
-    name: string
-    slug: string
-    plan: string
-    is_active: boolean
-    owner_verified: boolean
-    owner_id: number | null
-    member_count: number
-    website_count: number
-    conversation_count: number
-}
+import { fetchOrganization, updateOrganization, type OrgStats } from '@/services/admin'
 
 const PLANS = ['free', 'pro', 'enterprise'] as const
 
@@ -33,7 +20,7 @@ export default function SuperAdminOrgDetail() {
     useEffect(() => {
         if (!id) return
         setLoading(true)
-        apiRequest<OrgStats>(`/admin/organizations/${id}`)
+        fetchOrganization(id)
             .then((data) => {
                 setOrg(data)
                 setPlan(data.plan)
@@ -48,10 +35,7 @@ export default function SuperAdminOrgDetail() {
         setSaving(true)
         setError(null)
         try {
-            const updated = await apiRequest<OrgStats>(`/admin/organizations/${id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ plan, is_active: isActive }),
-            })
+            const updated = await updateOrganization(id, { plan, is_active: isActive })
             setOrg(updated)
         } catch (e: any) {
             setError(e?.message || 'Save failed')

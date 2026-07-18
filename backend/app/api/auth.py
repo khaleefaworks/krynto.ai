@@ -22,6 +22,7 @@ from app.core.limiter import limiter
 from app.core.system import is_system_initialized, mark_system_initialized
 from app.api.deps import get_current_user, require_admin
 from app.repos import login_sessions as login_sessions_repo
+from app.repos import security_events as security_events_repo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
@@ -43,6 +44,10 @@ def _record_login_session(
         )
     except Exception:
         pass  # never block a login due to session tracking failure
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 
 def _slugify(text: str) -> str:
@@ -300,20 +305,33 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
     # Verify password
     if not verify_password(login_request.password, user.password_hash):
         user.failed_login_attempts = getattr(user, 'failed_login_attempts', 0) + 1
-        
-        if user.failed_login_attempts >= 6:
+        attempts = user.failed_login_attempts
+        newly_locked = False
+
+        if attempts >= 6:
             user.is_locked_out = True
             user.temp_lockout_until = datetime.now(timezone.utc) + timedelta(hours=24)
-        elif user.failed_login_attempts >= 3:
+            newly_locked = attempts == 6
+        elif attempts >= 3:
             user.temp_lockout_until = datetime.now(timezone.utc) + timedelta(minutes=5)
-            
+            newly_locked = attempts == 3
+
         db.commit()
-        
+
+        security_events_repo.log_security_event(
+            db,
+            event_type="login_lockout" if newly_locked else "login_failed",
+            target_user_id=user.id,
+            organization_id=user.organization_id,
+            ip_address=_client_ip(request),
+            metadata={"attempts": attempts},
+        )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
     # Reset lockout counters on success
     if getattr(user, 'failed_login_attempts', 0) > 0 or getattr(user, 'temp_lockout_until', None) or getattr(user, 'is_locked_out', False):
         user.failed_login_attempts = 0
@@ -380,6 +398,13 @@ async def login(request: Request, login_request: LoginRequest, db: Session = Dep
 
     # Record the login session for server-side revocation.
     _record_login_session(db, request, access_token, int(user.id))
+    security_events_repo.log_security_event(
+        db,
+        event_type="login_success",
+        actor_user_id=user.id,
+        organization_id=user.organization_id,
+        ip_address=_client_ip(request),
+    )
 
     return LoginResponse(
         access_token=access_token,
@@ -755,6 +780,7 @@ async def forgot_password(
 
 @router.post("/reset-password")
 async def reset_password(
+    request: Request,
     body: ResetPasswordRequest,
     db: Session = Depends(get_db),
 ):
@@ -787,6 +813,14 @@ async def reset_password(
     user.password_changed_at = now  # Invalidates all existing sessions
     reset_token.used_at = now
     db.commit()
+
+    security_events_repo.log_security_event(
+        db,
+        event_type="password_changed",
+        target_user_id=user.id,
+        organization_id=user.organization_id,
+        ip_address=_client_ip(request),
+    )
 
     return {"message": "Password updated successfully. Please log in again."}
 

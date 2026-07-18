@@ -44,6 +44,12 @@ class PresenceService:
                 cls._connections.pop(int(website_id), None)
 
     @classmethod
+    async def total_connections(cls) -> int:
+        """Total live visitor websocket connections across all websites."""
+        async with cls._lock:
+            return sum(len(ws_set) for ws_set in cls._connections.values())
+
+    @classmethod
     async def _snapshot(cls, website_id: int) -> dict:
         db = SessionLocal()
         try:

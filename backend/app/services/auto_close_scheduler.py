@@ -255,3 +255,8 @@ def stop_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
         logger.info("auto_close_scheduler_stopped")
+
+
+def get_scheduler() -> AsyncIOScheduler | None:
+    """Return the running scheduler instance, or None if not started."""
+    return _scheduler
