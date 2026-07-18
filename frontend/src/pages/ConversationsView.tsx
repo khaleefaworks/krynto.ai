@@ -1353,15 +1353,13 @@ export default function ConversationsView() {
                 if (msgId != null) {
                     patchMessage(msgId, { contact_card_state: { status: 'filled', data: submittedData } })
                 }
-                const visitorName = (data as any)?.visitor_name
-                const visitorEmail = (data as any)?.visitor_email
-                const visitorPhone = (data as any)?.visitor_phone
-                setConversation(prev => prev ? {
-                    ...prev,
-                    visitor_name: visitorName ?? prev.visitor_name,
-                    visitor_email: visitorEmail ?? prev.visitor_email,
-                    visitor_phone: visitorPhone ?? prev.visitor_phone,
-                } as any : prev)
+                // Full server resync rather than patching just the 3 fields from
+                // the WS payload in place — a contact-card submission can also
+                // be the trigger for a lead_delivered automation tagging the
+                // conversation moments later, and the old inline patch never
+                // touched activeChats, so the chat-list row's name/tags could
+                // still drift stale even though the open panel looked right.
+                refreshConversationFromServer(dataConversationId)
                 // CC1: the visitor-details panel's "Form submissions" list is
                 // fetched once when the conversation is opened and otherwise
                 // never refreshed — without this, a new submission (or a
@@ -1375,8 +1373,10 @@ export default function ConversationsView() {
                 // automation just tagged the conversation) asynchronously,
                 // outside any request this tab made — refresh both the Lead
                 // delivery section and the conversation's tags live.
+                // (loadChatData only refetches the message thread, not the
+                // conversation/tags — that's a no-op for what we need here.)
                 setLeadStatusRefreshKey((k) => k + 1)
-                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
+                refreshConversationFromServer(selectedChat)
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
@@ -1641,6 +1641,24 @@ export default function ConversationsView() {
                 .catch(() => { })
         }
     }, [firstUnreadMessageId, selectedChat, setUnreadForConversation])
+
+    // Unlike loadConversationDetails, this always hits the server rather than
+    // preferring the locally-cached activeChats/resolvedChats entry — needed
+    // for server-side changes that happen outside any request this tab made
+    // (an automation tagging the conversation, visitor_* fields backfilled by
+    // a form submission), where the local cache is exactly what's stale.
+    const refreshConversationFromServer = useCallback(async (chatId: number) => {
+        try {
+            const summary = await fetchChatSummary(chatId)
+            setConversation((prev) => (prev && (prev as any).id === chatId ? ({ ...prev, ...summary } as any) : (summary as any)))
+            setConversationTags(((summary as any)?.tags || []) as any)
+            const patch = (list: any[]) => list.map((c) => (c.id === chatId ? { ...c, ...summary } : c))
+            setActiveChats(patch(activeChats))
+            setResolvedChats((prev) => patch(prev))
+        } catch {
+            // best-effort — a later reload or the normal poll cycle will catch up
+        }
+    }, [activeChats, setActiveChats])
 
     const loadConversationDetails = async (chatId: number) => {
         const token = ++loadDetailsTokenRef.current

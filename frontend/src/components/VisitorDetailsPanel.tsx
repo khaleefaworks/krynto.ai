@@ -125,15 +125,43 @@ export default function VisitorDetailsPanel({
   const [email, setEmail] = useState(conversation.visitor_email || "")
   const [phone, setPhone] = useState(conversation.visitor_phone || "")
 
-  // Keep local input state in sync when switching conversations
+  // Read via refs (not as effect deps) so a save — which flips editingX to
+  // false — doesn't itself re-trigger the sync effects below and briefly
+  // flash the field back to a still-in-flight conversation prop.
+  const editingNameRef = useRef(editingName)
+  editingNameRef.current = editingName
+  const editingEmailRef = useRef(editingEmail)
+  editingEmailRef.current = editingEmail
+  const editingPhoneRef = useRef(editingPhone)
+  editingPhoneRef.current = editingPhone
+
+  // Reset edit mode when switching conversations (separate from the field
+  // sync below since this must NOT re-run just because visitor_* changed).
   useEffect(() => {
-    setName(conversation.visitor_name || "")
-    setEmail(conversation.visitor_email || "")
-    setPhone(conversation.visitor_phone || "")
     setEditingName(false)
     setEditingEmail(false)
     setEditingPhone(false)
   }, [conversation.id])
+
+  // Keep local input state in sync with the conversation prop — both on a
+  // conversation switch AND when visitor_* changes on the SAME conversation
+  // (e.g. a contact-card submission or an agent-manual save arriving live
+  // over WS). Previously this only re-ran on conversation.id, so a live
+  // update to the same open conversation never reached these fields — the
+  // panel kept showing "Fill in visitor's ..." until a reload. Guarded via
+  // ref (not dependency) so an incoming update can't yank a half-typed value
+  // out from under an agent actively editing that one field.
+  useEffect(() => {
+    if (!editingNameRef.current) setName(conversation.visitor_name || "")
+  }, [conversation.id, conversation.visitor_name])
+
+  useEffect(() => {
+    if (!editingEmailRef.current) setEmail(conversation.visitor_email || "")
+  }, [conversation.id, conversation.visitor_email])
+
+  useEffect(() => {
+    if (!editingPhoneRef.current) setPhone(conversation.visitor_phone || "")
+  }, [conversation.id, conversation.visitor_phone])
 
   const saveName = () => {
     if (onUpdateMetadata) {
@@ -162,11 +190,26 @@ export default function VisitorDetailsPanel({
   const [leadStatus, setLeadStatus] = useState<LeadStatusResponse | null>(null)
   const [leadBusy, setLeadBusy] = useState<string | null>(null) // `resend:${id}` | null
 
+  // Guards against an in-flight request for a previously-open conversation
+  // resolving AFTER the request for whatever conversation is open now (e.g.
+  // an agent clicking through the inbox quickly) and clobbering the current
+  // one's correct state with a stale, unrelated result — same pattern as
+  // loadMessagesTokenRef/loadDetailsTokenRef elsewhere in ConversationsView.
+  const leadStatusTokenRef = useRef(0)
+  const leadStatusConvIdRef = useRef<number | null>(null)
+
   const refreshLeadStatus = useCallback(() => {
-    leadsApi.getStatus(conversation.id).then(setLeadStatus).catch(() => setLeadStatus(null))
+    const token = ++leadStatusTokenRef.current
+    const forId = conversation.id
+    leadsApi.getStatus(forId)
+      .then((status) => {
+        if (leadStatusTokenRef.current === token) setLeadStatus(status)
+      })
+      .catch(() => {
+        if (leadStatusTokenRef.current === token) setLeadStatus(null)
+      })
   }, [conversation.id])
 
-  const leadStatusConvIdRef = useRef<number | null>(null)
   useEffect(() => {
     // Only blank the section on an actual conversation switch — a WS-driven
     // refresh of the same conversation should update in place, not flicker.

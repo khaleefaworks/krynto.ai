@@ -349,6 +349,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
 
     const [uploadingCount, setUploadingCount] = useState(0)
     const [shortcutMenuIndex, setShortcutMenuIndex] = useState(0)
+    const shortcutItemRefs = useRef<(HTMLButtonElement | null)[]>([])
     const [selectionVersion, setSelectionVersion] = useState(0)
 
     const [plainValue, setPlainValue] = useState('')
@@ -459,12 +460,18 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                 if (shortcutMenuOpenRef.current) {
                     if (e.key === 'ArrowDown') {
                         e.preventDefault()
-                        setShortcutMenuIndex((i) => Math.min(i + 1, shortcutMatchesRef.current.length - 1))
+                        setShortcutMenuIndex((i) => {
+                            const len = shortcutMatchesRef.current.length
+                            return len ? (i + 1) % len : 0
+                        })
                         return true
                     }
                     if (e.key === 'ArrowUp') {
                         e.preventDefault()
-                        setShortcutMenuIndex((i) => Math.max(i - 1, 0))
+                        setShortcutMenuIndex((i) => {
+                            const len = shortcutMatchesRef.current.length
+                            return len ? (i - 1 + len) % len : 0
+                        })
                         return true
                     }
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -568,6 +575,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
     // rendering both just work off this one array regardless of which it is.
     const activeMatches = shortcutCtx.trigger === 'action' ? actionMatches : shortcutMatches
     const shortcutMenuOpen = shortcutCtx.open && activeMatches.length > 0
+
+    // Arrow-key navigation moves the highlight but the list never scrolled to
+    // follow it, so the selected row could end up hidden below the fold.
+    useEffect(() => {
+        if (!shortcutMenuOpen) return
+        shortcutItemRefs.current[shortcutMenuIndex]?.scrollIntoView({ block: 'nearest' })
+    }, [shortcutMenuOpen, shortcutMenuIndex, activeMatches])
 
     const focusEditor = useCallback(() => {
         requestAnimationFrame(() => editor?.commands.focus())
@@ -796,13 +810,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
             <div className="relative">
                 {shortcutMenuOpen && (
                     <div className="absolute bottom-full left-0 mb-2 w-full max-w-lg rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden z-50">
-                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                            {shortcutCtx.trigger === 'action' && <UserPlus className="h-3.5 w-3.5" />}
                             {shortcutCtx.trigger === 'action' ? 'Forms' : 'Shortcuts'}
                         </div>
                         <div className="max-h-64 overflow-auto">
                             {activeMatches.map((s, idx) => (
                                 <button
                                     key={`${s.scope}-${s.id}`}
+                                    ref={(el) => { shortcutItemRefs.current[idx] = el }}
                                     type="button"
                                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${idx === shortcutMenuIndex ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                                     onMouseEnter={() => setShortcutMenuIndex(idx)}
@@ -813,10 +829,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer
                                     }}
                                 >
                                     {s.kind === 'contact_card' ? (
-                                        <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                                            <UserPlus className="h-3.5 w-3.5 flex-shrink-0" />
-                                            <span className="font-medium">{s.message}</span>
-                                        </div>
+                                        <span className="text-gray-900 dark:text-gray-100">{s.message}</span>
                                     ) : (
                                         <>
                                             <div className="flex items-center gap-2">
