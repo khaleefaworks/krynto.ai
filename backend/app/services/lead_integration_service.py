@@ -36,6 +36,7 @@ def enqueue_lead(
     website_id: int,
     source: str,
     conversation_id: int | None = None,
+    form_id: int | None = None,
     name: str | None = None,
     email: str | None = None,
     phone: str | None = None,
@@ -43,12 +44,17 @@ def enqueue_lead(
 ) -> None:
     """Record a captured lead and kick off delivery to every enabled webhook.
 
+    form_id scopes delivery to integrations registered for that specific form
+    (plus website-wide, unscoped integrations) — see
+    integrations_repo.get_enabled_by_type. Leads with no form_id (the offline
+    gate) only reach unscoped integrations.
+
     Best-effort: never raises into the caller (offline-gate / form-submission
     paths must keep working even if a webhook is misconfigured or down).
     """
     try:
         integrations = integrations_repo.get_enabled_by_type(
-            db, website_id, WebsiteIntegrationType.WEBHOOK
+            db, website_id, WebsiteIntegrationType.WEBHOOK, form_id=form_id
         )
         if not integrations:
             return
@@ -110,6 +116,7 @@ async def _attempt_delivery(delivery_id: int) -> None:
         try:
             await loop.run_in_executor(None, lambda: _push_webhook(integration.config, delivery.payload))
             deliveries_repo.mark_as_sent(db, delivery.id)
+            await _fire_lead_delivered_trigger(delivery)
         except Exception as e:
             deliveries_repo.mark_as_failed_with_retry(
                 db,
@@ -119,8 +126,89 @@ async def _attempt_delivery(delivery_id: int) -> None:
                 retry_backoff_minutes=RETRY_BACKOFF_MINUTES,
             )
             logger.warning("lead_delivery_attempt_failed", delivery_id=delivery.id, error=str(e))
+        await _broadcast_lead_delivery_update(db, website_id=delivery.website_id, conversation_id=delivery.conversation_id)
     finally:
         db.close()
+
+
+async def _fire_lead_delivered_trigger(delivery) -> None:
+    """Notify the automations engine that a lead was successfully pushed out,
+    so a website can wire lead_delivered -> tag_conversation (e.g. the same
+    "leads created" tag agents already apply by hand once a lead lands in
+    their CRM/ERP). Form-agnostic — fires the same way regardless of which
+    form or integration produced the delivery, keyed only by conversation_id,
+    so N forms need no special-casing here. Best-effort: never breaks delivery
+    bookkeeping if the automations engine fails.
+    """
+    if not delivery.conversation_id:
+        return
+    db = SessionLocal()
+    try:
+        from app.services.conversation_orchestrator import ConversationOrchestrator
+
+        orchestrator = ConversationOrchestrator(db)
+        await orchestrator._run_automation_flows(
+            conversation_id=delivery.conversation_id,
+            website_id=delivery.website_id,
+            trigger="lead_delivered",
+            log_key="lead_delivered_automation_failed",
+            send_to_visitor=False,
+        )
+    except Exception as e:
+        logger.warning(
+            "lead_delivered_trigger_failed",
+            conversation_id=delivery.conversation_id,
+            error=str(e),
+        )
+    finally:
+        db.close()
+
+
+def _fire_lead_delivered_trigger_sync(delivery) -> None:
+    """Sync-context wrapper for the retry job, which APScheduler runs as a
+    plain callable outside the event loop."""
+    try:
+        asyncio.run(_fire_lead_delivered_trigger(delivery))
+    except Exception as e:
+        logger.warning(
+            "lead_delivered_trigger_failed",
+            conversation_id=getattr(delivery, "conversation_id", None),
+            error=str(e),
+        )
+
+
+async def _broadcast_lead_delivery_update(db, *, website_id: int, conversation_id: int | None) -> None:
+    """Push a WS ping to agents watching this conversation whenever a
+    delivery's status changes (sent or failed) — without this, the chat
+    page's Lead delivery section and any tag an automation just applied only
+    show up after a reload, since the status flip happens asynchronously
+    after the agent's click (or on the background retry job) rather than in
+    the request/response that triggered it. Best-effort, both outcomes.
+    """
+    if not conversation_id:
+        return
+    try:
+        from app.services.agent_service import AgentService
+
+        await AgentService(db).broadcast_to_active_agents(
+            website_id=website_id,
+            message_data={
+                "type": "lead_delivery_updated",
+                "conversation_id": conversation_id,
+                "website_id": website_id,
+            },
+            include_global=True,
+        )
+    except Exception as e:
+        logger.warning("lead_delivery_broadcast_failed", conversation_id=conversation_id, error=str(e))
+
+
+def _broadcast_lead_delivery_update_sync(db, *, website_id: int, conversation_id: int | None) -> None:
+    """Sync-context wrapper for the retry job (see _fire_lead_delivered_trigger_sync)."""
+    try:
+        asyncio.run(_broadcast_lead_delivery_update(db, website_id=website_id, conversation_id=conversation_id))
+    except Exception as e:
+        logger.warning("lead_delivery_broadcast_failed", conversation_id=conversation_id, error=str(e))
 
 
 def _push_webhook(config: dict, payload: dict) -> None:
@@ -157,6 +245,27 @@ def _push_webhook(config: dict, payload: dict) -> None:
     response.raise_for_status()
 
 
+async def force_resend_delivery(db, delivery_id: int) -> dict:
+    """Manually re-push one delivery right now, regardless of its current
+    status or retry backoff schedule — backs the agent-facing "Resend"
+    action. Raises ValueError if the delivery doesn't exist.
+    """
+    from app.models.lead_integration_delivery import LeadIntegrationDelivery
+
+    delivery = db.query(LeadIntegrationDelivery).filter_by(id=delivery_id).first()
+    if not delivery:
+        raise ValueError("Delivery not found")
+
+    await _attempt_delivery(delivery_id)
+    db.refresh(delivery)
+    return {
+        "id": delivery.id,
+        "status": delivery.status.value,
+        "error_message": delivery.error_message,
+        "attempt_count": delivery.attempt_count,
+    }
+
+
 def retry_failed_lead_deliveries(db=None, *, max_retries: int = 50) -> dict:
     """Retry pending lead deliveries due for another attempt.
 
@@ -184,10 +293,12 @@ def retry_failed_lead_deliveries(db=None, *, max_retries: int = 50) -> dict:
                     error_message="Integration disabled or deleted",
                     retry_backoff_minutes=RETRY_BACKOFF_MINUTES,
                 )
+                _broadcast_lead_delivery_update_sync(db, website_id=delivery.website_id, conversation_id=delivery.conversation_id)
                 continue
             try:
                 _push_webhook(integration.config, delivery.payload)
                 deliveries_repo.mark_as_sent(db, delivery.id)
+                _fire_lead_delivered_trigger_sync(delivery)
                 succeeded += 1
             except Exception as e:
                 deliveries_repo.mark_as_failed_with_retry(
@@ -197,6 +308,7 @@ def retry_failed_lead_deliveries(db=None, *, max_retries: int = 50) -> dict:
                     error_message=str(e),
                     retry_backoff_minutes=RETRY_BACKOFF_MINUTES,
                 )
+            _broadcast_lead_delivery_update_sync(db, website_id=delivery.website_id, conversation_id=delivery.conversation_id)
         logger.info("lead_delivery_retry_job", attempted=attempted, succeeded=succeeded)
         return {"attempted": attempted, "succeeded": succeeded}
     finally:

@@ -59,6 +59,7 @@ const TRIGGERS: { value: AutomationTrigger; label: string }[] = [
   { value: 'bot_conversation_resolved',  label: 'Bot resolved chat (bot-only)' },
   { value: 'conversation_auto_resolved', label: 'Auto-resolved' },
   { value: 'conversation_reopened',      label: 'Conversation reopened' },
+  { value: 'lead_delivered',             label: 'Lead delivered to integration' },
 ]
 
 // Triggers the backend always fires with send_to_visitor=False, hardcoded at
@@ -71,6 +72,7 @@ const AGENT_ONLY_TRIGGERS = new Set<string>([
   'visitor_reconnected',
   'visitor_socket_connected',
   'visitor_rated_conversation',
+  'lead_delivered',
 ])
 
 // ─── Summary helpers ──────────────────────────────────────────────────────

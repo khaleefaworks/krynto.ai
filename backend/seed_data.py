@@ -136,6 +136,18 @@ AUTOMATION_LIBRARY_TEMPLATES = [
         ],
         "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
     },
+    # ── Lead delivered ───────────────────────────────────────────────────────
+    {
+        "name": "Lead delivered",
+        "description": "Tag the conversation once a captured lead is confirmed delivered to an integration (never on capture, never on a failed push) — automates the \"leads created\" tag agents already apply by hand once a lead lands in their CRM/ERP.",
+        "trigger": "lead_delivered",
+        "category": "auto_message",
+        "nodes": [
+            {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+            {"id": "n1", "type": "tag_conversation", "config": {"tag": "leads created"}, "position": {"x": 0, "y": 150}},
+        ],
+        "edges": [{"id": "e1", "from": "trigger", "to": "n1"}],
+    },
     # ── Chatbot ───────────────────────────────────────────────────────────────
     {
         "name": "Team routing chatbot",

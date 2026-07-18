@@ -25,6 +25,11 @@ class WebsiteIntegration(Base, TimestampMixin):
 
     id = Column(Integer, primary_key=True)
     website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Null = fires for every lead capture on this website, regardless of which
+    # form produced it (the original, still-default behavior). Set = scoped to
+    # leads captured through that one form, so different forms can route to
+    # different external systems.
+    form_id = Column(Integer, ForeignKey("website_forms.id", ondelete="CASCADE"), nullable=True, index=True)
     type = Column(
         SQLEnum(
             WebsiteIntegrationType,
@@ -44,3 +49,4 @@ class WebsiteIntegration(Base, TimestampMixin):
     config = Column(JSON, nullable=False, default=dict)
 
     website = relationship("Website")
+    form = relationship("WebsiteForm")

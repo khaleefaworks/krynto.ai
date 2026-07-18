@@ -17,29 +17,42 @@ interface Webhook {
     type: string
     name: string
     enabled: boolean
+    form_id: number | null
+    form_name: string | null
     config: {
         url?: string
         secret_set?: boolean
     }
 }
 
+interface FormOption {
+    id: number
+    name: string
+}
+
 export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: number }) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [webhooks, setWebhooks] = useState<Webhook[]>([])
+    const [forms, setForms] = useState<FormOption[]>([])
 
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
     const [newUrl, setNewUrl] = useState('')
     const [newSecret, setNewSecret] = useState('')
+    const [newFormId, setNewFormId] = useState<string>('')
     const [saving, setSaving] = useState(false)
 
     const load = useCallback(async () => {
         setLoading(true)
         setError(null)
         try {
-            const data = await apiRequest<Webhook[]>(`/websites/${websiteId}/integrations`)
-            setWebhooks(Array.isArray(data) ? data : [])
+            const [hooksData, formsData] = await Promise.all([
+                apiRequest<Webhook[]>(`/websites/${websiteId}/integrations`),
+                apiRequest<FormOption[]>(`/websites/${websiteId}/forms`),
+            ])
+            setWebhooks(Array.isArray(hooksData) ? hooksData : [])
+            setForms(Array.isArray(formsData) ? formsData : [])
         } catch (e: any) {
             setError(e?.message || 'Failed to load integrations')
         } finally {
@@ -53,6 +66,7 @@ export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: numbe
         setNewName('')
         setNewUrl('')
         setNewSecret('')
+        setNewFormId('')
         setError(null)
         setCreating(true)
     }
@@ -68,6 +82,7 @@ export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: numbe
                     name: newName.trim() || 'Webhook',
                     url: newUrl.trim(),
                     secret: newSecret.trim() || undefined,
+                    form_id: newFormId ? Number(newFormId) : null,
                 }),
             })
             setCreating(false)
@@ -76,6 +91,21 @@ export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: numbe
             setError(e?.message || 'Failed to create webhook.')
         } finally {
             setSaving(false)
+        }
+    }
+
+    const handleScopeChange = async (hook: Webhook, formId: string) => {
+        const nextFormId = formId ? Number(formId) : null
+        setWebhooks(prev => prev.map(h => h.id === hook.id ? { ...h, form_id: nextFormId } : h))
+        try {
+            await apiRequest(`/websites/${websiteId}/integrations/webhooks/${hook.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ form_id: nextFormId }),
+            })
+            await load()
+        } catch (e: any) {
+            setError(e?.message || 'Failed to update webhook scope.')
+            await load()
         }
     }
 
@@ -152,6 +182,26 @@ export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: numbe
                             className="dark:bg-gray-800 dark:border-gray-700"
                         />
                     </div>
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
+                            Scope to form <span className="text-xs text-gray-400">(optional)</span>
+                        </label>
+                        <select
+                            value={newFormId}
+                            onChange={e => setNewFormId(e.target.value)}
+                            className="w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-sm px-2 text-gray-900 dark:text-white"
+                        >
+                            <option value="">All forms (website-wide)</option>
+                            {forms.map(f => (
+                                <option key={f.id} value={f.id}>{f.name}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            Leave as "All forms" to fire for every lead on this website. Pick a form to only
+                            fire when that specific form captures a lead — useful when different forms should
+                            route to different systems.
+                        </p>
+                    </div>
                     <div className="flex gap-2">
                         <Button onClick={handleCreate} disabled={saving}>
                             {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}
@@ -184,6 +234,17 @@ export default function WebsiteIntegrationsTab({ websiteId }: { websiteId: numbe
                                     <div className="text-xs text-gray-400 dark:text-gray-500">Signed with a secret</div>
                                 )}
                             </div>
+                            <select
+                                value={hook.form_id ?? ''}
+                                onChange={(e) => handleScopeChange(hook, e.target.value)}
+                                className="h-8 rounded-md border border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs px-2 text-gray-700 dark:text-gray-300 max-w-[140px]"
+                                title="Which form's leads this webhook fires for"
+                            >
+                                <option value="">All forms</option>
+                                {forms.map(f => (
+                                    <option key={f.id} value={f.id}>{f.name}</option>
+                                ))}
+                            </select>
                             <Switch checked={hook.enabled} onCheckedChange={(v) => handleToggleEnabled(hook, v)} />
                             <Button
                                 size="sm"

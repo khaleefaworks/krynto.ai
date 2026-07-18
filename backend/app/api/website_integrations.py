@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.website import Website
 from app.models.website_integration import WebsiteIntegration, WebsiteIntegrationType
 from app.repos import website_integrations as integrations_repo
+from app.repos import forms as forms_repo
 from app.services.visibility import compute_visibility_scope, ensure_website_visible
 
 router = APIRouter(prefix="/websites/{website_id}/integrations", tags=["integrations"])
@@ -55,6 +56,8 @@ class WebhookCreate(BaseModel):
     enabled: bool = True
     url: str
     secret: Optional[str] = None
+    # Omit/null = fires for every lead on the website; set = scoped to that form only.
+    form_id: Optional[int] = None
 
 
 class WebhookUpdate(BaseModel):
@@ -63,6 +66,10 @@ class WebhookUpdate(BaseModel):
     url: Optional[str] = None
     # Omit to keep the previously-saved secret; send "" explicitly to clear it.
     secret: Optional[str] = None
+    # Sentinel: omit the field entirely to leave scoping unchanged; send
+    # form_id explicitly (including null) to change it. Pydantic's
+    # model_fields_set on the request body distinguishes "omitted" below.
+    form_id: Optional[int] = None
 
 
 def _integration_to_dict(integration: WebsiteIntegration) -> dict:
@@ -75,6 +82,8 @@ def _integration_to_dict(integration: WebsiteIntegration) -> dict:
         "type": integration.type.value if hasattr(integration.type, "value") else integration.type,
         "name": integration.name,
         "enabled": integration.enabled,
+        "form_id": integration.form_id,
+        "form_name": integration.form.name if integration.form_id and integration.form else None,
         "config": {**config, "secret_set": has_secret},
         "created_at": integration.created_at.isoformat() if integration.created_at else None,
         "updated_at": integration.updated_at.isoformat() if integration.updated_at else None,
@@ -105,6 +114,11 @@ def create_webhook(
     if not body.url.strip():
         raise HTTPException(status_code=422, detail="url is required")
 
+    if body.form_id is not None:
+        form = forms_repo.get_form_by_id(db, body.form_id)
+        if not form or form.website_id != website_id:
+            raise HTTPException(status_code=422, detail="Invalid form_id for this website")
+
     integration = integrations_repo.create_integration(
         db,
         website_id=website_id,
@@ -112,6 +126,7 @@ def create_webhook(
         name=body.name.strip() or "Webhook",
         enabled=body.enabled,
         config={"url": body.url.strip(), "secret": (body.secret or None)},
+        form_id=body.form_id,
     )
     return _integration_to_dict(integration)
 
@@ -139,12 +154,21 @@ def update_webhook(
     if body.secret is not None:
         config["secret"] = body.secret or None
 
+    form_id_kwargs = {}
+    if "form_id" in body.model_fields_set:
+        if body.form_id is not None:
+            form = forms_repo.get_form_by_id(db, body.form_id)
+            if not form or form.website_id != website_id:
+                raise HTTPException(status_code=422, detail="Invalid form_id for this website")
+        form_id_kwargs["form_id"] = body.form_id
+
     integration = integrations_repo.update_integration(
         db,
         integration,
         name=(body.name.strip() if body.name is not None else None),
         enabled=body.enabled,
         config=config,
+        **form_id_kwargs,
     )
     return _integration_to_dict(integration)
 

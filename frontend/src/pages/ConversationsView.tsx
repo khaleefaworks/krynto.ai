@@ -552,6 +552,11 @@ export default function ConversationsView() {
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [formSubmissions, setFormSubmissions] = useState<any[]>([])
+    // Bumped on a lead_delivery_updated WS event so VisitorDetailsPanel's
+    // Lead delivery section refetches live — a delivery's status flips
+    // asynchronously after the request that triggered it, so without this
+    // agents only see it after switching conversations or reloading.
+    const [leadStatusRefreshKey, setLeadStatusRefreshKey] = useState(0)
     const [availableTags, setAvailableTags] = useState<any[]>([])
     const [conversationTags, setConversationTags] = useState<any[]>([])
     const [visitorConversations, setVisitorConversations] = useState<VisitorConversation[]>([])
@@ -1365,6 +1370,13 @@ export default function ConversationsView() {
                 apiRequest<any[]>(`/chats/${dataConversationId}/form-submissions`)
                     .then((subs) => setFormSubmissions(Array.isArray(subs) ? subs : []))
                     .catch(() => { })
+            } else if (data.type === 'lead_delivery_updated' && dataConversationId === selectedChat) {
+                // A delivery just flipped to sent/failed (or a lead_delivered
+                // automation just tagged the conversation) asynchronously,
+                // outside any request this tab made — refresh both the Lead
+                // delivery section and the conversation's tags live.
+                setLeadStatusRefreshKey((k) => k + 1)
+                loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'connected') {
                 loadChatData(selectedChat, { showSpinner: false, preserveMessages: true })
             } else if (data.type === 'visitor_typing' && dataConversationId === selectedChat) {
@@ -3627,6 +3639,7 @@ export default function ConversationsView() {
                                     browsingHistory={browsingHistory}
                                     rating={conversationRating}
                                     formSubmissions={formSubmissions}
+                                    leadStatusRefreshKey={leadStatusRefreshKey}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {
@@ -3740,6 +3753,7 @@ export default function ConversationsView() {
                             browsingHistory={browsingHistory}
                             rating={conversationRating}
                             formSubmissions={formSubmissions}
+                            leadStatusRefreshKey={leadStatusRefreshKey}
                             onUpdateMetadata={async (data) => {
                                 if (!conversation?.id) return
                                 try {

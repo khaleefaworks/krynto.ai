@@ -17,6 +17,7 @@ export type AutomationTrigger =
   | 'bot_conversation_resolved'
   | 'conversation_auto_resolved'
   | 'conversation_reopened'
+  | 'lead_delivered'
 
 export type AutomationNodeType =
   | 'trigger'

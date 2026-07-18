@@ -33,6 +33,7 @@ from app.api.website_teams import router as website_teams_router
 from app.api.website_shortcuts import router as website_shortcuts_router
 from app.api.forms import router as forms_router
 from app.api.website_integrations import router as website_integrations_router
+from app.api.leads import router as leads_router
 from app.api.teams_overview import router as teams_overview_router
 from app.api.analytics import router as analytics_router
 from app.api.ratings import router as ratings_router
@@ -300,6 +301,7 @@ app.include_router(website_teams_router)
 app.include_router(website_shortcuts_router)
 app.include_router(forms_router)
 app.include_router(website_integrations_router)
+app.include_router(leads_router)
 app.include_router(teams_overview_router)
 app.include_router(analytics_router)
 app.include_router(ratings_router)

@@ -489,6 +489,7 @@ async def submit_form(
             conversation=conversation if conversation_id is not None else None,
             form_fields=form.fields,
             data=validated_data,
+            form_id=form.id,
         )
 
     if card_message is not None and conversation is not None:
@@ -514,7 +515,7 @@ async def submit_form(
 
 
 def _capture_lead_from_submission(
-    db: Session, *, website_id: int, conversation, form_fields: list, data: dict
+    db: Session, *, website_id: int, conversation, form_fields: list, data: dict, form_id: int | None = None
 ) -> None:
     """Pull name/email/phone out of a contact-card submission by field_type
     (email/phone are unambiguous; "name" is matched by the field's machine
@@ -562,6 +563,7 @@ def _capture_lead_from_submission(
             db,
             website_id=website_id,
             conversation_id=conversation.id if conversation is not None else None,
+            form_id=form_id,
             source="live_chat_form",
             name=name or (conversation.visitor_name if conversation is not None else None),
             email=email or (conversation.visitor_email if conversation is not None else None),

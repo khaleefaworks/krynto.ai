@@ -6,6 +6,7 @@ outbound lead pushes instead of push notifications.
 """
 
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
 
@@ -45,3 +46,5 @@ class LeadIntegrationDelivery(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    integration = relationship("WebsiteIntegration")

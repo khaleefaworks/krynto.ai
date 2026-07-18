@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -9,12 +9,16 @@ import {
   Monitor,
   Globe,
   Plus,
-  X
+  X,
+  RotateCw,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import UserAvatar from "@/components/UserAvatar"
 import BotAvatarIcon from "@/components/BotAvatarIcon"
 import { API_BASE } from "@/config/endpoints"
+import { leadsApi, type LeadStatusResponse } from "@/services/leads"
 
 function shortSessionId(sessionId: string | null | undefined): string {
   const raw = String(sessionId || "").trim()
@@ -33,6 +37,14 @@ function visitorDisplayName(conv: { visitor_name?: string | null; title?: string
   const shortId = String(conv.short_id || '').trim()
   if (shortId) return shortId
   return shortSessionId(conv.session_id)
+}
+
+const LEAD_STATUS_META: Record<string, { label: string; className: string }> = {
+  not_sent: { label: 'Not sent', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' },
+  pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300' },
+  sent: { label: 'Sent', className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' },
+  partial: { label: 'Partially sent', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' },
+  failed: { label: 'Failed', className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
 }
 
 interface VisitorDetailsPanelProps {
@@ -89,6 +101,10 @@ interface VisitorDetailsPanelProps {
     data: Record<string, string>
     created_at: string | null
   }>
+
+  // Bumped by the parent on a lead_delivery_updated WS event so the Lead
+  // delivery section below refetches without waiting for a reload.
+  leadStatusRefreshKey?: number
 }
 
 export default function VisitorDetailsPanel({
@@ -100,6 +116,7 @@ export default function VisitorDetailsPanel({
   browsingHistory = [],
   rating,
   formSubmissions = [],
+  leadStatusRefreshKey,
 }: VisitorDetailsPanelProps) {
   const [editingName, setEditingName] = useState(false)
   const [editingEmail, setEditingEmail] = useState(false)
@@ -140,6 +157,39 @@ export default function VisitorDetailsPanel({
       onUpdateMetadata({ visitor_phone: phone })
     }
     setEditingPhone(false)
+  }
+
+  const [leadStatus, setLeadStatus] = useState<LeadStatusResponse | null>(null)
+  const [leadBusy, setLeadBusy] = useState<string | null>(null) // `resend:${id}` | null
+
+  const refreshLeadStatus = useCallback(() => {
+    leadsApi.getStatus(conversation.id).then(setLeadStatus).catch(() => setLeadStatus(null))
+  }, [conversation.id])
+
+  const leadStatusConvIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    // Only blank the section on an actual conversation switch — a WS-driven
+    // refresh of the same conversation should update in place, not flicker.
+    if (leadStatusConvIdRef.current !== conversation.id) {
+      leadStatusConvIdRef.current = conversation.id
+      setLeadStatus(null)
+    }
+    refreshLeadStatus()
+  }, [conversation.id, refreshLeadStatus, leadStatusRefreshKey])
+
+  const handleResendDelivery = async (deliveryId: number) => {
+    if (!window.confirm(
+      "This will send the lead to this integration again right now. If it already went through, the receiving system may end up with a duplicate lead. Continue?"
+    )) return
+    setLeadBusy(`resend:${deliveryId}`)
+    try {
+      await leadsApi.resendDelivery(conversation.id, deliveryId)
+      refreshLeadStatus()
+    } catch {
+      // no-op — the delivery row's own status reflects the outcome after refresh
+    } finally {
+      setLeadBusy(null)
+    }
   }
 
   const handleAddNote = () => {
@@ -328,6 +378,58 @@ export default function VisitorDetailsPanel({
           </div>
         </div>
 
+      </div>
+
+      {/* Lead delivery status */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Lead delivery</h4>
+          {leadStatus && leadStatus.has_integrations && leadStatus.status !== 'not_sent' && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${LEAD_STATUS_META[leadStatus.status]?.className || ''}`}>
+              {LEAD_STATUS_META[leadStatus.status]?.label || leadStatus.status}
+            </span>
+          )}
+        </div>
+
+        {!leadStatus ? null : !leadStatus.has_integrations ? (
+          <p className="text-xs text-gray-400 dark:text-gray-600 italic">No integrations configured for this website</p>
+        ) : leadStatus.deliveries.length === 0 ? (
+          <p className="text-xs text-gray-400 dark:text-gray-600 italic">No lead sent yet</p>
+        ) : (
+          <div className="space-y-1.5">
+            {leadStatus.deliveries.map((d) => (
+              <div key={d.id} className="flex items-center justify-between gap-2 text-xs py-1">
+                <div className="min-w-0 flex-1">
+                  <span className="text-gray-700 dark:text-gray-300 truncate block">
+                    {d.integration_name || `Integration #${d.integration_id}`}
+                  </span>
+                  {d.status === 'failed' && d.error_message && (
+                    <span className="text-red-500 dark:text-red-400 truncate block" title={d.error_message}>
+                      {d.error_message}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {d.status === 'sent' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                  ) : d.status === 'failed' ? (
+                    <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                  ) : (
+                    <span className="h-3.5 w-3.5 rounded-full border-2 border-yellow-400 border-t-transparent" />
+                  )}
+                  <button
+                    onClick={() => handleResendDelivery(d.id)}
+                    disabled={leadBusy === `resend:${d.id}`}
+                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+                    title="Force resend"
+                  >
+                    <RotateCw className={`h-3.5 w-3.5 ${leadBusy === `resend:${d.id}` ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Private Notes */}

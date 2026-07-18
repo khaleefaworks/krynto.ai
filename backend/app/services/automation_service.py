@@ -289,6 +289,25 @@ class AutomationService:
                     {"id": "e1", "from": "trigger", "to": "n1"},
                 ],
             },
+            # ─── Lead delivered (INT1 gap-fill) ───────────────────────────────
+            # Fires only once a lead's webhook delivery actually succeeds (not
+            # on capture, not on a failed push) — mirrors the "leads created"
+            # tag agents already apply by hand once a lead lands in their
+            # CRM/ERP. Same tag name every website already uses for this by
+            # convention; tag_conversation's upsert-by-name means a website
+            # that already has a "leads created" tag reuses that exact row.
+            {
+                "name": "Lead delivered",
+                "trigger": "lead_delivered",
+                "enabled": True,
+                "nodes": [
+                    {"id": "trigger", "type": "trigger", "config": {"repeat": "always"}, "position": {"x": 0, "y": 0}},
+                    {"id": "n1", "type": "tag_conversation", "config": {"tag": "leads created"}, "position": {"x": 0, "y": 150}},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "trigger", "to": "n1"},
+                ],
+            },
         ]
 
         try:
