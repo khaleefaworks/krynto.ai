@@ -552,6 +552,45 @@ export default function ConversationsView() {
     const [browsingHistory, setBrowsingHistory] = useState<any[]>([])
     const [conversationRating, setConversationRating] = useState<{ rating: number; feedback?: string } | null>(null)
     const [formSubmissions, setFormSubmissions] = useState<any[]>([])
+    // Patches the one submission VisitorDetailsPanel's "Form submissions"
+    // popup just saved an edit to, in place — the panel's edit state resets
+    // once the popup closes, so without this a reopen would show the
+    // pre-edit values again until the next full conversation-detail fetch.
+    const handleFormSubmissionUpdated = useCallback((submissionId: number, data: Record<string, string>) => {
+        setFormSubmissions((prev) => prev.map((s) => (s.id === submissionId ? { ...s, data } : s)))
+    }, [])
+    // Patches visitor_name/email/phone into conversation state (open panel,
+    // chat list row, resolved list) wherever they're cached — shared by the
+    // "agent typed a correction" path (onUpdateMetadata, which PATCHes the
+    // conversation itself) and the "agent edited the contact-card form
+    // submission" path (chats.py's form-submission PATCH already syncs
+    // conversation.visitor_* server-side as a side effect, so that caller
+    // only needs the local state applied, no second network round trip).
+    const applyConversationContactUpdates = useCallback((updates: {
+        visitor_name?: string | null
+        visitor_email?: string | null
+        visitor_phone?: string | null
+    }) => {
+        const convId = conversation?.id
+        if (!convId) return
+        setConversation((prev) => (prev ? ({ ...prev, ...updates } as any) : prev))
+        setActiveChats(
+            activeChatsRef.current.map((c) => (c.id === convId ? ({ ...(c as any), ...updates } as any) : c))
+        )
+        setResolvedChats((prev) =>
+            (Array.isArray(prev) ? prev : []).map((c) => ((c as any).id === convId ? ({ ...(c as any), ...updates } as any) : c))
+        )
+    }, [conversation?.id])
+    // Refetches the full list fresh — passed to VisitorDetailsPanel so its
+    // "Form submissions" popup pulls current data on open instead of
+    // whatever was loaded when the conversation was first opened, which can
+    // be stale by the time an agent opens the popup minutes later.
+    const refetchFormSubmissions = useCallback(() => {
+        if (!selectedChat) return
+        apiRequest<any[]>(`/chats/${selectedChat}/form-submissions`)
+            .then((subs) => setFormSubmissions(Array.isArray(subs) ? subs : []))
+            .catch(() => { })
+    }, [selectedChat])
     // Bumped on a lead_delivery_updated WS event so VisitorDetailsPanel's
     // Lead delivery section refetches live — a delivery's status flips
     // asynchronously after the request that triggered it, so without this
@@ -1365,9 +1404,12 @@ export default function ConversationsView() {
                 // never refreshed — without this, a new submission (or a
                 // field the form gained after that fetch, e.g. "location")
                 // only shows up after switching conversations or reloading.
-                apiRequest<any[]>(`/chats/${dataConversationId}/form-submissions`)
-                    .then((subs) => setFormSubmissions(Array.isArray(subs) ? subs : []))
-                    .catch(() => { })
+                refetchFormSubmissions()
+                // A newly-submitted form can also change the "N forms" count
+                // shown on an awaiting-confirmation delivery in the Lead
+                // delivery section — without this it only updates after
+                // switching conversations or reloading.
+                setLeadStatusRefreshKey((k) => k + 1)
             } else if (data.type === 'lead_delivery_updated' && dataConversationId === selectedChat) {
                 // A delivery just flipped to sent/failed (or a lead_delivered
                 // automation just tagged the conversation) asynchronously,
@@ -3657,6 +3699,9 @@ export default function ConversationsView() {
                                     browsingHistory={browsingHistory}
                                     rating={conversationRating}
                                     formSubmissions={formSubmissions}
+                                    onFormSubmissionUpdated={handleFormSubmissionUpdated}
+                                    onRequestFormSubmissionsRefresh={refetchFormSubmissions}
+                                    onConversationContactSynced={applyConversationContactUpdates}
                                     leadStatusRefreshKey={leadStatusRefreshKey}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
@@ -3666,27 +3711,11 @@ export default function ConversationsView() {
                                                 visitor_email?: string | null
                                                 visitor_phone?: string | null
                                             }
-
-                                            const updates: Partial<ConversationDetails> = {
+                                            applyConversationContactUpdates({
                                                 visitor_name: resp?.visitor_name ?? undefined,
                                                 visitor_email: resp?.visitor_email ?? undefined,
                                                 visitor_phone: resp?.visitor_phone ?? undefined,
-                                            }
-
-                                            setConversation((prev) => (prev ? ({ ...prev, ...updates } as any) : prev))
-
-                                            // Zustand setter expects the full array, not an updater function.
-                                            setActiveChats(
-                                                activeChats.map((c) =>
-                                                    c.id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
-                                                )
-                                            )
-
-                                            setResolvedChats((prev) =>
-                                                (Array.isArray(prev) ? prev : []).map((c) =>
-                                                    (c as any).id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
-                                                )
-                                            )
+                                            })
                                         } catch (e) {
                                             console.error('Failed to update visitor metadata:', e)
                                         }
@@ -3771,6 +3800,9 @@ export default function ConversationsView() {
                             browsingHistory={browsingHistory}
                             rating={conversationRating}
                             formSubmissions={formSubmissions}
+                            onFormSubmissionUpdated={handleFormSubmissionUpdated}
+                            onRequestFormSubmissionsRefresh={refetchFormSubmissions}
+                            onConversationContactSynced={applyConversationContactUpdates}
                             leadStatusRefreshKey={leadStatusRefreshKey}
                             onUpdateMetadata={async (data) => {
                                 if (!conversation?.id) return
@@ -3780,22 +3812,11 @@ export default function ConversationsView() {
                                         visitor_email?: string | null
                                         visitor_phone?: string | null
                                     }
-                                    const updates: Partial<ConversationDetails> = {
+                                    applyConversationContactUpdates({
                                         visitor_name: resp?.visitor_name ?? undefined,
                                         visitor_email: resp?.visitor_email ?? undefined,
                                         visitor_phone: resp?.visitor_phone ?? undefined,
-                                    }
-                                    setConversation((prev) => (prev ? ({ ...prev, ...updates } as any) : prev))
-                                    setActiveChats(
-                                        activeChats.map((c) =>
-                                            c.id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
-                                        )
-                                    )
-                                    setResolvedChats((prev) =>
-                                        (Array.isArray(prev) ? prev : []).map((c) =>
-                                            (c as any).id === conversation.id ? ({ ...(c as any), ...updates } as any) : c
-                                        )
-                                    )
+                                    })
                                 } catch (e) {
                                     console.error('Failed to update visitor metadata:', e)
                                 }

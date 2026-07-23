@@ -17,6 +17,10 @@ class LeadDeliveryStatus(str, enum.Enum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
+    # A captured lead held for an agent to review/edit and confirm before it
+    # goes out — no automatic timeout, it waits for a human indefinitely.
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    CANCELLED = "cancelled"
 
 
 class LeadIntegrationDelivery(Base):

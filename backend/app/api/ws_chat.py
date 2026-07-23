@@ -939,16 +939,11 @@ async def chat_ws(
                             db, website_id=website_id, session_id=session_id
                         )
                         if conv:
-                            changed = False
-                            if v_name and not conv.visitor_name:
-                                conv.visitor_name = str(v_name)
-                                changed = True
-                            if v_email and not conv.visitor_email:
-                                conv.visitor_email = str(v_email)
-                                changed = True
-                            if v_phone and not conv.visitor_phone:
-                                conv.visitor_phone = str(v_phone)
-                                changed = True
+                            from app.repos.conversations import update_visitor_contact_fields
+
+                            changed = update_visitor_contact_fields(
+                                conv, name=v_name, email=v_email, phone=v_phone
+                            )
                             if changed:
                                 db.commit()
                                 try:
@@ -1466,16 +1461,11 @@ async def chat_ws_with_conversation(
                             db.expire_all()
                             fresh_conv = db.query(Conversation).filter_by(id=conv.id).first()
                             if fresh_conv:
-                                changed = False
-                                if vc_name and not fresh_conv.visitor_name:
-                                    fresh_conv.visitor_name = str(vc_name)
-                                    changed = True
-                                if vc_email and not fresh_conv.visitor_email:
-                                    fresh_conv.visitor_email = str(vc_email)
-                                    changed = True
-                                if vc_phone and not fresh_conv.visitor_phone:
-                                    fresh_conv.visitor_phone = str(vc_phone)
-                                    changed = True
+                                from app.repos.conversations import update_visitor_contact_fields
+
+                                changed = update_visitor_contact_fields(
+                                    fresh_conv, name=vc_name, email=vc_email, phone=vc_phone
+                                )
                                 if changed:
                                     db.commit()
                                     try:

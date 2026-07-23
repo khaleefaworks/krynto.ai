@@ -19,6 +19,7 @@ from app.models.conversation_page_view import ConversationPageView
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.repos import page_views as page_views_repo
+from app.repos import forms as forms_repo
 from app.services.visibility import compute_visibility_scope
 
 router = APIRouter(prefix="/conversations", tags=["conversation-metadata"])
@@ -237,7 +238,20 @@ def update_conversation_metadata(
 ):
     """Update visitor metadata for a conversation"""
     conversation = _ensure_visible(db, current_user=current_user, conversation_id=conversation_id)
-    
+
+    # Same email/phone format rules as an actual form submission (see
+    # forms_repo.validate_contact_field) — this endpoint is the fallback
+    # contact-info editor used when the visitor hasn't submitted a
+    # contact-card form yet, so it's the only guard these two fields get.
+    if metadata.visitor_email is not None:
+        err = forms_repo.validate_contact_field("email", metadata.visitor_email)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+    if metadata.visitor_phone is not None:
+        err = forms_repo.validate_contact_field("phone", metadata.visitor_phone)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+
     # Update fields if provided
     if metadata.visitor_name is not None:
         conversation.visitor_name = metadata.visitor_name

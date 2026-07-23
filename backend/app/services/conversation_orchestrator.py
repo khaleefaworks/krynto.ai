@@ -588,16 +588,11 @@ class ConversationOrchestrator:
         # already contains the up-to-date visitor profile.
         if visitor_name or visitor_email or visitor_phone:
             try:
-                changed = False
-                if visitor_name and not conversation.visitor_name:
-                    conversation.visitor_name = str(visitor_name)
-                    changed = True
-                if visitor_email and not conversation.visitor_email:
-                    conversation.visitor_email = str(visitor_email)
-                    changed = True
-                if visitor_phone and not conversation.visitor_phone:
-                    conversation.visitor_phone = str(visitor_phone)
-                    changed = True
+                from app.repos.conversations import update_visitor_contact_fields
+
+                changed = update_visitor_contact_fields(
+                    conversation, name=visitor_name, email=visitor_email, phone=visitor_phone
+                )
                 if changed:
                     self.db.commit()
                     try:

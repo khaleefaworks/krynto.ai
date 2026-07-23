@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
-import phonenumbers
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi import Response as FastAPIResponse
 from pydantic import BaseModel, Field
@@ -60,6 +58,7 @@ class FormCreate(BaseModel):
     submit_label: str = "Send"
     enabled: bool = True
     is_contact_card: bool = False
+    include_in_lead: bool = True
 
 
 class FormUpdate(BaseModel):
@@ -69,6 +68,7 @@ class FormUpdate(BaseModel):
     submit_label: Optional[str] = None
     enabled: Optional[bool] = None
     is_contact_card: Optional[bool] = None
+    include_in_lead: Optional[bool] = None
 
 
 class SubmissionCreate(BaseModel):
@@ -101,94 +101,14 @@ def _enforce_website_access(db: Session, *, website_id: int, user: User) -> None
         raise HTTPException(status_code=403, detail="Website not assigned")
 
 
-MAX_SUBMISSION_FIELDS = 50
-MAX_SUBMISSION_FIELD_NAME_CHARS = 100
-MAX_SUBMISSION_FIELD_VALUE_CHARS = 2000
-MAX_SUBMISSION_TOTAL_CHARS = 20000
-MAX_SUBMISSION_FIELD_NAME_PREVIEW_CHARS = 32
-
-
-def _normalize_form_field_defs(form_fields: list[Any] | None) -> dict[str, dict[str, Any]]:
-    allowed: dict[str, dict[str, Any]] = {}
-    for field in form_fields or []:
-        if not isinstance(field, dict):
-            continue
-        key = str(field.get("name") or field.get("field_name") or "").strip()
-        if not key:
-            continue
-        allowed[key] = {
-            "required": bool(field.get("required")),
-            "field_type": str(field.get("field_type") or field.get("type") or "text"),
-        }
-    return allowed
-
-
-_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-
-# Widget's country-code picker sends E.164 (+<code><number>); older/legacy
-# clients still send bare national digits, which we assume are Indian since
-# that's the widget's default country.
-DEFAULT_PHONE_REGION = "IN"
-
-
-def _is_valid_phone(value: str) -> bool:
-    region = None if value.strip().startswith("+") else DEFAULT_PHONE_REGION
-    try:
-        parsed = phonenumbers.parse(value, region)
-    except phonenumbers.NumberParseException:
-        return False
-    return phonenumbers.is_valid_number(parsed)
-
-
 def _validate_submission_data(data: dict[str, Any], *, form_fields: list[Any] | None) -> dict[str, Any]:
-    if len(data) > MAX_SUBMISSION_FIELDS:
-        raise HTTPException(status_code=422, detail="Too many submitted fields")
-
-    allowed_fields = _normalize_form_field_defs(form_fields)
-    unknown_keys = [k for k in data.keys() if k not in allowed_fields]
-    if unknown_keys:
-        raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(unknown_keys)}")
-
-    normalized: dict[str, Any] = {}
-    total_chars = 0
-    for key, value in data.items():
-        if len(key) > MAX_SUBMISSION_FIELD_NAME_CHARS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field name too long: {key[:MAX_SUBMISSION_FIELD_NAME_PREVIEW_CHARS]}",
-            )
-        if isinstance(value, (dict, list, tuple, set)):
-            raise HTTPException(status_code=422, detail=f"Invalid value type for field: {key}")
-        if value is not None and not isinstance(value, (str, int, float, bool)):
-            raise HTTPException(status_code=422, detail=f"Invalid value type for field: {key}")
-        value_text = "" if value is None else str(value)
-        if len(value_text) > MAX_SUBMISSION_FIELD_VALUE_CHARS:
-            raise HTTPException(status_code=422, detail=f"Field value too long: {key}")
-
-        field_type = allowed_fields[key].get("field_type")
-        if value_text.strip():
-            if field_type == "email" and not _EMAIL_RE.match(value_text.strip()):
-                raise HTTPException(status_code=422, detail=f"Invalid email address: {key}")
-            if field_type == "phone" and not _is_valid_phone(value_text):
-                raise HTTPException(status_code=422, detail=f"Invalid phone number: {key}")
-
-        total_chars += len(key) + len(value_text)
-        normalized[key] = value
-
-    if total_chars > MAX_SUBMISSION_TOTAL_CHARS:
-        raise HTTPException(status_code=422, detail="Submission payload too large")
-
-    missing_required: list[str] = []
-    for key, field in allowed_fields.items():
-        if not field.get("required"):
-            continue
-        value = normalized.get(key)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            missing_required.append(key)
-    if missing_required:
-        raise HTTPException(status_code=422, detail=f"Missing required fields: {', '.join(missing_required)}")
-
-    return normalized
+    """Thin HTTPException-raising wrapper around forms_repo.validate_submission_data
+    — see that function for the actual rules; kept here so this router's
+    existing call sites don't need to change."""
+    try:
+        return forms_repo.validate_submission_data(data, form_fields=form_fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 def _form_to_dict(form):
@@ -201,6 +121,7 @@ def _form_to_dict(form):
         "submit_label": form.submit_label,
         "enabled": form.enabled,
         "is_contact_card": form.is_contact_card,
+        "include_in_lead": form.include_in_lead,
         "created_at": form.created_at.isoformat() if form.created_at else None,
         "updated_at": form.updated_at.isoformat() if form.updated_at else None,
     }
@@ -346,6 +267,7 @@ def create_form(
         submit_label=body.submit_label,
         enabled=body.enabled,
         is_contact_card=body.is_contact_card,
+        include_in_lead=body.include_in_lead,
     )
     return _form_to_dict(form)
 
@@ -395,6 +317,8 @@ def update_form(
         updates["is_contact_card"] = body.is_contact_card
         if body.is_contact_card:
             _unset_other_contact_cards(db, website_id=website_id, keep_form_id=form_id)
+    if body.include_in_lead is not None:
+        updates["include_in_lead"] = body.include_in_lead
     form = forms_repo.update_form(db, form, **updates)
     return _form_to_dict(form)
 
@@ -524,33 +448,13 @@ def _capture_lead_from_submission(
     gate uses), and enqueue the lead — everything else in the submission
     rides along as extra_fields.
     """
-    name = email = phone = None
-    extra_fields: dict = {}
-    field_types = {str(f.get("name") or ""): str(f.get("field_type") or "text") for f in (form_fields or []) if isinstance(f, dict)}
-
-    for key, value in data.items():
-        ftype = field_types.get(key, "text")
-        if ftype == "email" and email is None:
-            email = value
-        elif ftype == "phone" and phone is None:
-            phone = value
-        elif key == "name" and name is None:
-            name = value
-        else:
-            extra_fields[key] = value
+    name, email, phone, extra_fields = forms_repo.extract_contact_fields(form_fields, data)
 
     if conversation is not None:
         try:
-            changed = False
-            if name and not conversation.visitor_name:
-                conversation.visitor_name = str(name)
-                changed = True
-            if email and not conversation.visitor_email:
-                conversation.visitor_email = str(email)
-                changed = True
-            if phone and not conversation.visitor_phone:
-                conversation.visitor_phone = str(phone)
-                changed = True
+            from app.repos.conversations import update_visitor_contact_fields
+
+            changed = update_visitor_contact_fields(conversation, name=name, email=email, phone=phone)
             if changed:
                 db.commit()
         except Exception:

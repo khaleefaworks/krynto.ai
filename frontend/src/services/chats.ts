@@ -190,6 +190,28 @@ export async function fetchResolvedCount(
   return result.total
 }
 
+export async function updateFormSubmission(
+  chatId: number,
+  submissionId: number,
+  data: Record<string, string>,
+): Promise<{
+  id: number
+  form_id: number
+  form_name: string | null
+  is_contact_card: boolean
+  data: Record<string, string>
+  // Present (non-null) only for an is_contact_card submission — the
+  // conversation's visitor_name/email/phone after this edit was synced
+  // onto them server-side, so the caller can patch local conversation
+  // state without a second round trip.
+  conversation: { visitor_name: string | null; visitor_email: string | null; visitor_phone: string | null } | null
+}> {
+  return apiRequest(`/chats/${chatId}/form-submissions/${submissionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ data }),
+  })
+}
+
 export async function fetchChatSummary(chatId: number): Promise<ActiveChat> {
   const token = useAppStore.getState().token
 

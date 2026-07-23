@@ -170,6 +170,7 @@ def start_scheduler() -> None:
     - Notification retry (every 5 min): Retry failed push notifications with backoff
     - Notification cleanup (daily): Clean up old completed notifications
     - Scheduled backup (every 2h): Dump DB + uploads to local disk (SA2)
+    - Lead delivery retry (every 5 min): Retry failed webhook pushes with backoff
     """
     global _scheduler
     if _scheduler is not None:

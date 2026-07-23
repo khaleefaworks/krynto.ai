@@ -26,6 +26,7 @@ interface WebsiteForm {
     submit_label: string
     enabled: boolean
     is_contact_card: boolean
+    include_in_lead: boolean
     created_at: string
     updated_at: string | null
 }
@@ -71,6 +72,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
     const [formSubmitLabel, setFormSubmitLabel] = useState('Send')
     const [formEnabled, setFormEnabled] = useState(true)
     const [formIsContactCard, setFormIsContactCard] = useState(false)
+    const [formIncludeInLead, setFormIncludeInLead] = useState(true)
     const [formFields, setFormFields] = useState<FormField[]>([{ ...EMPTY_FIELD }])
     const [saving, setSaving] = useState(false)
     const [deleting, setDeleting] = useState(false)
@@ -106,6 +108,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
         setFormSubmitLabel('Send')
         setFormEnabled(true)
         setFormIsContactCard(false)
+        setFormIncludeInLead(true)
         setFormFields([{ ...EMPTY_FIELD }])
         setError(null)
         setPanel({ kind: 'create' })
@@ -118,6 +121,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
         setFormSubmitLabel(item.submit_label)
         setFormEnabled(item.enabled)
         setFormIsContactCard(!!item.is_contact_card)
+        setFormIncludeInLead(item.include_in_lead !== false)
         setFormFields(
             item.fields && item.fields.length > 0
                 ? item.fields.map((f: any) => ({
@@ -205,6 +209,7 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
             submit_label: formSubmitLabel.trim() || 'Send',
             enabled: formEnabled,
             is_contact_card: formIsContactCard,
+            include_in_lead: formIncludeInLead,
             fields: validFields.map(f => {
                 const fname = (f.name || '').toString().trim()
                 const flabel = (f.label || '').toString().trim()
@@ -340,6 +345,11 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
                                                     Offline extra fields
                                                 </span>
                                             )}
+                                            {f.include_in_lead === false && (
+                                                <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
+                                                    Excluded from lead
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3">
                                             <code className="text-xs text-gray-500 dark:text-gray-400">{f.slug}</code>
@@ -441,6 +451,17 @@ export default function WebsiteFormsTab({ websiteId }: { websiteId: number }) {
                                 <Switch checked={formIsContactCard} onCheckedChange={setFormIsContactCard} />
                                 <span className="text-sm text-gray-700 dark:text-gray-300">
                                     Use as offline form's extra fields
+                                </span>
+                            </div>
+
+                            {/* Whether a submission of this form rides along in the JSON
+                                sent to lead webhooks. Off keeps its answers out of the CRM
+                                entirely (e.g. internal surveys) — separate from is_contact_card,
+                                which is about what the widget shows, not what gets sent out. */}
+                            <div className="flex items-center gap-2">
+                                <Switch checked={formIncludeInLead} onCheckedChange={setFormIncludeInLead} />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                    Include in lead webhook
                                 </span>
                             </div>
 

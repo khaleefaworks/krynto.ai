@@ -7,26 +7,6 @@ from sqlalchemy.orm import Session
 from app.models.lead_integration_delivery import LeadIntegrationDelivery, LeadDeliveryStatus
 
 
-def exists_recent_for_conversation(
-    db: Session, *, conversation_id: int, integration_id: int, within_seconds: int = 30
-) -> bool:
-    """True if a delivery for this (conversation, integration) was already
-    created very recently — guards against the offline gate's visitor_contact
-    frame and its attached contact-card form submission both enqueueing the
-    same capture (they can both fire for the same overlay submit)."""
-    cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
-    return (
-        db.query(LeadIntegrationDelivery)
-        .filter(
-            LeadIntegrationDelivery.conversation_id == conversation_id,
-            LeadIntegrationDelivery.integration_id == integration_id,
-            LeadIntegrationDelivery.created_at >= cutoff,
-        )
-        .first()
-        is not None
-    )
-
-
 def create_pending(
     db: Session,
     *,
@@ -46,6 +26,104 @@ def create_pending(
         attempt_count=0,
     )
     db.add(delivery)
+    db.commit()
+    db.refresh(delivery)
+    return delivery
+
+
+def create_awaiting_confirmation(
+    db: Session,
+    *,
+    website_id: int,
+    integration_id: int,
+    source: str,
+    payload: dict,
+    conversation_id: int,
+) -> LeadIntegrationDelivery:
+    """A newly-captured lead held for agent review instead of sent right
+    away — see get_awaiting_confirmation/merge_draft for how later captures
+    (visitor corrections, a second form) fold into this same row rather than
+    creating duplicate deliveries."""
+    delivery = LeadIntegrationDelivery(
+        website_id=website_id,
+        conversation_id=conversation_id,
+        integration_id=integration_id,
+        source=source,
+        payload=payload,
+        status=LeadDeliveryStatus.AWAITING_CONFIRMATION,
+        attempt_count=0,
+    )
+    db.add(delivery)
+    db.commit()
+    db.refresh(delivery)
+    return delivery
+
+
+def get_awaiting_confirmation(
+    db: Session, *, conversation_id: int, integration_id: int
+) -> LeadIntegrationDelivery | None:
+    return (
+        db.query(LeadIntegrationDelivery)
+        .filter(
+            LeadIntegrationDelivery.conversation_id == conversation_id,
+            LeadIntegrationDelivery.integration_id == integration_id,
+            LeadIntegrationDelivery.status == LeadDeliveryStatus.AWAITING_CONFIRMATION,
+        )
+        .first()
+    )
+
+
+def merge_draft(
+    db: Session,
+    delivery: LeadIntegrationDelivery,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    extra_fields: dict | None = None,
+) -> LeadIntegrationDelivery:
+    """Fold a new capture (a visitor's correction, or a second form) into an
+    already-AWAITING_CONFIRMATION draft in place, instead of creating a
+    second delivery. Reassigns `payload` to a new dict (rather than mutating
+    it) so SQLAlchemy detects the JSON column change."""
+    payload = dict(delivery.payload or {})
+    if name:
+        payload["name"] = name
+    if email:
+        payload["email"] = email
+    if phone:
+        payload["phone"] = phone
+    if extra_fields:
+        merged_extra = dict(payload.get("extra_fields") or {})
+        merged_extra.update(extra_fields)
+        payload["extra_fields"] = merged_extra
+    delivery.payload = payload
+    db.commit()
+    db.refresh(delivery)
+    return delivery
+
+
+def confirm_draft(
+    db: Session,
+    delivery: LeadIntegrationDelivery,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+) -> LeadIntegrationDelivery:
+    """Move an AWAITING_CONFIRMATION draft to PENDING so the normal delivery
+    path picks it up — optionally applying last-second edits (the agent
+    fixing a typo before sending) first."""
+    if name or email or phone:
+        merge_draft(db, delivery, name=name, email=email, phone=phone)
+    delivery.status = LeadDeliveryStatus.PENDING
+    db.commit()
+    db.refresh(delivery)
+    return delivery
+
+
+def discard_draft(db: Session, delivery: LeadIntegrationDelivery) -> LeadIntegrationDelivery:
+    delivery.status = LeadDeliveryStatus.CANCELLED
     db.commit()
     db.refresh(delivery)
     return delivery

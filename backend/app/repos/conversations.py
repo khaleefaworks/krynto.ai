@@ -78,6 +78,32 @@ def get_conversation_by_session(db: Session, *, website_id: int, session_id: str
     )
 
 
+def update_visitor_contact_fields(
+    conversation: Conversation,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+) -> bool:
+    """Overwrite visitor_name/email/phone with any newly-provided non-empty
+    values. Deliberately last-write-wins (not "only if empty") — a visitor
+    correcting a typo they just sent must be able to replace what's already
+    on the conversation. Callers still need to db.commit(); returns whether
+    anything changed so they know whether a commit/re-enqueue is needed.
+    """
+    changed = False
+    if name and conversation.visitor_name != str(name):
+        conversation.visitor_name = str(name)
+        changed = True
+    if email and conversation.visitor_email != str(email):
+        conversation.visitor_email = str(email)
+        changed = True
+    if phone and conversation.visitor_phone != str(phone):
+        conversation.visitor_phone = str(phone)
+        changed = True
+    return changed
+
+
 def active_conversations_with_counts_and_last_message(
     db: Session,
     *,

@@ -26,5 +26,11 @@ class WebsiteForm(Base, TimestampMixin):
     # true per website — enforced in the API layer, not a DB constraint, since
     # it's a simple admin toggle rather than a hard invariant worth an index.
     is_contact_card = Column(Boolean, nullable=False, server_default="false")
+    # Whether a submission of this form gets folded into the lead JSON sent
+    # to webhooks (see lead_integration_service._enrich_payload_with_form_submissions).
+    # Opt-out (defaults true) so existing forms keep today's behavior; an
+    # admin flips this off for forms that shouldn't reach the CRM (internal
+    # surveys, anything privacy-sensitive).
+    include_in_lead = Column(Boolean, nullable=False, server_default="true")
 
     website = relationship("Website")

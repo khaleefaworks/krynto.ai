@@ -708,7 +708,11 @@ def get_conversation_form_submissions(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
-    """Return all form submissions linked to this conversation."""
+    """Return all form submissions linked to this conversation, including
+    is_contact_card forms — the visitor-details panel treats the contact
+    card as just the first form in one unified list rather than a separate
+    section, so `is_contact_card` rides along on each item for the frontend
+    to pin/label it accordingly."""
     conv = _resolve_conversation(db, chat_id)
     _ensure_conversation_visible(db, current_user=current_user, conv=conv)
 
@@ -724,7 +728,83 @@ def get_conversation_form_submissions(
             "form_id": sub.form_id,
             "form_name": form.name if form else None,
             "form_fields": form.fields if form else [],
+            "is_contact_card": bool(form.is_contact_card) if form else False,
             "data": sub.data,
             "created_at": _utc_iso(sub.created_at),
         })
     return result
+
+
+class UpdateFormSubmissionRequest(BaseModel):
+    data: dict[str, str]
+
+
+@router.patch("/{chat_id}/form-submissions/{submission_id}")
+def update_conversation_form_submission(
+    chat_id: str,
+    submission_id: int,
+    body: UpdateFormSubmissionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Agent correction to a form submission already on file — e.g. a
+    mistyped GSTIN spotted after the fact. Independent of the still-pending
+    lead review flow (leads.py's confirm endpoint, which only covers a
+    delivery that's still AWAITING_CONFIRMATION): this covers submissions
+    tied to leads that already sent, and forms with include_in_lead=False
+    that never go through that flow at all.
+
+    For an is_contact_card form, this is also now the only place an agent
+    edits the visitor's name/email/phone (the sidebar's old standalone
+    "Offline form" section is gone) — so a change here is mirrored onto
+    conversation.visitor_name/email/phone too, via the same field-type
+    extraction the initial contact-card capture uses. Without this, the
+    chat list row/header/avatar (which read those conversation columns
+    directly, not the submission) would silently drift from what this
+    modal shows the moment an agent corrects something here.
+    """
+    conv = _resolve_conversation(db, chat_id)
+    _ensure_conversation_visible(db, current_user=current_user, conv=conv)
+
+    from app.repos import forms as forms_repo
+    from app.models.website_form import WebsiteForm
+    from app.repos.conversations import update_visitor_contact_fields
+
+    sub = forms_repo.get_submission_by_id(db, submission_id)
+    if not sub or sub.conversation_id != conv.id:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    form = db.query(WebsiteForm).filter(WebsiteForm.id == sub.form_id).first()
+
+    new_data = dict(sub.data or {})
+    new_data.update(body.data)
+    try:
+        new_data = forms_repo.validate_submission_data(new_data, form_fields=form.fields if form else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    forms_repo.update_submission_data(db, sub, new_data)
+
+    synced_conversation = None
+    if form is not None and form.is_contact_card:
+        name, email, phone, _ = forms_repo.extract_contact_fields(form.fields, new_data)
+        if update_visitor_contact_fields(conv, name=name, email=email, phone=phone):
+            db.commit()
+        # Always returned (not just when something changed) so the caller
+        # can update its local conversation state unconditionally instead of
+        # special-casing "did anything change" — same values either way.
+        synced_conversation = {
+            "visitor_name": conv.visitor_name,
+            "visitor_email": conv.visitor_email,
+            "visitor_phone": conv.visitor_phone,
+        }
+
+    return {
+        "id": sub.id,
+        "form_id": sub.form_id,
+        "form_name": form.name if form else None,
+        "form_fields": form.fields if form else [],
+        "is_contact_card": bool(form.is_contact_card) if form else False,
+        "data": sub.data,
+        "created_at": _utc_iso(sub.created_at),
+        "conversation": synced_conversation,
+    }
