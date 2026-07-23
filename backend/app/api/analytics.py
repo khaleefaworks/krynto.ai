@@ -20,6 +20,7 @@ from sqlalchemy import func, case, and_, distinct
 from sqlalchemy.orm import Session
 from fastapi.responses import StreamingResponse
 import io
+import json
 from openpyxl import Workbook
 from sqlalchemy.orm import aliased
 
@@ -1041,6 +1042,7 @@ def export_xlsx(
         "Rating", "Rating Feedback", "Closed By", "Tags",
         "Lead Source", "Referrer", "Page URL",
         "Agents Online at Arrival", "Time to First Join (s)",
+        "Form Submissions",
     ]
     _REPORT_DESCRIPTIONS = [
         "Short unique conversation ID", "OPEN or RESOLVED", "Website name", "Routed team name",
@@ -1061,6 +1063,7 @@ def export_xlsx(
         "URL of the visitor's first page view",
         "Agents marked available when this chat arrived (comma-separated names)",
         "Seconds from chat arrival to first agent joining (accepting) the chat",
+        "Every non-contact-card form submitted (e.g. 'Virtual Office'), as JSON keyed by form name",
     ]
 
     # Empty workbook if user has no accessible websites
@@ -1234,6 +1237,7 @@ def export_xlsx(
     # Main query selecting all export columns
     q = (
         db.query(
+            Conversation.id.label("conv_id"),
             Conversation.short_id.label("short_id"),
             Conversation.status.label("status"),
             website_alias.name.label("website_name"),
@@ -1342,6 +1346,8 @@ def export_xlsx(
 
     _RATING_LABEL = {1: "Good", 0: "Neutral", -1: "Bad"}
 
+    from app.services.lead_integration_service import collect_lead_form_submissions
+
     # Create write-only workbook and stream rows
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title="Analytics")
@@ -1401,6 +1407,13 @@ def export_xlsx(
         started_date, started_time = _split_dt(row.date_with_time)
         resolved_date, resolved_time = _split_dt(row.resolved_at)
 
+        # One query per exported row — acceptable for a report download (bounded
+        # by the date-range/website filters already applied above), same
+        # per-conversation lookup collect_lead_form_submissions already does
+        # for a single webhook delivery.
+        form_data = collect_lead_form_submissions(db, row.conv_id)
+        form_submissions_col = json.dumps(form_data, ensure_ascii=False) if form_data else ""
+
         ws.append([
             row.short_id or "",
             status_val,
@@ -1429,6 +1442,7 @@ def export_xlsx(
             row.page_url or "",
             agents_at_arrival,
             time_to_first_join,
+            form_submissions_col,
         ])
 
     out = io.BytesIO()
@@ -1548,6 +1562,24 @@ def export_transcripts(
         ):
             messages_map.setdefault(msg.conversation_id, []).append(msg)
 
+    # Batch load form submissions per conversation — the visitor's actual
+    # answers never become a Message (submitting a form only writes a
+    # WebsiteFormSubmission row; the one Message tied to a contact-card
+    # exchange holds only the agent's request JSON), so without this, form
+    # answers are silently absent from the exported timeline. Merged into
+    # the same per-conversation event stream as messages, below.
+    from app.models.website_form_submission import WebsiteFormSubmission
+
+    form_submissions_map: dict[int, list[WebsiteFormSubmission]] = {}
+    if conv_ids:
+        for sub in (
+            db.query(WebsiteFormSubmission)
+            .filter(WebsiteFormSubmission.conversation_id.in_(conv_ids))
+            .order_by(WebsiteFormSubmission.conversation_id.asc(), WebsiteFormSubmission.created_at.asc())
+            .all()
+        ):
+            form_submissions_map.setdefault(sub.conversation_id, []).append(sub)
+
     # Batch load tags per conversation
     tags_map: dict[int, str] = {}
     if conv_ids:
@@ -1600,17 +1632,27 @@ def export_transcripts(
         else:
             started = ""
 
+        # Merge real messages with synthesized form-submission events into one
+        # chronological timeline, so a visitor's actual form answers show up
+        # inline instead of being silently omitted.
+        events: list[tuple[datetime | None, str, str, str]] = []
         for msg in msgs:
             sender = msg.sender or (
                 msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type)
             )
-            if msg.created_at:
-                mt = msg.created_at if msg.created_at.tzinfo else msg.created_at.replace(tzinfo=timezone.utc)
+            events.append((msg.created_at, sender, msg.event_type or "", msg.content or ""))
+        for sub in form_submissions_map.get(conv.id, []):
+            form_name = sub.form.name if sub.form else f"Form {sub.form_id}"
+            sub_content = f"{form_name}: {json.dumps(sub.data or {}, ensure_ascii=False)}"
+            events.append((sub.created_at, "Visitor", "form_submission", sub_content))
+        events.sort(key=lambda e: e[0] or conv.created_at or datetime.min.replace(tzinfo=timezone.utc))
+
+        for created_at, sender, msg_type, content in events:
+            if created_at:
+                mt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
                 ts = mt.astimezone(_IST).strftime("%Y-%m-%d %H:%M:%S")
             else:
                 ts = ""
-            msg_type = msg.event_type or ""
-            content = msg.content or ""
             ws.append([
                 conv_short, status, website, team,
                 visitor_name, visitor_email, visitor_phone, session_id, visitor_ip,
