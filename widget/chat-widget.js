@@ -351,6 +351,23 @@
     } catch (e) { return null; }
   }
 
+  // Invalidates the "already verified" shortcut so a brand-new conversation
+  // can't silently reuse (and re-send as a fresh lead capture) contact info
+  // that was only ever confirmed for a previous, resolved conversation.
+  // Called from enterStartView() — the one place a genuinely new conversation
+  // begins — not on every page load, so refreshing mid-conversation (which
+  // resumes via enterThreadView, not enterStartView) still skips the form
+  // as expected. The raw offline-gate prefill keys (_contact_name/phone/email)
+  // are intentionally left alone — pre-filling visible text the visitor still
+  // has to look at and submit is harmless; auto-submitting on their behalf
+  // for an unrelated new conversation is not.
+  function _clearContactVerified() {
+    try {
+      const k = _contactVerifiedKey();
+      if (k) localStorage.removeItem(k);
+    } catch (e) { }
+  }
+
   // Pulls name/phone/email out of a submitted form's (fields, data) pair —
   // email/phone matched by field_type (unambiguous), "name" matched by the
   // field's machine name since there's no dedicated field_type for it.
@@ -1356,6 +1373,7 @@
     CONFIG.conversationId = 0;
     _conversationBotOnly = false;
     _contactVerifiedThisConversation = false;
+    _clearContactVerified();
     _leafButtonCommitted = false;
     pendingBotButtonClick = null;
     // Clear the welcome-popup dismissed key so the popup can appear fresh for
