@@ -64,6 +64,28 @@ def _fetch_agents_by_ids(db: Session, agent_ids: set[int]) -> dict[int, dict]:
     }
 
 
+def _fetch_form_search_blobs(db: Session, conversation_ids: list[int]) -> dict[int, str]:
+    """Batch-fetch a space-joined blob of every submitted form's field values
+    per conversation, so the active-chat search box can match a visitor who
+    only filled a non-contact-card form (e.g. "Virtual Office") — that data
+    never lands on Conversation.visitor_*, which only the contact-card form
+    mirrors onto."""
+    if not conversation_ids:
+        return {}
+    from app.models.website_form_submission import WebsiteFormSubmission
+
+    rows = (
+        db.query(WebsiteFormSubmission.conversation_id, WebsiteFormSubmission.data)
+        .filter(WebsiteFormSubmission.conversation_id.in_(conversation_ids))
+        .all()
+    )
+    blobs: dict[int, list[str]] = {}
+    for conv_id, data in rows:
+        values = [str(v) for v in (data or {}).values() if v is not None]
+        blobs.setdefault(int(conv_id), []).extend(values)
+    return {conv_id: " ".join(vals) for conv_id, vals in blobs.items()}
+
+
 def _ensure_conversation_visible(db: Session, *, current_user: User, conv) -> None:
     scope = compute_visibility_scope(db, user=current_user)
 
@@ -272,6 +294,7 @@ def get_active_chats(
     # eliminates the need for a separate GET /users call on the frontend).
     assigned_ids = {int(conv.assigned_agent_id) for conv, *_ in rows if conv.assigned_agent_id is not None}
     agents_map = _fetch_agents_by_ids(db, assigned_ids)
+    form_search_blobs = _fetch_form_search_blobs(db, conversation_ids)
 
     result = []
     for conv, website_name, message_count, last_message, last_message_at in rows:
@@ -319,6 +342,9 @@ def get_active_chats(
                 "created_at": _utc_iso(conv.created_at),
                 "bot_only": bool(getattr(conv, "bot_only", False)),
                 "tags": _safe_serialize_conversation_tags(conv),
+                # Not rendered — lets the client-side search box match a
+                # visitor who only filled a non-contact-card form.
+                "form_search_blob": form_search_blobs.get(int(conv.id), ""),
             }
         )
 

@@ -2269,7 +2269,10 @@ export default function ConversationsView() {
         // Resolved: filtering is server-side, results are already correct
         ? chatsForList
         : chatsForList.filter(chat => {
-            // Search: name, email, phone, short_id, title, session_id, last_message
+            // Search: name, email, phone, short_id, title, session_id, last_message,
+            // plus any other submitted form's field values (e.g. a "Virtual Office"
+            // form's business name) via form_search_blob — those never land on
+            // visitor_name/email/phone, which only the contact-card form mirrors onto.
             if (searchQuery) {
                 const q = searchQuery.toLowerCase().trim()
                 const fields = [
@@ -2280,6 +2283,7 @@ export default function ConversationsView() {
                     String((chat as any).title || ''),
                     String(chat.session_id || ''),
                     String((chat as any).last_message || ''),
+                    String((chat as any).form_search_blob || ''),
                 ]
                 if (!fields.some(f => f.toLowerCase().includes(q))) return false
             }

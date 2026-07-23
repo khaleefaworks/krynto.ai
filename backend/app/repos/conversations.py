@@ -9,6 +9,7 @@ from app.models.conversation import Conversation, ConversationStatus
 from app.models.conversation_tag import ConversationTag
 from app.models.message import Message
 from app.models.website import Website
+from app.models.website_form_submission import WebsiteFormSubmission
 
 
 def _unwrap_last_message(content: str | None, event_type: str | None) -> str | None:
@@ -321,6 +322,16 @@ def resolved_conversations_with_counts_and_last_message(
                         sa.func.lower(Message.content).like(q)
                     )
                 ),
+                # Matches values from any submitted form, not just the
+                # contact card (e.g. a "Virtual Office" form's business_name) —
+                # those never land on Conversation.visitor_* since only the
+                # contact-card form mirrors onto those columns.
+                Conversation.id.in_(
+                    db.query(WebsiteFormSubmission.conversation_id).filter(
+                        WebsiteFormSubmission.conversation_id.isnot(None),
+                        sa.func.lower(sa.cast(WebsiteFormSubmission.data, sa.Text)).like(q),
+                    )
+                ),
             )
         )
 
@@ -413,6 +424,12 @@ def resolved_conversations_count(
                 Conversation.id.in_(
                     db.query(Message.conversation_id).filter(
                         sa.func.lower(Message.content).like(s)
+                    )
+                ),
+                Conversation.id.in_(
+                    db.query(WebsiteFormSubmission.conversation_id).filter(
+                        WebsiteFormSubmission.conversation_id.isnot(None),
+                        sa.func.lower(sa.cast(WebsiteFormSubmission.data, sa.Text)).like(s),
                     )
                 ),
             )
