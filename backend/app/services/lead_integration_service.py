@@ -243,6 +243,54 @@ def _enrich_payload_with_form_submissions(db, delivery) -> None:
     db.refresh(delivery)
 
 
+def _enrich_payload_with_integration_metadata(db, integration, delivery) -> None:
+    """Freeze the integration's admin-selected standard metadata fields
+    (payload["metadata"]) and static custom key/value pairs
+    (payload["custom_fields"]) right before send — same freeze-at-send-time
+    pattern as _enrich_payload_with_form_submissions, so a field that
+    changed since draft creation (agent reassigned, a tag added while the
+    draft sat waiting for confirmation) reflects current state, and a retry
+    after an admin edits the integration's field selection picks up the new
+    selection too. Runs on every attempt, not just the first.
+
+    custom_fields precedence: the integration's static config-level pairs
+    are the base; any per-lead ad-hoc pairs an agent typed in at confirm
+    time (already sitting in payload["custom_fields"] via
+    deliveries_repo.merge_custom_fields) win on key collision, since a human
+    just supplied a more specific value for this one lead.
+    """
+    config = integration.config or {}
+    field_ids = config.get("metadata_fields") or []
+    static_custom = config.get("custom_fields") or {}
+    if not field_ids and not static_custom:
+        return
+
+    payload = dict(delivery.payload or {})
+    changed = False
+
+    if field_ids:
+        from app.services.lead_metadata_fields import resolve_lead_metadata
+
+        metadata = resolve_lead_metadata(db, conversation_id=delivery.conversation_id, field_ids=field_ids)
+        if metadata and payload.get("metadata") != metadata:
+            payload["metadata"] = metadata
+            changed = True
+
+    if static_custom:
+        adhoc = dict(payload.get("custom_fields") or {})
+        merged = {**static_custom, **adhoc}
+        if merged != adhoc:
+            payload["custom_fields"] = merged
+            changed = True
+
+    if not changed:
+        return
+
+    delivery.payload = payload
+    db.commit()
+    db.refresh(delivery)
+
+
 async def _attempt_delivery(delivery_id: int) -> None:
     """Push one pending delivery, in its own DB session (fire-and-forget task)."""
     db = SessionLocal()
@@ -257,6 +305,7 @@ async def _attempt_delivery(delivery_id: int) -> None:
             return
 
         _enrich_payload_with_form_submissions(db, delivery)
+        _enrich_payload_with_integration_metadata(db, integration, delivery)
 
         loop = asyncio.get_running_loop()
         try:
@@ -419,6 +468,7 @@ async def send_confirmed_draft(
     name: str | None = None,
     email: str | None = None,
     phone: str | None = None,
+    custom_fields: dict[str, str] | None = None,
 ) -> dict:
     """Send a lead an agent just confirmed — applies any last-second edits,
     moves it from AWAITING_CONFIRMATION to PENDING, and delivers
@@ -439,7 +489,7 @@ async def send_confirmed_draft(
     if not delivery or delivery.status != LeadDeliveryStatus.AWAITING_CONFIRMATION:
         raise ValueError("Delivery not found or not awaiting confirmation")
 
-    deliveries_repo.confirm_draft(db, delivery, name=name, email=email, phone=phone)
+    deliveries_repo.confirm_draft(db, delivery, name=name, email=email, phone=phone, custom_fields=custom_fields)
     await _attempt_delivery(delivery_id)
     db.refresh(delivery)
     return {
@@ -481,6 +531,7 @@ def retry_failed_lead_deliveries(db=None, *, max_retries: int = 50) -> dict:
                 continue
             try:
                 _enrich_payload_with_form_submissions(db, delivery)
+                _enrich_payload_with_integration_metadata(db, integration, delivery)
                 _push_webhook(integration.config, delivery.payload)
                 deliveries_repo.mark_as_sent(db, delivery.id)
                 _fire_lead_delivered_trigger_sync(delivery)

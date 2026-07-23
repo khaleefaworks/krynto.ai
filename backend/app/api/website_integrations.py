@@ -51,6 +51,27 @@ def _require_webhook(db: Session, *, website_id: int, integration_id: int) -> We
     return integration
 
 
+_MAX_CUSTOM_FIELDS = 20
+_MAX_CUSTOM_FIELD_KEY_LEN = 100
+_MAX_CUSTOM_FIELD_VALUE_LEN = 1000
+
+
+def _validate_metadata_fields(field_ids: list[str]) -> None:
+    from app.services.lead_metadata_fields import is_valid_field_id
+
+    unknown = [f for f in field_ids if not is_valid_field_id(f)]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown metadata field id(s): {', '.join(unknown)}")
+
+
+def _validate_custom_fields(custom_fields: dict[str, str]) -> None:
+    if len(custom_fields) > _MAX_CUSTOM_FIELDS:
+        raise HTTPException(status_code=422, detail=f"custom_fields is limited to {_MAX_CUSTOM_FIELDS} pairs")
+    for key, value in custom_fields.items():
+        if len(key) > _MAX_CUSTOM_FIELD_KEY_LEN or len(str(value)) > _MAX_CUSTOM_FIELD_VALUE_LEN:
+            raise HTTPException(status_code=422, detail=f"custom_fields entry '{key}' is too long")
+
+
 class WebhookCreate(BaseModel):
     name: str
     enabled: bool = True
@@ -58,6 +79,11 @@ class WebhookCreate(BaseModel):
     secret: Optional[str] = None
     # Omit/null = fires for every lead on the website; set = scoped to that form only.
     form_id: Optional[int] = None
+    # Standard conversation metadata (agent, device, tags, ...) to include on every
+    # lead this webhook sends — see app.services.lead_metadata_fields.catalog().
+    metadata_fields: list[str] = []
+    # Static key/value pairs sent as-is on every lead from this webhook.
+    custom_fields: dict[str, str] = {}
 
 
 class WebhookUpdate(BaseModel):
@@ -70,6 +96,9 @@ class WebhookUpdate(BaseModel):
     # form_id explicitly (including null) to change it. Pydantic's
     # model_fields_set on the request body distinguishes "omitted" below.
     form_id: Optional[int] = None
+    # Same omit-vs-explicit sentinel as form_id (checked via model_fields_set).
+    metadata_fields: Optional[list[str]] = None
+    custom_fields: Optional[dict[str, str]] = None
 
 
 def _integration_to_dict(integration: WebsiteIntegration) -> dict:
@@ -101,6 +130,21 @@ def list_integrations(
     return [_integration_to_dict(i) for i in integrations_repo.get_integrations(db, website_id)]
 
 
+@router.get("/metadata-fields")
+def list_metadata_fields(
+    website_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Catalog of standard conversation metadata fields a webhook can be
+    configured to include on every lead — powers the picker UI."""
+    _require_website(website_id, db)
+    _enforce_website_access(db, website_id=website_id, user=current_user)
+    from app.services.lead_metadata_fields import catalog
+
+    return catalog()
+
+
 @router.post("/webhooks")
 def create_webhook(
     website_id: int,
@@ -119,13 +163,21 @@ def create_webhook(
         if not form or form.website_id != website_id:
             raise HTTPException(status_code=422, detail="Invalid form_id for this website")
 
+    _validate_metadata_fields(body.metadata_fields)
+    _validate_custom_fields(body.custom_fields)
+
     integration = integrations_repo.create_integration(
         db,
         website_id=website_id,
         type_=WebsiteIntegrationType.WEBHOOK,
         name=body.name.strip() or "Webhook",
         enabled=body.enabled,
-        config={"url": body.url.strip(), "secret": (body.secret or None)},
+        config={
+            "url": body.url.strip(),
+            "secret": (body.secret or None),
+            "metadata_fields": body.metadata_fields,
+            "custom_fields": body.custom_fields,
+        },
         form_id=body.form_id,
     )
     return _integration_to_dict(integration)
@@ -153,6 +205,14 @@ def update_webhook(
     # must not blank it out). Send an empty string explicitly to clear it.
     if body.secret is not None:
         config["secret"] = body.secret or None
+    if "metadata_fields" in body.model_fields_set:
+        fields = body.metadata_fields or []
+        _validate_metadata_fields(fields)
+        config["metadata_fields"] = fields
+    if "custom_fields" in body.model_fields_set:
+        custom = body.custom_fields or {}
+        _validate_custom_fields(custom)
+        config["custom_fields"] = custom
 
     form_id_kwargs = {}
     if "form_id" in body.model_fields_set:

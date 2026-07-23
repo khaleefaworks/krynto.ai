@@ -61,6 +61,10 @@ export const leadsApi = {
       name?: string | null
       email?: string | null
       phone?: string | null
+      // One-off key/value pairs specific to this lead (e.g. a budget the
+      // agent learned verbally) — merged into just this delivery, not saved
+      // to the integration's own config.
+      custom_fields?: Record<string, string>
     },
   ) =>
     apiRequest<LeadDelivery>(`/conversations/${conversationId}/leads/deliveries/${deliveryId}/confirm`, {

@@ -210,10 +210,19 @@ async def resend_delivery(
         raise HTTPException(status_code=404, detail="Delivery not found")
 
 
+_MAX_CUSTOM_FIELDS = 20
+_MAX_CUSTOM_FIELD_KEY_LEN = 100
+_MAX_CUSTOM_FIELD_VALUE_LEN = 1000
+
+
 class ConfirmLeadRequest(BaseModel):
     name: str | None = None
     email: str | None = None
     phone: str | None = None
+    # One-off key/value pairs the agent learned for THIS lead specifically
+    # (e.g. a budget mentioned verbally) — merged into just this delivery,
+    # never saved to the integration's own config.
+    custom_fields: dict[str, str] | None = None
 
 
 @router.post("/deliveries/{delivery_id}/confirm")
@@ -242,6 +251,13 @@ async def confirm_delivery(
     if delivery.status != LeadDeliveryStatus.AWAITING_CONFIRMATION:
         raise HTTPException(status_code=409, detail="This lead is not awaiting confirmation")
 
+    custom_fields = body.custom_fields or {}
+    if len(custom_fields) > _MAX_CUSTOM_FIELDS:
+        raise HTTPException(status_code=422, detail=f"custom_fields is limited to {_MAX_CUSTOM_FIELDS} pairs")
+    for key, value in custom_fields.items():
+        if len(key) > _MAX_CUSTOM_FIELD_KEY_LEN or len(str(value)) > _MAX_CUSTOM_FIELD_VALUE_LEN:
+            raise HTTPException(status_code=422, detail=f"custom_fields entry '{key}' is too long")
+
     try:
         return await send_confirmed_draft(
             db,
@@ -249,6 +265,7 @@ async def confirm_delivery(
             name=body.name,
             email=body.email,
             phone=body.phone,
+            custom_fields=body.custom_fields,
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="Delivery not found")

@@ -12,6 +12,7 @@ import {
   AlertCircle,
   ClipboardList,
   ChevronRight,
+  Trash2,
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { isValidPhoneNumber } from "libphonenumber-js"
@@ -219,6 +220,14 @@ export default function VisitorDetailsPanel({
   // which creates a WebsiteFormSubmission row) — bound straight to
   // conversation.visitor_name/email/phone instead of a submission.
   const [contactFallbackEdits, setContactFallbackEdits] = useState<{ name?: string; email?: string; phone?: string }>({})
+  // One-off key/value pairs the agent learned for this lead specifically
+  // (e.g. a budget mentioned verbally) — shared across every delivery
+  // confirmed from this modal open, not saved to any integration's config.
+  // If a conversation has two awaiting-confirmation deliveries and the agent
+  // wants different ad-hoc data on each, they'd need to edit between confirm
+  // clicks — a deliberate scope limit for the common case (one integration,
+  // or the same info applying to both), not an oversight.
+  const [adhocCustomFields, setAdhocCustomFields] = useState<{ key: string; value: string }[]>([])
   // Whatever the last save/confirm/discard/resend action failed with —
   // cleared on open/close and on the next attempt, shown as a banner so a
   // 422 (invalid email/phone, missing required field, ...) doesn't just
@@ -282,8 +291,14 @@ export default function VisitorDetailsPanel({
     setShowFormsModal(false)
     setFormEdits({})
     setContactFallbackEdits({})
+    setAdhocCustomFields([])
     setModalError(null)
   }
+
+  const addAdhocCustomFieldRow = () => setAdhocCustomFields((prev) => [...prev, { key: '', value: '' }])
+  const updateAdhocCustomFieldRow = (idx: number, patch: Partial<{ key: string; value: string }>) =>
+    setAdhocCustomFields((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+  const removeAdhocCustomFieldRow = (idx: number) => setAdhocCustomFields((prev) => prev.filter((_, i) => i !== idx))
 
   // Persists every pending edit (contact info + every other touched form)
   // and returns the resulting name/email/phone, so a caller about to send
@@ -349,7 +364,10 @@ export default function VisitorDetailsPanel({
     setModalError(null)
     try {
       const { name, email, phone } = await persistPendingEdits()
-      await leadsApi.confirmDelivery(conversation.id, delivery.id, { name, email, phone })
+      const custom_fields = Object.fromEntries(
+        adhocCustomFields.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])
+      )
+      await leadsApi.confirmDelivery(conversation.id, delivery.id, { name, email, phone, custom_fields })
       refreshLeadStatus()
     } catch (e) {
       setModalError(e instanceof Error ? e.message : 'Failed to confirm this lead')
@@ -665,6 +683,53 @@ export default function VisitorDetailsPanel({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {hasAwaitingConfirmation && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        Add details to this lead <span className="font-normal text-gray-400 dark:text-gray-500">(optional)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={addAdhocCustomFieldRow}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1 transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add field
+                      </button>
+                    </div>
+                    {adhocCustomFields.length > 0 && (
+                      <div className="space-y-2">
+                        {adhocCustomFields.map((row, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <Input
+                              value={row.key}
+                              onChange={(e) => updateAdhocCustomFieldRow(idx, { key: e.target.value })}
+                              placeholder="Key, e.g. Budget"
+                              className="h-8 text-sm dark:bg-gray-800 dark:border-gray-700"
+                            />
+                            <Input
+                              value={row.value}
+                              onChange={(e) => updateAdhocCustomFieldRow(idx, { value: e.target.value })}
+                              placeholder="Value"
+                              className="h-8 text-sm dark:bg-gray-800 dark:border-gray-700"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeAdhocCustomFieldRow(idx)}
+                              className="p-1 rounded text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                      Sent along with whichever lead below you confirm — not saved anywhere else.
+                    </p>
                   </div>
                 )}
 

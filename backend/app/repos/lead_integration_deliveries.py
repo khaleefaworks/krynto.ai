@@ -103,6 +103,29 @@ def merge_draft(
     return delivery
 
 
+def merge_custom_fields(
+    db: Session,
+    delivery: LeadIntegrationDelivery,
+    *,
+    custom_fields: dict[str, str],
+) -> LeadIntegrationDelivery:
+    """Fold agent-typed one-off key/value pairs (learned verbally, not from
+    any form field) into payload["custom_fields"] on this one delivery —
+    never touches the integration's own config, so it doesn't affect any
+    other lead sent through the same webhook. Same reassign-the-whole-dict
+    pattern as merge_draft, so SQLAlchemy detects the JSON column change."""
+    if not custom_fields:
+        return delivery
+    payload = dict(delivery.payload or {})
+    merged = dict(payload.get("custom_fields") or {})
+    merged.update({k: v for k, v in custom_fields.items() if k})
+    payload["custom_fields"] = merged
+    delivery.payload = payload
+    db.commit()
+    db.refresh(delivery)
+    return delivery
+
+
 def confirm_draft(
     db: Session,
     delivery: LeadIntegrationDelivery,
@@ -110,12 +133,15 @@ def confirm_draft(
     name: str | None = None,
     email: str | None = None,
     phone: str | None = None,
+    custom_fields: dict[str, str] | None = None,
 ) -> LeadIntegrationDelivery:
     """Move an AWAITING_CONFIRMATION draft to PENDING so the normal delivery
     path picks it up — optionally applying last-second edits (the agent
     fixing a typo before sending) first."""
     if name or email or phone:
         merge_draft(db, delivery, name=name, email=email, phone=phone)
+    if custom_fields:
+        merge_custom_fields(db, delivery, custom_fields=custom_fields)
     delivery.status = LeadDeliveryStatus.PENDING
     db.commit()
     db.refresh(delivery)
