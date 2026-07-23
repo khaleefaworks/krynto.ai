@@ -1258,6 +1258,11 @@
   border-color: #3b82f6;
 }
 
+#chatassist-widget .chatassist-phone-country-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* Fixed-positioned (coords computed in JS from the trigger's bounding rect)
    and appended to the widget's shadow root directly, so it floats above the
    form's own scroll container instead of being clipped by it — the same

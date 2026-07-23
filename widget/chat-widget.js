@@ -351,6 +351,44 @@
     } catch (e) { return null; }
   }
 
+  // Pulls name/phone/email out of a submitted form's (fields, data) pair —
+  // email/phone matched by field_type (unambiguous), "name" matched by the
+  // field's machine name since there's no dedicated field_type for it.
+  // Mirrors the backend's extract_contact_fields (repos/forms.py) so the
+  // widget and backend agree on what counts as a visitor's identity.
+  function _extractContactFromFormData(fields, data) {
+    let name = null, phone = null, email = null;
+    (fields || []).forEach(function (f) {
+      const v = data && data[f.name];
+      if (v == null || v === '') return;
+      if (f.field_type === 'email' && !email) email = v;
+      else if (f.field_type === 'phone' && !phone) phone = v;
+      else if (f.name === 'name' && !name) name = v;
+    });
+    return { name: name, phone: phone, email: email };
+  }
+
+  // In-thread contact cards (CC1) let an agent send *any* enabled form, not
+  // just a dedicated contact form — a visitor filling one is functionally
+  // the same "we now have their contact info" event the offline gate's own
+  // submit already caches via _saveContactVerified, but nothing wired that
+  // up here, so a later presence flip to offline (or another contact-gated
+  // bot button) still asked the visitor to fill the offline-gate form all
+  // over again even though a contact card had just captured the exact same
+  // fields. Reuses the same 12h-cached slot _checkAndSendContactSilently
+  // already checks, so any future contact-capturing surface only has to
+  // call this to plug into the same skip-if-known behavior.
+  //
+  // No-ops if the submitted form wasn't actually contact-shaped (e.g. an
+  // agent sent "Virtual Office" as a card) — _loadContactVerified requires
+  // both a name and a phone, same bar applied here before caching anything.
+  function _cacheContactFromCardSubmission(fields, data) {
+    const contact = _extractContactFromFormData(fields, data);
+    if (!contact.name || !contact.phone) return;
+    _saveContactVerified(contact.name, contact.phone, contact.email || '');
+    _contactVerifiedThisConversation = true;
+  }
+
   // Checks if contact requirement can be satisfied without showing the form.
   // If yes: sends visitor_contact WS frame silently and returns true.
   // If no: returns false (caller must show form).
@@ -2991,11 +3029,41 @@
   // applied instantly instead of waiting for a reload).
   var _pendingContactCards = {};
 
+  // Disabling a phone <input> alone doesn't touch the country-code combobox
+  // enhancePhoneField attached beside it (a plain <button>, not a form
+  // control that respects the input's disabled state) — so the trigger stays
+  // clickable and the search panel still opens on an already-submitted or
+  // expired card. inputEl.__phoneCountrySelect only exists once
+  // enhancePhoneField's async lib load has resolved, so this is a no-op for
+  // a phone field disabled before that (e.g. a card rendered already-filled
+  // on page load, which never builds the combobox — see enhancePhoneField's
+  // own `inputEl.disabled` bail-out).
+  function _disablePhoneCountryUI(inputEl) {
+    var select = inputEl.__phoneCountrySelect;
+    if (!select) return;
+    select.disabled = true;
+    if (select._uiRoot) {
+      var trigger = select._uiRoot.querySelector('.chatassist-phone-country-trigger');
+      if (trigger) {
+        trigger.disabled = true;
+        trigger.setAttribute('aria-disabled', 'true');
+      }
+    }
+    if (select._uiPanel) select._uiPanel.style.display = 'none';
+  }
+
+  function _disableFormInputs(inputs) {
+    Object.keys(inputs).forEach(function (k) {
+      inputs[k].disabled = true;
+      _disablePhoneCountryUI(inputs[k]);
+    });
+  }
+
   function _expireContactCard(messageId) {
     var entry = _pendingContactCards[messageId];
     if (!entry) return;
     delete _pendingContactCards[messageId];
-    Object.keys(entry.inputs).forEach(function (k) { entry.inputs[k].disabled = true; });
+    _disableFormInputs(entry.inputs);
     entry.submitBtn.style.display = 'none';
     entry.statusEl.className = 'chatassist-contact-card-expired';
     entry.statusEl.textContent = 'This form has expired. Ask the agent to resend it.';
@@ -3568,11 +3636,12 @@
       submitBtn.appendChild(submitBtnIcon);
 
       if (state.status === 'filled') {
-        Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+        _disableFormInputs(inputs);
         submitBtn.style.display = 'none';
         statusEl.textContent = 'Submitted — thank you!';
+        _cacheContactFromCardSubmission(fields, state.data);
       } else if (state.status === 'expired') {
-        Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+        _disableFormInputs(inputs);
         submitBtn.style.display = 'none';
         statusEl.className = 'chatassist-contact-card-expired';
         statusEl.textContent = 'This form has expired. Ask the agent to resend it.';
@@ -3624,9 +3693,10 @@
             })
             .then(function () {
               delete _pendingContactCards[messageId];
-              Object.keys(inputs).forEach(function (k) { inputs[k].disabled = true; });
+              _disableFormInputs(inputs);
               submitBtn.style.display = 'none';
               statusEl.textContent = 'Submitted — thank you!';
+              _cacheContactFromCardSubmission(fields, data);
             })
             .catch(function (err) {
               if (err && err.message === 'expired') {
