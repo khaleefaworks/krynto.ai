@@ -520,6 +520,12 @@ export default function ConversationsView() {
     const [formsByWebsiteId, setFormsByWebsiteId] = useState<Record<number, { id: number; name: string }[]>>({})
     const formsTokenRef = useRef(0)
 
+    // Same fetch-once-per-website pattern as forms/shortcuts above — only
+    // the two phone-dropdown fields VisitorDetailsPanel needs, not the full
+    // widget_config, since that's all this view uses it for.
+    const [phoneConfigByWebsiteId, setPhoneConfigByWebsiteId] = useState<Record<number, { show_country_dropdown?: boolean; default_phone_country?: string }>>({})
+    const phoneConfigTokenRef = useRef(0)
+
     const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<number | null>(null)
 
     // Takeover confirmation (Smartsupp-like)
@@ -787,6 +793,29 @@ export default function ConversationsView() {
                 }
             })()
     }, [selectedWebsiteId, formsByWebsiteId])
+
+    useEffect(() => {
+        if (!selectedWebsiteId) return
+        if (Object.prototype.hasOwnProperty.call(phoneConfigByWebsiteId, selectedWebsiteId)) return
+
+        const token = ++phoneConfigTokenRef.current
+            ; (async () => {
+                try {
+                    const data = await apiRequest<{ widget_config?: { show_country_dropdown?: boolean; default_phone_country?: string } }>(`/websites/${selectedWebsiteId}`)
+                    if (token !== phoneConfigTokenRef.current) return
+                    setPhoneConfigByWebsiteId((prev) => ({
+                        ...prev,
+                        [selectedWebsiteId]: {
+                            show_country_dropdown: data.widget_config?.show_country_dropdown,
+                            default_phone_country: data.widget_config?.default_phone_country,
+                        },
+                    }))
+                } catch {
+                    if (token !== phoneConfigTokenRef.current) return
+                    setPhoneConfigByWebsiteId((prev) => ({ ...prev, [selectedWebsiteId]: {} }))
+                }
+            })()
+    }, [selectedWebsiteId, phoneConfigByWebsiteId])
 
     const stopAgentTyping = useCallback((conversationId?: number | null) => {
         const id = conversationId ?? lastTypingConversationIdRef.current
@@ -3707,6 +3736,8 @@ export default function ConversationsView() {
                                     onRequestFormSubmissionsRefresh={refetchFormSubmissions}
                                     onConversationContactSynced={applyConversationContactUpdates}
                                     leadStatusRefreshKey={leadStatusRefreshKey}
+                                    showCountryDropdown={selectedWebsiteId ? phoneConfigByWebsiteId[selectedWebsiteId]?.show_country_dropdown ?? true : true}
+                                    defaultPhoneCountry={selectedWebsiteId ? phoneConfigByWebsiteId[selectedWebsiteId]?.default_phone_country ?? 'IN' : 'IN'}
                                     onUpdateMetadata={async (data) => {
                                         if (!conversation?.id) return
                                         try {
@@ -3808,6 +3839,8 @@ export default function ConversationsView() {
                             onRequestFormSubmissionsRefresh={refetchFormSubmissions}
                             onConversationContactSynced={applyConversationContactUpdates}
                             leadStatusRefreshKey={leadStatusRefreshKey}
+                            showCountryDropdown={selectedWebsiteId ? phoneConfigByWebsiteId[selectedWebsiteId]?.show_country_dropdown ?? true : true}
+                            defaultPhoneCountry={selectedWebsiteId ? phoneConfigByWebsiteId[selectedWebsiteId]?.default_phone_country ?? 'IN' : 'IN'}
                             onUpdateMetadata={async (data) => {
                                 if (!conversation?.id) return
                                 try {

@@ -6,6 +6,7 @@ import { isAdmin } from '@/lib/roles'
 import { Image, Palette, ToggleRight, Upload, MessageCircle, Sparkles, Bell, AlignLeft, AlignRight, Volume2, Play, HelpCircle } from 'lucide-react'
 import { API_BASE } from '@/config/endpoints'
 import DocsLink from '@/components/DocsLink'
+import { PHONE_COUNTRIES, flagEmoji } from '@/lib/phoneCountries'
 
 /* ── Types ────────────────────────────────────────────── */
 
@@ -23,6 +24,8 @@ interface WidgetConfig {
     show_emoji_picker?: boolean
     show_attachments?: boolean
     show_end_chat_button?: boolean
+    show_country_dropdown?: boolean
+    default_phone_country?: string
     branding_text?: string | null
     header_icon_url?: string | null
     popup_name?: string
@@ -706,6 +709,41 @@ export default function WebsiteWidgetTab({
                                 onCheckedChange={(checked) => update({ show_end_chat_button: checked })}
                             />
                         </div>
+
+                        <div className="border-t border-gray-100 dark:border-gray-700/50" />
+
+                        <div className="flex items-center justify-between py-1">
+                            <div>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Phone Country Dropdown</span>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Let visitors pick their own country code on phone fields. Turn off if this site only serves one country.
+                                </p>
+                            </div>
+                            <Switch
+                                checked={widgetConfig.show_country_dropdown !== false}
+                                onCheckedChange={(checked) => update({ show_country_dropdown: checked })}
+                            />
+                        </div>
+
+                        {widgetConfig.show_country_dropdown === false && (
+                            <div className="pt-1 pl-1">
+                                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Default Country</label>
+                                <select
+                                    value={widgetConfig.default_phone_country || 'IN'}
+                                    onChange={(e) => update({ default_phone_country: e.target.value })}
+                                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    {PHONE_COUNTRIES.map((c) => (
+                                        <option key={c.iso} value={c.iso}>
+                                            {flagEmoji(c.iso)} {c.name} (+{c.dial})
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                                    Used to validate and format phone numbers on this site now that visitors can't pick a country themselves.
+                                </p>
+                            </div>
+                        )}
 
                         <div className="border-t border-gray-100 dark:border-gray-700/50" />
 

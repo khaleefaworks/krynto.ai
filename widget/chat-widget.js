@@ -67,6 +67,10 @@
     showAttachments: globalConfig.showAttachments || false,
     // Default true (preserve existing behavior) unless explicitly disabled per-website.
     showEndChatButton: globalConfig.showEndChatButton !== false,
+    // Default true (preserve existing behavior) unless explicitly disabled per-website.
+    showCountryDropdown: globalConfig.showCountryDropdown !== false,
+    // Only actually used when showCountryDropdown is false — see _detectDefaultPhoneCountry.
+    defaultPhoneCountry: globalConfig.defaultPhoneCountry || 'IN',
     brandingText: globalConfig.brandingText || 'Powered by AI ChatAssist',
     popupName: globalConfig.popupName || 'Support',
     popupButtonText: globalConfig.popupButtonText || 'Reply',
@@ -3179,12 +3183,16 @@
     return raw ? raw.length : DEFAULT_PHONE_MAX_LENGTH;
   }
 
-  var DEFAULT_PHONE_COUNTRY = 'IN';
   // Timezone is a much stronger real-location signal than browser language
   // (a visitor in India commonly has an en-US-language browser, but their
   // OS timezone is still Asia/Kolkata) — try it first, then fall back to
-  // language, then India.
+  // language, then the website's configured default.
   function _detectDefaultPhoneCountry(lp, ct) {
+    // Dropdown disabled: the website owner picked one fixed country for
+    // every visitor on this site — skip timezone/language guessing so a
+    // traveling or VPN'd visitor doesn't get silently mis-detected with no
+    // dropdown left to correct it.
+    if (!CONFIG.showCountryDropdown) return CONFIG.defaultPhoneCountry;
     try {
       if (ct) {
         var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -3204,7 +3212,7 @@
         if (region && lp.getCountries().indexOf(region) !== -1) return region;
       }
     } catch (e) { }
-    return DEFAULT_PHONE_COUNTRY;
+    return CONFIG.defaultPhoneCountry;
   }
 
   function _phoneCountryStorageKey() {
@@ -3468,7 +3476,11 @@
         const parsed = lp.parsePhoneNumberFromString(String(prefillValue).trim());
         if (parsed) { iso = parsed.country; inputEl.value = parsed.nationalNumber; }
       }
-      if (!iso) {
+      // Dropdown disabled: skip the "remembered from a previous visit" pick
+      // too — there's no UI left for a visitor to have set it deliberately,
+      // and a stale value from before the site owner turned the dropdown
+      // off would otherwise silently override the new fixed default.
+      if (!iso && CONFIG.showCountryDropdown) {
         try {
           const saved = localStorage.getItem(_phoneCountryStorageKey());
           if (saved && lp.getCountries().indexOf(saved) !== -1) iso = saved;
@@ -3495,8 +3507,14 @@
         const newMax = _phoneMaxLength(select.value);
         if (inputEl.value.length > newMax) inputEl.value = inputEl.value.slice(0, newMax);
       });
-      if (_panelHost) _panelHost.appendChild(select._uiPanel);
-      wrapEl.insertBefore(select._uiRoot, inputEl);
+      // Dropdown disabled: still track the resolved country on
+      // __phoneCountrySelect (validatePhoneValue/composePhoneValue key off
+      // it) so formatting/validation keep working against the fixed
+      // default — just never mount the visible trigger+panel.
+      if (CONFIG.showCountryDropdown) {
+        if (_panelHost) _panelHost.appendChild(select._uiPanel);
+        wrapEl.insertBefore(select._uiRoot, inputEl);
+      }
       inputEl.__phoneCountrySelect = select;
     }).catch(function () {
       // Offline/blocked — the plain digit input still works, validated as a

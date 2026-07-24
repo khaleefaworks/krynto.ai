@@ -19,6 +19,7 @@ import { isValidPhoneNumber } from "libphonenumber-js"
 import UserAvatar from "@/components/UserAvatar"
 import BotAvatarIcon from "@/components/BotAvatarIcon"
 import PhoneNumberField from "@/components/PhoneNumberField"
+import type { CountryCode } from "libphonenumber-js"
 import { API_BASE } from "@/config/endpoints"
 import { leadsApi, type LeadStatusResponse, type LeadDelivery } from "@/services/leads"
 import { updateFormSubmission } from "@/services/chats"
@@ -153,6 +154,12 @@ interface VisitorDetailsPanelProps {
   // Bumped by the parent on a lead_delivery_updated WS event so the Lead
   // delivery section below refetches without waiting for a reload.
   leadStatusRefreshKey?: number
+
+  // This conversation's website widget_config.show_country_dropdown /
+  // default_phone_country — keeps every phone field an agent edits here in
+  // sync with what the visitor actually saw on the widget for that site.
+  showCountryDropdown?: boolean
+  defaultPhoneCountry?: string
 }
 
 export default function VisitorDetailsPanel({
@@ -168,6 +175,8 @@ export default function VisitorDetailsPanel({
   onRequestFormSubmissionsRefresh,
   onConversationContactSynced,
   leadStatusRefreshKey,
+  showCountryDropdown = true,
+  defaultPhoneCountry = 'IN',
 }: VisitorDetailsPanelProps) {
   const [newNote, setNewNote] = useState("")
   const [addingNote, setAddingNote] = useState(false)
@@ -447,7 +456,12 @@ export default function VisitorDetailsPanel({
                 {meta?.label || key}
               </label>
               {type === 'phone' ? (
-                <PhoneNumberField value={currentValue} onChange={setValue} />
+                <PhoneNumberField
+                  value={currentValue}
+                  onChange={setValue}
+                  showCountrySelect={showCountryDropdown}
+                  defaultCountry={defaultPhoneCountry as CountryCode}
+                />
               ) : (
                 <>
                   <Input
@@ -776,6 +790,8 @@ export default function VisitorDetailsPanel({
                       <PhoneNumberField
                         value={contactFallbackEdits.phone ?? conversation.visitor_phone ?? ''}
                         onChange={(v) => setContactFallbackEdits((prev) => ({ ...prev, phone: v }))}
+                        showCountrySelect={showCountryDropdown}
+                        defaultCountry={defaultPhoneCountry as CountryCode}
                       />
                     </div>
                   </div>
