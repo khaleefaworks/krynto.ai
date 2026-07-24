@@ -33,6 +33,59 @@ def _unwrap_last_message(content: str | None, event_type: str | None) -> str | N
     return content
 
 
+def _message_counts_and_last_message(db: Session, conversation_ids: list[int]) -> dict[int, dict]:
+    """Message count + last message for exactly these conversations.
+
+    Scoped via `IN (conversation_ids)` — the GROUP BY and the ROW_NUMBER()
+    window function below only ever touch messages belonging to this
+    specific set (a chat-list page, typically ~50 conversations), never the
+    whole messages table. Shared by both the active and resolved chat list
+    queries, which previously each ran the unscoped version of this same
+    join independently.
+    """
+    if not conversation_ids:
+        return {}
+
+    counts = dict(
+        db.query(Message.conversation_id, sa.func.count(Message.id))
+        .filter(Message.conversation_id.in_(conversation_ids))
+        .group_by(Message.conversation_id)
+        .all()
+    )
+
+    msg_ranked = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.content.label("content"),
+            Message.event_type.label("event_type"),
+            Message.created_at.label("created_at"),
+            sa.func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=(Message.created_at.desc(), Message.id.desc()),
+            )
+            .label("rn"),
+        )
+        .filter(Message.conversation_id.in_(conversation_ids))
+        .subquery()
+    )
+    last_rows = (
+        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.event_type, msg_ranked.c.created_at)
+        .filter(msg_ranked.c.rn == 1)
+        .all()
+    )
+
+    result: dict[int, dict] = {
+        cid: {"count": counts.get(cid, 0), "content": None, "event_type": None, "created_at": None}
+        for cid in conversation_ids
+    }
+    for cid, content, event_type, created_at in last_rows:
+        result[cid]["content"] = content
+        result[cid]["event_type"] = event_type
+        result[cid]["created_at"] = created_at
+    return result
+
+
 def get_conversation_by_id(db: Session, conversation_id: int) -> Conversation | None:
     return db.query(Conversation).filter_by(id=conversation_id).first()
 
@@ -115,51 +168,18 @@ def active_conversations_with_counts_and_last_message(
     bot_only: bool | None = None,
     exclude_bot_only: bool | None = None,
 ):
-    """Return rows of (Conversation, website_name, message_count, last_message, last_message_at)."""
+    """Return rows of (Conversation, website_name, message_count, last_message, last_message_at).
 
-    msg_count_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            sa.func.count(Message.id).label("message_count"),
-        )
-        .group_by(Message.conversation_id)
-        .subquery()
-    )
-
-    msg_ranked = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            Message.content.label("content"),
-            Message.event_type.label("event_type"),
-            Message.created_at.label("created_at"),
-            sa.func.row_number()
-            .over(
-                partition_by=Message.conversation_id,
-                order_by=(Message.created_at.desc(), Message.id.desc()),
-            )
-            .label("rn"),
-        )
-        .subquery()
-    )
-
-    last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.event_type, msg_ranked.c.created_at)
-        .filter(msg_ranked.c.rn == 1)
-        .subquery()
-    )
+    Same fix as resolved_conversations_with_counts_and_last_message below:
+    resolve the filtered Conversation set first (no messages join), then
+    look up message count / last message scoped to just those ids — rather
+    than the previous unscoped GROUP BY + ROW_NUMBER() over every message
+    in the whole system on every request.
+    """
 
     rows_query = (
-        db.query(
-            Conversation,
-            Website.name.label("website_name"),
-            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
-            last_msg_subq.c.content.label("last_message"),
-            last_msg_subq.c.event_type.label("last_message_event_type"),
-            last_msg_subq.c.created_at.label("last_message_at"),
-        )
+        db.query(Conversation, Website.name.label("website_name"))
         .outerjoin(Website, Website.id == Conversation.website_id)
-        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
-        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
         .filter(Conversation.status == ConversationStatus.OPEN)
         # Do not show "empty" conversations (e.g. welcome-only) in the agent inbox.
         # A conversation is considered "active" when:
@@ -209,9 +229,21 @@ def active_conversations_with_counts_and_last_message(
     except Exception:
         rows_query = rows_query.order_by(Conversation.created_at.desc())
 
+    page = rows_query.all()
+    if not page:
+        return []
+
+    info = _message_counts_and_last_message(db, [conv.id for conv, _ in page])
+
     return [
-        (conv, website_name, message_count, _unwrap_last_message(last_message, last_message_event_type), last_message_at)
-        for conv, website_name, message_count, last_message, last_message_event_type, last_message_at in rows_query.all()
+        (
+            conv,
+            website_name,
+            info[conv.id]["count"],
+            _unwrap_last_message(info[conv.id]["content"], info[conv.id]["event_type"]),
+            info[conv.id]["created_at"],
+        )
+        for conv, website_name in page
     ]
 
 
@@ -231,51 +263,22 @@ def resolved_conversations_with_counts_and_last_message(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ):
-    """Return rows of (Conversation, website_name, message_count, last_message, last_message_at)."""
+    """Return rows of (Conversation, website_name, message_count, last_message, last_message_at).
 
-    msg_count_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            sa.func.count(Message.id).label("message_count"),
-        )
-        .group_by(Message.conversation_id)
-        .subquery()
-    )
-
-    msg_ranked = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            Message.content.label("content"),
-            Message.event_type.label("event_type"),
-            Message.created_at.label("created_at"),
-            sa.func.row_number()
-            .over(
-                partition_by=Message.conversation_id,
-                order_by=(Message.created_at.desc(), Message.id.desc()),
-            )
-            .label("rn"),
-        )
-        .subquery()
-    )
-
-    last_msg_subq = (
-        db.query(msg_ranked.c.conversation_id, msg_ranked.c.content, msg_ranked.c.event_type, msg_ranked.c.created_at)
-        .filter(msg_ranked.c.rn == 1)
-        .subquery()
-    )
+    Message count / last message used to be computed by joining a GROUP BY
+    and a ROW_NUMBER() window function over the ENTIRE messages table on
+    every request, before pagination was applied — with resolved history
+    growing unboundedly (20k+ conversations, 30k+ messages at time of
+    writing) that got slower every day regardless of the 50-row page
+    actually being shown. Now the filtered/sorted/paginated Conversation
+    page is resolved first (cheap — no messages join at all except the
+    narrow `search` EXISTS-style filters below), and the two subqueries
+    only ever aggregate over that page's own conversation ids.
+    """
 
     rows_query = (
-        db.query(
-            Conversation,
-            Website.name.label("website_name"),
-            sa.func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
-            last_msg_subq.c.content.label("last_message"),
-            last_msg_subq.c.event_type.label("last_message_event_type"),
-            last_msg_subq.c.created_at.label("last_message_at"),
-        )
+        db.query(Conversation, Website.name.label("website_name"))
         .outerjoin(Website, Website.id == Conversation.website_id)
-        .outerjoin(msg_count_subq, msg_count_subq.c.conversation_id == Conversation.id)
-        .outerjoin(last_msg_subq, last_msg_subq.c.conversation_id == Conversation.id)
         .filter(Conversation.status == ConversationStatus.RESOLVED)
         # Exclude bot/welcome-only conversations (same rule as the active list).
         .filter(
@@ -357,10 +360,21 @@ def resolved_conversations_with_counts_and_last_message(
     except Exception:
         rows_query = rows_query.order_by(Conversation.created_at.desc())
 
+    page = rows_query.offset(offset).limit(limit).all()
+    if not page:
+        return []
+
+    info = _message_counts_and_last_message(db, [conv.id for conv, _ in page])
+
     return [
-        (conv, website_name, message_count, _unwrap_last_message(last_message, last_message_event_type), last_message_at)
-        for conv, website_name, message_count, last_message, last_message_event_type, last_message_at
-        in rows_query.offset(offset).limit(limit).all()
+        (
+            conv,
+            website_name,
+            info[conv.id]["count"],
+            _unwrap_last_message(info[conv.id]["content"], info[conv.id]["event_type"]),
+            info[conv.id]["created_at"],
+        )
+        for conv, website_name in page
     ]
 
 

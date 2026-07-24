@@ -281,12 +281,12 @@ function closedByBadge(closedBy: string | null | undefined): { label: string; cl
     }
 }
 
-function getTagPillBackground(color: unknown): string {
+function getTagPillBackground(color: unknown, isDark: boolean): string {
     const raw = String(color || '').trim()
     if (!raw) return 'transparent'
 
     // A bit stronger in dark mode so it stays visible.
-    const alpha = isDarkMode() ? 0.30 : 0.18
+    const alpha = isDark ? 0.30 : 0.18
     const pct = `${Math.round(alpha * 100)}%`
 
     // If it's a valid CSS color but not hex, lean on color-mix.
@@ -311,6 +311,49 @@ function getTagPillBackground(color: unknown): string {
     if (![r, g, b].every((n) => Number.isFinite(n))) return 'transparent'
 
     return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+    const raw = hex.replace('#', '')
+    const normalized = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw.length === 6 ? raw : ''
+    if (!normalized) return null
+    const r = parseInt(normalized.slice(0, 2), 16)
+    const g = parseInt(normalized.slice(2, 4), 16)
+    const b = parseInt(normalized.slice(4, 6), 16)
+    return [r, g, b].every((n) => Number.isFinite(n)) ? [r, g, b] : null
+}
+
+function rgbToHue(r: number, g: number, b: number): number {
+    r /= 255; g /= 255; b /= 255
+    const max = Math.max(r, g, b), min = Math.min(r, g, b)
+    const d = max - min
+    if (d === 0) return 0
+    let h: number
+    switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)); break
+        case g: h = (b - r) / d + 2; break
+        default: h = (r - g) / d + 4; break
+    }
+    return h * 60
+}
+
+// Tags store an arbitrary admin-picked hex (WebsiteTagsTab.tsx / TagsSettings.tsx
+// <input type="color">) with no legibility constraint — a dark/muted pick (e.g.
+// a maroon or olive) renders as text at nearly the same lightness as its own
+// tinted background from getTagPillBackground, in either theme, which is why
+// some tags are barely readable. Keeps the admin's hue (so tags stay visually
+// distinct and still "read" as the color they picked) but fixes saturation and
+// lightness to values proven legible against that wash background — the same
+// idea as closedByBadge()'s fixed 700-for-light/300-for-dark Tailwind weights
+// just above, computed here instead of hand-picked, since tag color isn't a
+// small fixed set.
+function getTagAccentColor(color: unknown, isDark: boolean): string {
+    const raw = String(color || '').trim()
+    if (!raw.startsWith('#')) return raw || (isDark ? '#d1d5db' : '#4b5563')
+    const rgb = hexToRgb(raw.slice(1))
+    if (!rgb) return raw
+    const hue = rgbToHue(...rgb)
+    return isDark ? `hsl(${hue}, 65%, 76%)` : `hsl(${hue}, 55%, 36%)`
 }
 
 function TagIcon({ className }: { className?: string }) {
@@ -435,6 +478,18 @@ export default function ConversationsView() {
     useEffect(() => {
         activeChatsRef.current = activeChats
     }, [activeChats])
+
+    // Tag colors (getTagAccentColor/getTagPillBackground below) read the 'dark'
+    // class at render time — without this, toggling the theme only re-renders
+    // DashboardLayout (where the toggle's state actually lives), leaving tag
+    // colors stale here until some unrelated re-render happens to catch up.
+    // Same MutationObserver pattern as AutomationFlowCanvas.tsx's colorMode.
+    const [isDarkTheme, setIsDarkTheme] = useState(() => isDarkMode())
+    useEffect(() => {
+        const observer = new MutationObserver(() => setIsDarkTheme(isDarkMode()))
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+        return () => observer.disconnect()
+    }, [])
 
     const [unreadRibbon, setUnreadRibbon] = useState<{ chatId: number; count: number } | null>(null)
     const unreadRibbonHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -3016,19 +3071,22 @@ export default function ConversationsView() {
                                             {/* Row 3: tags */}
                                             {((chat as any).tags || []).length > 0 && (
                                                 <div className="flex flex-wrap gap-1 mt-1">
-                                                    {((chat as any).tags as any[]).slice(0, 3).map((tag: any) => (
-                                                        <span
-                                                            key={tag.id}
-                                                            className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-full border leading-none"
-                                                            style={{
-                                                                backgroundColor: getTagPillBackground(tag.color),
-                                                                borderColor: tag.color || '#d1d5db',
-                                                                color: tag.color || 'inherit',
-                                                            }}
-                                                        >
-                                                            {tag.name}
-                                                        </span>
-                                                    ))}
+                                                    {((chat as any).tags as any[]).slice(0, 3).map((tag: any) => {
+                                                        const accent = getTagAccentColor(tag.color, isDarkTheme)
+                                                        return (
+                                                            <span
+                                                                key={tag.id}
+                                                                className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-full border leading-none"
+                                                                style={{
+                                                                    backgroundColor: getTagPillBackground(tag.color, isDarkTheme),
+                                                                    borderColor: accent,
+                                                                    color: accent,
+                                                                }}
+                                                            >
+                                                                {tag.name}
+                                                            </span>
+                                                        )
+                                                    })}
                                                     {((chat as any).tags as any[]).length > 3 && (
                                                         <span className="text-[9px] text-gray-400">+{((chat as any).tags as any[]).length - 3}</span>
                                                     )}
@@ -3191,29 +3249,32 @@ export default function ConversationsView() {
                                 {conversationTags
                                     .slice()
                                     .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                                    .map((t: any) => (
-                                        <Badge
-                                            key={t.id}
-                                            variant="outline"
-                                            className="gap-1"
-                                            style={{
-                                                borderColor: String(t?.color || ''),
-                                                color: String(t?.color || ''),
-                                                backgroundColor: getTagPillBackground(t?.color),
-                                            }}
-                                        >
-                                            <span className="truncate max-w-40">{t.name}</span>
-                                            <button
-                                                type="button"
-                                                className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                                                onClick={() => handleRemoveTag(Number(t.id))}
-                                                aria-label={`Remove tag ${String(t.name || '')}`}
-                                                title="Remove"
+                                    .map((t: any) => {
+                                        const accent = getTagAccentColor(t?.color, isDarkTheme)
+                                        return (
+                                            <Badge
+                                                key={t.id}
+                                                variant="outline"
+                                                className="gap-1"
+                                                style={{
+                                                    borderColor: accent,
+                                                    color: accent,
+                                                    backgroundColor: getTagPillBackground(t?.color, isDarkTheme),
+                                                }}
                                             >
-                                                ×
-                                            </button>
-                                        </Badge>
-                                    ))}
+                                                <span className="truncate max-w-40">{t.name}</span>
+                                                <button
+                                                    type="button"
+                                                    className="ml-1 opacity-80 hover:opacity-100 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                                                    onClick={() => handleRemoveTag(Number(t.id))}
+                                                    aria-label={`Remove tag ${String(t.name || '')}`}
+                                                    title="Remove"
+                                                >
+                                                    ×
+                                                </button>
+                                            </Badge>
+                                        )
+                                    })}
 
                                 <Popover open={tagPickerOpen} onOpenChange={setTagPickerOpen}>
                                     <PopoverTrigger asChild>
